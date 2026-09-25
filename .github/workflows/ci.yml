@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Vet & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - name: Download dependencies
+        run: go mod download
+      # Formatting guard: gofmt is OS-invariant, Linux-only is enough.
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      # -race is load-bearing, not optional: the driver fans sub-agents out
+      # across goroutines and the tools package fetches in parallel. Only the
+      # race detector sees that class of bug.
+      - name: Test
+        run: go test -race ./...
+      # Every released platform must compile. The terminal UI is split across
+      # //go:build unix and !unix files, and the unix half once used Linux-only
+      # ioctl request constants — so `go build` on Linux stayed green while
+      # every macOS build failed. A compile-only bug has no unit test; this
+      # step is its regression test.
+      - name: Cross-compile release targets
+        run: |
+          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 \
+                      windows/amd64 windows/arm64; do
+            echo "building ${pair}"
+            GOOS=${pair%/*} GOARCH=${pair#*/} go build -o /dev/null ./... || exit 1
+          done
+      # Building is not testing: this runs the real binary through config
+      # load, the four-phase pipeline, the store and all three exporters.
+      # Offline mode makes no network call, so it needs no key and no
+      # services. Catches the init()/wiring-panic class of bug where every
+      # built binary dies while go test stays green.
+      - name: Smoke test built binary
+        run: |
+          go build -o deep-research ./cmd/deep-research
+          DEEP_RESEARCH_OFFLINE=true \
+            DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" \
+            ./deep-research run "smoke test" --silent --reports "$RUNNER_TEMP/reports"
+          test -n "$(ls "$RUNNER_TEMP"/reports/*.md)"
+          DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" ./deep-research list
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+      # golangci-lint runs the config in .golangci.yml, which covers
+      # errcheck/govet/ineffassign/staticcheck/unused (≈ make verify's
+      # golangci + ineffassign steps).
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.2
+      # The two make-verify linters not bundled with golangci.
+      - name: gocyclo & deadcode
+        run: |
+          go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+          go install golang.org/x/tools/cmd/deadcode@latest
+          gocyclo -over 15 .
+          # deadcode exits 0 even when it finds unreachable functions, so the
+          # gate has to look at the output (same as the Makefile target).
+          out=$(deadcode ./...)
+          if [ -n "$out" ]; then echo "unreachable code:"; echo "$out"; exit 1; fi
+
+  release:
+    name: Draft Release
+    needs: [test, lint]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # goreleaser needs full history (previous tags)
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

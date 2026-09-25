@@ -1,0 +1,23 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  exclusions:
+    generated: lax
+    rules:
+      # Response bodies are closed via defer; a close error there is informational.
+      - path: internal/tools/
+        linters: [errcheck]
+        text: "resp\\.Body\\.Close"
+      # The CLI prints to cobra's writers; a broken-pipe error isn't worth handling.
+      - path: internal/cli/
+        linters: [errcheck]
+        text: "fmt\\.(Fprint|Fprintf|Fprintln)"
+      # Test helpers writing to httptest servers / cobra writers.
+      - path: _test\.go
+        linters: [errcheck]

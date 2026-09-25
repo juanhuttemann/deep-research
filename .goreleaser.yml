@@ -1,0 +1,26 @@
+version: 2
+builds:
+  - main: ./cmd/deep-research
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # none* matches nothing: archives ship the binary only (no README/LICENSE
+    # dumped next to it on manual extraction) — documented GoReleaser hack.
+    files:
+      - none*
+# Stable name so the installers can verify against releases/latest without
+# knowing the version.
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+release:
+  draft: true
+changelog:
+  disable: true # CHANGELOG.md is maintained by hand (see RELEASING.md)

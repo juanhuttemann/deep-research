@@ -1,0 +1,17 @@
+# Local secrets / machine-specific overrides
+# Created by `deep-research init`; the real secrets file lives at the repo root.
+.env
+
+# Build artifacts
+/deep-research
+/bin/
+dist/
+*.jsonl
+
+# Generated research output (default --reports dir)
+/reports/
+
+# local working notes, never shipped
+TODO.md
+ISSUES.md
+PENDING.md

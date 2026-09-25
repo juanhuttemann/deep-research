@@ -1,0 +1,45 @@
+# Default config for deep-research agent
+# See config/agent.yaml for agent prompts
+#
+# Every key below can also be set from the environment as DEEP_RESEARCH_<KEY>
+# (uppercase), e.g. DEEP_RESEARCH_OFFLINE=true or
+# DEEP_RESEARCH_SOURCES_PER_TOPIC=9. The environment wins over this file.
+
+data_file: ~/.deep-research/research.jsonl
+offline: false
+
+# Timeout for a single model call, and the deadline for a whole run. The run
+# deadline covers searching and scraping too, which dominate wall-clock time
+# on a wide plan, so it is set here rather than derived from the call timeout.
+model_call_timeout: 120s
+run_timeout: 30m
+# Extra attempts for a failed model call; each retry doubles the call timeout,
+# because a call that ran out of time usually needed more of it.
+model_call_retries: 2
+# Sources gathered per sub-agent. Left at 0 the --mode tier decides
+# (quick 3, standard 4, deep 5), which is what makes changing depth in the
+# research brief change the plan. Set it to pin the budget regardless of mode.
+# The old name for this key, max_depth, still works.
+sources_per_topic: 0
+# Sub-agents searching at the same time. A deep plan has more sub-topics than
+# this, and they queue: raise it to finish a wide plan sooner, lower it when the
+# search backend or a rate-limited model provider cannot take the concurrency.
+parallelism: 3
+
+# LLM provider. Any OpenAI-compatible endpoint works (OpenRouter, vLLM,
+# llama.cpp, LM Studio). The matching OPENAI_* environment variables override
+# whatever is set here. Keep the API key in .env, not in this file.
+# openai_base_url: https://openrouter.ai/api/v1
+# openai_model: deepseek/deepseek-chat
+
+# Web search / scraping services. These are OPTIONAL: when left empty the
+# agent uses the built-in LLM search agent. Set them only if you run a local
+# SearXNG and Firecrawl; env vars SEARXNG_URL / FIRECRAWL_URL override these.
+# Running both services: docs/services.md.
+# searxng_url: http://localhost:8888
+# firecrawl_url: http://localhost:3002
+
+# Bearer token for hosted Firecrawl. A self-hosted instance needs none; the
+# hosted service rejects an unauthenticated scrape with 401, which shows up as
+# every source degrading to "snippet only". FIRECRAWL_API_KEY overrides this.
+# firecrawl_api_key:
