@@ -47,11 +47,15 @@ when OpenRouter retires it. Two consequences:
   its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
   it names; the daily cap (`free-models-per-day`) fails at once with a
   message instead of burning the retries on a limit that clears only at
-  00:00 UTC. Whether the router alias counts against the same daily cap as
-  `:free` ids is not documented by OpenRouter and has not been verified
-  here. To check with your key: run `doctor`, do one run, run `doctor`
-  again — if "free-model requests today" rose by the run's request count,
-  the router is capped like any `:free` model.
+  00:00 UTC.
+- The router counts against the same caps as any `:free` model. OpenRouter's
+  router guide says each request is forwarded to a free model and names it
+  in the response as a `:free` variant (`upstage/solar-pro-3:free`), and its
+  limits page applies the caps to `:free` variants: 20 requests a minute,
+  and 50 a day — 1000 once at least 10 credits have been bought. That is
+  documented behaviour (checked September 2026), not a measured one; the
+  `:free` ids in a run's `served_by` and the "free-model requests today"
+  line in `doctor` show it for a real key.
 
 The legacy `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL`
 names are still read as a fallback, so existing `.env` files keep working.
