@@ -142,3 +142,25 @@ func TestScraperStillFetchesPublicTargets(t *testing.T) {
 		t.Errorf("unexpected scrape result: %+v", got)
 	}
 }
+
+// Firecrawl answers success:true with empty markdown for JS-only pages, PDFs
+// and paywalls. The empty body replaced the search snippet and the source was
+// labelled a clean fetch.
+func TestBlankScrapeKeepsTheSnippet(t *testing.T) {
+	sx := newSearXNGServer(t, []map[string]any{{"title": "T", "url": "https://example.com/js", "content": "Search snippet"}})
+	defer sx.Close()
+	fc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"success":true,"data":{"markdown":"  \n","metadata":{"title":"Loading…","statusCode":200}}}`)
+	}))
+	defer fc.Close()
+	got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Findings) != 1 || got.Findings[0].Content != "Search snippet" || got.Findings[0].Title != "T" {
+		t.Errorf("blank scrape replaced the snippet: %+v", got.Findings)
+	}
+	if len(got.Signals) != 1 || got.Signals[0].Status != "degraded" || got.Signals[0].Code != "empty" {
+		t.Errorf("blank scrape signal = %+v, want degraded/empty", got.Signals)
+	}
+}

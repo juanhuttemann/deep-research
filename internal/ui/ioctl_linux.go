@@ -11,6 +11,9 @@ import "golang.org/x/sys/unix"
 // outright on TCGETS/TCSETSF being undefined there.
 const (
 	tcGet = unix.TCGETS
+	// TCSETS applies raw mode without discarding typeahead, so what was typed
+	// before can be counted (see newTTYInput).
+	tcSet = unix.TCSETS
 	// TCSETSF, not TCSAFLUSH: see setTermios in input_unix.go.
 	tcSetFlush = unix.TCSETSF
 )

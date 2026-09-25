@@ -30,12 +30,15 @@ parallelism: 3
 # llama.cpp, LM Studio). The matching OPENAI_* environment variables override
 # whatever is set here. Keep the API key in .env, not in this file.
 # openai_base_url: https://openrouter.ai/api/v1
-# openai_model: deepseek/deepseek-chat
+# openai_model: openrouter/free
 
-# Web search / scraping services. These are OPTIONAL: when left empty the
-# agent uses the built-in LLM search agent. Set them only if you run a local
-# SearXNG and Firecrawl; env vars SEARXNG_URL / FIRECRAWL_URL override these.
-# Running both services: docs/services.md.
+# Web search. Unset, searxng_url is "auto": public SearXNG instances listed on
+# searx.space, tried in turn — every query then goes to a third party. Set one
+# or more of your own instances (comma-separated) to keep queries local, or
+# "off" to let the model supply findings from memory (all unverified).
+# firecrawl_url is optional: with it each result page is scraped for its full
+# text, without it the search snippet is the source. SEARXNG_URL /
+# FIRECRAWL_URL override these. Running both services: docs/services.md.
 # searxng_url: http://localhost:8888
 # firecrawl_url: http://localhost:3002
 

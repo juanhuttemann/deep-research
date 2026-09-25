@@ -76,6 +76,10 @@ type Event struct {
 	Progress int    `json:"progress,omitempty"`
 	// Line is the latest status line shown under a sub-agent node.
 	Line string `json:"line,omitempty"`
+	// Transient marks progress that replaces the previous status rather than
+	// adding to the history. The live frame shows only the latest; JSONL and
+	// the exported timeline keep every one.
+	Transient bool `json:"transient,omitempty"`
 }
 
 func (e Event) withTime() Event {

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -39,13 +41,17 @@ type Config struct {
 // or export the matching environment variables for a session.
 const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
 # Fill in your values here, or export the matching env var for the session.
+# Get a free OpenRouter key (no card): https://openrouter.ai/keys
 # OPENAI_API_KEY=
 # OPENAI_BASE_URL=https://openrouter.ai/api/v1
-# OPENAI_MODEL=deepseek/deepseek-chat
+# OPENAI_MODEL=openrouter/free
 # SEARXNG_URL=http://localhost:8888
 # FIRECRAWL_URL=http://localhost:3002
 # FIRECRAWL_API_KEY=
 `
+
+// DefaultModel is the model a fresh checkout uses.
+const DefaultModel = "openrouter/free"
 
 // EnvPrefix is the prefix for the per-key environment overrides: any
 // config.yaml key resolves from DEEP_RESEARCH_<KEY> when that variable is set.
@@ -118,6 +124,69 @@ func Init() (dir string, created []string, err error) {
 	return dir, created, nil
 }
 
+// dockerCompose runs SearXNG on localhost only: it is a search endpoint for
+// this machine, not a public instance.
+const dockerCompose = `# Local SearXNG for deep-research. Start it with: docker compose up -d
+# Firecrawl (full page text) runs from its own repository: docs/services.md.
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    environment:
+      # Without it the container takes ownership of ./searxng and later
+      # edits to settings.yml need sudo.
+      - FORCE_OWNERSHIP=false
+    volumes:
+      # :z relabels the mount for SELinux hosts (Fedora, RHEL), where the
+      # container is otherwise denied its own settings file; hosts without
+      # SELinux ignore it.
+      - ./searxng:/etc/searxng:z
+`
+
+// searxngSettings enables the JSON API, which SearXNG ships disabled.
+const searxngSettings = `use_default_settings: true
+
+server:
+  secret_key: "%s"
+
+search:
+  formats:
+    - html
+    - json
+`
+
+// InitDocker writes a docker-compose.yml and searxng/settings.yml into dir
+// for a local SearXNG, returning the files it created. Existing files are
+// left alone, so a second run changes nothing — including the secret.
+func InitDocker(dir string) ([]string, error) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, err
+	}
+	var created []string
+	for _, f := range []struct{ path, content string }{
+		{filepath.Join(dir, "docker-compose.yml"), dockerCompose},
+		{filepath.Join(dir, "searxng", "settings.yml"), fmt.Sprintf(searxngSettings, hex.EncodeToString(secret))},
+	} {
+		if _, err := os.Stat(f.path); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return created, err
+		}
+		if err := os.MkdirAll(filepath.Dir(f.path), 0o755); err != nil {
+			return created, err
+		}
+		if err := os.WriteFile(f.path, []byte(f.content), 0o644); err != nil {
+			return created, err
+		}
+		created = append(created, f.path)
+	}
+	return created, nil
+}
+
 func writeDir() (string, error) {
 	if dir := os.Getenv("DEEP_RESEARCH_CONFIG_DIR"); dir != "" {
 		return dir, nil
@@ -175,9 +244,16 @@ func applyEnvDefaults(cfg *Config, v *viper.Viper) {
 	cfg.OpenAIAPIKey = pick("openai_api_key", "", "OPENAI_API_KEY", "OPENROUTER_API_KEY")
 	cfg.OpenAIBaseURL = pick("openai_base_url", "https://openrouter.ai/api/v1",
 		"OPENAI_BASE_URL", "OPENROUTER_BASE_URL")
-	cfg.OpenAIModel = pick("openai_model", "deepseek/deepseek-chat",
+	// OpenRouter's free router, not a pinned ":free" id: pinned free models
+	// are retired regularly, and the first run should cost nothing.
+	cfg.OpenAIModel = pick("openai_model", DefaultModel,
 		"OPENAI_MODEL", "OPENROUTER_MODEL")
-	cfg.SearXNGURL = pick("searxng_url", "", "SEARXNG_URL")
+	// Public instances out of the box ("auto"); "off" is the model-as-search
+	// mode that used to be the default, kept for runs that want no search.
+	cfg.SearXNGURL = pick("searxng_url", "auto", "SEARXNG_URL")
+	if strings.EqualFold(cfg.SearXNGURL, "off") || strings.EqualFold(cfg.SearXNGURL, "none") {
+		cfg.SearXNGURL = ""
+	}
 	cfg.FirecrawlURL = pick("firecrawl_url", "", "FIRECRAWL_URL")
 	cfg.FirecrawlAPIKey = pick("firecrawl_api_key", "", "FIRECRAWL_API_KEY")
 }

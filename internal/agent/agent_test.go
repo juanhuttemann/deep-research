@@ -48,8 +48,8 @@ func TestLocalRunResearchPhases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Summarize() error: %v", err)
 	}
-	if summary.Report != "prompt" {
-		t.Errorf("expected report 'prompt', got %q", summary.Report)
+	if summary.Report == "prompt" || !strings.Contains(summary.Report, "offline") {
+		t.Errorf("offline report should be a stub, got %q", summary.Report)
 	}
 }
 

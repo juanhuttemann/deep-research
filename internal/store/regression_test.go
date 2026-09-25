@@ -143,3 +143,29 @@ func TestHistoryKeepsShortSourcesAndCountsTornRecords(t *testing.T) {
 		t.Errorf("short content was altered: %q", runs[0].Findings[0].Content)
 	}
 }
+
+// The model, provider and incomplete-run error are new optional fields: a new
+// record keeps them, and records written before them still load.
+func TestModelAndErrorFieldsRoundTripBesideLegacyRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	legacy := `{"id":"old","question":"q0","analysis":"a","confidence":"low"}`
+	if err := os.WriteFile(path, []byte(legacy+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{
+		Question: "q1", Model: "openrouter/free", Provider: "openrouter.ai", Error: "report writing failed: 500",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := st.List()
+	if err != nil || skipped != 0 || len(runs) != 2 {
+		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
+	}
+	if runs[0].Analysis == nil || runs[0].Analysis.Answer != "a" || runs[0].Model != "" {
+		t.Errorf("legacy record = %+v", runs[0])
+	}
+	if r := runs[1]; r.Model != "openrouter/free" || r.Provider != "openrouter.ai" || r.Error == "" {
+		t.Errorf("new record lost fields: %+v", r)
+	}
+}

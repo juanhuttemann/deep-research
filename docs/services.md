@@ -1,16 +1,23 @@
 # Running SearXNG and Firecrawl
 
-Web-search mode needs two services:
+Out of the box, web search uses public SearXNG instances. Running your own
+keeps queries on your machine, and adding Firecrawl gives each source its
+full page text instead of a search snippet:
 
 | Service | Role | URL used below | API key |
 | ------- | ---- | -------------- | ------- |
 | SearXNG | searches the web, returns result URLs and snippets | `http://localhost:8888` | none |
 | Firecrawl | fetches each result page and returns Markdown | `http://localhost:3002` | none when self-hosted |
 
-Set `SEARXNG_URL` and `FIRECRAWL_URL` and runs use web search. Leave either
-one empty and runs use LLM search instead, where the model supplies findings
-from memory and every source is marked `unverified`
+Set `SEARXNG_URL` to use your SearXNG; set `FIRECRAWL_URL` too to scrape the
+pages. SearXNG alone is enough for web search — each source is then its
+search snippet, marked `snippet only`
 ([configuration.md](configuration.md#research-modes)).
+
+For SearXNG alone, `deep-research init --docker` writes a ready
+`docker-compose.yml` and settings file (JSON enabled, bound to localhost):
+`docker compose up -d`, then set `SEARXNG_URL=http://localhost:8888`. The
+sections below do the same by hand and add Firecrawl.
 
 Follow the three sections in order. Each ends with a command that tells you
 whether that piece works, so you find a problem at the step that caused it.
@@ -30,8 +37,9 @@ Official docs: [Installation with Docker](https://docs.searxng.org/admin/install
 ### Create the settings file
 
 SearXNG's JSON API is off by default — its default `formats` list contains
-only `html`. This CLI requests `format=json`, so you must enable it. Create
-the settings file before first start:
+only `html`. This CLI asks for `format=json` first and falls back to reading
+the HTML result page, so JSON is not required, but it is the cheaper and
+sturdier of the two. Create the settings file before first start:
 
 ```sh
 mkdir -p searxng/config
@@ -157,7 +165,7 @@ starting usually means the API is still booting; retry before investigating.
 
 ## 3. Point deep-research at them
 
-Add both URLs to the `.env` that `deep-research init` writes:
+Add the URLs to the `.env` that `deep-research init` writes:
 
 ```sh
 SEARXNG_URL=http://localhost:8888
@@ -183,8 +191,8 @@ sources  9 (9 fetched)      tokens  18.1k
 
 `fetched` means Firecrawl returned the page. `snippet only` means the search
 result was used without the page. `unverified` means the run used LLM search
-and fetched nothing — if you see that, one of the two URLs is empty or
-unreachable.
+and fetched nothing — if you see that, `SEARXNG_URL` is `off`.
+`deep-research doctor` checks both services directly.
 
 While a run is in progress each result is reported as it is handled, marked
 `ok`, `snippet`, `off-topic` (the page did not match the question, so it was
@@ -212,7 +220,8 @@ shows up as every source being `snippet only`.
 | SearXNG returns an HTML `403 Forbidden` for `format=json` | The `search.formats` block is not in effect. Confirm the file you edited is the one mounted at `/etc/searxng/settings.yml`, then `docker restart searxng` |
 | `permission denied` when editing `settings.yml` | The container took ownership. Edit with `sudo`, or recreate the container with `-e FORCE_OWNERSHIP=false` |
 | Firecrawl API container exits; logs show `EAI_AGAIN nuq-postgres` | It was started without its database. Run `docker compose up -d` for the whole stack |
-| Every source is `unverified` | The run used LLM search. Check both `SEARXNG_URL` and `FIRECRAWL_URL` are set and non-empty |
+| Every source is `unverified` | The run used LLM search: `SEARXNG_URL` is `off` |
+| `every search failed (rate-limited)` | Every instance refused. With `auto`, public instances limit bursts; retry later, or run your own SearXNG |
 | Every source is `snippet only` | Search works, scraping does not. Check Firecrawl with the curl in section 2; if hosted, check `FIRECRAWL_API_KEY` |
 | Sources reported as `blocked` | The target resolved to a private or loopback address and was refused before the request. See [the trust boundary](configuration.md#scraping-trust-boundary) |
 | Settings in `.env` appear to be ignored | Variables already exported in your shell take precedence — `.env` does not overwrite them. Run `env \| grep -E 'OPENAI\|SEARXNG\|FIRECRAWL'` and unset what you do not want |

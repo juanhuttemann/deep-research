@@ -20,14 +20,35 @@ one found and never climbing past the project root (a directory holding
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key | — (required for online mode) |
+| `OPENAI_API_KEY` | LLM API key; free at <https://openrouter.ai/keys> | — (required unless offline) |
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
-| `OPENAI_MODEL` | model to use | `deepseek/deepseek-chat` |
-| `SEARXNG_URL` | SearXNG instance for web search | — (empty: use the LLM search agent) |
-| `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: use the LLM search agent) |
+| `OPENAI_MODEL` | model to use | `openrouter/free` |
+| `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
+| `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: search snippets only) |
 | `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none) | — |
 
 To run SearXNG and Firecrawl yourself, see [services.md](services.md).
+
+### The default model
+
+`openrouter/free` is OpenRouter's free-model router: it costs nothing and
+picks an available free model per request, so no pinned `:free` id goes stale
+when OpenRouter retires it. Two consequences:
+
+- Runs are not reproducible model-for-model. Every artifact and history
+  record names the configured model and provider host (`model`, `provider`)
+  and the models the provider reported serving (`served_by`), read from each
+  response's `model` field.
+- Free models are capped per minute and per UTC day, and the daily ceiling
+  depends on credits bought. A run is a handful of requests, not tokens:
+  plan, analyze, fact-check and summarize — 4 with web search; LLM search
+  adds up to 2 per sub-topic (quick 10, standard 12, deep 16).
+  `deep-research doctor` prints these numbers and, for an OpenRouter key,
+  its usage and tier. A per-minute 429 is retried after the `Retry-After`
+  it names; the daily cap (`free-models-per-day`) fails at once with a
+  message instead of burning the retries on a limit that clears only at
+  00:00 UTC. Whether the router alias counts against the same daily cap as
+  `:free` ids is not documented by OpenRouter and was not verified here.
 
 The legacy `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL`
 names are still read as a fallback, so existing `.env` files keep working.
@@ -62,26 +83,59 @@ phase, so they can be edited without touching Go code.
 
 ## Research modes
 
-Which of the three modes a run uses is decided by what is configured, not by
-a flag:
+Which mode a run uses is decided by what is configured:
 
-- **Web search** — `searxng_url` *and* `firecrawl_url` both set. Findings
-  come from real web search plus page scraping. Each source is labelled by
-  how it was obtained: `✓ fetched`, `! snippet only`, `✗ dropped`. Both URLs
-  must be set; with only one, runs use LLM search. See
-  [services.md](services.md) to set the services up.
-- **LLM search** — the shipped default, since both URLs are empty. The model
-  itself proposes the findings and their URLs. Nothing is fetched, so every
-  source is labelled `~ unverified` and exported with that status. The
-  fact-check phase says so too: with no retrieved page to check an answer
-  against, it runs as a self-consistency pass ("Checking self-consistency (no
-  page was retrieved)") and the report presents its claims as unverified
-  recollection. Only web-search mode produces verification against sources.
-- **Offline** — `offline: true`. No network calls at all; a stub assistant
-  carries the pipeline so the CLI, store and report path can be exercised.
+- **Web search** — `searxng_url` set, which it is by default (`auto`).
+  Findings come from real web search. With `firecrawl_url` set too, each
+  result page is scraped for its full text; without it the search snippet is
+  the source. Each source is labelled by how it was obtained: `✓ fetched`,
+  `! snippet only` (with the reason: `noservice` when no scraper is
+  configured, `empty` when the scraper returned a blank page, or the HTTP
+  status), `✗ dropped`.
+  - `auto` reads the public instance list from
+    [searx.space](https://searx.space/), keeps the reachable, analytics-free
+    instances with a search success rate, and tries the best ten in turn.
+    The list is only candidates: searx.space's checker is whitelisted by most
+    instances' limiters, so an instance proves itself by answering a real
+    query, and the one that answered is asked first next time. Public
+    instances rarely enable SearXNG's JSON API, so they are read through
+    their HTML result page.
+  - A URL, or a comma-separated list of URLs, pins your own instances. JSON is
+    asked for first; an instance that refuses it is read through HTML.
+  - A search that every instance refuses fails with its reason —
+    `rate-limited`, `challenge`, `blocked` or `unavailable` — on the event
+    and in the error. It is never replaced by the model inventing findings,
+    and a run whose every search failed stops before analysing nothing.
+- **LLM search** — `searxng_url: off`. The model itself proposes the findings
+  and their URLs. Nothing is fetched, so every source is labelled
+  `~ unverified` and exported with that status. The fact-check phase says so
+  too: with no retrieved page to check an answer against, it runs as a
+  self-consistency pass ("Checking self-consistency (no page was retrieved)")
+  and the report presents its claims as unverified recollection. When a run
+  holds both kinds, every prompt marks each unfetched finding `[never
+  fetched]` and the phase line says how many there are.
+- **Offline** — `--offline` or `offline: true`. No network calls at all; a
+  stub assistant carries the pipeline so the CLI, store and report path can
+  be exercised. Its report says it is a stub.
 
-If the online assistant cannot be built (e.g. missing API key), the run falls
-back to offline mode with a warning.
+A missing API key is an error that says where to get one. It used to fall
+back to offline mode with a warning, which produced a complete-looking run
+that had researched nothing.
+
+### Public search instances
+
+With `auto`, every query and every result goes through a SearXNG instance run
+by a third party you did not pick, and that party's rate limits and retention
+apply. Public instances are donated capacity: queries use the same
+`Parallelism` bound as any run, carry an honest `User-Agent`, and move to the
+next instance on a refusal rather than retrying the one that refused. Set
+`searxng_url` to your own instance to keep queries local.
+
+DuckDuckGo is deliberately not a backend. Its HTML endpoints answered every
+request from here with a `202` bot challenge and no results (September
+2026), and the Go client for it (`duckduckgogo`) fails on that `202` and
+pulls in goquery for one selector. A DuckDuckGo backend would need a
+challenge-aware transport and should never be the default.
 
 ## Scraping trust boundary
 

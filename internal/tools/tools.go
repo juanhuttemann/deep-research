@@ -17,89 +17,6 @@ import (
 	"unicode/utf8"
 )
 
-// SearXNGClient wraps the SearXNG API
-type SearXNGClient struct {
-	BaseURL     string
-	HTTPClient  *http.Client
-	ResultLimit int
-}
-
-// NewSearXNGClient creates a new SearXNG client
-func NewSearXNGClient(baseURL string, timeout time.Duration) *SearXNGClient {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	return &SearXNGClient{
-		BaseURL:     baseURL,
-		HTTPClient:  &http.Client{Timeout: timeout},
-		ResultLimit: 10,
-	}
-}
-
-// SearXNGResult represents a single search result from SearXNG
-type SearXNGResult struct {
-	Title   string  `json:"title"`
-	URL     string  `json:"url"`
-	Content string  `json:"content"`
-	Engine  string  `json:"engine"`
-	Score   float64 `json:"score"`
-}
-
-// Search executes a query via SearXNG
-func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearXNGResult, error) {
-	searchURL := fmt.Sprintf("%s/search?q=%s&format=json&categories=general",
-		c.BaseURL,
-		url.QueryEscape(query),
-	)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create search request: %w", err)
-	}
-	req.Header.Set("User-Agent", "deep-research-agent/1.0")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("search request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("search failed: %w", &httpError{Code: resp.StatusCode, Body: string(body)})
-	}
-
-	var data struct {
-		Results []struct {
-			Title   string  `json:"title"`
-			URL     string  `json:"url"`
-			Content string  `json:"content"`
-			Engine  string  `json:"engine"`
-			Score   float64 `json:"score"`
-		} `json:"results"`
-	}
-
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&data); err != nil {
-		return nil, fmt.Errorf("decode search response: %w", err)
-	}
-
-	var results []SearXNGResult
-	for i, r := range data.Results {
-		if i >= c.ResultLimit {
-			break
-		}
-		results = append(results, SearXNGResult{
-			Title:   r.Title,
-			URL:     r.URL,
-			Content: r.Content,
-			Engine:  r.Engine,
-			Score:   r.Score,
-		})
-	}
-
-	return results, nil
-}
-
 // FirecrawlClient wraps the Firecrawl API for webpage scraping
 type FirecrawlClient struct {
 	BaseURL    string
@@ -132,6 +49,13 @@ type ScrapedContent struct {
 
 // errBlockedTarget marks a URL the scraper is not allowed to fetch.
 var errBlockedTarget = errors.New("blocked scrape target")
+
+// errEmptyScrape marks a scrape that succeeded but returned no text.
+var errEmptyScrape = errors.New("scrape returned no content")
+
+// errNoScraper marks a search run with no scrape service configured: the
+// search snippet is all there is, and the source is labelled that way.
+var errNoScraper = errors.New("no scrape service configured")
 
 // checkScrapeTarget vets a URL before it is handed to Firecrawl.
 //
@@ -326,6 +250,12 @@ func scrapeCode(err error) string {
 	if errors.Is(err, errBlockedTarget) {
 		return "blocked"
 	}
+	if errors.Is(err, errEmptyScrape) {
+		return "empty"
+	}
+	if errors.Is(err, errNoScraper) {
+		return "noservice"
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		return strconv.Itoa(he.Code)
@@ -350,17 +280,31 @@ func DomainOf(u string) string {
 	return u
 }
 
-// NewSearchTools creates a new SearchTools instance.
+// NewSearchTools creates a new SearchTools instance. searxURL is one instance,
+// a comma-separated list, or "auto" (see NewSearXNGClient). An empty
+// firecrawlURL means no scraper: every source keeps its search snippet and is
+// labelled snippet-only, which is still real search.
 func NewSearchTools(searxURL, firecrawlURL string, timeout time.Duration) *SearchTools {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &SearchTools{
+	t := &SearchTools{
 		SearXNG:           NewSearXNGClient(searxURL, timeout),
-		Firecrawl:         NewFirecrawlClient(firecrawlURL, timeout),
 		MaxURLsPerQuery:   3,
 		ScrapeParallelism: 4,
 	}
+	if strings.TrimSpace(firecrawlURL) != "" {
+		t.Firecrawl = NewFirecrawlClient(firecrawlURL, timeout)
+	}
+	return t
+}
+
+// scrape fetches a page's text, or reports that there is no scraper.
+func (s *SearchTools) scrape(ctx context.Context, url string) (*ScrapedContent, error) {
+	if s.Firecrawl == nil {
+		return nil, errNoScraper
+	}
+	return s.Firecrawl.ScrapeURL(ctx, url)
 }
 
 // SearchResults is the full result of a search query.
@@ -505,38 +449,8 @@ func (s *SearchTools) Search(ctx context.Context, query string) (*SearchResults,
 			}
 			defer func() { <-sem }()
 
-			title, content := r.Title, r.Content
-			signal := SourceSignal{URL: r.URL, Domain: DomainOf(r.URL), Status: "ok"}
-			if scraped, err := s.Firecrawl.ScrapeURL(ctx, r.URL); err == nil {
-				if scraped.Title != "" {
-					title = scraped.Title
-				}
-				content = scraped.Content
-				s.log(fmt.Sprintf("    ok       %s", DomainOf(r.URL)))
-			} else if strings.TrimSpace(content) != "" {
-				// Scraping failed but the search snippet survives: keep it and
-				// flag the source as degraded rather than dropping it.
-				signal.Status = "degraded"
-				signal.Code = scrapeCode(err)
-				s.log(fmt.Sprintf("    snippet  %s", DomainOf(r.URL)))
-			} else {
-				// Nothing was scraped and there is no snippet either, so this
-				// source contributed no content at all. Saying "degraded"
-				// would claim a body the finding does not have.
-				signal.Status = "dropped"
-				signal.Code = scrapeCode(err)
-				s.log(fmt.Sprintf("    dropped  %s", DomainOf(r.URL)))
-			}
-
 			urls[i] = r.URL
-			signals[i] = signal
-			findings[i] = SearchFinding{
-				Title:      title,
-				Content:    content,
-				URL:        r.URL,
-				Engine:     r.Engine,
-				Confidence: "high",
-			}
+			findings[i], signals[i] = s.fetch(ctx, r)
 		}(i, r)
 	}
 	wg.Wait()
@@ -556,4 +470,37 @@ func (s *SearchTools) Search(ctx context.Context, query string) (*SearchResults,
 	}
 
 	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped}, nil
+}
+
+// fetch scrapes one search result and labels how its content was obtained.
+func (s *SearchTools) fetch(ctx context.Context, r SearXNGResult) (SearchFinding, SourceSignal) {
+	title, content := r.Title, r.Content
+	signal := SourceSignal{URL: r.URL, Domain: DomainOf(r.URL), Status: "ok"}
+	scraped, err := s.scrape(ctx, r.URL)
+	// A 200 with an empty body is a page the scraper could not read (JS-only,
+	// PDF, paywall), not a page with nothing on it. Taking it as a fetch threw
+	// away the snippet and labelled a blank source a clean 200.
+	if err == nil && strings.TrimSpace(scraped.Content) == "" {
+		err = errEmptyScrape
+	}
+	switch {
+	case err == nil:
+		if scraped.Title != "" {
+			title = scraped.Title
+		}
+		content = scraped.Content
+		s.log(fmt.Sprintf("    ok       %s", DomainOf(r.URL)))
+	case strings.TrimSpace(content) != "":
+		// Scraping failed but the search snippet survives: keep it and flag
+		// the source as degraded rather than dropping it.
+		signal.Status, signal.Code = "degraded", scrapeCode(err)
+		s.log(fmt.Sprintf("    snippet  %s", DomainOf(r.URL)))
+	default:
+		// Nothing was scraped and there is no snippet either, so this source
+		// contributed no content at all. Saying "degraded" would claim a body
+		// the finding does not have.
+		signal.Status, signal.Code = "dropped", scrapeCode(err)
+		s.log(fmt.Sprintf("    dropped  %s", DomainOf(r.URL)))
+	}
+	return SearchFinding{Title: title, Content: content, URL: r.URL, Engine: r.Engine, Confidence: "high"}, signal
 }

@@ -21,18 +21,25 @@ type ttyReader struct {
 	// key-reader goroutine while ui.Run still closes the same Input when the
 	// run ends, so the restore has to be both idempotent and race-free.
 	closed sync.Once
+	// ignored counts keys typed before raw mode began — during planning,
+	// before the brief existed. They are discarded, not applied: nobody can
+	// confirm or cancel a plan they have not seen. Counting them is what lets
+	// the brief say an Enter was ignored rather than appear to hang.
+	ignored int
 }
 
-// setTermios applies t to fd.
-//
-// The request must be tcSetFlush (TCSETSF on Linux, TIOCSETAF on the BSDs).
-// unix.TCSAFLUSH is 0x2 — a tcsetattr(3) optional_actions value, not an
+// Ignored reports how many keys typed before the brief were discarded.
+func (t *ttyReader) Ignored() int { return t.ignored }
+
+// setTermios applies t to fd with an ioctl request: tcSet, or tcSetFlush
+// (TCSETSF on Linux, TIOCSETAF on the BSDs) to also discard pending input.
+// It must be one of those request numbers — unix.TCSAFLUSH is 0x2 — a tcsetattr(3) optional_actions value, not an
 // ioctl request number — and passing it here does not fail: the kernel accepts request 0x2 on a terminal and returns
 // success without touching the termios at all. The terminal then stays in
 // canonical mode with echo on, so single keypresses are never delivered and
 // every key the UI offers silently does nothing.
-func setTermios(fd int, t *unix.Termios) error {
-	return unix.IoctlSetTermios(fd, tcSetFlush, t)
+func setTermios(fd int, req uint, t *unix.Termios) error {
+	return unix.IoctlSetTermios(fd, req, t)
 }
 
 // newTTYInput puts f in raw mode so single keys can be read, returning an
@@ -57,7 +64,7 @@ func newTTYInput(f *os.File) (Input, error) {
 	raw.Lflag &^= unix.ICANON | unix.ECHO | unix.ISIG | unix.IEXTEN
 	raw.Cc[unix.VMIN] = 1
 	raw.Cc[unix.VTIME] = 0
-	if err := setTermios(fd, &raw); err != nil {
+	if err := setTermios(fd, tcSet, &raw); err != nil {
 		return nil, err
 	}
 	// Confirm the mode actually took. A termios request the kernel accepts
@@ -65,10 +72,21 @@ func newTTYInput(f *os.File) (Input, error) {
 	// and a silent no-op here disables every key in the UI.
 	if now, err := unix.IoctlGetTermios(fd, tcGet); err != nil ||
 		now.Lflag&unix.ICANON != 0 || now.Lflag&unix.ECHO != 0 {
-		_ = setTermios(fd, old)
+		_ = setTermios(fd, tcSetFlush, old)
 		return nil, errors.New("raw mode not applied")
 	}
-	return &ttyReader{f: f, old: old}, nil
+	t := &ttyReader{f: f, old: old}
+	// Drain what was typed before now, counting it. Flushing it in the
+	// ioctl, as this used to, lost an Enter pressed during planning without
+	// a trace. Draining after the switch also catches a half-typed line the
+	// canonical mode was still holding.
+	for {
+		if _, err := t.NextWithin(0); err != nil {
+			break
+		}
+		t.ignored++
+	}
+	return t, nil
 }
 
 // NextWithin returns the next byte if one arrives within d. It polls the
@@ -126,7 +144,8 @@ func (t *ttyReader) Raw() bool { return true }
 func (t *ttyReader) Close() {
 	t.closed.Do(func() {
 		if t.old != nil {
-			_ = setTermios(int(t.f.Fd()), t.old)
+			// Flushed: keys pressed during the run are not the shell's.
+			_ = setTermios(int(t.f.Fd()), tcSetFlush, t.old)
 		}
 	})
 }

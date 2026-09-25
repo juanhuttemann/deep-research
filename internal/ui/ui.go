@@ -90,6 +90,11 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 		// like a frozen spinner. Non-interactive runs keep the stderr logger
 		// the CLI installed.
 		o.Assistant.SetProgress(func(msg string) { driver.emit(Event{Type: Info, Detail: msg}) })
+		// Streamed-phase progress is status: one row replaced in place, not
+		// an activity line every five seconds.
+		if s, ok := o.Assistant.(interface{ SetStatus(func(string)) }); ok {
+			s.SetStatus(func(msg string) { driver.emit(Event{Type: Info, Detail: msg, Transient: true}) })
+		}
 	}
 
 	result, err := driver.Run(ctx, plan)
@@ -166,6 +171,15 @@ func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive 
 	// explicit choice by the reader, so the tier it selects wins outright.
 	// Re-applying the flag here is what made the key look dead: it cycled the
 	// label while pinning every visible number to the configured value.
+	// Keys typed while planning are discarded — a plan cannot be confirmed
+	// before it is shown — but a dropped Enter with no word read as a hang.
+	if in, ok := input.(interface{ Ignored() int }); ok && in.Ignored() > 0 {
+		keys := "1 key typed while planning was"
+		if n := in.Ignored(); n > 1 {
+			keys = fmt.Sprintf("%d keys typed while planning were", n)
+		}
+		r.SetBriefNote(keys + " ignored — review the plan, then press Enter")
+	}
 	plan, action := waitBrief(input, r, plan, (*Plan).WithDepth)
 	return plan, action == actionCancel
 }

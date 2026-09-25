@@ -10,8 +10,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -22,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
 func TestFinalResultRetainsReportedUsage(t *testing.T) {
@@ -998,7 +1002,7 @@ func TestFactCheckSaysSoWhenNothingWasRetrieved(t *testing.T) {
 		t.Errorf("retrieved-source prompt changed:\n%s", got)
 	}
 
-	if got := factCheckDetail(false); !strings.Contains(got, "self-consistency") {
+	if got := factCheckDetail(unretrieved); !strings.Contains(got, "self-consistency") {
 		t.Errorf("phase line %q does not say what is being checked", got)
 	}
 	if got := summarizePrompt("q", &agent.Analysis{Answer: "a"}, nil, unretrieved, false); !strings.Contains(got, "No source was retrieved") {
@@ -1115,5 +1119,397 @@ func TestDetachOptionReleasesTheDisplay(t *testing.T) {
 	}
 	if !detached {
 		t.Error("a run started detached never reported the display released")
+	}
+}
+
+// ---- review pass: fact-check verdicts, mixed retrieval, query shape --------
+
+// The fact-checker may put a claim in the "verified" array with
+// "verified": false. The summarizer was told "verified: <claim>" regardless,
+// so a claim the checker rejected reached the report as checked.
+func TestRejectedClaimIsNotPresentedAsVerified(t *testing.T) {
+	fc := &agent.FactCheckResult{Verified: []agent.VerifiedClaim{
+		{Claim: "the moon is cheese", Verified: false, Evidence: "no source says so"},
+		{Claim: "water is wet", Verified: true, Evidence: "source 1"},
+	}}
+	got := summarizePrompt("q", &agent.Analysis{Answer: "a"}, fc, nil, true)
+	if strings.Contains(got, "verified: the moon is cheese") && !strings.Contains(got, "unverified: the moon is cheese") {
+		t.Errorf("a rejected claim was presented as verified:\n%s", got)
+	}
+	if !strings.Contains(got, "unverified: the moon is cheese (no source says so)") {
+		t.Errorf("the rejected claim and its evidence are missing:\n%s", got)
+	}
+	if !strings.Contains(got, "  - verified: water is wet (source 1)") {
+		t.Errorf("a confirmed claim lost its verdict:\n%s", got)
+	}
+}
+
+// A search outage on one branch falls back per query, so one run can hold
+// fetched findings and model-invented ones. One fetched finding flipped the
+// whole run to "verified against sources", invented ones included.
+func TestMixedRunMarksFindingsThatWereNeverFetched(t *testing.T) {
+	mixed := []agent.Finding{
+		{Title: "Real", URL: "https://real.example", Content: "fetched", Status: "ok"},
+		{Title: "Invented", URL: "https://invented.example", Content: "recalled", Status: "unverified"},
+	}
+	for name, prompt := range map[string]string{
+		"analyze":    analyzePrompt("q", mixed, nil),
+		"fact-check": factCheckPrompt("claim", mixed, true),
+		"summarize":  summarizePrompt("q", &agent.Analysis{Answer: "a"}, nil, mixed, true),
+	} {
+		if !strings.Contains(prompt, "Invented (https://invented.example) [never fetched]") {
+			t.Errorf("%s prompt does not mark the unfetched finding:\n%s", name, prompt)
+		}
+		if strings.Contains(prompt, "Real (https://real.example) [never fetched]") {
+			t.Errorf("%s prompt marks a fetched finding as unfetched:\n%s", name, prompt)
+		}
+	}
+	if got := factCheckDetail(mixed); !strings.Contains(got, "1 of 2 never fetched") {
+		t.Errorf("phase line %q hides that part of the evidence was never fetched", got)
+	}
+	if got := factCheckDetail(mixed[:1]); got != "Verifying claims against sources" {
+		t.Errorf("fully fetched run phase line = %q", got)
+	}
+	if got := factCheckDetail(mixed[1:]); !strings.Contains(got, "self-consistency") {
+		t.Errorf("unfetched run phase line = %q", got)
+	}
+}
+
+// The planner fallback names its only sub-topic after the question, and the
+// query builder glued the two together: "What is X? What is X?".
+func TestFallbackPlanDoesNotRepeatTheQuestion(t *testing.T) {
+	got := subQueries("What is X?", agent.SubTopic{ID: "1", Name: "what is x?"})
+	if len(got) != 1 || got[0] != "What is X?" {
+		t.Errorf("subQueries = %q, want the question once", got)
+	}
+}
+
+// A question wider than the query cap dropped every facet, so every branch
+// issued the same query and all but the first found only duplicates.
+func TestLongQuestionKeepsBranchesDistinct(t *testing.T) {
+	q := strings.Repeat("solid state battery commercialization ", 4) // ~150 columns
+	a := anchoredQuery(q, "Manufacturing Cost")
+	b := anchoredQuery(q, "Regulatory Hurdles")
+	if a == b {
+		t.Fatalf("two facets produced the same query %q", a)
+	}
+	for _, got := range []string{a, b} {
+		if dispWidth(got) > maxQueryLen {
+			t.Errorf("query %q is %d columns, over the %d cap", got, dispWidth(got), maxQueryLen)
+		}
+		if !strings.HasPrefix(got, "solid state battery") {
+			t.Errorf("query %q lost the subject", got)
+		}
+	}
+	if !strings.HasSuffix(a, "Manufacturing Cost") {
+		t.Errorf("query %q lost its facet", a)
+	}
+}
+
+// ---- review pass: partial runs, detach ticker, export completeness --------
+
+// failingPhase answers every phase normally except the one named.
+type failingPhase struct {
+	*fakeAssistant
+	phase string
+}
+
+func (f failingPhase) Analyze(ctx context.Context, p string) (*agent.Analysis, error) {
+	if f.phase == "analyze" {
+		return nil, errors.New("provider 500")
+	}
+	return f.fakeAssistant.Analyze(ctx, p)
+}
+
+func (f failingPhase) Summarize(ctx context.Context, p string) (*agent.Summary, error) {
+	if f.phase == "summarize" {
+		return nil, errors.New("provider 500")
+	}
+	return f.fakeAssistant.Summarize(ctx, p)
+}
+
+// A failed analyze or summarize returned no result at all, so every search,
+// scrape and token the run had already spent was thrown away: no artifact, no
+// history record, one line on stderr.
+func TestFailedLatePhaseStillDeliversTheRun(t *testing.T) {
+	for _, phase := range []string{"analyze", "summarize"} {
+		t.Run(phase, func(t *testing.T) {
+			dir := t.TempDir()
+			var stdout, stderr bytes.Buffer
+			res, err := Run(context.Background(), Options{
+				Question:  "q",
+				Assistant: failingPhase{&fakeAssistant{}, phase},
+				OutDir:    dir, Stdout: &stdout, Stderr: &stderr, Quiet: true,
+			})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if res.Report == nil || len(res.Report.Findings) == 0 {
+				t.Fatalf("the gathered findings were discarded: %+v", res.Report)
+			}
+			if !strings.Contains(res.Report.Error, "provider 500") {
+				t.Errorf("result does not record why it is incomplete: %q", res.Report.Error)
+			}
+			if res.Report.Summary == nil || !strings.Contains(res.Report.Summary.Report, "could not be written") {
+				t.Errorf("report does not say it is incomplete: %+v", res.Report.Summary)
+			}
+			if res.MDPath == "" || res.JSONPath == "" {
+				t.Errorf("artifacts were not written: %+v", res)
+			}
+		})
+	}
+}
+
+// Esc during a late phase is still a cancellation, not a partial report.
+func TestCancelDuringLatePhaseIsNotAPartialRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := NewDriver(cancellingAnalyzer{&fakeAssistant{}, cancel}, &MultiSink{}, nil, 1)
+	if _, err := d.Run(ctx, newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "Alpha"}})); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+type cancellingAnalyzer struct {
+	*fakeAssistant
+	cancel context.CancelFunc
+}
+
+func (c cancellingAnalyzer) Analyze(ctx context.Context, p string) (*agent.Analysis, error) {
+	c.cancel()
+	return nil, ctx.Err()
+}
+
+// Detaching stopped the animation ticker, and the very next event started a
+// new one that woke 8×/s for the rest of the run to paint nothing.
+func TestDetachedRendererDoesNotRestartTheTicker(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{})
+	r.plain = false
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
+	r.Emit(Event{Type: Detach, Detail: "released"})
+	r.Emit(Event{Type: Info, Detail: "still working"})
+	r.mu.Lock()
+	running := r.stop != nil
+	r.mu.Unlock()
+	r.Close()
+	if running {
+		t.Error("an event after detach restarted the animation ticker")
+	}
+}
+
+// A tab counted zero columns, so a row holding one was not really clipped:
+// it wrapped, the frame scrolled and the repaint left stale frames behind.
+func TestTabsCannotOverflowTheFrame(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{})
+	r.plain, r.width, r.rows = false, 40, 30
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "go"})
+	r.Emit(Event{Type: Info, Detail: "provider said:\t\t\t\t\t\terror\tdetail\there"})
+	r.mu.Lock()
+	lines := r.frameLines()
+	r.mu.Unlock()
+	r.Close()
+	for _, l := range lines {
+		if strings.Contains(l, "\t") {
+			t.Errorf("a tab reached the terminal: %q", l)
+		}
+		if w := dispWidth(l); w > 40 {
+			t.Errorf("row is %d columns on a 40-column terminal: %q", w, l)
+		}
+	}
+}
+
+// The analyzer's per-topic evidence and confidence, and the fact-check
+// verdicts, were parsed and stored and never reached either artifact.
+func TestArtifactsCarryTopicsAndFactCheck(t *testing.T) {
+	res := testResult()
+	res.Analysis.Topics = []agent.Topic{{Name: "Cost", Findings: []string{"cells cost $80/kWh"}, Confidence: "medium"}}
+	res.FactCheck = &agent.FactCheckResult{
+		Verified:       []agent.VerifiedClaim{{Claim: "ok claim", Verified: true, Evidence: "src"}, {Claim: "bad claim", Verified: false, Evidence: "none"}},
+		Unverified:     []string{"loose claim"},
+		Contradictions: []agent.Contradiction{{Claim: "launch year", Sources: []string{"a", "b"}}},
+	}
+	md := MarkdownReport(res)
+	for _, want := range []string{"Cost", "cells cost $80/kWh", "ok claim", "bad claim", "loose claim", "launch year"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "- ✓ bad claim") {
+		t.Error("a rejected claim is listed as verified")
+	}
+	m := BuildMeta(res, nil, "standard", 0, 0)
+	if m.FactCheck == nil || len(m.Topics) != 1 {
+		t.Errorf("sidecar lacks fact-check or topics: %+v %+v", m.FactCheck, m.Topics)
+	}
+	if !strings.Contains(summarizePrompt("q", res.Analysis, nil, nil, true), "cells cost $80/kWh") {
+		t.Error("the summarizer never sees the per-topic evidence")
+	}
+}
+
+// Citation events carry the source only in SourceTitle/SourceURL, which the
+// timeline export dropped: every exported citation named no source.
+func TestExportedCitationsNameTheirSource(t *testing.T) {
+	sink := &MultiSink{}
+	d := NewDriver(&fakeAssistant{}, sink, nil, 1)
+	res, err := d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "Alpha"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := BuildMeta(res, sink.TimelineSnapshot(), "quick", 0, 0)
+	var n int
+	for _, e := range m.Timeline {
+		if e.Type == "citation" {
+			n++
+			if e.URL == "" || e.Detail == "" {
+				t.Errorf("exported citation names no source: %+v", e)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no citation in the timeline")
+	}
+}
+
+// A URL-less finding was counted as a source but left out of the citation
+// list, so "sources 5" came with a list of two.
+func TestURLlessFindingsAreListed(t *testing.T) {
+	res := testResult()
+	res.Findings = append(res.Findings, agent.Finding{Title: "Model recollection", Content: "c", Status: "unverified"})
+	if got := len(citations(res, "")); got != len(res.Findings) {
+		t.Errorf("%d citations for %d counted sources", got, len(res.Findings))
+	}
+	if md := MarkdownReport(res); !strings.Contains(md, "Model recollection") || !strings.Contains(md, "no URL") {
+		t.Errorf("URL-less source missing from the report or not marked:\n%s", md)
+	}
+}
+
+// A plan with no sub-topics researched nothing and still spent three model
+// calls on an empty findings list.
+func TestPlanWithNoSubTopicsIsAnError(t *testing.T) {
+	_, err := NewPlanner(&fakeAssistant{planTopics: []agent.SubTopic{}}, depthMode("quick")).Plan(context.Background(), "  ")
+	if err == nil {
+		t.Error("an empty plan was accepted")
+	}
+}
+
+// Every 5-second progress line was appended to the 64-entry activity tail, so
+// a long summarize evicted every read/verify/citation line — the only part of
+// the frame that says what the run found. Progress is status: one row,
+// replaced in place, and still recorded in the timeline.
+func TestTransientProgressDoesNotEvictTheActivityTail(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{})
+	r.plain, r.width, r.rows = false, 100, 40
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "go"})
+	r.Emit(Event{Type: Verify, SubID: "1", Line: "✓ keep.example 200 OK"})
+	r.Emit(Event{Type: Phase, Phase: "Summarize", Detail: "Writing the report"})
+	for i := range 100 {
+		r.Emit(Event{Type: Info, Transient: true, Detail: fmt.Sprintf("writing the report — %d words", i)})
+	}
+	r.mu.Lock()
+	var tail []string
+	for _, a := range r.acts {
+		tail = append(tail, a.text)
+	}
+	frame := strings.Join(r.frameLines(), "\n")
+	r.mu.Unlock()
+	r.Close()
+	joined := strings.Join(tail, "\n")
+	if strings.Contains(joined, "words") {
+		t.Errorf("progress lines were pushed into the activity tail:\n%s", joined)
+	}
+	if !strings.Contains(joined, "keep.example") {
+		t.Errorf("the source line was evicted:\n%s", joined)
+	}
+	if !strings.Contains(frame, "writing the report — 99 words") || strings.Contains(frame, "98 words") {
+		t.Errorf("the frame does not show exactly the latest status:\n%s", frame)
+	}
+}
+
+// failingSearch refuses every query the way a rate-limited instance does.
+type failingSearch struct{ *fakeAssistant }
+
+func (failingSearch) ResearchDetail(ctx context.Context, q string) (*agent.ResearchDetail, error) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	_, err := tools.NewSearXNGClient(srv.URL, 0).Search(ctx, q)
+	return nil, err
+}
+
+// When every search was refused the run analysed nothing, spent three model
+// calls and wrote a report about nothing. It now fails, naming why, and each
+// refusal carries its status on the event.
+func TestRunFailsWhenEverySearchFailed(t *testing.T) {
+	sink := &MultiSink{}
+	d := NewDriver(failingSearch{&fakeAssistant{}}, sink, nil, 2)
+	_, err := d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}, {ID: "2", Name: "B"}}))
+	if err == nil || !strings.Contains(err.Error(), "rate-limited") {
+		t.Fatalf("err = %v, want a failure naming the rate limit", err)
+	}
+	var tagged bool
+	for _, e := range sink.TimelineSnapshot() {
+		if e.Type == Error && e.Status == "rate-limited" {
+			tagged = true
+		}
+		if e.Type == Phase && e.Phase == "Analyze" {
+			t.Error("analysis ran on no evidence")
+		}
+	}
+	if !tagged {
+		t.Error("the refused search carried no status on its event")
+	}
+}
+
+// modelled reports which model and provider it used.
+type modelled struct{ *fakeAssistant }
+
+func (modelled) ModelInfo() (string, string) { return "openrouter/free", "openrouter.ai" }
+func (modelled) ServedModels() []string      { return []string{"google/gemma:free"} }
+
+// Nothing recorded which model wrote a report; with a free router that picks
+// a model per request, two runs of one question were incomparable with no way
+// to tell why.
+func TestArtifactsRecordTheModel(t *testing.T) {
+	sink := &MultiSink{}
+	res, err := NewDriver(modelled{&fakeAssistant{}}, sink, nil, 1).Run(context.Background(),
+		newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model != "openrouter/free" || res.Provider != "openrouter.ai" {
+		t.Errorf("result model=%q provider=%q", res.Model, res.Provider)
+	}
+	if m := BuildMeta(res, nil, "quick", 0, 0); m.Model != "openrouter/free" || m.Provider != "openrouter.ai" {
+		t.Errorf("sidecar model=%q provider=%q", m.Model, m.Provider)
+	}
+	if m := BuildMeta(res, nil, "quick", 0, 0); len(m.ServedBy) != 1 {
+		t.Errorf("sidecar served_by = %q", m.ServedBy)
+	}
+	if md := MarkdownReport(res); !strings.Contains(md, "openrouter/free") || !strings.Contains(md, "served by google/gemma:free") {
+		t.Errorf("report does not name its model:\n%s", md)
+	}
+}
+
+// ignoringInput is scripted input that reports keys discarded before the brief.
+type ignoringInput struct{ Input }
+
+func (ignoringInput) Ignored() int { return 1 }
+
+// An Enter pressed while planning was dropped, and the brief then waited with
+// nothing to say why; it reads as a hang. The brief now says the key was
+// ignored and what to press.
+func TestBriefSaysKeysTypedDuringPlanningWereIgnored(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{})
+	o := Options{KeyScript: "\r"}.withDefaults()
+	plan := newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}})
+	if _, cancelled := o.confirmBrief(ignoringInput{NewByteReader([]byte("\r"))}, r, plan, true); cancelled {
+		t.Fatal("brief cancelled")
+	}
+	if !strings.Contains(buf.String(), "typed while planning") {
+		t.Errorf("brief does not mention the ignored key:\n%s", buf.String())
 	}
 }

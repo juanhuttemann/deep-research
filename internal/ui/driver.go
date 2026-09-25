@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +43,10 @@ type Driver struct {
 	// backend hands most of them the same pages; without this the run counts
 	// one page once per sub-agent and reports far more sources than it read.
 	citedURLs map[string]bool
+	// searchesOK and searchErr tell a run that found nothing apart from a run
+	// whose every search was refused: only the second is a failure.
+	searchesOK int
+	searchErr  error
 }
 
 func NewDriver(a agent.Assistant, sink *MultiSink, input Input, parallelism int) *Driver {
@@ -228,11 +234,16 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+	// Every search was refused: there is no evidence to analyse, and three
+	// model calls would only write a report about nothing.
+	if err := d.searchFailure(findings); err != nil {
+		return nil, err
+	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
 	analysis, err := d.Agent.Analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
 	if err != nil {
-		return nil, err
+		return d.partial(ctx, plan, findings, nil, nil, "analysis failed", err)
 	}
 
 	// What this phase can honestly claim depends on where the "sources" came
@@ -241,7 +252,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// self-consistency pass with no contact with the world — and saying
 	// "verified" for it would be the pipeline's single most misleading word.
 	retrieved := sourcesRetrieved(findings)
-	d.emit(Event{Type: Phase, Phase: "Fact-Check", Detail: factCheckDetail(retrieved)})
+	d.emit(Event{Type: Phase, Phase: "Fact-Check", Detail: factCheckDetail(findings)})
 	// Fact-checking is a verification pass over an answer that already
 	// exists. If it fails there is still a complete, citable report to
 	// deliver, so the failure is surfaced and the run continues rather than
@@ -257,7 +268,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved)
 	summary, err := d.Agent.Summarize(ctx, prompt)
 	if err != nil {
-		return nil, err
+		return d.partial(ctx, plan, findings, analysis, fc, "report writing failed", err)
 	}
 	// The summarizer writes prose, so it reports no confidence of its own. The
 	// analyzer's is the run's, and without carrying it over the report prints
@@ -265,20 +276,53 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if summary.Confidence == "" {
 		summary.Confidence = analysis.Confidence
 	}
+	return d.finish(&agent.ResearchResult{
+		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
+	}), nil
+}
 
+// finish stamps a result with the run's final counters and announces it.
+func (d *Driver) finish(result *agent.ResearchResult) *agent.ResearchResult {
 	sources, tokens := d.syncUsage()
-	result := &agent.ResearchResult{
-		Question:  plan.Question,
-		Tokens:    tokens,
-		Findings:  findings,
-		Analysis:  analysis,
-		FactCheck: fc,
-		Summary:   summary,
-		Timestamp: d.now(),
+	result.Tokens, result.Timestamp = tokens, d.now()
+	if m, ok := d.Agent.(interface{ ModelInfo() (string, string) }); ok {
+		result.Model, result.Provider = m.ModelInfo()
+	}
+	if m, ok := d.Agent.(interface{ ServedModels() []string }); ok {
+		result.ServedBy = m.ServedModels()
 	}
 	d.emit(Event{Type: Report, Phase: "Report", Detail: "Research complete",
 		Tokens: tokens, Sources: sources})
-	return result, nil
+	return result
+}
+
+// partial delivers a run whose analyze or summarize call failed. Those calls
+// come last, after every search, scrape and token has been spent; returning
+// only the error threw all of it away — no artifact, no history record. A
+// deadline or a provider that gave up mid-report still leaves the sources and
+// possibly the analysis, so they are delivered, marked incomplete.
+//
+// A cancellation is the reader stopping the run, not a failure to recover
+// from, so it is passed through.
+func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Finding,
+	analysis *agent.Analysis, fc *agent.FactCheckResult, what string, err error) (*agent.ResearchResult, error) {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return nil, err
+	}
+	reason := what + ": " + err.Error()
+	d.emit(Event{Type: Error, Detail: reason + " — delivering what the run gathered"})
+	report := "_The report could not be written (" + reason + ")._\n\n"
+	confidence := "unknown"
+	if analysis != nil && strings.TrimSpace(analysis.Answer) != "" {
+		report += "The analysis it would have been written from:\n\n" + analysis.Answer
+		confidence = analysis.Confidence
+	} else {
+		report += "Only the sources the run gathered remain; the saved report lists them under its citations."
+	}
+	return d.finish(&agent.ResearchResult{
+		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc,
+		Summary: &agent.Summary{Report: report, Confidence: confidence}, Error: reason,
+	}), nil
 }
 
 // research runs each sub-topic as a parallel sub-agent and collects findings.
@@ -365,8 +409,13 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		d.emit(Event{Type: Search, Query: q, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
 
 		det, err := d.Agent.ResearchDetail(ctx, q)
+		d.noteSearch(err)
 		if err != nil {
-			d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id, Line: "search failed"})
+			// A limiter or a challenge is a state of the run, so it travels on
+			// the event rather than only inside the message text.
+			status := tools.SearchStatus(err)
+			d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
+				Status: status, Line: "search " + status})
 			continue
 		}
 		// Results the search judged off-topic were never fetched, so they cost
@@ -416,7 +465,11 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 
 			sources, tokens := d.record()
 			d.emit(Event{Type: Token, Tokens: tokens, Sources: sources})
-			d.emit(Event{Type: Citation, SourceTitle: f.Title, SourceURL: f.URL, SubID: id, Sources: sources})
+			// URL and Detail repeat the source's identity in the fields the
+			// timeline export keeps; SourceTitle/SourceURL alone left every
+			// exported citation naming no source.
+			d.emit(Event{Type: Citation, SourceTitle: f.Title, SourceURL: f.URL, URL: f.URL, Detail: f.Title,
+				SubID: id, Sources: sources})
 
 			// Report progress per source, not per query. A sub-topic usually
 			// issues a single query, so query-granular progress would leave the
@@ -432,6 +485,28 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 	d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "done", Progress: 100,
 		Line: contributionLine(kept, duplicates, offTopic)})
 	return kept
+}
+
+// noteSearch records the outcome of one search.
+func (d *Driver) noteSearch(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err != nil {
+		d.searchErr = err
+	} else {
+		d.searchesOK++
+	}
+}
+
+// searchFailure is the run's error when it gathered nothing because no search
+// ever answered.
+func (d *Driver) searchFailure(findings []agent.Finding) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(findings) > 0 || d.searchesOK > 0 || d.searchErr == nil {
+		return nil
+	}
+	return fmt.Errorf("every search failed (%s): %w", tools.SearchStatus(d.searchErr), d.searchErr)
 }
 
 // contributionLine says what a finished sub-agent actually added to the run.
@@ -490,6 +565,11 @@ func verifyLabel(s agent.SourceSignal) string {
 // on long queries, so the facet is trimmed rather than the question.
 const maxQueryLen = 100
 
+// minFacetCols is the room a facet keeps even beside a question that fills the
+// query cap by itself. Dropping the facet there made every branch issue the
+// same query, so the plan collapsed into one search and a pile of duplicates.
+const minFacetCols = 30
+
 // subQueries is the list of search queries a sub-agent issues.
 //
 // Planner sub-topic names are facets of the question ("Performance
@@ -525,7 +605,8 @@ func subQueries(question string, sub agent.SubTopic) []string {
 // anchoredQuery joins the research question to one facet, trimmed to the
 // backends' comfortable query length. The facet loses the trailing words
 // rather than the question: a query that drops the subject retrieves generic
-// articles about the facet and nothing about what was asked.
+// articles about the facet and nothing about what was asked. Only a question
+// too long to leave the facet minFacetCols gives up its own tail.
 func anchoredQuery(question, facet string) string {
 	q, facet := strings.TrimSpace(question), strings.TrimSpace(facet)
 	switch {
@@ -533,22 +614,31 @@ func anchoredQuery(question, facet string) string {
 		return ""
 	case q == "":
 		return facet
-	case facet == "":
+	// The planner fallback names its one sub-topic after the question.
+	case facet == "", strings.EqualFold(q, facet):
+		return clipWords(q, maxQueryLen)
+	}
+	keep := min(dispWidth(facet), minFacetCols)
+	q = clipWords(q, maxQueryLen-1-keep)
+	facet = clipWords(facet, maxQueryLen-1-dispWidth(q))
+	if facet == "" {
 		return q
 	}
-	if room := maxQueryLen - dispWidth(q) - 1; room < dispWidth(facet) {
-		if room < 1 {
-			return q
-		}
-		facet = strings.TrimSpace(queryPrefix(facet, room))
-		if i := strings.LastIndex(facet, " "); i > 0 {
-			facet = facet[:i]
-		}
-		if facet == "" {
-			return q
-		}
-	}
 	return q + " " + facet
+}
+
+// clipWords trims s to at most width columns, cutting at a word boundary when
+// it has to cut at all. A single word wider than the budget is cut mid-word:
+// some prefix of the subject beats none.
+func clipWords(s string, width int) string {
+	if dispWidth(s) <= width {
+		return s
+	}
+	cut := strings.TrimSpace(queryPrefix(s, width))
+	if i := strings.LastIndex(cut, " "); i > 0 && !strings.HasPrefix(s[len(cut):], " ") {
+		cut = cut[:i]
+	}
+	return strings.TrimSpace(cut)
 }
 
 // maxNotesTerms bounds the re-formulation: a handful of distinctive words
@@ -634,11 +724,23 @@ func queryPrefix(s string, width int) string {
 const maxPromptFindingChars = 1500
 
 // writeFindings lists findings as numbered, content-bounded prompt entries.
+//
+// A finding no page backs is marked on its own line. One run can mix both
+// kinds — the search falls back to the model per query — and a run-level flag
+// let one fetched page vouch for every invented one beside it.
 func writeFindings(sb *strings.Builder, findings []agent.Finding) {
 	for i, f := range findings {
-		sb.WriteString("  " + strconv.Itoa(i+1) + ". " + f.Title + " (" + f.URL + ")\n    ")
+		mark := ""
+		if !fetched(f) {
+			mark = " " + neverFetched
+		}
+		sb.WriteString("  " + strconv.Itoa(i+1) + ". " + f.Title + " (" + f.URL + ")" + mark + "\n    ")
 		sb.WriteString(clipPromptContent(f.Content))
 		sb.WriteString("\n")
+	}
+	if n := countFetched(findings); n > 0 && n < len(findings) {
+		sb.WriteString("  Entries marked " + neverFetched + " came from a language model's memory," +
+			" not from a retrieved page: treat them as unverified.\n")
 	}
 }
 
@@ -694,31 +796,64 @@ func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool) st
 	return sb.String()
 }
 
-// sourcesRetrieved reports whether any finding came from a page the run
-// actually fetched. "ok" is a scraped page and "degraded" a search snippet;
-// both reached the run from a search backend. "unverified" is the LLM-search
-// path, where the model supplied the URL and the text behind it.
-func sourcesRetrieved(findings []agent.Finding) bool {
-	for _, f := range findings {
-		if f.Status == "ok" || f.Status == "degraded" {
-			return true
+// writeTopicEvidence gives the summarizer the analyzer's per-topic evidence
+// and confidence, the structured half of the analysis the answer text flattens.
+func writeTopicEvidence(sb *strings.Builder, topics []agent.Topic) {
+	if len(topics) == 0 {
+		return
+	}
+	sb.WriteString("Evidence by topic (with the analyzer's confidence):\n")
+	for _, t := range topics {
+		sb.WriteString("  - " + t.Name + " (" + t.Confidence + ")\n")
+		for _, f := range t.Findings {
+			sb.WriteString("      " + f + "\n")
 		}
 	}
-	return false
+	sb.WriteString("\n")
 }
 
-// factCheckDetail is the phase line the reader sees, which says which of the
-// two passes is running.
-func factCheckDetail(retrieved bool) string {
-	if retrieved {
-		return "Verifying claims against sources"
+// neverFetched marks a prompt entry whose URL and text came from the model.
+const neverFetched = "[never fetched]"
+
+// fetched reports whether a finding came from a page the run actually
+// retrieved. "ok" is a scraped page and "degraded" a search snippet; both
+// reached the run from a search backend. "unverified" is the LLM-search path,
+// where the model supplied the URL and the text behind it.
+func fetched(f agent.Finding) bool { return f.Status == "ok" || f.Status == "degraded" }
+
+// countFetched is how many findings a page actually backs.
+func countFetched(findings []agent.Finding) int {
+	n := 0
+	for _, f := range findings {
+		if fetched(f) {
+			n++
+		}
 	}
-	return "Checking self-consistency (no page was retrieved)"
+	return n
+}
+
+// sourcesRetrieved reports whether any finding came from a fetched page. It
+// picks which pass the fact-checker runs; the per-finding marks in the
+// prompts are what keep a mixed run from vouching for its unfetched half.
+func sourcesRetrieved(findings []agent.Finding) bool { return countFetched(findings) > 0 }
+
+// factCheckDetail is the phase line the reader sees: which of the two passes
+// is running, and how much of the evidence no page backs.
+func factCheckDetail(findings []agent.Finding) string {
+	n := countFetched(findings)
+	switch {
+	case n == 0:
+		return "Checking self-consistency (no page was retrieved)"
+	case n < len(findings):
+		return fmt.Sprintf("Verifying claims against sources (%d of %d never fetched)", len(findings)-n, len(findings))
+	}
+	return "Verifying claims against sources"
 }
 
 func summarizePrompt(question string, analysis *agent.Analysis, fc *agent.FactCheckResult, findings []agent.Finding, retrieved bool) string {
 	var sb strings.Builder
 	sb.WriteString("Question: " + question + "\n\nSynthesized answer:\n" + analysis.Answer + "\n\n")
+	writeTopicEvidence(&sb, analysis.Topics)
 	sb.WriteString("Sources (title, URL, content) — link and quote these:\n")
 	writeFindings(&sb, findings)
 	// The reader cannot tell the two modes apart from the finished report, so
@@ -733,8 +868,14 @@ func summarizePrompt(question string, analysis *agent.Analysis, fc *agent.FactCh
 	// from unsupported ones, so they belong in the summarizer's context.
 	if fc != nil {
 		sb.WriteString("\nFact-check results:\n")
+		// The verdict is the flag, not the array: models echo the schema and
+		// file a claim they rejected under "verified" with verified:false.
 		for _, c := range fc.Verified {
-			sb.WriteString("  - verified: " + c.Claim + " (" + c.Evidence + ")\n")
+			verdict := "unverified"
+			if c.Verified {
+				verdict = "verified"
+			}
+			sb.WriteString("  - " + verdict + ": " + c.Claim + " (" + c.Evidence + ")\n")
 		}
 		for _, c := range fc.Unverified {
 			sb.WriteString("  - unverified: " + c + "\n")

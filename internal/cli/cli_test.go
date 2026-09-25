@@ -48,15 +48,24 @@ func TestInitReportsCreatedFiles(t *testing.T) {
 	if !strings.Contains(out, ".env") {
 		t.Errorf("output should report the .env file that was created; got:\n%s", out)
 	}
+	// The first run needs a key; init names the one place to get a free one.
+	if !strings.Contains(out, "https://openrouter.ai/keys") {
+		t.Errorf("init does not say where to get a key; got:\n%s", out)
+	}
+	env, err := os.ReadFile(filepath.Join(cwd, ".env"))
+	if err != nil || !strings.Contains(string(env), "OPENAI_MODEL=openrouter/free") {
+		t.Errorf(".env template does not default to the free model: %v\n%s", err, env)
+	}
 }
 
-// TestRunFallsBackToOfflineWhenAssistantUnavailable exercises the fallback the
-// README promises: when the online assistant cannot be built, the run warns
-// and completes offline instead of failing.
-func TestRunFallsBackToOfflineWhenAssistantUnavailable(t *testing.T) {
+// A missing key used to print a warning and fall back to offline mode, so the
+// reader got a RESEARCH COMPLETE card, three artifacts and a history record
+// for a run that researched nothing. It is now an error that says how to fix
+// it, and writes nothing.
+func TestMissingKeyIsAHardError(t *testing.T) {
 	dir := t.TempDir()
 	deps := Deps{
-		Assistant: func() (agent.Assistant, error) { return nil, errors.New("no API key") },
+		Assistant: func() (agent.Assistant, error) { return nil, errors.New("no API key (set OPENAI_API_KEY)") },
 		Raw:       agent.Local(),
 		Config:    config.Config{DataFile: filepath.Join(dir, "runs.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
@@ -66,11 +75,38 @@ func TestRunFallsBackToOfflineWhenAssistantUnavailable(t *testing.T) {
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetArgs([]string{"run", "why is the sky blue", "--silent", "--reports", dir})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("run should have fallen back to offline, got: %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("a run with no API key succeeded")
 	}
-	if !strings.Contains(errBuf.String(), "falling back to offline") {
-		t.Errorf("no fallback warning on stderr; got:\n%s", errBuf.String())
+	for _, want := range []string{"https://openrouter.ai/keys", "--offline"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not say %q: %v", want, err)
+		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("a failed run wrote files: %v", entries)
+	}
+}
+
+// --offline is the explicit way to run the stub pipeline.
+func TestOfflineFlagSkipsTheOnlineAssistant(t *testing.T) {
+	dir := t.TempDir()
+	deps := Deps{
+		Assistant: func() (agent.Assistant, error) {
+			t.Error("online assistant built under --offline")
+			return nil, errors.New("x")
+		},
+		Raw:    agent.Local(),
+		Config: config.Config{DataFile: filepath.Join(dir, "runs.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
+	}
+	cmd := New(func() (Deps, error) { return deps, nil })
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"run", "why is the sky blue", "--offline", "--silent", "--reports", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--offline run: %v", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,18 +19,28 @@ import (
 // Meta is the structured trace written to the .json sidecar: full citations,
 // per-sub-agent research notes, and the full event timeline.
 type Meta struct {
-	Version          string          `json:"version"`
-	Question         string          `json:"question"`
-	Timestamp        time.Time       `json:"timestamp"`
-	Depth            string          `json:"depth"`
-	Confidence       string          `json:"confidence"`
-	Tokens           int             `json:"tokens"`
-	Sources          int             `json:"sources"`
-	ExecutiveSummary string          `json:"executive_summary"`
-	Report           string          `json:"report"`
-	Citations        []MetaCitation  `json:"citations"`
-	Notes            []MetaNote      `json:"sub_agent_notes"`
-	Timeline         []TimelineEntry `json:"timeline"`
+	Version          string    `json:"version"`
+	Question         string    `json:"question"`
+	Timestamp        time.Time `json:"timestamp"`
+	Depth            string    `json:"depth"`
+	Model            string    `json:"model,omitempty"`
+	Provider         string    `json:"provider,omitempty"`
+	ServedBy         []string  `json:"served_by,omitempty"`
+	Confidence       string    `json:"confidence"`
+	Tokens           int       `json:"tokens"`
+	Sources          int       `json:"sources"`
+	ExecutiveSummary string    `json:"executive_summary"`
+	Report           string    `json:"report"`
+	// Error is set when a late phase failed and the report is incomplete.
+	Error string `json:"error,omitempty"`
+	// Topics is the analyzer's per-topic evidence with its own confidence.
+	Topics []agent.Topic `json:"topics,omitempty"`
+	// FactCheck is the verification pass's verdicts, so a consumer can see
+	// which claims were checked rather than inferring it from the prose.
+	FactCheck *agent.FactCheckResult `json:"fact_check,omitempty"`
+	Citations []MetaCitation         `json:"citations"`
+	Notes     []MetaNote             `json:"sub_agent_notes"`
+	Timeline  []TimelineEntry        `json:"timeline"`
 }
 
 // MetaCitation is one cited source with its verification status.
@@ -83,14 +94,26 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	}
 	fmt.Fprintf(&sb, "# %s\n\n", res.Question)
 	fmt.Fprintf(&sb, "**Confidence:** %s\n\n", sum.Confidence)
+	if res.Model != "" {
+		fmt.Fprintf(&sb, "**Model:** %s", res.Model)
+		if res.Provider != "" {
+			fmt.Fprintf(&sb, " via %s", res.Provider)
+		}
+		if len(res.ServedBy) > 0 && !slices.Equal(res.ServedBy, []string{res.Model}) {
+			fmt.Fprintf(&sb, " (served by %s)", strings.Join(res.ServedBy, ", "))
+		}
+		sb.WriteString("\n\n")
+	}
 	if body := summaryBody(res.Question, sum); body != "" {
 		sb.WriteString(body)
 		sb.WriteString("\n\n")
 	}
 
 	if res.Analysis != nil {
+		writeTopics(&sb, res.Analysis.Topics)
 		writeOpenQuestions(&sb, res.Analysis)
 	}
+	writeFactCheck(&sb, res.FactCheck)
 
 	// Judged against the report body alone, exactly as the JSON sidecar does:
 	// a URL is cited when the text of the answer references it.
@@ -113,14 +136,21 @@ func MarkdownReport(res *agent.ResearchResult) string {
 
 // citations is the deduplicated, URL-ordered citation list for a result, with
 // each entry marked according to whether the report body references it.
+//
+// A finding without a URL is listed under its title: it is counted as a
+// source, and leaving it out made "sources 5" arrive with a list of two.
 func citations(res *agent.ResearchResult, body string) []MetaCitation {
 	seen := map[string]bool{}
 	var cits []MetaCitation
 	for _, f := range res.Findings {
-		if f.URL == "" || seen[f.URL] {
+		key := f.URL
+		if key == "" {
+			key = "title:" + f.Title
+		}
+		if seen[key] {
 			continue
 		}
-		seen[f.URL] = true
+		seen[key] = true
 		cits = append(cits, MetaCitation{
 			Query: f.Query, Title: f.Title, URL: f.URL,
 			Confidence: f.Confidence, Status: citationStatus(f), Domain: tools.DomainOf(f.URL),
@@ -148,6 +178,10 @@ func writeCitationList(sb *strings.Builder, heading string, cits []MetaCitation)
 	}
 	fmt.Fprintf(sb, "## %s (%d)\n\n", heading, len(cits))
 	for i, c := range cits {
+		if c.URL == "" {
+			fmt.Fprintf(sb, "%d. %s — _%s_ (%s, no URL)\n", i+1, c.Title, c.Confidence, c.Status)
+			continue
+		}
 		fmt.Fprintf(sb, "%d. [%s](%s) — _%s_ (%s)\n", i+1, c.Title, c.URL, c.Confidence, c.Status)
 	}
 	sb.WriteString("\n")
@@ -171,6 +205,53 @@ func writeOpenQuestions(sb *strings.Builder, a *agent.Analysis) {
 		if q = strings.TrimSpace(q); q != "" {
 			fmt.Fprintf(sb, "- _suggested search:_ %s\n", q)
 		}
+	}
+	sb.WriteString("\n")
+}
+
+// writeTopics lists the analyzer's per-topic evidence and confidence. It was
+// parsed, stored in the history and read by nothing.
+func writeTopics(sb *strings.Builder, topics []agent.Topic) {
+	if len(topics) == 0 {
+		return
+	}
+	sb.WriteString("## Evidence by Topic\n\n")
+	for _, t := range topics {
+		fmt.Fprintf(sb, "### %s\n\n_Confidence: %s_\n\n", t.Name, t.Confidence)
+		for _, f := range t.Findings {
+			if f = strings.TrimSpace(f); f != "" {
+				fmt.Fprintf(sb, "- %s\n", f)
+			}
+		}
+		sb.WriteString("\n")
+	}
+}
+
+// writeFactCheck records what the verification pass concluded, claim by
+// claim. Leaving it to the summarizer's prose meant a reader could not tell
+// which claims the pipeline had actually checked. The verdict is the flag,
+// not the array a claim arrived in.
+func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult) {
+	if fc == nil || len(fc.Verified)+len(fc.Unverified)+len(fc.Contradictions) == 0 {
+		return
+	}
+	sb.WriteString("## Fact-Check\n\n")
+	for _, c := range fc.Verified {
+		mark := "✓ verified"
+		if !c.Verified {
+			mark = "✗ not verified"
+		}
+		fmt.Fprintf(sb, "- %s: %s", mark, c.Claim)
+		if c.Evidence != "" {
+			fmt.Fprintf(sb, " — %s", c.Evidence)
+		}
+		sb.WriteString("\n")
+	}
+	for _, c := range fc.Unverified {
+		fmt.Fprintf(sb, "- ? unverified: %s\n", c)
+	}
+	for _, c := range fc.Contradictions {
+		fmt.Fprintf(sb, "- ⚠ contradiction on %s: %s\n", c.Claim, strings.Join(c.Sources, "; "))
 	}
 	sb.WriteString("\n")
 }
@@ -266,6 +347,14 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 		Sources:          sources,
 		ExecutiveSummary: condStr(res.Summary, "executive"),
 		Report:           condStr(res.Summary, "report"),
+		Error:            res.Error,
+		Model:            res.Model,
+		Provider:         res.Provider,
+		ServedBy:         res.ServedBy,
+		FactCheck:        res.FactCheck,
+	}
+	if res.Analysis != nil {
+		m.Topics = res.Analysis.Topics
 	}
 	// The sidecar records the same cited/retrieved distinction the Markdown
 	// export draws, so a consumer of the trace can tell which sources the

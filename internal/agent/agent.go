@@ -5,10 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"net"
 	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -169,6 +175,16 @@ type ResearchResult struct {
 	FactCheck *FactCheckResult `json:"fact_check"`
 	Summary   *Summary         `json:"summary"`
 	Timestamp time.Time        `json:"timestamp"`
+	// Error is set when a late phase failed and the run was delivered from
+	// what it had gathered; empty for a complete run.
+	Error string `json:"error,omitempty"`
+	// Model and Provider name what wrote the report: the configured model and
+	// the endpoint's host. With a router alias the provider picks the model
+	// per request, and without this two runs could not be compared; ServedBy
+	// is what it picked.
+	Model    string   `json:"model,omitempty"`
+	Provider string   `json:"provider,omitempty"`
+	ServedBy []string `json:"served_by,omitempty"`
 }
 
 type runFunc func(ctx context.Context, prompt string) (string, error)
@@ -187,6 +203,9 @@ func New(cfg Config) (Assistant, error) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
+	impl := &impl{model: cfg.OpenAIModel, baseURL: cfg.OpenAIBaseURL,
+		timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
+
 	// The deadline is applied per call as a context timeout (see impl.call),
 	// not as http.Client.Timeout: that one also caps reading the response
 	// body, so a report the model was still streaming died mid-write with
@@ -201,6 +220,7 @@ func New(cfg Config) (Assistant, error) {
 		// unreachable. Retry policy lives in impl.call, which knows the
 		// difference between a server that never answered and one that did.
 		option.WithMaxRetries(0),
+		option.WithMiddleware(impl.sniffServedModel),
 	)
 
 	newAgent := func(name, instructions string) *agent.Agent {
@@ -210,9 +230,6 @@ func New(cfg Config) (Assistant, error) {
 			Config:       agent.Config{Name: name},
 		})
 	}
-
-	impl := &impl{model: cfg.OpenAIModel, baseURL: cfg.OpenAIBaseURL,
-		timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
 
 	// newRunJSON constrains the model to emit a JSON object
 	// (response_format=json_object). Search/analysis/fact-check/planner all
@@ -230,9 +247,9 @@ func New(cfg Config) (Assistant, error) {
 	// they finished or the deadline killed them. Streaming lets them report
 	// how much of the answer has arrived. Search is left unstreamed: it runs in
 	// parallel across sub-agents, where interleaved progress is noise.
-	newRunStreaming := func(a *agent.Agent, label string, opts ...agent.Option) runFunc {
+	newRunStreaming := func(a *agent.Agent, label string, unit progressUnit, opts ...agent.Option) runFunc {
 		return func(ctx context.Context, prompt string) (string, error) {
-			return impl.callStreaming(ctx, a, prompt, impl.streamProgress(label), opts...)
+			return impl.callStreaming(ctx, a, prompt, impl.streamProgress(label, unit), opts...)
 		}
 	}
 	jsonFormat := agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"})
@@ -241,9 +258,11 @@ func New(cfg Config) (Assistant, error) {
 		cfg.PlanningInstructions = defaultPlanningInstructions
 	}
 	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions))
-	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions), "analyzing", jsonFormat)
-	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions), "fact-checking", jsonFormat)
-	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions), "writing the report")
+	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions), "analyzing",
+		entriesUnit("section so far", "sections so far", "answer", "name", "gaps", "follow_up", "follow_up_queries"), jsonFormat)
+	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions), "fact-checking",
+		entriesUnit("claim checked", "claims checked", "claim"), jsonFormat)
+	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions), "writing the report", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
 	// it, so the wait is dead air unless the run can say how much of the plan
 	// has arrived.
@@ -261,16 +280,25 @@ func New(cfg Config) (Assistant, error) {
 		}, agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"}))
 	}
 
-	if cfg.SearXNGURL != "" && cfg.FirecrawlURL != "" {
+	// SearXNG alone is real web search: without a scraper every source keeps
+	// its snippet and is labelled snippet-only. Requiring Firecrawl too sent
+	// every run that lacked it to the model for invented findings.
+	if cfg.SearXNGURL != "" {
 		impl.searchTools = tools.NewSearchTools(cfg.SearXNGURL, cfg.FirecrawlURL, timeout)
-		impl.searchTools.Firecrawl.APIKey = cfg.FirecrawlAPIKey
+		if impl.searchTools.Firecrawl != nil {
+			impl.searchTools.Firecrawl.APIKey = cfg.FirecrawlAPIKey
+		}
 	}
 	return impl, nil
 }
 
 type impl struct {
-	logf  func(string)
-	model string
+	logf func(string)
+	// statusf receives streamed-phase progress, which is status rather than
+	// history: the live UI shows it in one row replaced in place. Unset, it
+	// falls back to logf.
+	statusf func(string)
+	model   string
 	// baseURL is kept so a transport failure can name the endpoint that was
 	// actually tried, which is the one thing the reader has to check.
 	baseURL string
@@ -285,6 +313,10 @@ type impl struct {
 	summarizer  runFunc
 	plan        runFunc
 	searchTools *tools.SearchTools // non-nil when real search+scrape is available
+	// served is every model the provider reported serving, which differs
+	// from model when model is a router alias.
+	servedMu sync.Mutex
+	served   map[string]bool
 }
 
 // callStreaming is call with the response streamed and each partial reported
@@ -302,7 +334,10 @@ func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string
 			StreamOptions: openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)},
 		}),
 	}, opts...)
-	out, err := a.callWith(ctx, ag, prompt, progress, streamOpts...)
+	report, stop := tickProgress(progress, progressTick)
+	report("") // the wait starts now, before the first byte arrives
+	out, err := a.callWith(ctx, ag, prompt, report, streamOpts...)
+	stop()
 	// Not every OpenAI-compatible server honours stream:true — proxies and
 	// older local servers answer with a whole JSON body, the stream yields
 	// nothing, and the phase would hand back an empty answer with no error at
@@ -337,7 +372,7 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 			// Wait before trying again, and stay interruptible while waiting:
 			// a cancelled run should not sit out a backoff it will not use.
 			select {
-			case <-time.After(time.Duration(attempt) * retryBackoff):
+			case <-time.After(retryWait(err, attempt)):
 			case <-ctx.Done():
 				return "", fmt.Errorf("agent %s call failed: %w", ag.Name(), err)
 			}
@@ -358,6 +393,12 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		if unreachable(err) {
 			return "", providerUnreachable(a.baseURL, err)
 		}
+		// A daily cap will not clear on a retry, only at the next UTC day;
+		// retrying it spent the whole doubling budget on a certain failure.
+		if strings.Contains(err.Error(), dailyLimitMarker) {
+			return "", fmt.Errorf("the provider's daily request limit for %s is reached; it resets at 00:00 UTC"+
+				" — add credits or set OPENAI_MODEL to a paid model: %w", a.model, err)
+		}
 		// The caller gave up (reader cancelled, or the whole run timed out):
 		// retrying would only stall a run nobody is waiting for.
 		if attempt >= a.retries || ctx.Err() != nil {
@@ -376,6 +417,27 @@ const dialTimeout = 5 * time.Second
 // attempt. A provider that answered with 429 or 500 is asking for a moment;
 // retrying the instant the error arrives just spends the budget faster.
 const retryBackoff = 500 * time.Millisecond
+
+// dailyLimitMarker is how OpenRouter names the free-model daily cap, in the
+// body of a 429 and in the error event that replaces one mid-stream. Matching
+// provider text is fragile, but it is the only signal the two forms share.
+const dailyLimitMarker = "free-models-per-day"
+
+// maxRetryAfter bounds how long a provider's Retry-After can hold a retry.
+const maxRetryAfter = time.Minute
+
+// retryWait is the pause before retry attempt n: the growing backoff, or the
+// provider's Retry-After when it asks for longer.
+func retryWait(err error, attempt int) time.Duration {
+	wait := time.Duration(attempt) * retryBackoff
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) && apiErr.Response != nil {
+		if secs, convErr := strconv.Atoi(apiErr.Response.Header.Get("Retry-After")); convErr == nil {
+			wait = max(wait, min(time.Duration(secs)*time.Second, maxRetryAfter))
+		}
+	}
+	return wait
+}
 
 // providerHTTPClient is the HTTP client for provider calls. It bounds
 // connection setup and nothing else: Client.Timeout is deliberately left zero
@@ -431,32 +493,135 @@ func providerUnreachable(baseURL string, err error) error {
 // and later ones are spaced so a long phase does not flood the activity feed.
 const progressInterval = 5 * time.Second
 
-// streamProgress reports how much of a streamed response has arrived. Length
-// is the only honest measure available mid-stream: the content is partial
-// JSON or half a report, and neither can be summarised until it is complete.
-func (a *impl) streamProgress(label string) func(string) {
-	var last time.Time
-	var reported int
-	var announcedWait bool
-	return func(partial string) {
-		n := utf8.RuneCountInString(partial)
-		// A reasoning model streams for a minute or more before any answer
-		// text appears. Repeating "0 characters" every few seconds reads as a
-		// broken counter, so the wait is stated once and then nothing until
-		// there is something to count.
-		if n == 0 {
-			if !announcedWait {
-				announcedWait = true
-				a.log(label + ": no answer text yet")
-			}
-			return
+// progressTick is how often a silent stream is re-checked. It is finer than
+// progressInterval so the reporter's own throttle, not the tick phase,
+// decides when a line is due: at a 5s tick a 12s stall could pass unreported.
+const progressTick = time.Second
+
+// progressUnit measures a partial response in something a reader can judge.
+// Characters were the old unit: comparable across nothing, and for the JSON
+// phases mostly braces and keys.
+//
+// ponytail: words and entry counts are proxies. Real token counts arrive only
+// in the final chunk (stream_options.include_usage), so none is invented here.
+type progressUnit func(partial string) (n int, noun string)
+
+// wordsUnit counts the words of prose — the report.
+func wordsUnit(p string) (int, string) {
+	n := len(strings.Fields(p))
+	return n, pick(n, "word", "words")
+}
+
+// entriesUnit counts completed JSON entries by the keys that open them.
+func entriesUnit(one, many string, keys ...string) progressUnit {
+	return func(p string) (int, string) {
+		n := 0
+		for _, k := range keys {
+			n += strings.Count(p, `"`+k+`"`)
 		}
-		if n <= reported || (!last.IsZero() && time.Since(last) < progressInterval) {
-			return
-		}
-		last, reported = time.Now(), n
-		a.log(fmt.Sprintf("%s: %d characters so far", label, n))
+		return n, pick(n, one, many)
 	}
+}
+
+// pick is the singular or plural noun for n.
+func pick(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// streamProgress reports a streamed phase on the status channel.
+func (a *impl) streamProgress(label string, unit progressUnit) func(string) {
+	return newStreamReporter(label, unit, time.Now, a.status)
+}
+
+// newStreamReporter turns partial responses into progress lines: a ticking
+// wait for the first token, the count in the phase's unit with the delta
+// since the last line, and a stall notice once the text stops growing. The
+// stall line is the one that matters: without it a dead stream looked exactly
+// like a slow one until the call deadline gave up minutes later.
+//
+// It is safe for concurrent use; tickProgress calls it from a ticker.
+func newStreamReporter(label string, unit progressUnit, now func() time.Time, log func(string)) func(string) {
+	var (
+		mu                  sync.Mutex
+		start               = now()
+		lastLog, lastGrowth time.Time
+		logged, texted      bool
+		size, shown         int
+	)
+	return func(partial string) {
+		mu.Lock()
+		defer mu.Unlock()
+		t := now()
+		due := !logged || t.Sub(lastLog) >= progressInterval
+		say := func(msg string) {
+			log(label + " — " + msg)
+			lastLog, logged = t, true
+		}
+		switch {
+		case strings.TrimSpace(partial) == "":
+			if due {
+				say(fmt.Sprintf("waiting for the first token (%ds)", int(t.Sub(start).Seconds())))
+			}
+		case len(partial) > size:
+			size, lastGrowth = len(partial), t
+			n, noun := unit(partial)
+			if texted && !due {
+				return
+			}
+			delta := ""
+			if texted && n > shown {
+				delta = fmt.Sprintf(" (+%d in %ds)", n-shown, int(t.Sub(lastLog).Seconds()))
+			}
+			texted, shown = true, n
+			say(fmt.Sprintf("%d %s%s · %s", n, noun, delta, clockTime(t.Sub(start))))
+		case due && t.Sub(lastGrowth) >= 2*progressInterval:
+			say(fmt.Sprintf("no new text for %ds · %s", int(t.Sub(lastGrowth).Seconds()), clockTime(t.Sub(start))))
+		}
+	}
+}
+
+// clockTime renders elapsed time as m:ss.
+func clockTime(d time.Duration) string {
+	s := int(d.Seconds())
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
+// tickProgress re-reports the last partial every interval until stop. A model
+// that sends nothing produces no stream updates at all, so without a ticker
+// the wait line froze and the stall notice could never fire. No call to
+// progress happens after stop returns.
+func tickProgress(progress func(string), every time.Duration) (report func(string), stop func()) {
+	var mu sync.Mutex
+	last, done := "", make(chan struct{})
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				mu.Lock()
+				select {
+				case <-done:
+				default:
+					progress(last)
+				}
+				mu.Unlock()
+			}
+		}
+	}()
+	var once sync.Once
+	report = func(p string) {
+		mu.Lock()
+		defer mu.Unlock()
+		last = p
+		progress(p)
+	}
+	return report, func() { once.Do(func() { mu.Lock(); close(done); mu.Unlock() }) }
 }
 
 // collectResponse drains a response stream into a Response, reporting the text
@@ -491,6 +656,75 @@ func (a *impl) addUsage(resp *agent.Response) {
 	a.tokens.Add(n)
 }
 
+// ModelInfo names the configured model and the provider's host. The host is
+// taken alone so credentials in the URL never reach an artifact. The models
+// a router actually served are ServedModels.
+func (a *impl) ModelInfo() (model, provider string) {
+	if u, err := url.Parse(a.baseURL); err == nil {
+		provider = u.Hostname()
+	}
+	return a.model, provider
+}
+
+// servedModelRE matches the top-level "model" field of a completion or of a
+// stream chunk. Model output inside the content is JSON-escaped (\"model\"),
+// so it cannot match.
+var servedModelRE = regexp.MustCompile(`"model"\s*:\s*"([^"]+)"`)
+
+// maxSniff bounds how much of a response is searched for its model field,
+// which providers put before the content.
+const maxSniff = 8 << 10
+
+// sniffServedModel is HTTP middleware that records the model a successful
+// response names. The agent framework drops that field, and with a router
+// alias it is the only record of which model wrote the run.
+func (a *impl) sniffServedModel(req *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+	resp, err := next(req)
+	if err == nil && resp != nil && resp.StatusCode == http.StatusOK && resp.Body != nil {
+		resp.Body = &modelSniffer{ReadCloser: resp.Body, record: a.addServed}
+	}
+	return resp, err
+}
+
+func (a *impl) addServed(model string) {
+	a.servedMu.Lock()
+	defer a.servedMu.Unlock()
+	if a.served == nil {
+		a.served = map[string]bool{}
+	}
+	a.served[model] = true
+}
+
+// ServedModels lists, sorted, every model the provider reported serving.
+func (a *impl) ServedModels() []string {
+	a.servedMu.Lock()
+	defer a.servedMu.Unlock()
+	return slices.Sorted(maps.Keys(a.served))
+}
+
+// modelSniffer passes a body through, recording the first model field in its
+// opening bytes.
+type modelSniffer struct {
+	io.ReadCloser
+	head   []byte
+	done   bool
+	record func(string)
+}
+
+func (s *modelSniffer) Read(p []byte) (int, error) {
+	n, err := s.ReadCloser.Read(p)
+	if !s.done && n > 0 {
+		s.head = append(s.head, p[:n]...)
+		if m := servedModelRE.FindSubmatch(s.head); m != nil {
+			s.record(string(m[1]))
+			s.done, s.head = true, nil
+		} else if len(s.head) > maxSniff {
+			s.done, s.head = true, nil
+		}
+	}
+	return n, err
+}
+
 // TokensUsed reports the running provider-reported token total.
 func (a *impl) TokensUsed() int { return int(a.tokens.Load()) }
 
@@ -515,29 +749,44 @@ func (a *impl) log(msg string) {
 	}
 }
 
+// SetStatus wires the channel for transient progress. It is not part of
+// Assistant: a caller that has no status row simply never sets it, and the
+// lines reach the progress logger instead.
+func (a *impl) SetStatus(f func(string)) { a.statusf = f }
+
+func (a *impl) status(msg string) {
+	if a.statusf != nil {
+		a.statusf(msg)
+		return
+	}
+	a.log(msg)
+}
+
 // ResearchDetail performs a web search and enriches results with scrape
-// signals when search tools are configured; otherwise it falls back to the LLM
-// search agent, whose findings are marked unverified because no URL in them
-// was ever fetched.
+// signals when search tools are configured; otherwise it uses the LLM search
+// agent, whose findings are marked unverified because no URL in them was ever
+// fetched.
+//
+// A configured search that fails is an error, not a cue to ask the model
+// instead. The fallback turned every rate limit and outage into invented
+// findings that counted as sources, and with public instances a refusal is
+// routine: "it ran and produced a report" has to mean the same thing whether
+// or not the search answered.
 func (a *impl) ResearchDetail(ctx context.Context, query string) (*ResearchDetail, error) {
 	if a.searchTools != nil {
 		res, err := a.searchTools.Search(ctx, query)
 		if err != nil {
-			// Real search services are configured but unavailable (e.g. a
-			// SearXNG/Firecrawl host that is down): say so, then fall back to
-			// the LLM search agent rather than returning zero findings.
-			a.log(fmt.Sprintf("  searxng   unavailable: %v", err))
-		} else {
-			det := &ResearchDetail{
-				Findings: make([]Finding, len(res.Findings)),
-				Signals:  res.Signals,
-				Skipped:  res.Skipped,
-			}
-			for i, f := range res.Findings {
-				det.Findings[i] = Finding{Query: query, Title: f.Title, Content: f.Content, URL: f.URL, Confidence: f.Confidence}
-			}
-			return det, nil
+			return nil, err
 		}
+		det := &ResearchDetail{
+			Findings: make([]Finding, len(res.Findings)),
+			Signals:  res.Signals,
+			Skipped:  res.Skipped,
+		}
+		for i, f := range res.Findings {
+			det.Findings[i] = Finding{Query: query, Title: f.Title, Content: f.Content, URL: f.URL, Confidence: f.Confidence}
+		}
+		return det, nil
 	}
 	a.log("  llm agent searching")
 	out, err := a.search(ctx, query)
@@ -603,8 +852,15 @@ func (l *local) FactCheck(ctx context.Context, claims string) (*FactCheckResult,
 	}, nil
 }
 
+// Summarize offline writes no report. Returning the prompt made the composed
+// summarizer input — question, findings, instructions — read as a real report
+// in every artifact.
 func (l *local) Summarize(ctx context.Context, prompt string) (*Summary, error) {
-	return &Summary{Report: prompt, Executive: "offline mode", Confidence: "low"}, nil
+	return &Summary{
+		Report:     "offline mode: no report was written; the pipeline ran against a stub assistant that makes no network calls.",
+		Executive:  "offline mode",
+		Confidence: "low",
+	}, nil
 }
 
 func (l *local) Plan(ctx context.Context, question string, subTopics int) ([]SubTopic, error) {
@@ -858,14 +1114,22 @@ func tryUnmarshalFindings(payload, query string) []Finding {
 	return nil
 }
 
+// finalizeFindings stamps each finding with its query and drops the ones with
+// no text. A title and a URL are not evidence: accepting {"title":"T"} counted
+// a source for free and sent a blank entry to every later phase.
 func finalizeFindings(findings []Finding, query string) []Finding {
-	for i := range findings {
-		findings[i].Query = query
-		if findings[i].Confidence == "" {
-			findings[i].Confidence = "medium"
+	out := findings[:0]
+	for _, f := range findings {
+		if strings.TrimSpace(f.Content) == "" {
+			continue
 		}
+		f.Query = query
+		if f.Confidence == "" {
+			f.Confidence = "medium"
+		}
+		out = append(out, f)
 	}
-	return findings
+	return out
 }
 
 // parseAnalysis tolerates non-JSON model output by treating it as the answer.

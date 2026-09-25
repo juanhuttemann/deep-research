@@ -8,5 +8,6 @@ import "golang.org/x/sys/unix"
 // and TIOCSETAF are what darwin's tcgetattr/tcsetattr(TCSAFLUSH) issue.
 const (
 	tcGet      = unix.TIOCGETA
+	tcSet      = unix.TIOCSETA
 	tcSetFlush = unix.TIOCSETAF
 )

@@ -82,12 +82,14 @@ type Renderer struct {
 	width int
 	rows  int
 
-	mode     string // brief | tree | report
-	plan     *Plan
-	nodes    map[string]*Node
-	order    []string
-	phase    string
-	detail   string
+	mode   string // brief | tree | report
+	plan   *Plan
+	nodes  map[string]*Node
+	order  []string
+	phase  string
+	detail string
+	// status is the latest transient progress line of the current phase.
+	status   string
 	question string
 
 	tokens  int
@@ -99,6 +101,8 @@ type Renderer struct {
 	// has to draw it.
 	promptLabel string
 	promptText  string
+	// briefNote is a one-line notice shown above the brief's key hints.
+	briefNote string
 
 	startTime time.Time
 	detached  bool
@@ -214,7 +218,9 @@ func (r *Renderer) Emit(e Event) {
 		r.logEvent(e)
 		return
 	}
-	if r.mode == "tree" {
+	// A detached frame paints nothing, so a ticker restarted here would wake
+	// 8×/s for the rest of the run to do nothing.
+	if r.mode == "tree" && !r.detached {
 		r.startTickerLocked()
 	}
 	r.paintLocked(e.Type == Detach)
@@ -240,7 +246,7 @@ func (r *Renderer) promptRow() string {
 func (r *Renderer) apply(e Event) {
 	switch e.Type {
 	case Phase:
-		r.phase, r.detail = e.Phase, e.Detail
+		r.phase, r.detail, r.status = e.Phase, e.Detail, ""
 		if r.mode == "brief" || r.mode == "" {
 			r.mode = "tree"
 		}
@@ -255,6 +261,12 @@ func (r *Renderer) apply(e Event) {
 	case Detach:
 		r.detached = true
 	case Info:
+		// Periodic progress is status, not history: pushed into the tail it
+		// evicted every read/verify line within a few minutes.
+		if e.Transient {
+			r.status = e.Detail
+			return
+		}
 		// Progress, not failure: the same line without the error glyph.
 		if e.SubID != "" {
 			r.node(e.SubID, e.SubName).Line = e.Detail
@@ -572,10 +584,19 @@ func (r *Renderer) briefFoot() []string {
 			"  " + r.T.gray("[enter] confirm   [esc] cancel"),
 		}
 	}
-	return []string{
-		r.rule(),
-		"  " + r.T.gray("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"),
+	out := []string{r.rule()}
+	if r.briefNote != "" {
+		out = append(out, "  "+r.T.yellow(r.briefNote))
 	}
+	return append(out,
+		"  "+r.T.gray("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"))
+}
+
+// SetBriefNote shows note above the brief's key hints; empty clears it.
+func (r *Renderer) SetBriefNote(note string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.briefNote = note
 }
 
 // wrapNote lays a sub-topic note out in the column beside its name. Below
@@ -692,8 +713,12 @@ func (r *Renderer) agentLines() []string {
 	// analyze / fact-check / summarize are single model calls that can run for
 	// a minute. This row is what says the run is still working, and on what.
 	if r.detail != "" && !strings.EqualFold(r.phase, "Research") && !r.done {
+		text := r.detail
+		if r.status != "" {
+			text = r.status
+		}
 		out = append(out, fmt.Sprintf("  %s %s",
-			r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)]), r.detail))
+			r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)]), text))
 	}
 	return out
 }

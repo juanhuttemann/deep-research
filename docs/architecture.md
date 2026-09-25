@@ -27,12 +27,13 @@ comes back. It never decides what to ask or in what order.
 cmd/deep-research   entrypoint; version is stamped in at link time
 internal/
   agent     one LLM phase per method (ResearchDetail / Analyze / FactCheck /
-            Summarize / Plan); real search via internal/tools when
-            SearXNG + Firecrawl are configured
-  cli       cobra commands (run / list / init)
+            Summarize / Plan); real search via internal/tools when SearXNG
+            is configured; Diagnose for `doctor`
+  cli       cobra commands (run / list / init / doctor)
   config    config resolution (env > config dir > embedded defaults) + .env
   store     append-only JSONL run history
-  tools     SearXNG search + Firecrawl scrape HTTP clients
+  tools     SearXNG search (JSON or HTML, one or many instances, searx.space
+            discovery) + Firecrawl scrape HTTP clients
   ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export
 config/     embedded default config.yaml and agent.yaml
 ```

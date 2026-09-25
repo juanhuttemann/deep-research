@@ -60,10 +60,16 @@ func dispWidth(s string) int {
 // of the frame. A truncated string always ends in an ellipsis: one column is
 // reserved for it, so a cut that happens to land exactly on the boundary is
 // still visibly a cut rather than a word that looks complete but is not.
+//
+// Tabs are expanded first: a terminal moves a tab to the next stop, up to
+// eight columns, while it measures zero here, so a row holding one escaped the
+// clamp, wrapped and scrolled the frame. Detail text comes straight from
+// model and provider errors, where a tab is ordinary.
 func clip(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
+	s = strings.ReplaceAll(s, "\t", "    ")
 	if dispWidth(s) <= w {
 		return s
 	}

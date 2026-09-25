@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -57,35 +60,32 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// Same as pressing "b" during a run: the display is released at the first
 	// event, the run keeps the terminal until it writes its report.
 	runCmd.Flags().Bool("detach", false, "release the live display as soon as the run starts")
+	// The stub pipeline used to be reachable only through config or as the
+	// silent fallback for a missing key; as a flag it is an explicit demo mode.
+	runCmd.Flags().Bool("offline", false, "run the pipeline against a stub assistant with no network calls")
 	// Both write to stdout. Together they interleaved a rendered Markdown
 	// report with the event stream, leaving the machine-readable output
 	// unparseable, so the combination is rejected instead of guessed at.
 	runCmd.MarkFlagsMutuallyExclusive("silent", "jsonl")
 
+	initCmd := &cobra.Command{
+		Use:   "init",
+		Short: "write default config files",
+		RunE:  runInit,
+	}
+	initCmd.Flags().Bool("docker", false, "also write a docker-compose.yml for a local SearXNG")
+
 	root.AddCommand(runCmd,
+		initCmd,
 		&cobra.Command{
-			Use:   "init",
-			Short: "write default config files",
+			Use:   "doctor",
+			Short: "check the model endpoint, search and scraper a run depends on",
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				dir, created, err := config.Init()
+				d, err := load()
 				if err != nil {
 					return err
 				}
-				out := cmd.OutOrStdout()
-				if len(created) == 0 {
-					fmt.Fprintf(out, "config dir %q already configured; nothing to write\n", dir)
-					return nil
-				}
-				fmt.Fprintf(out, "wrote %d file(s) to %q:\n", len(created), dir)
-				for _, f := range created {
-					fmt.Fprintf(out, "  - %s\n", f)
-				}
-				hasEnv := slices.Contains(created, ".env")
-				if hasEnv {
-					fmt.Fprintln(out, "\nEdit .env to add your API key, then run:")
-					fmt.Fprintln(out, "  ./deep-research run \"your question\"")
-				}
-				return nil
+				return runDoctor(cmd, d)
 			},
 		},
 		&cobra.Command{
@@ -103,18 +103,67 @@ func New(load func() (Deps, error)) *cobra.Command {
 	return root
 }
 
-// pickAssistant returns the online assistant, or the offline one with a
-// warning when it cannot be built.
-func pickAssistant(cmd *cobra.Command, d Deps) agent.Assistant {
-	if d.Config.Offline {
-		return d.Raw
+// runInit writes the config files and, with --docker, a local SearXNG setup.
+func runInit(cmd *cobra.Command, _ []string) error {
+	dir, created, err := config.Init()
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if len(created) == 0 {
+		fmt.Fprintf(out, "config dir %q already configured; nothing to write\n", dir)
+	} else {
+		fmt.Fprintf(out, "wrote %d file(s) to %q:\n", len(created), dir)
+		for _, f := range created {
+			fmt.Fprintf(out, "  - %s\n", f)
+		}
+		if slices.Contains(created, ".env") {
+			fmt.Fprintln(out, "\nGet a free API key (no card): "+keyURL)
+			fmt.Fprintln(out, "Add it to .env as OPENAI_API_KEY=..., then run:")
+			fmt.Fprintln(out, "  ./deep-research run \"your question\"")
+		}
+	}
+	if docker, _ := cmd.Flags().GetBool("docker"); docker {
+		return initDocker(out)
+	}
+	return nil
+}
+
+// initDocker writes the local SearXNG setup and says how to use it.
+func initDocker(out io.Writer) error {
+	created, err := config.InitDocker(".")
+	if err != nil {
+		return err
+	}
+	for _, f := range created {
+		fmt.Fprintf(out, "  - %s\n", f)
+	}
+	fmt.Fprintln(out, "\nLocal search (docker-compose.yml, searxng/settings.yml):")
+	fmt.Fprintln(out, "  docker compose up -d")
+	fmt.Fprintln(out, "  echo 'SEARXNG_URL=http://localhost:8888' >> .env")
+	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: docs/services.md")
+	return nil
+}
+
+// keyURL is where a first-time user gets a free OpenRouter key.
+const keyURL = "https://openrouter.ai/keys"
+
+// pickAssistant returns the online assistant, or the offline one when it was
+// asked for. An online assistant that cannot be built is an error: falling
+// back to offline printed a warning nobody reads and then a RESEARCH COMPLETE
+// card, three artifacts and a history record for a run that researched
+// nothing.
+func pickAssistant(cmd *cobra.Command, d Deps) (agent.Assistant, error) {
+	if offline, _ := cmd.Flags().GetBool("offline"); offline || d.Config.Offline {
+		return d.Raw, nil
 	}
 	a, err := d.Assistant()
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: online assistant unavailable (%v); falling back to offline mode\n", err)
-		return d.Raw
+		return nil, fmt.Errorf("%w\n  Get a free key (no card): %s\n"+
+			"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research run \"...\"\n"+
+			"  Or try the pipeline with no network at all: deep-research run --offline \"...\"", err, keyURL)
 	}
-	return a
+	return a, nil
 }
 
 // sourceBudget is the per-sub-agent source budget: the config value unless a
@@ -138,20 +187,28 @@ func runDeadline(d Deps) time.Duration {
 }
 
 func runResearch(cmd *cobra.Command, d Deps, question string) error {
-	assistant := pickAssistant(cmd, d)
+	// An empty question plans nothing, and the run would still spend its
+	// model calls writing a report about nothing.
+	if strings.TrimSpace(question) == "" {
+		return errors.New("the question is empty")
+	}
+	// A misspelt tier used to fall through to standard without a word, so
+	// "--mode deeep" ran a study the reader never asked for. Checked before
+	// the assistant, so a typo is reported before a missing key.
+	mode, _ := cmd.Flags().GetString("mode")
+	if _, err := ui.ParseDepthMode(mode); err != nil {
+		return err
+	}
+	assistant, err := pickAssistant(cmd, d)
+	if err != nil {
+		return err
+	}
 
 	silent, _ := cmd.Flags().GetBool("silent")
 	jsonl, _ := cmd.Flags().GetBool("jsonl")
 	noColor, _ := cmd.Flags().GetBool("no-color")
 	detach, _ := cmd.Flags().GetBool("detach")
 	outDir, _ := cmd.Flags().GetString("reports")
-
-	// A misspelt tier used to fall through to standard without a word, so
-	// "--mode deeep" ran a study the reader never asked for.
-	mode, _ := cmd.Flags().GetString("mode")
-	if _, err := ui.ParseDepthMode(mode); err != nil {
-		return err
-	}
 
 	// The agent's own progress lines are the fallback log for a plain pipe.
 	// They are suppressed everywhere else: they would tear the live UI's
@@ -199,7 +256,15 @@ func runResearch(cmd *cobra.Command, d Deps, question string) error {
 	if err := saveRun(d, result); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not save result: %v\n", err)
 	}
-	return printResult(cmd, result, silent || jsonl)
+	if err := printResult(cmd, result, silent || jsonl); err != nil {
+		return err
+	}
+	// The partial run is saved and printed, but it did not finish: scripts
+	// deciding on the exit status must not read it as a complete report.
+	if result.Error != "" {
+		return fmt.Errorf("research incomplete (the partial report was saved): %s", result.Error)
+	}
+	return nil
 }
 
 // drawsUI reports whether ui.Run will paint the live terminal UI, which it
@@ -251,6 +316,53 @@ func printResult(cmd *cobra.Command, result *agent.ResearchResult, printed bool)
 	noColor, _ := cmd.Flags().GetBool("no-color")
 	fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", ui.FormatMarkdown(cmd.OutOrStdout(), result.Summary.Report, noColor))
 	return nil
+}
+
+// runDoctor prints one line per dependency and fails when any is broken.
+func runDoctor(cmd *cobra.Command, d Deps) error {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "  config   %s\n", configSource())
+	problems := 0
+	for _, c := range agent.Diagnose(cmd.Context(), d.Config.Config) {
+		mark := "✓"
+		if !c.OK {
+			mark, problems = "✗", problems+1
+		}
+		fmt.Fprintf(out, "%s %-8s %s\n", mark, c.Name, c.Detail)
+	}
+	fmt.Fprintf(out, "  budget   %s\n", callBudget(d.Config.SearXNGURL != ""))
+	if problems > 0 {
+		return fmt.Errorf("doctor found %d problem(s)", problems)
+	}
+	return nil
+}
+
+// configSource names the config.yaml a run reads, or the embedded defaults.
+func configSource() string {
+	for _, dir := range config.Dirs() {
+		if p := filepath.Join(dir, "config.yaml"); fileExists(p) {
+			return p
+		}
+	}
+	return "embedded defaults (no config.yaml found)"
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// callBudget is how many model requests one run spends per --mode tier, which
+// is what a free model's per-day cap is counted in. With web search a run is
+// plan, analyze, fact-check and summarize; LLM search adds up to two calls
+// per sub-topic.
+func callBudget(webSearch bool) string {
+	parts := make([]string, len(ui.DepthModes))
+	for i, m := range ui.DepthModes {
+		n := 4
+		if !webSearch {
+			n += 2 * m.SubTopics
+		}
+		parts[i] = fmt.Sprintf("%s %d", m.Key, n)
+	}
+	return "model requests per run: " + strings.Join(parts, ", ")
 }
 
 func runList(cmd *cobra.Command, d Deps) error {

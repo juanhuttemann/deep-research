@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -120,5 +121,29 @@ func TestSpinPaintsAFrameAndErasesOnStop(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "\r"+eraseLine) {
 		t.Errorf("spinner left its row on screen: %q", out)
+	}
+}
+
+// Keys typed while the plan was still being made were flushed silently when
+// raw mode began, so an Enter pressed during planning vanished and the brief
+// sat waiting with nothing to say why. They are still not acted on — no one
+// can confirm a plan before seeing it — but they are counted so the brief can
+// say so.
+func TestKeysTypedBeforeRawModeAreCountedNotApplied(t *testing.T) {
+	master, slave := openPTY(t)
+	if _, err := master.Write([]byte("q\r")); err != nil {
+		t.Fatal(err)
+	}
+	in, err := newTTYInput(slave)
+	if err != nil {
+		t.Skipf("raw mode: %v", err)
+	}
+	defer in.Close()
+	tr := in.(*ttyReader)
+	if tr.ignored != 2 {
+		t.Errorf("ignored = %d, want the 2 keys typed before raw mode", tr.ignored)
+	}
+	if b, err := tr.NextWithin(50 * time.Millisecond); err == nil {
+		t.Errorf("a key typed before the brief was delivered: %q", b)
 	}
 }

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 )
@@ -101,6 +102,11 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	topics, err := pl.Assistant.Plan(ctx, question, pl.Depth.SubTopics)
 	if err != nil {
 		return nil, err
+	}
+	// Nothing to research: running on would still spend three model calls on
+	// an empty findings list and write a report about nothing.
+	if len(topics) == 0 {
+		return nil, errors.New("the plan has no sub-topics to research")
 	}
 	// The tier's breadth is a budget, not a request: the source allowance below
 	// is sized for this many sub-agents, so an assistant that returns more

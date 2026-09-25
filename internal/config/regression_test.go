@@ -6,7 +6,9 @@ package config
 // read as unfinished work.
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +110,60 @@ func TestDocumentedEnvOverridesApply(t *testing.T) {
 func TestEnvPrefixMatchesTheDocumentedName(t *testing.T) {
 	if EnvPrefix != "DEEP_RESEARCH" {
 		t.Errorf("EnvPrefix = %q, but the docs promise DEEP_RESEARCH_<KEY>", EnvPrefix)
+	}
+}
+
+// The shipped default pointed a fresh checkout at a paid model. The first run
+// should cost nothing, so the default is OpenRouter's free router.
+func TestDefaultModelIsFree(t *testing.T) {
+	if got := loadIn(t, "offline: false\n").OpenAIModel; got != "openrouter/free" {
+		t.Errorf("default model = %q, want openrouter/free", got)
+	}
+	if !strings.Contains(EnvTemplate, "OPENAI_MODEL=openrouter/free") {
+		t.Errorf(".env template does not name the free model:\n%s", EnvTemplate)
+	}
+}
+
+// A fresh checkout had no search at all: the model invented its sources. The
+// default is now public SearXNG instances; "off" keeps the old LLM search.
+func TestSearchDefaultsToPublicInstances(t *testing.T) {
+	if got := loadIn(t, "offline: false\n").SearXNGURL; got != "auto" {
+		t.Errorf("default searxng_url = %q, want auto", got)
+	}
+	for _, off := range []string{"off", "OFF", "none"} {
+		if got := loadIn(t, "searxng_url: "+off+"\n").SearXNGURL; got != "" {
+			t.Errorf("searxng_url: %s resolved to %q, want LLM search", off, got)
+		}
+	}
+	if got := loadIn(t, "searxng_url: http://localhost:8888\n").SearXNGURL; got != "http://localhost:8888" {
+		t.Errorf("a pinned instance became %q", got)
+	}
+}
+
+// The Docker setup existed only as prose to copy. init --docker writes it:
+// a compose file and a SearXNG settings file with the JSON API enabled and a
+// fresh secret, never clobbering files already there.
+func TestInitDockerWritesALocalSearXNG(t *testing.T) {
+	dir := t.TempDir()
+	created, err := InitDocker(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("created %v, want the compose file and the settings file", created)
+	}
+	compose, _ := os.ReadFile(filepath.Join(dir, "docker-compose.yml"))
+	settings, _ := os.ReadFile(filepath.Join(dir, "searxng", "settings.yml"))
+	if !strings.Contains(string(compose), "127.0.0.1:8888:8080") {
+		t.Errorf("compose does not publish SearXNG on localhost only:\n%s", compose)
+	}
+	if !strings.Contains(string(settings), "- json") || strings.Contains(string(settings), "CHANGE") {
+		t.Errorf("settings lack the JSON format or a generated secret:\n%s", settings)
+	}
+	if again, err := InitDocker(dir); err != nil || len(again) != 0 {
+		t.Errorf("second init --docker: created=%v err=%v, want nothing overwritten", again, err)
+	}
+	if s2, _ := os.ReadFile(filepath.Join(dir, "searxng", "settings.yml")); string(s2) != string(settings) {
+		t.Error("settings changed on a second run")
 	}
 }

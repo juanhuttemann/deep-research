@@ -7,7 +7,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -196,5 +198,105 @@ func TestDetachFlagIsAccepted(t *testing.T) {
 	cmd.SetArgs([]string{"run", "q", "--detach", "--reports", dir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("--detach: %v", err)
+	}
+}
+
+// `run ""` planned nothing and still spent three model calls, wrote three
+// artifacts and a history record about nothing.
+func TestEmptyQuestionIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	deps := Deps{
+		Assistant: func() (agent.Assistant, error) {
+			t.Error("assistant built for an empty question")
+			return agent.Local(), nil
+		},
+		Raw:    agent.Local(),
+		Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
+	}
+	for _, q := range []string{"", "   \t"} {
+		cmd := New(func() (Deps, error) { return deps, nil })
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs([]string{"run", q, "--silent", "--reports", dir})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "empty") {
+			t.Errorf("run %q: err = %v, want an empty-question error", q, err)
+		}
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("a rejected run wrote files: %v", entries)
+	}
+}
+
+// failingSummary is the offline assistant with a summarizer that errors.
+type failingSummary struct{ agent.Assistant }
+
+func (failingSummary) Summarize(context.Context, string) (*agent.Summary, error) {
+	return nil, errors.New("provider 500")
+}
+
+// A run whose report call failed is saved and exported from what it gathered,
+// but the exit status still says it did not finish.
+func TestIncompleteRunIsSavedAndFails(t *testing.T) {
+	dir := t.TempDir()
+	history := filepath.Join(dir, "r.jsonl")
+	deps := Deps{
+		Raw: failingSummary{agent.Local()},
+		Config: config.Config{Offline: true, DataFile: history,
+			Config: agent.Config{ModelCallTimeout: time.Second}},
+	}
+	cmd := New(func() (Deps, error) { return deps, nil })
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"run", "q", "--silent", "--reports", dir})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "provider 500") {
+		t.Errorf("err = %v, want the incomplete-run error", err)
+	}
+	if _, statErr := os.Stat(history); statErr != nil {
+		t.Errorf("incomplete run was not saved to history: %v", statErr)
+	}
+	if mds, _ := filepath.Glob(filepath.Join(dir, "*.md")); len(mds) != 1 {
+		t.Errorf("incomplete run wrote %d .md artifacts, want 1", len(mds))
+	}
+}
+
+// doctor names what is wrong and exits non-zero, so a run that produced
+// nothing useful can be traced to its cause.
+func TestDoctorReportsProblemsAndBudget(t *testing.T) {
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", t.TempDir())
+	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIModel: "m", ModelCallTimeout: time.Second}}}
+	cmd := New(func() (Deps, error) { return deps, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"doctor"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "1 problem") {
+		t.Errorf("err = %v, want one problem (the missing key)", err)
+	}
+	for _, want := range []string{"config", "embedded defaults", "✗ model", "openrouter.ai/keys", "✓ search", "budget", "quick 10", "deep 16"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("doctor output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestInitDockerSaysWhatToRun(t *testing.T) {
+	cwd := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", t.TempDir())
+	t.Chdir(cwd)
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"init", "--docker"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"docker-compose.yml", "docker compose up -d", "SEARXNG_URL=http://localhost:8888", "docs/services.md"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("init --docker output lacks %q:\n%s", want, out.String())
+		}
 	}
 }

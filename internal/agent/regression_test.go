@@ -412,9 +412,10 @@ func TestPostResearchPhasesStreamProgress(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			unit := map[string]string{"analyze": "section", "fact-check": "checked", "summarize": "word"}[phase]
 			var sawProgress bool
 			for _, msg := range progress {
-				if strings.Contains(msg, "so far") {
+				if strings.Contains(msg, unit) {
 					sawProgress = true
 				}
 			}
@@ -463,34 +464,79 @@ func TestStreamedCallFallsBackWhenServerDoesNotStream(t *testing.T) {
 	}
 }
 
-// A reasoning model streams for a long time before any answer text appears.
-// The wait is worth saying once; saying "0 characters so far" every few
-// seconds reads as a broken counter.
-func TestStreamProgressReportsTheWaitOnceThenGrowth(t *testing.T) {
+// Progress used to be "1873 characters so far": a developer unit with no
+// scale, no rate, and no way to tell a stalled stream from a slow one. It now
+// counts something a reader can judge (words, or completed JSON entries),
+// shows the delta, waits for the first token with a ticking clock, and says
+// when the stream has stopped growing.
+func TestStreamProgressSpeaksInUnitsWithDeltaAndStall(t *testing.T) {
 	var got []string
-	a := &impl{logf: func(msg string) { got = append(got, msg) }}
-	report := a.streamProgress("analyzing")
-	for range 5 {
-		report("") // the model is working, but nothing to show yet
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := t0
+	report := newStreamReporter("writing the report", wordsUnit, func() time.Time { return now }, func(m string) { got = append(got, m) })
+	step := func(d time.Duration, partial string) {
+		now = t0.Add(d)
+		report(partial)
 	}
-	report("hello")
-	report("hello")  // no growth: nothing to say
-	report("hello!") // throttled behind the previous report
+	step(0, "")
+	step(3*time.Second, "")
+	step(6*time.Second, "")
+	step(7*time.Second, "one two three")
+	step(8*time.Second, "one two three four")
+	step(12*time.Second, "one two three four five six seven eight nine ten")
+	step(17*time.Second, "one two three four five six seven eight nine ten")
+	step(22*time.Second, "one two three four five six seven eight nine ten")
+	step(23*time.Second, "one two three four five six seven eight nine ten")
 
-	waits, counts := 0, 0
-	for _, msg := range got {
-		switch {
-		case strings.Contains(msg, "no answer text yet"):
-			waits++
-		case strings.Contains(msg, "characters so far"):
-			counts++
+	want := []string{
+		"writing the report — waiting for the first token (0s)",
+		"writing the report — waiting for the first token (6s)",
+		"writing the report — 3 words · 0:07",
+		"writing the report — 10 words (+7 in 5s) · 0:12",
+		"writing the report — no new text for 10s · 0:22",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("progress lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The JSON phases count completed entries, not the braces and keys around them.
+func TestEntriesUnitCountsJSONEntries(t *testing.T) {
+	n, noun := entriesUnit("claim checked", "claims checked", "claim")(`{"verified":[{"claim":"a","verified":true},{"claim":"b"`)
+	if n != 2 || noun != "claims checked" {
+		t.Errorf("entriesUnit = %d %q, want 2 claims checked", n, noun)
+	}
+}
+
+// A model that sends nothing at all produced no callbacks, so the wait line
+// never ticked and a dead stream looked exactly like a slow one.
+func TestProgressTicksThroughSilence(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	report, stop := tickProgress(func(string) { mu.Lock(); calls++; mu.Unlock() }, 5*time.Millisecond)
+	report("")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := calls
+		mu.Unlock()
+		if n >= 3 || time.Now().After(deadline) {
+			break
 		}
+		time.Sleep(time.Millisecond)
 	}
-	if waits != 1 {
-		t.Errorf("reported the wait %d times, want once: %q", waits, got)
+	stop()
+	mu.Lock()
+	after := calls
+	mu.Unlock()
+	if after < 3 {
+		t.Fatalf("progress was called %d times through a silent stream, want ticks", after)
 	}
-	if counts != 1 {
-		t.Errorf("reported %d counts, want one for the first content: %q", counts, got)
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != after {
+		t.Errorf("progress kept ticking after stop: %d -> %d", after, calls)
 	}
 }
 
@@ -508,5 +554,196 @@ func TestHumanizeTopicKeepsNonASCIINames(t *testing.T) {
 		if got := humanizeTopic(name); got != want {
 			t.Errorf("humanizeTopic(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// A finding with no text is not evidence. The LLM search path accepted
+// {"title":"T"} as a source, counted it and sent a blank entry to analysis.
+func TestFindingsWithoutContentAreDropped(t *testing.T) {
+	got := parseSearchResults(`{"findings":[{"title":"T","url":"https://a.example"},{"title":"U","content":"  "},{"title":"V","content":"real text"}]}`, "q")
+	if len(got) != 1 || got[0].Title != "V" {
+		t.Errorf("findings = %+v, want only the one with content", got)
+	}
+}
+
+// Offline mode printed the whole summarizer prompt as its "report", which
+// read like a real report in every artifact.
+func TestOfflineReportIsAStub(t *testing.T) {
+	s, err := Local().Summarize(context.Background(), "Question: q\n\nSynthesized answer:\nstuff\n\nSources (title, URL, content)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.Report, "Synthesized answer") || !strings.Contains(s.Report, "offline") {
+		t.Errorf("offline report = %q", s.Report)
+	}
+}
+
+// Web search needed both SearXNG and Firecrawl: with SearXNG alone the run
+// silently used the model as its search engine. Snippets are real results.
+func TestSearXNGAloneEnablesWebSearch(t *testing.T) {
+	var modelCalls atomic.Int32
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { modelCalls.Add(1) }))
+	defer model.Close()
+	sx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"results":[{"title":"Go","url":"https://go.dev/","content":"The Go programming language"}]}`)
+	}))
+	defer sx.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, SearXNGURL: sx.URL, ModelCallTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	det, err := a.ResearchDetail(context.Background(), "go programming language")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(det.Signals) != 1 || det.Signals[0].Status != "degraded" || det.Signals[0].Code != "noservice" {
+		t.Errorf("signals = %+v, want one snippet-only source", det.Signals)
+	}
+	if modelCalls.Load() != 0 {
+		t.Error("the model was asked to search although SearXNG was configured")
+	}
+}
+
+// A search backend that refused (rate limit, challenge, outage) was replaced
+// by the model inventing findings, URLs and all — which then counted as
+// sources. With public instances a refusal is routine, so it is an error the
+// run reports, never a silent switch to recollection.
+func TestFailedSearchIsNotReplacedByTheModel(t *testing.T) {
+	var modelCalls atomic.Int32
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { modelCalls.Add(1) }))
+	defer model.Close()
+	sx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer sx.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, SearXNGURL: sx.URL, ModelCallTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.ResearchDetail(context.Background(), "q")
+	if err == nil {
+		t.Fatal("a refused search returned findings")
+	}
+	if got := tools.SearchStatus(err); got != "rate-limited" {
+		t.Errorf("SearchStatus = %q, want rate-limited (err: %v)", got, err)
+	}
+	if modelCalls.Load() != 0 {
+		t.Errorf("the model was asked to invent findings %d times", modelCalls.Load())
+	}
+}
+
+// A free model's daily cap does not clear until 00:00 UTC, but the retry loop
+// treated it like a blip: three attempts and 7× the call budget spent on a
+// condition that could not change. It fails at once, naming the ceiling —
+// whether the 429 arrives as a status or as an error event mid-stream.
+func TestDailyFreeModelLimitFailsFast(t *testing.T) {
+	const body = `{"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}`
+	for name, handler := range map[string]http.HandlerFunc{
+		"status": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, body)
+		},
+		"mid-stream": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: %s\n\n", body)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				handler(w, r)
+			}))
+			defer srv.Close()
+			a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "openrouter/free",
+				ModelCallTimeout: 5 * time.Second, ModelCallRetries: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = a.Summarize(context.Background(), "p")
+			if err == nil || !strings.Contains(err.Error(), "daily") || !strings.Contains(err.Error(), "00:00 UTC") {
+				t.Errorf("err = %v, want the daily-limit explanation", err)
+			}
+			if n := calls.Load(); n != 1 {
+				t.Errorf("%d requests for a limit that cannot clear today, want 1", n)
+			}
+		})
+	}
+}
+
+// A per-minute 429 says when to come back. Retrying after the fixed half
+// second instead hit the same limit again and spent the retry.
+func TestRateLimitRetryWaitsForRetryAfter(t *testing.T) {
+	var calls atomic.Int32
+	var first time.Time
+	var waited time.Duration
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			first = time.Now()
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"message":"Rate limit exceeded: free-models-per-min","code":429}}`)
+			return
+		}
+		waited = time.Since(first)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+		ModelCallTimeout: 5 * time.Second, ModelCallRetries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ResearchDetail(context.Background(), "q"); err != nil {
+		t.Fatal(err)
+	}
+	if waited < 900*time.Millisecond {
+		t.Errorf("retried after %v, want the 1s Retry-After honoured", waited)
+	}
+}
+
+// The provider host is recorded with the model; the key never is, even when
+// it was written into the URL.
+func TestModelInfoNamesHostWithoutCredentials(t *testing.T) {
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: "https://user:secret@openrouter.ai/api/v1", OpenAIModel: "openrouter/free"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, host := a.(*impl).ModelInfo()
+	if model != "openrouter/free" || host != "openrouter.ai" {
+		t.Errorf("ModelInfo = %q, %q", model, host)
+	}
+}
+
+// With a router alias the model that wrote the report is the provider's
+// choice, reported in each response's "model" field — which the agent
+// framework drops. It is read off the wire so the run can record it.
+func TestModelInfoRecordsTheServedModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"stream":true`) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"model\":\"meta/llama:free\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"report\"}}]}\n\ndata: [DONE]\n\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"1","object":"chat.completion","model":"google/gemma:free","choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "openrouter/free", ModelCallTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ResearchDetail(context.Background(), "q"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Summarize(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.(*impl).ServedModels(); strings.Join(got, ",") != "google/gemma:free,meta/llama:free" {
+		t.Errorf("served models = %q", got)
 	}
 }

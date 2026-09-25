@@ -25,10 +25,29 @@ progress meter, a rolling activity tail, and running source/token counters.
 | `--jsonl` | off | machine-readable event stream instead of the live UI |
 | `--silent`, `-s` | off | no live UI; print only the report |
 | `--detach` | off | release the live display as soon as the run starts (same as pressing `b`) |
+| `--offline` | off | run against a stub assistant with no network calls (same as `offline: true`) |
 | `--no-color` | off | disable ANSI colour (`NO_COLOR=1` does the same) |
 | `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
+
+An empty question is rejected, and so is a run with no API key (unless it is
+`--offline`); neither writes anything.
+
+If the analyze or report call fails — a provider error after its retries, or
+`run_timeout` expiring mid-report — the run still saves what it gathered:
+the history record and the `.md` / `.pdf` / `.json` artifacts, with a report
+that says it could not be written and includes the analysis when there is
+one. The command then exits non-zero, so a script does not mistake it for a
+complete report.
+
+While a model call streams, the live frame shows one status line for it,
+replaced in place: how long it has waited for the first token, then the
+count so far in a unit that fits the phase — sections for the analysis,
+claims for the fact-check, words for the report — with the change since the
+last line, and "no new text for Ns" once the stream stops growing. These
+lines are not added to the activity tail, so they cannot push the source
+lines out of it; `--jsonl` still carries every one (`"transient": true`).
 
 ### Examples
 
@@ -43,7 +62,7 @@ deep-research run "question" --mode deep
 deep-research run "question" --jsonl
 
 # Try the CLI with no API calls at all
-DEEP_RESEARCH_OFFLINE=true deep-research run "question"
+deep-research run --offline "question"
 ```
 
 ## `list`
@@ -73,8 +92,28 @@ deep-research init
 ```
 
 Writes `config.yaml` and `agent.yaml` into the config directory and a `.env`
-into the working directory. Existing files are never clobbered. See
-[configuration.md](configuration.md) for where those files are looked up.
+into the working directory, and prints where to get a free API key. Existing
+files are never clobbered.
+
+`init --docker` also writes a `docker-compose.yml` and `searxng/settings.yml`
+into the working directory: a SearXNG on `127.0.0.1:8888` with the JSON API
+enabled and a generated secret. Start it with `docker compose up -d` and set
+`SEARXNG_URL=http://localhost:8888`. Firecrawl is not included — it runs from
+its own repository ([services.md](services.md)). See [configuration.md](configuration.md) for where
+those files are looked up.
+
+## `doctor`
+
+```bash
+deep-research doctor
+```
+
+One line per dependency a run has, each from one cheap request that spends
+no model tokens: which `config.yaml` is read; whether the model endpoint
+answers with your key (and, for OpenRouter, the key's usage and tier);
+whether the search backend answers a real query, and which instance did;
+whether the scraper can fetch a page; and how many model requests a run at
+each `--mode` tier spends. It exits non-zero when any check fails.
 
 ## Keys
 
@@ -93,6 +132,10 @@ In the brief:
 | `x` | delete a sub-topic (pick its number; one must stay) |
 | `d` | cycle depth: quick → standard → deep |
 | `q` / `Esc` / `Ctrl-C` | cancel |
+
+Keys pressed while the plan is still being made are discarded — a plan
+cannot be confirmed before it is on screen — and the brief says how many were
+ignored.
 
 During a run:
 
@@ -124,7 +167,12 @@ question stem plus a 128-bit hash; reports created with the earlier short
 hash keep their old filenames.
 
 `--output FILE` writes the same document as the `.md` artifact: the question
-as a title, the confidence line, the report body, and the citation lists
-split into sources the report cites and sources the run only retrieved.
+as a title, the confidence and model lines, the report body, the analysis's
+evidence by topic, its open questions, the fact-check verdicts claim by
+claim, and the citation lists split into sources the report cites and
+sources the run only retrieved. A source with no URL is listed by title and
+marked `no URL`. The `.json` sidecar carries the same `model`, `provider`, `served_by`,
+`topics` and `fact_check`, plus `error` for an incomplete run, and each
+`citation` event in its timeline names its source.
 
 Token counts come from the usage the provider reports.
