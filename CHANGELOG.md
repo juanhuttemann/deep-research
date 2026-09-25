@@ -5,6 +5,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
+Two defaults change what an existing setup does: a run with no API key now
+fails instead of falling back to offline (use `--offline`), and a run with no
+search configured now uses public SearXNG instances instead of model-supplied
+sources (set `SEARXNG_URL=off` for the old behaviour).
+
 ### Changed
 
 - A fresh checkout now does real research on its first run. The default model
