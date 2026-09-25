@@ -70,6 +70,13 @@ func keyTier(body []byte) string {
 			FreeTier bool     `json:"is_free_tier"`
 			Usage    float64  `json:"usage"`
 			Limit    *float64 `json:"limit"`
+			// FreeDaily is the free-model cap, counted in requests. It is
+			// absent from records that do not carry it.
+			FreeDaily *struct {
+				Limit     int `json:"limit"`
+				Remaining int `json:"remaining"`
+				Used      int `json:"used"`
+			} `json:"free_model_daily_requests"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(body, &k) != nil {
@@ -81,6 +88,9 @@ func keyTier(body []byte) string {
 	}
 	if k.Data.FreeTier {
 		s += ", free tier (free models are capped per minute and per UTC day)"
+	}
+	if f := k.Data.FreeDaily; f != nil {
+		s += fmt.Sprintf("; free-model requests today: %d of %d used, %d left", f.Used, f.Limit, f.Remaining)
 	}
 	return s
 }

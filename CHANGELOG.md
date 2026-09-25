@@ -42,7 +42,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   container its own settings file.
 - `deep-research doctor`: one cheap check each for the model endpoint and
   key, the search backend and the scraper, plus the model requests a run
-  spends per `--mode` tier.
+  spends per `--mode` tier. For an OpenRouter key it shows today's
+  free-model requests used, the limit and what is left.
 - Reports and the `.json` sidecar record the model and provider host, the
   models a router actually served (`served_by`, read off each response
   because the agent framework drops it), the analysis's evidence by topic

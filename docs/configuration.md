@@ -44,11 +44,14 @@ when OpenRouter retires it. Two consequences:
   plan, analyze, fact-check and summarize — 4 with web search; LLM search
   adds up to 2 per sub-topic (quick 10, standard 12, deep 16).
   `deep-research doctor` prints these numbers and, for an OpenRouter key,
-  its usage and tier. A per-minute 429 is retried after the `Retry-After`
+  its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
   it names; the daily cap (`free-models-per-day`) fails at once with a
   message instead of burning the retries on a limit that clears only at
   00:00 UTC. Whether the router alias counts against the same daily cap as
-  `:free` ids is not documented by OpenRouter and was not verified here.
+  `:free` ids is not documented by OpenRouter and has not been verified
+  here. To check with your key: run `doctor`, do one run, run `doctor`
+  again — if "free-model requests today" rose by the run's request count,
+  the router is capped like any `:free` model.
 
 The legacy `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL`
 names are still read as a fallback, so existing `.env` files keep working.

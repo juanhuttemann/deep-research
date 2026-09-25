@@ -110,7 +110,8 @@ deep-research doctor
 
 One line per dependency a run has, each from one cheap request that spends
 no model tokens: which `config.yaml` is read; whether the model endpoint
-answers with your key (and, for OpenRouter, the key's usage and tier);
+answers with your key (and, for OpenRouter, the key's usage, tier and
+today's free-model requests used and left);
 whether the search backend answers a real query, and which instance did;
 whether the scraper can fetch a page; and how many model requests a run at
 each `--mode` tier spends. It exits non-zero when any check fails.

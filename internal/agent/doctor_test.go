@@ -80,3 +80,17 @@ func TestDiagnoseFlagsWhatIsBroken(t *testing.T) {
 		t.Errorf("search off should pass and say what it means: %+v", c)
 	}
 }
+
+// The free-model daily cap is counted in requests, and the key endpoint
+// reports it; doctor showed usage in dollars only, which says nothing about
+// how many free-model runs are left today.
+func TestKeyTierShowsFreeModelDailyRequests(t *testing.T) {
+	got := keyTier([]byte(`{"data":{"usage":0,"limit":null,"is_free_tier":true,
+		"free_model_daily_requests":{"limit":50,"remaining":38,"used":12}}}`))
+	if !strings.Contains(got, "free-model requests today: 12 of 50 used, 38 left") {
+		t.Errorf("keyTier = %q", got)
+	}
+	if got := keyTier([]byte(`{"data":{"usage":1.5}}`)); strings.Contains(got, "free-model requests") {
+		t.Errorf("a key record without the counter invented one: %q", got)
+	}
+}
