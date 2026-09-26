@@ -20,7 +20,7 @@ one found and never climbing past the project root (a directory holding
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key; free at <https://openrouter.ai/keys> | — (required unless offline) |
+| `OPENAI_API_KEY` | LLM API key; free at <https://openrouter.ai/keys> | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
@@ -70,7 +70,6 @@ the API key in `.env`, not in the config file.
 | Key | Default | Meaning |
 | --- | ------- | ------- |
 | `data_file` | `~/.deep-research/research.jsonl` | append-only run history |
-| `offline` | `false` | run with no network calls at all |
 | `model_call_timeout` | `120s` | one attempt at one model call |
 | `model_call_retries` | `2` | extra attempts for a failed call; each retry doubles that timeout |
 | `run_timeout` | `30m` | the whole run, including search and scraping |
@@ -78,8 +77,7 @@ the API key in `.env`, not in the config file.
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |
 
 Every `config.yaml` key can also be set from the environment as
-`DEEP_RESEARCH_<KEY>` in uppercase — `DEEP_RESEARCH_OFFLINE=true`,
-`DEEP_RESEARCH_SOURCES_PER_TOPIC=9`, `DEEP_RESEARCH_PARALLELISM=6` — and the
+`DEEP_RESEARCH_<KEY>` in uppercase — `DEEP_RESEARCH_SOURCES_PER_TOPIC=9`, `DEEP_RESEARCH_PARALLELISM=6` — and the
 environment wins over the file. This is a per-key override channel, so a
 stray `DEEP_RESEARCH_*` variable left in a shell changes how runs behave;
 `env | grep DEEP_RESEARCH` is the place to look when a config file seems to
@@ -121,13 +119,9 @@ Which mode a run uses is decided by what is configured:
   and the report presents its claims as unverified recollection. When a run
   holds both kinds, every prompt marks each unfetched finding `[never
   fetched]` and the phase line says how many there are.
-- **Offline** — `--offline` or `offline: true`. No network calls at all; a
-  stub assistant carries the pipeline so the CLI, store and report path can
-  be exercised. Its report says it is a stub.
-
 A missing API key is an error that says where to get one. It used to fall
-back to offline mode with a warning, which produced a complete-looking run
-that had researched nothing.
+back to a stub assistant with a warning, which produced a complete-looking
+run that had researched nothing.
 
 ### Public search instances
 

@@ -545,7 +545,7 @@ func verifyLabel(s agent.SourceSignal) string {
 	case "dropped":
 		return "✗ " + s.Code + " dropped"
 	case "unverified":
-		// LLM-search and offline modes never fetch anything, so the URL is
+		// LLM-search mode never fetches anything, so the URL is
 		// only as good as the model that produced it. Say so.
 		return "~ " + s.Domain + " unverified"
 	case "offtopic":

@@ -54,7 +54,7 @@ func TestParallelismIsConfigurable(t *testing.T) {
 		env  string
 		want int
 	}{
-		{name: "default when unset", yaml: "offline: true\n", want: 3},
+		{name: "default when unset", yaml: "model_call_retries: 2\n", want: 3},
 		{name: "from the config file", yaml: "parallelism: 6\n", want: 6},
 		{name: "environment overrides the file", yaml: "parallelism: 6\n", env: "2", want: 2},
 		// 0 or a negative number would otherwise mean "no sub-agent runs".
@@ -85,17 +85,13 @@ func TestParallelismIsConfigurable(t *testing.T) {
 func TestDocumentedEnvOverridesApply(t *testing.T) {
 	cfgDir := chdirTemp(t)
 	writeFile(t, filepath.Join(cfgDir, "config.yaml"),
-		"offline: false\nsources_per_topic: 2\nrun_timeout: 30m\n")
-	t.Setenv("DEEP_RESEARCH_OFFLINE", "true")
+		"sources_per_topic: 2\nrun_timeout: 30m\n")
 	t.Setenv("DEEP_RESEARCH_SOURCES_PER_TOPIC", "9")
 	t.Setenv("DEEP_RESEARCH_RUN_TIMEOUT", "90s")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-	if !cfg.Offline {
-		t.Error("DEEP_RESEARCH_OFFLINE did not override offline: false")
 	}
 	if cfg.SourcesPerTopic != 9 {
 		t.Errorf("SourcesPerTopic = %d, want 9", cfg.SourcesPerTopic)
@@ -116,7 +112,7 @@ func TestEnvPrefixMatchesTheDocumentedName(t *testing.T) {
 // The shipped default pointed a fresh checkout at a paid model. The first run
 // should cost nothing, so the default is OpenRouter's free router.
 func TestDefaultModelIsFree(t *testing.T) {
-	if got := loadIn(t, "offline: false\n").OpenAIModel; got != "openrouter/free" {
+	if got := loadIn(t, "model_call_retries: 2\n").OpenAIModel; got != "openrouter/free" {
 		t.Errorf("default model = %q, want openrouter/free", got)
 	}
 	if !strings.Contains(EnvTemplate, "OPENAI_MODEL=openrouter/free") {
@@ -127,7 +123,7 @@ func TestDefaultModelIsFree(t *testing.T) {
 // A fresh checkout had no search at all: the model invented its sources. The
 // default is now public SearXNG instances; "off" keeps the old LLM search.
 func TestSearchDefaultsToPublicInstances(t *testing.T) {
-	if got := loadIn(t, "offline: false\n").SearXNGURL; got != "auto" {
+	if got := loadIn(t, "model_call_retries: 2\n").SearXNGURL; got != "auto" {
 		t.Errorf("default searxng_url = %q, want auto", got)
 	}
 	for _, off := range []string{"off", "OFF", "none"} {

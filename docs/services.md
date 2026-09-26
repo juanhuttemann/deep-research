@@ -178,7 +178,7 @@ Environment variables win over that file.
 Then run anything:
 
 ```sh
-deep-research run "What is the Firecrawl v2 scrape API?" --mode quick
+deep-research -p "What is the Firecrawl v2 scrape API?" --mode quick
 ```
 
 ### Confirm it used web search

@@ -66,7 +66,6 @@ func TestMissingKeyIsAHardError(t *testing.T) {
 	dir := t.TempDir()
 	deps := Deps{
 		Assistant: func() (agent.Assistant, error) { return nil, errors.New("no API key (set OPENAI_API_KEY)") },
-		Raw:       agent.Local(),
 		Config:    config.Config{DataFile: filepath.Join(dir, "runs.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	cmd := New(func() (Deps, error) { return deps, nil })
@@ -74,39 +73,18 @@ func TestMissingKeyIsAHardError(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "why is the sky blue", "--silent", "--reports", dir})
+	cmd.SetArgs([]string{"-p", "why is the sky blue", "--silent", "--reports", dir})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("a run with no API key succeeded")
 	}
-	for _, want := range []string{"https://openrouter.ai/keys", "--offline"} {
+	for _, want := range []string{"https://openrouter.ai/keys"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not say %q: %v", want, err)
 		}
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("a failed run wrote files: %v", entries)
-	}
-}
-
-// --offline is the explicit way to run the stub pipeline.
-func TestOfflineFlagSkipsTheOnlineAssistant(t *testing.T) {
-	dir := t.TempDir()
-	deps := Deps{
-		Assistant: func() (agent.Assistant, error) {
-			t.Error("online assistant built under --offline")
-			return nil, errors.New("x")
-		},
-		Raw:    agent.Local(),
-		Config: config.Config{DataFile: filepath.Join(dir, "runs.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
-	}
-	cmd := New(func() (Deps, error) { return deps, nil })
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "why is the sky blue", "--offline", "--silent", "--reports", dir})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("--offline run: %v", err)
 	}
 }
 
@@ -117,15 +95,15 @@ func TestSourcesFlagAndDeprecatedDepthAlias(t *testing.T) {
 	for _, flag := range []string{"--sources", "--depth"} {
 		var got int
 		deps := Deps{
-			Raw:    newRecording(&got),
-			Config: config.Config{Offline: true, DataFile: filepath.Join(t.TempDir(), "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
+			Assistant: always(newRecording(&got)),
+			Config:    config.Config{DataFile: filepath.Join(t.TempDir(), "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
 		}
 		cmd := New(func() (Deps, error) { return deps, nil })
 		dir := t.TempDir()
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
 		cmd.SetIn(strings.NewReader(""))
-		cmd.SetArgs([]string{"run", "q", "--silent", "--reports", dir, flag, "6"})
+		cmd.SetArgs([]string{"-p", "q", "--silent", "--reports", dir, flag, "6"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("%s: %v", flag, err)
 		}
@@ -135,7 +113,7 @@ func TestSourcesFlagAndDeprecatedDepthAlias(t *testing.T) {
 	}
 }
 
-// recordingAssistant is the offline assistant plus a record of the source
+// recordingAssistant is the stub assistant plus a record of the source
 // budget the CLI handed down.
 type recordingAssistant struct {
 	agent.Assistant
@@ -143,7 +121,7 @@ type recordingAssistant struct {
 }
 
 func newRecording(sources *int) *recordingAssistant {
-	return &recordingAssistant{Assistant: agent.Local(), sources: sources}
+	return &recordingAssistant{Assistant: stub{}, sources: sources}
 }
 
 func (r *recordingAssistant) SetSourceBudget(n int) { *r.sources = n }
@@ -153,15 +131,15 @@ func (r *recordingAssistant) SetSourceBudget(n int) { *r.sources = n }
 // while the reader believed they had asked for a deep one.
 func TestUnknownModeIsRejected(t *testing.T) {
 	deps := Deps{
-		Raw:    agent.Local(),
-		Config: config.Config{Offline: true, DataFile: filepath.Join(t.TempDir(), "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
+		Assistant: always(stub{}),
+		Config:    config.Config{DataFile: filepath.Join(t.TempDir(), "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	cmd := New(func() (Deps, error) { return deps, nil })
 	var errBuf bytes.Buffer
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "q", "--silent", "--reports", t.TempDir(), "--mode", "deeep"})
+	cmd.SetArgs([]string{"-p", "q", "--silent", "--reports", t.TempDir(), "--mode", "deeep"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -176,14 +154,14 @@ func TestUnknownModeIsRejected(t *testing.T) {
 func TestKnownModesAreAccepted(t *testing.T) {
 	for _, mode := range []string{"quick", "standard", "deep"} {
 		deps := Deps{
-			Raw:    agent.Local(),
-			Config: config.Config{Offline: true, DataFile: filepath.Join(t.TempDir(), "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
+			Assistant: always(stub{}),
+			Config:    config.Config{DataFile: filepath.Join(t.TempDir(), "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
 		}
 		cmd := New(func() (Deps, error) { return deps, nil })
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
 		cmd.SetIn(strings.NewReader(""))
-		cmd.SetArgs([]string{"run", "q", "--silent", "--reports", t.TempDir(), "--mode", mode})
+		cmd.SetArgs([]string{"-p", "q", "--silent", "--reports", t.TempDir(), "--mode", mode})
 		if err := cmd.Execute(); err != nil {
 			t.Errorf("--mode %s: %v", mode, err)
 		}
@@ -194,11 +172,10 @@ func TestKnownModesAreAccepted(t *testing.T) {
 // unrelated to the searching and scraping that dominate a run's wall clock.
 // It is now its own setting, and a run must be given that budget.
 func TestRunDeadlineComesFromRunTimeout(t *testing.T) {
-	rec := &deadlineRecorder{Assistant: agent.Local()}
+	rec := &deadlineRecorder{Assistant: stub{}}
 	deps := Deps{
-		Raw: rec,
+		Assistant: always(rec),
 		Config: config.Config{
-			Offline:    true,
 			DataFile:   filepath.Join(t.TempDir(), "r.jsonl"),
 			Config:     agent.Config{ModelCallTimeout: time.Second},
 			RunTimeout: 25 * time.Minute,
@@ -208,7 +185,7 @@ func TestRunDeadlineComesFromRunTimeout(t *testing.T) {
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "q", "--silent", "--reports", t.TempDir()})
+	cmd.SetArgs([]string{"-p", "q", "--silent", "--reports", t.TempDir()})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -228,4 +205,36 @@ func (d *deadlineRecorder) Plan(ctx context.Context, q string, subTopics int) ([
 		d.budget = time.Until(dl)
 	}
 	return d.Assistant.Plan(ctx, q, subTopics)
+}
+
+// stub is an assistant that makes no network call, so a test can drive the
+// whole pipeline through the CLI.
+type stub struct{}
+
+func (stub) Analyze(context.Context, string) (*agent.Analysis, error) {
+	return &agent.Analysis{Answer: "stub", Confidence: "low"}, nil
+}
+
+func (stub) FactCheck(context.Context, string) (*agent.FactCheckResult, error) {
+	return &agent.FactCheckResult{}, nil
+}
+
+func (stub) Summarize(context.Context, string) (*agent.Summary, error) {
+	return &agent.Summary{Report: "stub report", Executive: "stub", Confidence: "low"}, nil
+}
+
+func (stub) Plan(_ context.Context, question string, _ int) ([]agent.SubTopic, error) {
+	return []agent.SubTopic{{ID: "1", Name: question}}, nil
+}
+
+func (stub) ResearchDetail(_ context.Context, query string) (*agent.ResearchDetail, error) {
+	return &agent.ResearchDetail{Findings: []agent.Finding{{Query: query, Title: "stub", Content: "stub", Confidence: "low"}}}, nil
+}
+
+func (stub) SetSourceBudget(int)      {}
+func (stub) SetProgress(func(string)) {}
+func (stub) TokensUsed() int          { return 0 }
+
+func always(a agent.Assistant) func() (agent.Assistant, error) {
+	return func() (agent.Assistant, error) { return a, nil }
 }

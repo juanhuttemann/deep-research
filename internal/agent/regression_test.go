@@ -566,18 +566,6 @@ func TestFindingsWithoutContentAreDropped(t *testing.T) {
 	}
 }
 
-// Offline mode printed the whole summarizer prompt as its "report", which
-// read like a real report in every artifact.
-func TestOfflineReportIsAStub(t *testing.T) {
-	s, err := Local().Summarize(context.Background(), "Question: q\n\nSynthesized answer:\nstuff\n\nSources (title, URL, content)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(s.Report, "Synthesized answer") || !strings.Contains(s.Report, "offline") {
-		t.Errorf("offline report = %q", s.Report)
-	}
-}
-
 // Web search needed both SearXNG and Firecrawl: with SearXNG alone the run
 // silently used the model as its search engine. Snippets are real results.
 func TestSearXNGAloneEnablesWebSearch(t *testing.T) {

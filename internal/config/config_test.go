@@ -37,7 +37,7 @@ func TestInitReportsOnlyCreatedFiles(t *testing.T) {
 	defer func() { _ = os.Chdir(oldWd) }()
 
 	// Simulate a setup where the config dir already has its yaml files.
-	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "offline: true\n")
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "model_call_retries: 2\n")
 	writeFile(t, filepath.Join(cfgDir, "agent.yaml"), "researcher_instructions: x\n")
 
 	_, created, err := Init()
@@ -138,7 +138,7 @@ func TestSourcesPerTopicKey(t *testing.T) {
 	if got := loadIn(t, "max_depth: 5\n").SourcesPerTopic; got != 5 {
 		t.Errorf("legacy max_depth: got %d, want 5", got)
 	}
-	if got := loadIn(t, "offline: true\n").SourcesPerTopic; got != 0 {
+	if got := loadIn(t, "model_call_retries: 2\n").SourcesPerTopic; got != 0 {
 		t.Errorf("unset: got %d, want 0 (the --mode tier decides)", got)
 	}
 }
@@ -200,7 +200,7 @@ func TestRunTimeoutIsItsOwnSetting(t *testing.T) {
 	if got := loadIn(t, "run_timeout: 12m\n").RunTimeout; got != 12*time.Minute {
 		t.Errorf("run_timeout: got %v, want 12m", got)
 	}
-	if got := loadIn(t, "offline: true\n").RunTimeout; got != 30*time.Minute {
+	if got := loadIn(t, "model_call_retries: 2\n").RunTimeout; got != 30*time.Minute {
 		t.Errorf("default run_timeout: got %v, want 30m", got)
 	}
 }
@@ -211,7 +211,7 @@ func TestRunTimeoutIsItsOwnSetting(t *testing.T) {
 func TestAgentConfigDoesNotRequireTheDeadResearcherPrompt(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
-	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "offline: true\n")
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "model_call_retries: 2\n")
 	writeFile(t, filepath.Join(cfgDir, "agent.yaml"), strings.Join([]string{
 		"analyzer_instructions: analyze",
 		"fact_checker_instructions: check",

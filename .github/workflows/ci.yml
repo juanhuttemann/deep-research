@@ -43,17 +43,13 @@ jobs:
             GOOS=${pair%/*} GOARCH=${pair#*/} go build -o /dev/null ./... || exit 1
           done
       # Building is not testing: this runs the real binary through config
-      # load, the four-phase pipeline, the store and all three exporters.
-      # Offline mode makes no network call, so it needs no key and no
-      # services. Catches the init()/wiring-panic class of bug where every
-      # built binary dies while go test stays green.
+      # load and the store, with no key and no services. Catches the
+      # init()/wiring-panic class of bug where every built binary dies while
+      # go test stays green. The pipeline itself is covered by the cli tests.
       - name: Smoke test built binary
         run: |
           go build -o deep-research ./cmd/deep-research
-          DEEP_RESEARCH_OFFLINE=true \
-            DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" \
-            ./deep-research run "smoke test" --silent --reports "$RUNNER_TEMP/reports"
-          test -n "$(ls "$RUNNER_TEMP"/reports/*.md)"
+          ./deep-research --version
           DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" ./deep-research list
 
   lint:

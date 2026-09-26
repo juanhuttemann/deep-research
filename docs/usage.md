@@ -1,13 +1,13 @@
 # Usage
 
-All commands are subcommands of the `deep-research` binary built by
-`make build`. `deep-research --version` reports the version stamped in at
+A research run is `deep-research -p "question"`; `init`, `doctor` and
+`list` are subcommands of the same binary, built by `make build`. `deep-research --version` reports the version stamped in at
 build time (`dev` for a plain `go build`).
 
-## `run`
+## `-p` / `--prompt`
 
 ```bash
-deep-research run "What are the latest advances in fusion energy?"
+deep-research -p "What are the latest advances in fusion energy?"
 ```
 
 On a terminal this draws a live UI: a research brief you confirm, then a
@@ -18,6 +18,7 @@ progress meter, a rolling activity tail, and running source/token counters.
 
 | Flag | Default | Meaning |
 | ---- | ------- | ------- |
+| `--prompt`, `-p QUESTION` | — | the question to research; without it the binary prints help |
 | `--output`, `-o FILE` | — | write the report to a file as well |
 | `--mode quick\|standard\|deep` | `standard` | research budget tier |
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
@@ -25,14 +26,13 @@ progress meter, a rolling activity tail, and running source/token counters.
 | `--jsonl` | off | machine-readable event stream instead of the live UI |
 | `--silent`, `-s` | off | no live UI; print only the report |
 | `--detach` | off | release the live display as soon as the run starts (same as pressing `b`) |
-| `--offline` | off | run against a stub assistant with no network calls (same as `offline: true`) |
 | `--no-color` | off | disable ANSI colour (`NO_COLOR=1` does the same) |
 | `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
 
-An empty question is rejected, and so is a run with no API key (unless it is
-`--offline`); neither writes anything.
+An empty question is rejected, and so is a run with no API key; neither
+writes anything.
 
 If the analyze or report call fails — a provider error after its retries, or
 `run_timeout` expiring mid-report — the run still saves what it gathered:
@@ -53,16 +53,13 @@ lines out of it; `--jsonl` still carries every one (`"transient": true`).
 
 ```bash
 # Save the report next to the terminal output
-deep-research run "question" --output report.md
+deep-research -p "question" --output report.md
 
 # Widen the budget
-deep-research run "question" --mode deep
+deep-research -p "question" --mode deep
 
 # Feed another program or agent
-deep-research run "question" --jsonl
-
-# Try the CLI with no API calls at all
-deep-research run --offline "question"
+deep-research -p "question" --jsonl
 ```
 
 ## `list`

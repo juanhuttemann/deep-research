@@ -21,8 +21,7 @@ import (
 
 // Deps carries everything a command needs.
 type Deps struct {
-	Assistant func() (agent.Assistant, error) // online assistant (lazy)
-	Raw       agent.Assistant                 // offline assistant
+	Assistant func() (agent.Assistant, error) // built lazily
 	Config    config.Config
 }
 
@@ -34,39 +33,37 @@ func New(load func() (Deps, error)) *cobra.Command {
 		SilenceUsage: true,
 	}
 
-	runCmd := &cobra.Command{
-		Use:   "run [question]",
-		Short: "run deep research on a question",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := load()
-			if err != nil {
-				return err
-			}
-			return runResearch(cmd, d, args[0])
-		},
+	// A question is a flag on the root, not a subcommand: `deep-research -p "..."`.
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if !cmd.Flags().Changed("prompt") {
+			return cmd.Help()
+		}
+		question, _ := cmd.Flags().GetString("prompt")
+		d, err := load()
+		if err != nil {
+			return err
+		}
+		return runResearch(cmd, d, question)
 	}
-	runCmd.Flags().StringP("output", "o", "", "write report to file")
-	runCmd.Flags().Int("sources", 0, "sources to gather per sub-agent (0 = --mode tier default)")
+	root.Flags().StringP("prompt", "p", "", "the question to research")
+	root.Flags().StringP("output", "o", "", "write report to file")
+	root.Flags().Int("sources", 0, "sources to gather per sub-agent (0 = --mode tier default)")
 	// The flag was called --depth when the value capped a run's total sources.
 	// Scripts and older docs still pass that name, so it keeps working.
-	runCmd.Flags().Int("depth", 0, "deprecated alias for --sources")
-	_ = runCmd.Flags().MarkDeprecated("depth", "use --sources")
-	runCmd.Flags().String("mode", "standard", "research depth: quick | standard | deep")
-	runCmd.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts")
-	runCmd.Flags().Bool("jsonl", false, "emit machine-readable JSONL events instead of the live UI")
-	runCmd.Flags().Bool("no-color", false, "disable ANSI colour")
-	runCmd.Flags().BoolP("silent", "s", false, "suppress the live UI; print only the report")
+	root.Flags().Int("depth", 0, "deprecated alias for --sources")
+	_ = root.Flags().MarkDeprecated("depth", "use --sources")
+	root.Flags().String("mode", "standard", "research depth: quick | standard | deep")
+	root.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts")
+	root.Flags().Bool("jsonl", false, "emit machine-readable JSONL events instead of the live UI")
+	root.Flags().Bool("no-color", false, "disable ANSI colour")
+	root.Flags().BoolP("silent", "s", false, "suppress the live UI; print only the report")
 	// Same as pressing "b" during a run: the display is released at the first
 	// event, the run keeps the terminal until it writes its report.
-	runCmd.Flags().Bool("detach", false, "release the live display as soon as the run starts")
-	// The stub pipeline used to be reachable only through config or as the
-	// silent fallback for a missing key; as a flag it is an explicit demo mode.
-	runCmd.Flags().Bool("offline", false, "run the pipeline against a stub assistant with no network calls")
+	root.Flags().Bool("detach", false, "release the live display as soon as the run starts")
 	// Both write to stdout. Together they interleaved a rendered Markdown
 	// report with the event stream, leaving the machine-readable output
 	// unparseable, so the combination is rejected instead of guessed at.
-	runCmd.MarkFlagsMutuallyExclusive("silent", "jsonl")
+	root.MarkFlagsMutuallyExclusive("silent", "jsonl")
 
 	initCmd := &cobra.Command{
 		Use:   "init",
@@ -75,8 +72,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	}
 	initCmd.Flags().Bool("docker", false, "also write a docker-compose.yml for a local SearXNG")
 
-	root.AddCommand(runCmd,
-		initCmd,
+	root.AddCommand(initCmd,
 		&cobra.Command{
 			Use:   "doctor",
 			Short: "check the model endpoint, search and scraper a run depends on",
@@ -120,7 +116,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		if slices.Contains(created, ".env") {
 			fmt.Fprintln(out, "\nGet a free API key (no card): "+keyURL)
 			fmt.Fprintln(out, "Add it to .env as OPENAI_API_KEY=..., then run:")
-			fmt.Fprintln(out, "  ./deep-research run \"your question\"")
+			fmt.Fprintln(out, "  ./deep-research -p \"your question\"")
 		}
 	}
 	if docker, _ := cmd.Flags().GetBool("docker"); docker {
@@ -148,20 +144,13 @@ func initDocker(out io.Writer) error {
 // keyURL is where a first-time user gets a free OpenRouter key.
 const keyURL = "https://openrouter.ai/keys"
 
-// pickAssistant returns the online assistant, or the offline one when it was
-// asked for. An online assistant that cannot be built is an error: falling
-// back to offline printed a warning nobody reads and then a RESEARCH COMPLETE
-// card, three artifacts and a history record for a run that researched
-// nothing.
-func pickAssistant(cmd *cobra.Command, d Deps) (agent.Assistant, error) {
-	if offline, _ := cmd.Flags().GetBool("offline"); offline || d.Config.Offline {
-		return d.Raw, nil
-	}
+// pickAssistant builds the assistant. One that cannot be built is an error
+// that says how to get a key, never a stub run that researched nothing.
+func pickAssistant(d Deps) (agent.Assistant, error) {
 	a, err := d.Assistant()
 	if err != nil {
 		return nil, fmt.Errorf("%w\n  Get a free key (no card): %s\n"+
-			"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research run \"...\"\n"+
-			"  Or try the pipeline with no network at all: deep-research run --offline \"...\"", err, keyURL)
+			"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research -p \"...\"", err, keyURL)
 	}
 	return a, nil
 }
@@ -199,7 +188,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) error {
 	if _, err := ui.ParseDepthMode(mode); err != nil {
 		return err
 	}
-	assistant, err := pickAssistant(cmd, d)
+	assistant, err := pickAssistant(d)
 	if err != nil {
 		return err
 	}

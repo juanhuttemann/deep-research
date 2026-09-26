@@ -29,7 +29,6 @@ func main() {
 			Assistant: sync.OnceValues(func() (agent.Assistant, error) {
 				return agent.New(cfg.Config)
 			}),
-			Raw:    agent.Local(),
 			Config: cfg,
 		}, nil
 	})

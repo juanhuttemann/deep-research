@@ -193,7 +193,7 @@ type runFunc func(ctx context.Context, prompt string) (string, error)
 //
 // It fails when there is no API key: every phase of the pipeline is a model
 // call, so a keyless online assistant cannot do anything except error at the
-// first one. Reporting it here is what lets the CLI fall back to offline mode.
+// first one. Reporting it here is what lets the CLI say how to get a key.
 func New(cfg Config) (Assistant, error) {
 	key := strings.TrimSpace(cfg.OpenAIAPIKey)
 	if key == "" {
@@ -833,56 +833,6 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	out = stripCodeFence(strings.TrimSpace(out))
 	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
 }
-
-// Local returns an offline assistant that makes no API calls.
-func Local() Assistant { return &local{} }
-
-type local struct{}
-
-func (l *local) Analyze(ctx context.Context, prompt string) (*Analysis, error) {
-	return &Analysis{Answer: "offline mode: no analysis performed", Confidence: "low"}, nil
-}
-
-// FactCheck offline verifies nothing: no source was ever fetched and no model
-// was ever asked. It says so instead of stamping the claims "verified", which
-// the exports then presented as an established fact.
-func (l *local) FactCheck(ctx context.Context, claims string) (*FactCheckResult, error) {
-	return &FactCheckResult{
-		Unverified: []string{"offline mode: no fact-check was performed"},
-	}, nil
-}
-
-// Summarize offline writes no report. Returning the prompt made the composed
-// summarizer input — question, findings, instructions — read as a real report
-// in every artifact.
-func (l *local) Summarize(ctx context.Context, prompt string) (*Summary, error) {
-	return &Summary{
-		Report:     "offline mode: no report was written; the pipeline ran against a stub assistant that makes no network calls.",
-		Executive:  "offline mode",
-		Confidence: "low",
-	}, nil
-}
-
-func (l *local) Plan(ctx context.Context, question string, subTopics int) ([]SubTopic, error) {
-	// Offline planning falls back to the same canonical set of sub-topics the
-	// online planner uses when the model returns nothing usable.
-	return defaultSubTopics(question), nil
-}
-
-func (l *local) ResearchDetail(ctx context.Context, query string) (*ResearchDetail, error) {
-	return &ResearchDetail{
-		Findings: []Finding{{Query: query, Title: "offline", Content: "offline mode: no API calls made", Confidence: "low"}},
-		Signals:  []SourceSignal{{URL: "", Domain: "offline", Status: "unverified"}},
-	}, nil
-}
-
-func (l *local) SetSourceBudget(int) {}
-
-func (l *local) SetProgress(func(string)) {}
-
-// TokensUsed is always zero offline: no model call is ever made, so there is
-// no usage to report and none is invented.
-func (l *local) TokensUsed() int { return 0 }
 
 const defaultPlanningInstructions = `You are a research planner. Decompose the following question into exactly %d focused, non-overlapping research sub-topics that together answer it. For each sub-topic give a name and a single sentence describing what to investigate. The name is a short human-readable title of 2-5 words in Title Case ("Benchmark Performance"), never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in English. Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"..."}]}` //nolint:lll
 

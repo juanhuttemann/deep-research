@@ -62,19 +62,14 @@ in `.env` or your environment:
 
 ```bash
 export OPENAI_API_KEY="sk-or-..."
-./deep-research run "What are the latest advances in fusion energy?"
+./deep-research -p "What are the latest advances in fusion energy?"
 ```
 
 Something off? `./deep-research doctor` checks the model endpoint and key,
 the search backend and the scraper — one cheap request each, no tokens — and
 prints how many model requests a run spends.
 
-No key at all? A run without one fails and says where to get one. To try the
-pipeline with no network, ask for the stub explicitly:
-
-```bash
-./deep-research run --offline "question"
-```
+No key at all? A run without one fails and says where to get one.
 
 ## What a run looks like
 
@@ -148,11 +143,10 @@ vLLM, llama.cpp or LM Studio server, which needs no key: set
 ## Common commands
 
 ```bash
-./deep-research run "question" --mode deep          # quick | standard | deep
-./deep-research run "question" --output report.md   # also save to a file
-./deep-research run "question" --silent             # just the report
-./deep-research run "question" --jsonl              # machine-readable events
-./deep-research run "question" --offline            # stub pipeline, no network
+./deep-research -p "question" --mode deep          # quick | standard | deep
+./deep-research -p "question" --output report.md   # also save to a file
+./deep-research -p "question" --silent             # just the report
+./deep-research -p "question" --jsonl              # machine-readable events
 ./deep-research list                                # past runs
 ./deep-research doctor                              # check model, key, search
 ./deep-research init --docker                       # local SearXNG setup
@@ -167,7 +161,7 @@ every `config.yaml` key is also settable as `DEEP_RESEARCH_<KEY>`.
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key | — (required unless `--offline`) |
+| `OPENAI_API_KEY` | LLM API key | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `SEARXNG_URL` | a URL, a comma-separated list, `auto` or `off` | `auto` |

@@ -25,8 +25,8 @@ make lint                   # fmt vet cyclo ineffassign golangci deadcode
 
 `.github/workflows/ci.yml` runs the same checks on every push and pull
 request, plus two things `make verify` cannot do locally: it cross-compiles
-all six released targets, and it smoke-tests the built binary through an
-offline research run and all three exporters.
+all six released targets, and it smoke-tests the built binary's startup
+and history path.
 
 If you touch the platform-split UI files, cross-compile before pushing —
 `//go:build unix` includes darwin, and a Linux-only constant there breaks

@@ -21,8 +21,7 @@ reported and skipped, not a build failure; `make tools` installs all four.
 
 Other targets: `make test`, `make build`, `make lint`,
 `go test -race ./internal/ui/` for one package.
-`./deep-research run "question"` to exercise the CLI; add
-`DEEP_RESEARCH_OFFLINE=true` for a no-network run.
+`./deep-research -p "question"` to exercise the CLI (needs an API key).
 
 `make verify` does not cross-compile. CI does
 (`.github/workflows/ci.yml`), and so should you after touching a

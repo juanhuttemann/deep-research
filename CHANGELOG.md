@@ -5,6 +5,18 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- A question is asked with `deep-research -p "question"`; the `run`
+  subcommand is gone. The run flags (`--mode`, `--silent`, `--jsonl`, …)
+  moved to the root command.
+
+### Removed
+
+- Offline mode (`--offline`, `offline:` / `DEEP_RESEARCH_OFFLINE`). Its stub
+  assistant researched nothing, so a run with it only exercised the CLI;
+  a stray `offline: true` in a config file now does nothing.
+
 ## [0.2.0] - 2026-09-25
 
 Two defaults change what an existing setup does: a run with no API key now

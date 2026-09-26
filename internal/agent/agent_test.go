@@ -12,47 +12,6 @@ import (
 	"time"
 )
 
-func TestLocalRunResearchPhases(t *testing.T) {
-	assistant := Local()
-	ctx := context.Background()
-
-	det, err := assistant.ResearchDetail(ctx, "search query")
-	if err != nil {
-		t.Fatalf("ResearchDetail() error: %v", err)
-	}
-	results := det.Findings
-	if len(results) == 0 {
-		t.Fatal("expected at least one finding")
-	}
-	if results[0].Query != "search query" {
-		t.Errorf("expected query 'search query', got %q", results[0].Query)
-	}
-
-	analysis, err := assistant.Analyze(ctx, "prompt")
-	if err != nil {
-		t.Fatalf("Analyze() error: %v", err)
-	}
-	if analysis.Confidence != "low" {
-		t.Errorf("expected low confidence offline, got %q", analysis.Confidence)
-	}
-
-	factCheck, err := assistant.FactCheck(ctx, "a claim")
-	if err != nil {
-		t.Fatalf("FactCheck() error: %v", err)
-	}
-	if len(factCheck.Verified) != 0 {
-		t.Errorf("offline mode verified a claim it never checked: %+v", factCheck.Verified)
-	}
-
-	summary, err := assistant.Summarize(ctx, "prompt")
-	if err != nil {
-		t.Fatalf("Summarize() error: %v", err)
-	}
-	if summary.Report == "prompt" || !strings.Contains(summary.Report, "offline") {
-		t.Errorf("offline report should be a stub, got %q", summary.Report)
-	}
-}
-
 func TestNew(t *testing.T) {
 	assistant, err := New(Config{
 		OpenAIModel:             "test",
@@ -213,12 +172,12 @@ func TestParsePlanAssignsIDsOnEveryPath(t *testing.T) {
 	}
 }
 
-// TestNewRejectsMissingAPIKey keeps the documented offline fallback reachable:
+// TestNewRejectsMissingAPIKey keeps the CLI's missing-key error reachable:
 // an online assistant built without credentials cannot make a single call, so
 // New must say so at construction rather than failing mid-run at the planner.
 func TestNewRejectsMissingAPIKey(t *testing.T) {
 	if _, err := New(Config{OpenAIModel: "m"}); err == nil {
-		t.Error("New with no API key returned no error; the CLI's offline fallback can never fire")
+		t.Error("New with no API key returned no error; the CLI's missing-key error can never fire")
 	}
 	if _, err := New(Config{OpenAIAPIKey: "   ", OpenAIModel: "m"}); err == nil {
 		t.Error("New with a blank API key returned no error")
@@ -267,14 +226,6 @@ func TestTokensUsedReportsModelUsage(t *testing.T) {
 	}
 }
 
-// TestLocalReportsNoTokens: the offline assistant makes no API calls, so it
-// must not invent usage for the counters to display.
-func TestLocalReportsNoTokens(t *testing.T) {
-	if got := Local().TokensUsed(); got != 0 {
-		t.Errorf("offline assistant reports %d tokens", got)
-	}
-}
-
 // TestLLMSearchSignalsAreUnverified: with no SearXNG/Firecrawl configured the
 // findings come from the model, not from a fetch. Marking them "ok" made the
 // UI print "✓ domain 200 OK" for a page nobody ever requested.
@@ -306,17 +257,6 @@ func TestLLMSearchSignalsAreUnverified(t *testing.T) {
 		if s.Status != "unverified" {
 			t.Errorf("signal %d status = %q, want %q: nothing was fetched", i, s.Status, "unverified")
 		}
-	}
-}
-
-// TestLocalSignalsAreUnverified: offline mode makes no network call either.
-func TestLocalSignalsAreUnverified(t *testing.T) {
-	det, err := Local().ResearchDetail(context.Background(), "q")
-	if err != nil {
-		t.Fatalf("ResearchDetail: %v", err)
-	}
-	if det.Signals[0].Status != "unverified" {
-		t.Errorf("offline signal status = %q, want unverified", det.Signals[0].Status)
 	}
 }
 
@@ -421,21 +361,6 @@ func TestStripCodeFenceHandlesAnUnclosedFence(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "# Report") {
 		t.Errorf("report body was damaged: %q", got)
-	}
-}
-
-// Offline mode makes no API call, so it has verified nothing. Reporting the
-// whole answer as one verified claim stated a fact the stub cannot know.
-func TestLocalFactCheckVerifiesNothing(t *testing.T) {
-	fc, err := Local().FactCheck(context.Background(), "a claim")
-	if err != nil {
-		t.Fatalf("FactCheck: %v", err)
-	}
-	if len(fc.Verified) != 0 {
-		t.Errorf("offline mode reported verified claims: %+v", fc.Verified)
-	}
-	if len(fc.Unverified) == 0 {
-		t.Error("expected offline mode to report the claims as unverified")
 	}
 }
 

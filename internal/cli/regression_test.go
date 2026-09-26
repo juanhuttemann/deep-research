@@ -126,15 +126,15 @@ func TestOutputFileHoldsTheSameReportAsTheArtifact(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "report.md")
 	deps := Deps{
-		Raw: agent.Local(),
-		Config: config.Config{Offline: true, DataFile: filepath.Join(dir, "runs.jsonl"),
+		Assistant: always(stub{}),
+		Config: config.Config{DataFile: filepath.Join(dir, "runs.jsonl"),
 			Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	cmd := New(func() (Deps, error) { return deps, nil })
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "why is the sky blue", "--silent", "--reports", dir, "-o", out})
+	cmd.SetArgs([]string{"-p", "why is the sky blue", "--silent", "--reports", dir, "-o", out})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -164,15 +164,15 @@ func TestOutputFileHoldsTheSameReportAsTheArtifact(t *testing.T) {
 // the combination is rejected rather than guessed at.
 func TestSilentAndJSONLAreMutuallyExclusive(t *testing.T) {
 	deps := Deps{
-		Raw: agent.Local(),
-		Config: config.Config{Offline: true, DataFile: filepath.Join(t.TempDir(), "r.jsonl"),
+		Assistant: always(stub{}),
+		Config: config.Config{DataFile: filepath.Join(t.TempDir(), "r.jsonl"),
 			Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	cmd := New(func() (Deps, error) { return deps, nil })
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "q", "--silent", "--jsonl", "--reports", t.TempDir()})
+	cmd.SetArgs([]string{"-p", "q", "--silent", "--jsonl", "--reports", t.TempDir()})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("--silent --jsonl was accepted")
@@ -187,30 +187,29 @@ func TestSilentAndJSONLAreMutuallyExclusive(t *testing.T) {
 func TestDetachFlagIsAccepted(t *testing.T) {
 	dir := t.TempDir()
 	deps := Deps{
-		Raw: agent.Local(),
-		Config: config.Config{Offline: true, DataFile: filepath.Join(dir, "r.jsonl"),
+		Assistant: always(stub{}),
+		Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
 			Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	cmd := New(func() (Deps, error) { return deps, nil })
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "q", "--detach", "--reports", dir})
+	cmd.SetArgs([]string{"-p", "q", "--detach", "--reports", dir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("--detach: %v", err)
 	}
 }
 
-// `run ""` planned nothing and still spent three model calls, wrote three
+// `-p ""` planned nothing and still spent three model calls, wrote three
 // artifacts and a history record about nothing.
 func TestEmptyQuestionIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	deps := Deps{
 		Assistant: func() (agent.Assistant, error) {
 			t.Error("assistant built for an empty question")
-			return agent.Local(), nil
+			return stub{}, nil
 		},
-		Raw:    agent.Local(),
 		Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	for _, q := range []string{"", "   \t"} {
@@ -218,9 +217,9 @@ func TestEmptyQuestionIsRejected(t *testing.T) {
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
 		cmd.SetIn(strings.NewReader(""))
-		cmd.SetArgs([]string{"run", q, "--silent", "--reports", dir})
+		cmd.SetArgs([]string{"-p", q, "--silent", "--reports", dir})
 		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "empty") {
-			t.Errorf("run %q: err = %v, want an empty-question error", q, err)
+			t.Errorf("-p %q: err = %v, want an empty-question error", q, err)
 		}
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -228,7 +227,7 @@ func TestEmptyQuestionIsRejected(t *testing.T) {
 	}
 }
 
-// failingSummary is the offline assistant with a summarizer that errors.
+// failingSummary is the stub assistant with a summarizer that errors.
 type failingSummary struct{ agent.Assistant }
 
 func (failingSummary) Summarize(context.Context, string) (*agent.Summary, error) {
@@ -241,15 +240,15 @@ func TestIncompleteRunIsSavedAndFails(t *testing.T) {
 	dir := t.TempDir()
 	history := filepath.Join(dir, "r.jsonl")
 	deps := Deps{
-		Raw: failingSummary{agent.Local()},
-		Config: config.Config{Offline: true, DataFile: history,
+		Assistant: always(failingSummary{stub{}}),
+		Config: config.Config{DataFile: history,
 			Config: agent.Config{ModelCallTimeout: time.Second}},
 	}
 	cmd := New(func() (Deps, error) { return deps, nil })
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"run", "q", "--silent", "--reports", dir})
+	cmd.SetArgs([]string{"-p", "q", "--silent", "--reports", dir})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "provider 500") {
 		t.Errorf("err = %v, want the incomplete-run error", err)

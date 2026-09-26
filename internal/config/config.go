@@ -23,7 +23,6 @@ import (
 type Config struct {
 	agent.Config
 	DataFile string
-	Offline  bool
 	// RunTimeout is the deadline for a whole run. It covers searching and
 	// scraping, which dominate wall-clock time and are not model calls, so it
 	// is its own setting rather than a multiple of ModelCallTimeout.
@@ -275,15 +274,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("read config.yaml: %w", err)
 	}
 	// Every config.yaml key can also be set as DEEP_RESEARCH_<KEY>, e.g.
-	// DEEP_RESEARCH_OFFLINE=true or DEEP_RESEARCH_SOURCES_PER_TOPIC=9. This
-	// is documented in the README's environment table and in config.yaml:
+	// DEEP_RESEARCH_SOURCES_PER_TOPIC=9. This is documented in the README's environment table and in config.yaml:
 	// an override channel nobody has written down is indistinguishable from
 	// the tool ignoring its own config file.
 	v.SetEnvPrefix(EnvPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 	v.SetDefault("data_file", "~/.deep-research/research.jsonl")
-	v.SetDefault("offline", false)
 	v.SetDefault("model_call_timeout", "120s")
 	v.SetDefault("model_call_retries", 2)
 	v.SetDefault("run_timeout", "30m")
@@ -296,7 +293,6 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		DataFile:        v.GetString("data_file"),
-		Offline:         v.GetBool("offline"),
 		RunTimeout:      v.GetDuration("run_timeout"),
 		SourcesPerTopic: v.GetInt("sources_per_topic"),
 		Parallelism:     v.GetInt("parallelism"),
