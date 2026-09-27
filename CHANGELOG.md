@@ -42,6 +42,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- `init` said it wrote every file to the config directory, `.env` included,
+  when `.env` goes to the working directory. Each file is now listed by its
+  absolute path.
 - `--jsonl` carried none of the assistant's progress: no retries, none of the
   streamed status lines, and nothing at all while planning. A slow model call
   and a hung process looked the same on the stream. They now arrive as

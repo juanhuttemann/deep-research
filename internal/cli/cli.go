@@ -108,8 +108,14 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if len(created) == 0 {
 		fmt.Fprintf(out, "config dir %q already configured; nothing to write\n", dir)
 	} else {
-		fmt.Fprintf(out, "wrote %d file(s) to %q:\n", len(created), dir)
+		// Each file is listed by its absolute path: the yaml files go to the
+		// config dir and .env to the working directory, and a header naming
+		// only the config dir said the .env was written there too.
+		fmt.Fprintf(out, "wrote %d file(s):\n", len(created))
 		for _, f := range created {
+			if abs, err := filepath.Abs(f); err == nil {
+				f = abs
+			}
 			fmt.Fprintf(out, "  - %s\n", f)
 		}
 		if slices.Contains(created, ".env") {

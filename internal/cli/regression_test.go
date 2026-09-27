@@ -351,3 +351,27 @@ func TestJSONLEndsOnDone(t *testing.T) {
 		})
 	}
 }
+
+// init printed "wrote 3 file(s) to <config dir>:" above a list that included
+// the .env, which it writes to the working directory, so the reader was sent
+// looking for it in the wrong place.
+func TestInitSaysWhereTheEnvWent(t *testing.T) {
+	cfgDir, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	t.Chdir(cwd)
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"init"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{filepath.Join(cfgDir, "config.yaml"), filepath.Join(cwd, ".env")} {
+		if !strings.Contains(out.String(), "  - "+want+"\n") {
+			t.Errorf("init output does not list %s:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "to \""+cfgDir) {
+		t.Errorf("init says every file went to the config dir:\n%s", out.String())
+	}
+}
