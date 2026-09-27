@@ -275,7 +275,7 @@ func TestDoctorReportsProblemsAndBudget(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 problem") {
 		t.Errorf("err = %v, want one problem (the missing key)", err)
 	}
-	for _, want := range []string{"config", "embedded defaults", "✗ model", "openrouter.ai/keys", "✓ search", "budget", "quick 10", "deep 16"} {
+	for _, want := range []string{"config", "embedded defaults", "✗ model", "openrouter.ai/keys", "✓ search", "budget", "quick 17", "deep 23"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out.String())
 		}

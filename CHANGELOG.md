@@ -14,6 +14,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   See "Driving it from another program" in `docs/usage.md`.
 - `make e2e` runs the built binary against the real provider and search. It
   is not part of `make verify`.
+- `search` events carry the `terms` their results were judged against, so
+  the `.json` timeline and `--jsonl` show why a result was called off-topic.
+- A follow-up round: after the first analysis, its first three follow-up
+  queries are searched as extra sub-agents, and the run analyzes once more
+  if they found evidence. The report used to list them as "suggested
+  searches" and leave open a question one search would have settled. A run
+  with search is now 4 or 5 model requests; `doctor` counts the fifth.
 
 ### Changed
 
@@ -42,6 +49,22 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- The model saw the first 1500 characters of each source, which on a
+  documentation page were navigation and a cookie dialog. It now sees the
+  passages that match the queries that found the page, and pages are
+  scraped up to 40,000 bytes instead of 5,000 so there is text to choose
+  from. A page found by several searches is still one source, but each
+  search's query now steers its excerpt instead of being discarded.
+- The analysis's open questions never reached the summarizer, which wrote
+  conclusions over the gaps the analysis had flagged. They are now passed
+  to it, and the analyzer and summarizer are told that "not found" is not
+  "no". That instruction is a prompt, not a guarantee.
+- The planner is asked to put the question's subject among each sub-topic's
+  relevance terms, since it wrote only words that set a sub-topic apart and a
+  page about the subject worded differently was skipped as off-topic. It is
+  also asked to name the options a comparison compares and research each;
+  a plan could miss one side of a comparison entirely, and still can when
+  the model ignores the instruction.
 - `init` said it wrote every file to the config directory, `.env` included,
   when `.env` goes to the working directory. Each file is now listed by its
   absolute path.

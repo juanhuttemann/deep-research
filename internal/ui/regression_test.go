@@ -1582,3 +1582,106 @@ func findEvent(t *testing.T, stream string, match func(Event) bool) (Event, bool
 	}
 	return Event{}, false
 }
+
+// followUpAnalyzer answers the first analysis with open follow-up queries and
+// the second without, and records every prompt it was sent.
+type followUpAnalyzer struct {
+	*fakeAssistant
+	followUp []string
+	failNext bool
+	prompts  []string
+}
+
+func (f *followUpAnalyzer) Analyze(ctx context.Context, p string) (*agent.Analysis, error) {
+	f.prompts = append(f.prompts, p)
+	if len(f.prompts) == 1 {
+		return &agent.Analysis{Answer: "first", Confidence: "low", FollowUp: f.followUp}, nil
+	}
+	if f.failNext {
+		return nil, errors.New("provider unavailable")
+	}
+	return &agent.Analysis{Answer: "second", Confidence: "high"}, nil
+}
+
+// The analysis named the search that would settle its own gap, and the
+// pipeline printed it under the report as a "suggested search" instead of
+// running it; the report then answered "not established" where one search
+// would have answered.
+func TestFollowUpQueriesAreSearchedBeforeTheReport(t *testing.T) {
+	fq := "widgetdb serverless engine support"
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: []string{fq}}
+	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fa.prompts) != 2 {
+		t.Fatalf("analyze ran %d times, want 2 (first pass and after the follow-up)", len(fa.prompts))
+	}
+	if !strings.Contains(fa.prompts[1], "Finding for "+fq) {
+		t.Errorf("second analysis never saw the follow-up evidence:\n%s", fa.prompts[1])
+	}
+	if res.Analysis.Answer != "second" {
+		t.Errorf("report built on analysis %q, want the one that saw the follow-up", res.Analysis.Answer)
+	}
+}
+
+// A follow-up that finds a page the first round already cited adds no source,
+// but its query must reach the page: the excerpt the model sees is chosen by
+// the queries that found the page, and dropping the duplicate kept the
+// passage tuned to the first question only.
+func TestFollowUpOnAKnownPageSteersItsExcerptWithoutCountingIt(t *testing.T) {
+	topics := []agent.SubTopic{{ID: "1", Name: "Alpha"}}
+	plan := newTestPlan("quick", topics)
+	q1, fq := subQueries(plan.Question, topics[0])[0], "widgetdb serverless engine support"
+	shared := "https://docs.example/widgetdb"
+	fa := &followUpAnalyzer{followUp: []string{fq}, fakeAssistant: &fakeAssistant{
+		planTopics: topics,
+		findings: map[string][]agent.Finding{
+			q1: {{Query: q1, Title: "WidgetDB docs", URL: shared, Content: "text"}},
+			fq: {{Query: fq, Title: "WidgetDB docs", URL: shared, Content: "text"}},
+			// Finding only a known page leaves the follow-up empty-handed, so
+			// it tries its fallback query too; that one finds nothing here.
+			anchoredQuery(plan.Question, fq): {},
+		},
+		signals: map[string][]agent.SourceSignal{
+			q1: {{URL: shared, Domain: "docs.example", Status: "ok"}},
+			fq: {{URL: shared, Domain: "docs.example", Status: "ok"}},
+		},
+	}}
+	sink := &MultiSink{}
+	res, err := NewDriver(fa, sink, nil, 1).Run(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("one page became %d findings", len(res.Findings))
+	}
+	if !slices.Contains(res.Findings[0].AlsoFoundBy, fq) {
+		t.Errorf("follow-up query not carried onto the page: %+v", res.Findings[0])
+	}
+	if last := sink.Timeline[len(sink.Timeline)-1]; last.Sources != 1 {
+		t.Errorf("sources = %d, want 1: a page found twice is one source", last.Sources)
+	}
+}
+
+// The second analysis is a refinement: when it fails, the report is written
+// from the first one instead of the run failing after everything was spent.
+func TestFailedReanalysisKeepsTheFirstAnalysis(t *testing.T) {
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: []string{"widgetdb limits"}, failNext: true}
+	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Analysis == nil || res.Analysis.Answer != "first" {
+		t.Errorf("analysis = %+v, want the first analysis kept", res.Analysis)
+	}
+}
+
+// The analyzer flagged "not found" as a gap, but the summarizer never saw the
+// gaps and wrote a conclusion of "no" over them.
+func TestSummarizerSeesTheAnalysisGaps(t *testing.T) {
+	a := &agent.Analysis{Answer: "a", Gaps: []string{"whether WidgetDB runs serverless"}}
+	if p := summarizePrompt("q", a, nil, nil, true); !strings.Contains(p, "whether WidgetDB runs serverless") {
+		t.Errorf("summarize prompt lacks the analysis gaps:\n%s", p)
+	}
+}

@@ -60,9 +60,12 @@ type Event struct {
 	Detail string `json:"detail,omitempty"`
 
 	// Search / Read.
-	Query  string `json:"query,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Domain string `json:"domain,omitempty"`
+	Query string `json:"query,omitempty"`
+	// Terms are what the search's results were judged against: a run whose
+	// sources were all rejected as off-topic can only be explained by them.
+	Terms  []string `json:"terms,omitempty"`
+	URL    string   `json:"url,omitempty"`
+	Domain string   `json:"domain,omitempty"`
 	// SourceTitle / SourceURL identify the source a citation refers to.
 	SourceTitle string `json:"source_title,omitempty"`
 	SourceURL   string `json:"source_url,omitempty"`

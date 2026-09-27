@@ -17,10 +17,19 @@ analyzer_instructions: |
     "topics": [{"name":"...", "findings":[...], "confidence":"high/medium/low"}],
     "gaps": ["what we don't know"],
     "confidence": "high/medium/low",
-    "follow_up_queries": ["suggested queries to fill gaps"]
+    "follow_up_queries": ["web search queries that would settle the gaps"]
   }
   
   Be honest about uncertainty. Don't overstate conclusions.
+  A gap is not a finding: never conclude that something does not exist, is
+  not supported or does not apply because the findings do not mention it.
+  Put it in "gaps"; where it limits the answer, the answer says that the
+  question is open, never that the answer is "no".
+
+  The first three follow-up queries are searched before the report is
+  written, so list them most decisive first: the search whose result could
+  change the answer comes before one that adds detail. Write each as
+  keywords a person would type into a search engine, under 80 characters.
 
 fact_checker_instructions: |
   You are a fact-checker agent. Given a set of claims, the research findings
@@ -57,6 +66,11 @@ summarizer_instructions: |
   6. Back up key claims with short verbatim quotes (partial quotes are fine)
      taken from the finding content, with the source URL alongside
 
+  Conclusions state what the findings say; an inference is labelled as one
+  and names the evidence it rests on. What the findings leave open is stated
+  as open, in the executive summary too when it limits the answer, and never
+  turned into a negative answer: "not found" is not "no".
+
   Return the report as clean markdown, with no code fences. Be concise but
   thorough. Never invent facts or quotes: a quote must appear verbatim in the
   finding content you were given. Attribute every claim to its source.
@@ -72,12 +86,16 @@ search_instructions: |
   confident exist, and keep content faithful to what the page actually says.
 
 planner_instructions: |
-  You are a research planner. Decompose the following question into 3-6
-  focused, non-overlapping research sub-topics that together answer it.
+  You are a research planner. Decompose the following question into focused,
+  non-overlapping research sub-topics that together answer it, as many as the
+  request asks for.
   Each sub-topic should map to an independent research stream (a sub-agent)
   so they can be researched in parallel. For each give a name, a single
   sentence describing what to investigate, a web search query, and the
-  terms a relevant page must mention.
+  terms a relevant page must mention. When the question compares options,
+  first name each option as its vendor or project calls it, then plan so
+  that every one of them is researched: a plan that covers only one side of
+  a comparison cannot answer it.
 
   The name is a short human-readable title of 2-5 words in Title Case, e.g.
   "Benchmark Performance" or "Architecture and Training". It is never an
@@ -95,6 +113,9 @@ planner_instructions: |
   The terms are 2-5 distinctive words or identifiers a page answering this
   sub-topic would show in its title or snippet: names, identifiers,
   technical terms, never generic words like "advantages" or "overview".
+  One of them is always the question's own subject (the product, library,
+  person or thing asked about), so a page about the subject is not rejected
+  for wording this sub-topic differently.
   Write them in the language of the question, in their shortest common form.
 
   Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}

@@ -34,9 +34,13 @@ func NewFirecrawlClient(baseURL string, timeout time.Duration) *FirecrawlClient 
 		timeout = 30 * time.Second
 	}
 	return &FirecrawlClient{
-		BaseURL:      baseURL,
-		HTTPClient:   &http.Client{Timeout: timeout},
-		ContentLimit: 5000,
+		BaseURL:    baseURL,
+		HTTPClient: &http.Client{Timeout: timeout},
+		// Generous, because the prompts no longer take a page's opening: they
+		// take the passages that match the query (see Excerpt), and the answer
+		// to a query sits anywhere in the page. At 5000 bytes a documentation
+		// page was cut before its first section.
+		ContentLimit: 40000,
 	}
 }
 

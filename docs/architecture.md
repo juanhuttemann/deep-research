@@ -2,14 +2,17 @@
 
 ## The pipeline
 
-A run is four phases, in order:
+A run is four phases, in order, with one bounded follow-up round inside
+analyze:
 
 ```
-research → analyze → fact-check → summarize
+research → analyze → [follow-up research → analyze] → fact-check → summarize
 ```
 
 Each assistant phase is a single model call. There are no multi-turn loops
-inside an agent method.
+inside an agent method. The follow-up round is the Driver's: it searches the
+first three of the analysis's follow-up queries as extra sub-agents, and
+analyzes once more only if they found evidence. It never repeats.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
@@ -21,6 +24,13 @@ facet. Both searches rank results by the branch's terms, and results that
 mention none of them are reported off-topic and never fetched. A plan without
 query or terms (the planner's fallback) searches the anchored question and
 keeps the engines' order.
+
+A page that several searches return is one source, counted and cited once;
+the queries that found it are kept on it. Each phase's prompt caps a source at
+1500 characters, and what fills them is the page's passages that match those
+queries (`tools.Excerpt`), not its opening, which on a documentation site is
+navigation and a cookie dialog. The analysis's open questions reach the
+summarizer, so a gap is reported as open rather than answered "no".
 
 The `agent` package knows how to talk to one model and how to parse what
 comes back. It never decides what to ask or in what order.

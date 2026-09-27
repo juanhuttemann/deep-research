@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/tools"
@@ -245,6 +245,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err != nil {
 		return d.partial(ctx, plan, findings, nil, nil, "analysis failed", err)
 	}
+	analysis, findings = d.followUp(ctx, plan, analysis, findings, uncovered)
 
 	// What this phase can honestly claim depends on where the "sources" came
 	// from. With no search backend configured the model supplied the findings,
@@ -387,7 +388,82 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 			uncovered = append(uncovered, sub.Name)
 		}
 	}
-	return all, uncovered
+	return mergeFindings(all), uncovered
+}
+
+// MaxFollowUps bounds the follow-up round to the analyzer's first few open
+// questions, which it lists most decisive first. Each is one more search and
+// the round adds one analyze call, so it cannot grow into a research loop.
+const MaxFollowUps = 3
+
+// followUpSources is the page allowance of each follow-up search. A follow-up
+// asks one narrow question; a few pages answer it or nothing will.
+const followUpSources = 3
+
+// followUp searches the analysis's open questions and analyzes again with
+// what they found. The first analysis routinely named the exact search that
+// would have settled its own gap ("does X support Y?") and the pipeline
+// printed it at the end of the report as homework for the reader.
+//
+// It returns the first analysis unchanged when there is nothing to follow up,
+// the searches found nothing, or the second analysis fails: a refinement that
+// did not happen is no reason to lose the analysis that did.
+func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analysis,
+	findings []agent.Finding, uncovered []string) (*agent.Analysis, []agent.Finding) {
+	var subs []SubTopic
+	for _, q := range analysis.FollowUp {
+		if q = strings.TrimSpace(q); q != "" && len(subs) < MaxFollowUps {
+			// The query is the name too, so the fallback query a sub-agent
+			// anchors on the question is the question plus this query.
+			subs = append(subs, SubTopic{ID: "f" + strconv.Itoa(len(subs)+1), Name: q, Query: q})
+		}
+	}
+	if len(subs) == 0 || ctx.Err() != nil {
+		return analysis, findings
+	}
+	d.emit(Event{Type: Phase, Phase: "Research", Detail: fmt.Sprintf("Following up %d open questions", len(subs))})
+	extra, unanswered := d.research(ctx, &Plan{Question: plan.Question, MaxSources: followUpSources * len(subs), SubTopics: subs})
+	if len(extra) == 0 || ctx.Err() != nil {
+		return analysis, findings
+	}
+	findings = mergeFindings(append(findings, extra...))
+	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Re-analyzing with the follow-up evidence"})
+	again, err := d.Agent.Analyze(ctx, analyzePrompt(plan.Question, findings, append(uncovered, unanswered...)))
+	if err != nil {
+		d.emit(Event{Type: Error, Phase: "Analyze", Detail: "re-analysis failed, keeping the first analysis: " + err.Error()})
+		return analysis, findings
+	}
+	return again, findings
+}
+
+// mergeFindings keeps one finding per page, in first-seen order. A page that
+// several searches returned is one source, so counting and citing it again
+// would inflate the total over the pages actually read; but each search asked
+// something different of it, so its query is kept for choosing the excerpt.
+// A page that was only a search snippet the first time takes the scraped text
+// when a later search fetched it.
+func mergeFindings(in []agent.Finding) []agent.Finding {
+	at := map[string]int{}
+	out := make([]agent.Finding, 0, len(in))
+	for _, f := range in {
+		key := tools.CanonicalURL(f.URL)
+		i, seen := at[key]
+		if key == "" || !seen {
+			if key != "" {
+				at[key] = len(out)
+			}
+			out = append(out, f)
+			continue
+		}
+		m := &out[i]
+		if f.Query != "" && f.Query != m.Query && !slices.Contains(m.AlsoFoundBy, f.Query) {
+			m.AlsoFoundBy = append(m.AlsoFoundBy, f.Query)
+		}
+		if f.Status == "ok" && m.Status != "ok" {
+			m.Content, m.Status = f.Content, f.Status
+		}
+	}
+	return out
 }
 
 // runSubAgent drives a single sub-agent to completion, emitting status,
@@ -406,7 +482,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		if kept >= perSource {
 			break
 		}
-		d.emit(Event{Type: Search, Query: q, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
+		d.emit(Event{Type: Search, Query: q, Terms: sub.Terms, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
 
 		det, err := d.Agent.ResearchDetail(ctx, q, sub.Terms)
 		d.noteSearch(err)
@@ -453,12 +529,16 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 				continue
 			}
 			// Another sub-agent already took this page. It is reported so the
-			// duplication is visible, but counting and citing it again would
-			// inflate the source total over the number of pages actually read.
+			// duplication is visible, and neither counted nor cited again; it is
+			// still collected, so mergeFindings can carry this query onto the
+			// page and the model sees the passage this search was after.
 			if !d.claimSource(f.URL) {
 				duplicates++
 				d.emit(Event{Type: Verify, URL: f.URL, Domain: signal.Domain,
 					Status: "duplicate", SubID: id, Line: "= " + signal.Domain + " already cited"})
+				mu.Lock()
+				*all = append(*all, f)
+				mu.Unlock()
 				continue
 			}
 			kept++
@@ -657,8 +737,8 @@ func queryPrefix(s string, width int) string {
 // without a cap the prompt — and the call — grow with the whole run: a wide
 // run put a quarter of a megabyte in front of the model, blew the two-minute
 // call deadline mid-analysis and retried at four minutes, throwing away the
-// two already spent. A source's opening is the part that says what it covers;
-// the cap keeps that and drops the tail.
+// two already spent. What fills the cap is chosen by the queries that found the
+// source (see clipPromptContent), not taken from the page's opening.
 const maxPromptFindingChars = 1500
 
 // writeFindings lists findings as numbered, content-bounded prompt entries.
@@ -673,7 +753,7 @@ func writeFindings(sb *strings.Builder, findings []agent.Finding) {
 			mark = " " + neverFetched
 		}
 		sb.WriteString("  " + strconv.Itoa(i+1) + ". " + f.Title + " (" + f.URL + ")" + mark + "\n    ")
-		sb.WriteString(clipPromptContent(f.Content))
+		sb.WriteString(clipPromptContent(f.Content, strings.Join(append([]string{f.Query}, f.AlsoFoundBy...), " ")))
 		sb.WriteString("\n")
 	}
 	if n := countFetched(findings); n > 0 && n < len(findings) {
@@ -682,18 +762,15 @@ func writeFindings(sb *strings.Builder, findings []agent.Finding) {
 	}
 }
 
-// clipPromptContent caps one source at maxPromptFindingChars, marking the cut
-// so the model reads a source as excerpted rather than as complete. The cut
-// lands on a rune boundary: half a rune is not evidence.
-func clipPromptContent(s string) string {
+// clipPromptContent caps one source at maxPromptFindingChars, keeping the
+// passages that match query, and marks the cut so the model reads the source
+// as excerpted rather than complete. The prefix it used to keep was, on a
+// documentation page, its cookie dialog and navigation.
+func clipPromptContent(s, query string) string {
 	if len(s) <= maxPromptFindingChars {
 		return s
 	}
-	cut := maxPromptFindingChars
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + " …[truncated]"
+	return tools.Excerpt(s, query, maxPromptFindingChars) + " …[truncated]"
 }
 
 func analyzePrompt(question string, findings []agent.Finding, uncovered []string) string {
@@ -792,6 +869,17 @@ func summarizePrompt(question string, analysis *agent.Analysis, fc *agent.FactCh
 	var sb strings.Builder
 	sb.WriteString("Question: " + question + "\n\nSynthesized answer:\n" + analysis.Answer + "\n\n")
 	writeTopicEvidence(&sb, analysis.Topics)
+	// The analyzer's open questions are what stop a report from answering "no"
+	// where the evidence only said nothing. The summarizer never saw them, and
+	// wrote conclusions over the very gaps the analysis had flagged.
+	if len(analysis.Gaps) > 0 {
+		sb.WriteString("Open questions the evidence does not settle. State them as open where they" +
+			" limit the answer, never as a negative answer:\n")
+		for _, g := range analysis.Gaps {
+			sb.WriteString("  - " + g + "\n")
+		}
+		sb.WriteString("\n")
+	}
 	sb.WriteString("Sources (title, URL, content) — link and quote these:\n")
 	writeFindings(&sb, findings)
 	// The reader cannot tell the two modes apart from the finished report, so

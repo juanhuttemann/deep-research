@@ -1,6 +1,9 @@
 package tools
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // qPrefix is the research question every sub-agent query is anchored on.
 const qPrefix = "What are the practical trade-offs between sync.Mutex and sync.RWMutex in Go? "
@@ -234,5 +237,27 @@ func TestRelevanceMatchesPhrasesByTheirWords(t *testing.T) {
 	// Every word must be there: sharing one word is not mentioning the phrase.
 	if got := relevance(terms, "Ventajas de viajar en tren", ""); got != 0 {
 		t.Errorf("a page sharing one word of each phrase scored %.2f", got)
+	}
+}
+
+// A long block mentions every query word once somewhere in its bulk; the
+// sentence that is about the query must still win.
+func TestExcerptPrefersAFocusedPassageOverABulkyOne(t *testing.T) {
+	bulky := "Reference: " + strings.Repeat("widget node scaling cluster field value ", 60)
+	focused := "Widget clusters scale nodes on a schedule."
+	page := strings.Repeat("Unrelated paragraph about billing.\n\n", 30) + bulky + "\n\n" + focused + "\n\n" +
+		strings.Repeat("Another unrelated paragraph.\n\n", 30)
+	if got := Excerpt(page, "widget node scaling", 300); !strings.Contains(got, focused) {
+		t.Errorf("excerpt chose the bulk over the focused passage:\n%s", got)
+	}
+}
+
+func TestExcerptKeepsTheOpeningWhenNothingMatches(t *testing.T) {
+	page := strings.Repeat("abcdefghij ", 500)
+	if got := Excerpt(page, "unrelated query", 100); got != page[:100] {
+		t.Errorf("no-match excerpt = %q, want the page's first 100 bytes", got)
+	}
+	if got := Excerpt("short page", "anything", 100); got != "short page" {
+		t.Errorf("a page under the limit was changed: %q", got)
 	}
 }

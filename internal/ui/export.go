@@ -78,6 +78,7 @@ type TimelineEntry struct {
 	Detail string    `json:"detail,omitempty"`
 	Time   time.Time `json:"time"`
 	Query  string    `json:"query,omitempty"`
+	Terms  []string  `json:"terms,omitempty"`
 	URL    string    `json:"url,omitempty"`
 	SubID  string    `json:"sub_id,omitempty"`
 	Line   string    `json:"line,omitempty"`
@@ -366,7 +367,7 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 	for _, e := range timeline {
 		m.Timeline = append(m.Timeline, TimelineEntry{
 			Type: string(e.Type), Phase: e.Phase, Detail: e.Detail, Time: e.Time,
-			Query: e.Query, URL: e.URL, SubID: e.SubID, Line: e.Line,
+			Query: e.Query, Terms: e.Terms, URL: e.URL, SubID: e.SubID, Line: e.Line,
 		})
 		if e.Type == "citation" && e.SubID != "" {
 			n, ok := notes[e.SubID]

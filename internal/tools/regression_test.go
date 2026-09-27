@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -197,5 +198,25 @@ func TestRelevanceMatchesAcrossAccents(t *testing.T) {
 		if got := relevance(terms, title, ""); got != 1 {
 			t.Errorf("%q scored %.2f against %q, want 1", title, got, terms)
 		}
+	}
+}
+
+// A documentation page scraped to Markdown opened with ~5 KB of cookie dialog
+// and navigation, and the prompt kept the page's opening: the model got the
+// consent text and never the section that answered the query.
+func TestExcerptReachesPastAPagesOpeningBoilerplate(t *testing.T) {
+	cookie := "We use essential cookies and similar tools that are necessary to provide our site and services.\n\n"
+	answer := "WidgetDB integrates with Application Auto Scaling to add and remove nodes automatically."
+	page := strings.Repeat(cookie, 60) + "## Scaling\n\n" + answer + "\n\n" + strings.Repeat("See also the release notes.\n\n", 40)
+
+	got := Excerpt(page, "WidgetDB automatic node scaling", 1500)
+	if !strings.Contains(got, answer) {
+		t.Errorf("excerpt missed the answering passage:\n%s", got)
+	}
+	if strings.Contains(got, "cookies") {
+		t.Errorf("excerpt kept the cookie dialog:\n%s", got)
+	}
+	if len(got) > 1500 {
+		t.Errorf("excerpt is %d bytes, over the 1500 limit", len(got))
 	}
 }

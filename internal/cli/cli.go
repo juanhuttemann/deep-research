@@ -376,14 +376,15 @@ func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // callBudget is how many model requests one run spends per --mode tier, which
 // is what a free model's per-day cap is counted in. With web search a run is
-// plan, analyze, fact-check and summarize; LLM search adds up to two calls
-// per sub-topic.
+// plan, analyze, fact-check and summarize, plus a second analyze when the
+// follow-up round finds evidence; LLM search adds up to two calls per
+// sub-topic.
 func callBudget(webSearch bool) string {
 	parts := make([]string, len(ui.DepthModes))
 	for i, m := range ui.DepthModes {
-		n := 4
+		n := 5
 		if !webSearch {
-			n += 2 * m.SubTopics
+			n += 2 * (m.SubTopics + ui.MaxFollowUps)
 		}
 		parts[i] = fmt.Sprintf("%s %d", m.Key, n)
 	}

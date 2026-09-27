@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -148,4 +150,135 @@ func rankByRelevance(in []SearXNGResult, terms []string) (kept, skipped []Scored
 		}
 	}
 	return kept, skipped
+}
+
+// Excerpt returns the passages of content that bear most on query, in page
+// order and within limit bytes. A scraped page opens with whatever its site
+// puts first, and documentation sites routinely spend their first kilobytes on
+// a cookie dialog and navigation: a prefix cut handed the model those and cut
+// off the section that answered the query.
+//
+// Passages are the page's blank-line-separated blocks, scored by the query
+// words they contain, each weighted by how rare it is on this page. A word
+// every block repeats (the product's name, a function word) weighs nothing, so
+// no stopword list is needed. A query that matches no block gets the prefix.
+// ponytail: lexical; a query in an unspaced script (Japanese, Chinese) is one
+// word that rarely matches, and falls back to the prefix as it did before.
+func Excerpt(content, query string, limit int) string {
+	if len(content) <= limit {
+		return content
+	}
+	blocks := blockBreak.Split(content, -1)
+	keep := pickBlocks(blocks, blockScores(blocks, queryWords(query)), limit)
+	if keep == nil {
+		return truncateUTF8Bare(content, limit)
+	}
+	var sb strings.Builder
+	last := -1
+	for i, b := range blocks {
+		if !keep[i] {
+			continue
+		}
+		switch {
+		case last >= 0 && i == last+1:
+			sb.WriteString("\n\n")
+		case i > 0:
+			sb.WriteString(elision)
+		}
+		sb.WriteString(b)
+		last = i
+	}
+	return truncateUTF8Bare(sb.String(), limit)
+}
+
+// blockBreak separates passages: a blank line, which in scraped Markdown often
+// holds the indentation of the list around it. Splitting on "\n\n" alone left
+// a whole numbered list as one block that matched every query by its size.
+var blockBreak = regexp.MustCompile(`\n[ \t]*\n`)
+
+// elision marks text left out between two excerpted passages.
+const elision = "\n[…]\n"
+
+// queryWords are the distinct folded words of a query worth matching; under
+// three bytes a word sits inside too many others (see judgeable).
+func queryWords(query string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range strings.FieldsFunc(fold(query), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len(w) >= 3 && !seen[w] {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// blockScores weighs each block by the query words it mentions, a word
+// counting log((n+1)/(df+1)): nothing when every block has it. The sum is
+// divided by the block's length relative to the page's average, as BM25 does:
+// otherwise a long block (a JSON sample, a table) wins by mentioning every
+// word once somewhere in its bulk.
+func blockScores(blocks, words []string) []float64 {
+	folded := make([]string, len(blocks))
+	total := 0
+	for i, b := range blocks {
+		folded[i] = fold(b)
+		total += len(b)
+	}
+	avg := float64(total) / float64(max(len(blocks), 1))
+	scores := make([]float64, len(blocks))
+	for _, w := range words {
+		var in []int
+		for i, b := range folded {
+			if strings.Contains(b, w) {
+				in = append(in, i)
+			}
+		}
+		idf := math.Log(float64(len(blocks)+1) / float64(len(in)+1))
+		for _, i := range in {
+			scores[i] += idf
+		}
+	}
+	for i, b := range blocks {
+		scores[i] /= 0.25 + 0.75*float64(len(b))/max(avg, 1)
+	}
+	return scores
+}
+
+// pickBlocks takes the best-scoring blocks that fit in limit, best first; a
+// best block too long to fit is still taken, and clipped by the caller. It
+// returns nil when no block scores at all.
+func pickBlocks(blocks []string, scores []float64, limit int) []bool {
+	order := make([]int, len(blocks))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return scores[order[a]] > scores[order[b]] })
+	if len(order) == 0 || scores[order[0]] <= 0 {
+		return nil
+	}
+	keep := make([]bool, len(blocks))
+	used := 0
+	for _, i := range order {
+		n := len(blocks[i]) + len(elision)
+		if scores[i] <= 0 || (used > 0 && used+n > limit) {
+			continue
+		}
+		keep[i], used = true, used+n
+	}
+	return keep
+}
+
+// truncateUTF8Bare cuts s to at most limit bytes on a rune boundary, with no
+// marker: the prompt builder that calls Excerpt marks the cut itself.
+func truncateUTF8Bare(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
 }

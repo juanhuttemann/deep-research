@@ -642,7 +642,7 @@ func TestMarkdownReportFormat(t *testing.T) {
 func TestBuildMetaSortsCitationsAndCapturesTimeline(t *testing.T) {
 	meta := BuildMeta(testResult(), []Event{
 		{Type: SubAgent, SubID: "1", SubName: "Alpha", SubState: "done", Progress: 100, Line: "complete"},
-		{Type: Search, Query: "q", Line: "Searching q"},
+		{Type: Search, Query: "q", Terms: []string{"Memcached"}, Line: "Searching q"},
 	}, "standard", 42, 8)
 	if meta.Sources != 8 || meta.Tokens != 42 {
 		t.Errorf("unexpected counters: %+v", meta)
@@ -658,7 +658,11 @@ func TestBuildMetaSortsCitationsAndCapturesTimeline(t *testing.T) {
 		t.Errorf("expected sub-agent note, got %+v", meta.Notes)
 	}
 	if len(meta.Timeline) != 2 {
-		t.Errorf("expected 2 timeline entries, got %d", len(meta.Timeline))
+		t.Fatalf("expected 2 timeline entries, got %d", len(meta.Timeline))
+	}
+	// The terms are what explains an off-topic verdict after the run.
+	if got := meta.Timeline[1].Terms; len(got) != 1 || got[0] != "Memcached" {
+		t.Errorf("search terms not exported: %v", got)
 	}
 }
 
