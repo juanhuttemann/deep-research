@@ -342,8 +342,10 @@ func renameTopic(in Input, r *Renderer, plan *Plan, seed string) {
 		r.SetPrompt("rename sub-topic", text)
 	})
 	r.SetPrompt("", "")
-	if done && name != "" {
-		plan.SubTopics[i].Name = truncate(name, 60)
+	if name = truncate(name, 60); done && name != "" && name != plan.SubTopics[i].Name {
+		// The planner's query and terms were written for the old name; kept,
+		// the branch would search and rank for a facet the reader replaced.
+		plan.SubTopics[i] = SubTopic{ID: plan.SubTopics[i].ID, Name: name, Notes: plan.SubTopics[i].Notes}
 	}
 }
 

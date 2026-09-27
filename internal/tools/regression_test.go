@@ -24,7 +24,7 @@ func TestFirecrawlTargetErrorsKeepOnlySearchSnippet(t *testing.T) {
 				fmt.Fprintf(w, `{"success":true,"data":{"markdown":"Error page","metadata":{"title":"Error","statusCode":%d,"error":"Target failed"}}}`, code)
 			}))
 			defer fc.Close()
-			got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q")
+			got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -52,7 +52,8 @@ func TestSearchSpendsBudgetOnRelevantResults(t *testing.T) {
 	tools := NewSearchTools(sx.URL, fc.URL, 0)
 	tools.MaxURLsPerQuery = 2
 
-	got, err := tools.Search(context.Background(), "What are the trade-offs between sync.Mutex and sync.RWMutex in Go?")
+	got, err := tools.Search(context.Background(), "What are the trade-offs between sync.Mutex and sync.RWMutex in Go?",
+		[]string{"Mutex", "RWMutex"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +154,7 @@ func TestBlankScrapeKeepsTheSnippet(t *testing.T) {
 		fmt.Fprint(w, `{"success":true,"data":{"markdown":"  \n","metadata":{"title":"Loading…","statusCode":200}}}`)
 	}))
 	defer fc.Close()
-	got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q")
+	got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,5 +163,39 @@ func TestBlankScrapeKeepsTheSnippet(t *testing.T) {
 	}
 	if len(got.Signals) != 1 || got.Signals[0].Status != "degraded" || got.Signals[0].Code != "empty" {
 		t.Errorf("blank scrape signal = %+v, want degraded/empty", got.Signals)
+	}
+}
+
+// Relevance was scored on the query's own words, split by an ASCII pattern and
+// filtered through an English stopword list. A Japanese question glued to an
+// English facet was judged on the facet's words alone, so every Japanese page
+// was off-topic and the run came back empty; a query in Japanese alone yielded
+// no terms and was never judged at all. Planner terms need no word boundaries.
+func TestRelevanceJudgesCJKResults(t *testing.T) {
+	in := []SearXNGResult{
+		{Title: "東京の天気予報", URL: "https://weather.example/tokyo", Content: "今日は晴れ、明日は雨の予報です。"},
+		{Title: "量子誤り訂正の現状", URL: "https://qc.example/qec", Content: "表面符号のしきい値と実機での課題を解説します。"},
+	}
+	kept, skipped := rankByRelevance(in, []string{"量子誤り訂正", "表面符号"})
+	if len(kept) != 1 || kept[0].URL != "https://qc.example/qec" {
+		t.Errorf("kept %+v, want only the error-correction page", kept)
+	}
+	if len(skipped) != 1 || skipped[0].URL != "https://weather.example/tokyo" {
+		t.Errorf("skipped %+v, want the weather page", skipped)
+	}
+}
+
+// The ASCII pattern split "energía" into "energ" and "España" into "espa",
+// and page titles routinely drop accents altogether: a Spanish question
+// matched its own sources on fragments, or not at all.
+func TestRelevanceMatchesAcrossAccents(t *testing.T) {
+	terms := []string{"energía nuclear", "España"}
+	for _, title := range []string{
+		"Cuales Son Las Ventajas De La Energia Nuclear En Espana",
+		"ENERGÍA NUCLEAR EN ESPAÑA",
+	} {
+		if got := relevance(terms, title, ""); got != 1 {
+			t.Errorf("%q scored %.2f against %q, want 1", title, got, terms)
+		}
 	}
 }

@@ -416,7 +416,7 @@ func TestEscCancelsARunInFlight(t *testing.T) {
 // blockingAssistant stalls in ResearchDetail until its context is cancelled.
 type blockingAssistant struct{ agent.Assistant }
 
-func (b *blockingAssistant) ResearchDetail(ctx context.Context, _ string) (*agent.ResearchDetail, error) {
+func (b *blockingAssistant) ResearchDetail(ctx context.Context, _ string, _ []string) (*agent.ResearchDetail, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
@@ -498,7 +498,7 @@ func TestDepthChangesTheSourceBudget(t *testing.T) {
 // budget is the only thing that can bound what a sub-agent keeps.
 type floodingDetail struct{ agent.Assistant }
 
-func (floodingDetail) ResearchDetail(context.Context, string) (*agent.ResearchDetail, error) {
+func (floodingDetail) ResearchDetail(context.Context, string, []string) (*agent.ResearchDetail, error) {
 	out := &agent.ResearchDetail{}
 	for i := range 20 { // far more than any budget
 		out.Findings = append(out.Findings,

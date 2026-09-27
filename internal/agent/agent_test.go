@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -172,6 +173,22 @@ func TestParsePlanAssignsIDsOnEveryPath(t *testing.T) {
 	}
 }
 
+// The planner's query and terms are what the branch searches and ranks by; a
+// blank or repeated term would count toward a result's relevance.
+func TestParsePlanKeepsQueryAndTerms(t *testing.T) {
+	got := parsePlanAgent(`{"subtopics":[{"name":"Nuclear Advantages","query":" ventajas energía nuclear España ",
+		"terms":["energía nuclear"," España ","","españa"]}]}`)
+	if len(got) != 1 {
+		t.Fatalf("parsed %+v", got)
+	}
+	if got[0].Query != "ventajas energía nuclear España" {
+		t.Errorf("query = %q", got[0].Query)
+	}
+	if want := []string{"energía nuclear", "España"}; !slices.Equal(got[0].Terms, want) {
+		t.Errorf("terms = %q, want %q", got[0].Terms, want)
+	}
+}
+
 // TestNewRejectsMissingAPIKey keeps the CLI's missing-key error reachable:
 // an online assistant built without credentials cannot make a single call, so
 // New must say so at construction rather than failing mid-run at the planner.
@@ -212,7 +229,7 @@ func TestTokensUsedReportsModelUsage(t *testing.T) {
 	if got := a.TokensUsed(); got != 0 {
 		t.Errorf("fresh assistant reports %d tokens, want 0", got)
 	}
-	if _, err := a.ResearchDetail(context.Background(), "q"); err != nil {
+	if _, err := a.ResearchDetail(context.Background(), "q", nil); err != nil {
 		t.Fatalf("ResearchDetail: %v", err)
 	}
 	if got := a.TokensUsed(); got != 125 {
@@ -246,7 +263,7 @@ func TestLLMSearchSignalsAreUnverified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	det, err := a.ResearchDetail(context.Background(), "q")
+	det, err := a.ResearchDetail(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatalf("ResearchDetail: %v", err)
 	}

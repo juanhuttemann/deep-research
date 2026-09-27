@@ -13,10 +13,14 @@ inside an agent method.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
-each phase. A sub-agent anchors its search on the research question plus its
-own facet; if that query does not fill the branch's source budget, it issues
-one re-formulation built from the distinctive terms of the planner's note for
-that branch.
+each phase. The planner writes, for each sub-topic and in the question's
+language, a keyword search query and the terms a relevant page must mention.
+A sub-agent searches the planner's query first; if that does not fill the
+branch's source budget, it falls back to the research question plus its own
+facet. Both searches rank results by the branch's terms, and results that
+mention none of them are reported off-topic and never fetched. A plan without
+query or terms (the planner's fallback) searches the anchored question and
+keeps the engines' order.
 
 The `agent` package knows how to talk to one model and how to parse what
 comes back. It never decides what to ask or in what order.

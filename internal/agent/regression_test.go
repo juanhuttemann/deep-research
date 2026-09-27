@@ -112,7 +112,7 @@ func TestResearchDetailReportsSkippedSources(t *testing.T) {
 	defer fc.Close()
 
 	a := &impl{searchTools: tools.NewSearchTools(sx.URL, fc.URL, 0)}
-	det, err := a.ResearchDetail(context.Background(), "sync.Mutex vs sync.RWMutex in Go")
+	det, err := a.ResearchDetail(context.Background(), "sync.Mutex vs sync.RWMutex in Go", []string{"Mutex", "RWMutex"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func TestSearXNGAloneEnablesWebSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	det, err := a.ResearchDetail(context.Background(), "go programming language")
+	det, err := a.ResearchDetail(context.Background(), "go programming language", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestFailedSearchIsNotReplacedByTheModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = a.ResearchDetail(context.Background(), "q")
+	_, err = a.ResearchDetail(context.Background(), "q", nil)
 	if err == nil {
 		t.Fatal("a refused search returned findings")
 	}
@@ -685,7 +685,7 @@ func TestRateLimitRetryWaitsForRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.ResearchDetail(context.Background(), "q"); err != nil {
+	if _, err := a.ResearchDetail(context.Background(), "q", nil); err != nil {
 		t.Fatal(err)
 	}
 	if waited < 900*time.Millisecond {
@@ -725,7 +725,7 @@ func TestModelInfoRecordsTheServedModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.ResearchDetail(context.Background(), "q"); err != nil {
+	if _, err := a.ResearchDetail(context.Background(), "q", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Summarize(context.Background(), "p"); err != nil {

@@ -18,17 +18,19 @@ type noiseResult struct {
 // engine really returns for a long technical question — the handful of pages
 // that answer it, and unrelated pages that share an incidental word with it
 // ("trade", "practical", "guidelines", "read", "performance"). Those near
-// misses are the point: rejecting a page that shares no vocabulary at all is
-// easy, and a floor that also rejects these is the one worth having.
+// misses are the point: scoring on the query's own words let them through,
+// and the terms a planner names for the branch must not.
 //
 // Every site, title and snippet here is invented. The corpus is modelled on
 // the shape and ratios of a live capture, not on its content.
 var noiseCorpus = []struct {
 	query   string
+	terms   []string
 	results []noiseResult
 }{
 	{
 		query: qPrefix + "Locking Semantics",
+		terms: []string{"Mutex", "RWMutex", "RLock"},
 		results: []noiseResult{
 			{"Venta de flores al por mayor", "https://viveros.example/mayorista", "Plantas ornamentales y ramos de temporada, con horario de apertura ampliado.", false},
 			{"Lock It Right the First Time", "https://gophernotes.example/lock-it-right", "Go's sync.Mutex and sync.RWMutex: when the read-write lock changes the picture and when it does not.", true},
@@ -44,6 +46,7 @@ var noiseCorpus = []struct {
 	},
 	{
 		query: qPrefix + "Read Heavy Performance",
+		terms: []string{"RWMutex", "read-heavy", "Mutex", "benchmark"},
 		results: []noiseResult{
 			{"General technology discussion board", "https://boards.example/technology", "A community for news and argument about how technology gets built and used.", false},
 			{"Concurrency control, mutex and read-write lock", "https://leafstack.example/concurrency-control", "sync.RWMutex grants shared read access; sync.Mutex can be too strict when reads dominate.", true},
@@ -59,6 +62,7 @@ var noiseCorpus = []struct {
 	},
 	{
 		query: qPrefix + "Contention Scalability",
+		terms: []string{"Mutex", "RWMutex", "contention"},
 		results: []noiseResult{
 			{"Woodworking channel uploads", "https://clips.example/workshop", "Short builds filmed in a small garage workshop, posted most weeks.", false},
 			{"Choosing a lock in production Go", "https://fieldreports.example/locks-in-production", "Race conditions, sync.Mutex, sync.RWMutex, and the strategy we settled on after a year.", true},
@@ -74,6 +78,7 @@ var noiseCorpus = []struct {
 	},
 	{
 		query: qPrefix + "Use Case Guidelines",
+		terms: []string{"sync.Mutex", "sync.RWMutex", "locking"},
 		results: []noiseResult{
 			{"Riverbend State College", "https://riverbend.example/index", "An independent college with undergraduate programmes across six faculties.", false},
 			{"3.1.4 Period to be considered — registry guidelines", "https://registry.example/mark-guidelines", "Under the regulation a mark becomes open to revocation; these guidelines set out the period.", false},
@@ -93,9 +98,8 @@ var noiseCorpus = []struct {
 // noise result must fall below it, on real engine output.
 func TestRelevanceSeparatesSignalFromNoise(t *testing.T) {
 	for _, f := range noiseCorpus {
-		terms := queryTerms(f.query)
 		for _, r := range f.results {
-			got := relevance(terms, r.title, r.snippet)
+			got := relevance(f.terms, r.title, r.snippet)
 			if r.relevant && got < minRelevance {
 				t.Errorf("relevant source scored %.3f (floor %.2f): %s", got, minRelevance, r.url)
 			}
@@ -119,7 +123,7 @@ func TestRankByRelevancePromotesSignalOverEngineOrder(t *testing.T) {
 				want++
 			}
 		}
-		kept, skipped := rankByRelevance(in, f.query)
+		kept, skipped := rankByRelevance(in, f.terms)
 		if len(kept) != want {
 			t.Errorf("%s: kept %d results, want the %d relevant ones", f.query, len(kept), want)
 		}
@@ -144,21 +148,21 @@ func TestRankByRelevancePromotesSignalOverEngineOrder(t *testing.T) {
 	}
 }
 
-// Scoring needs enough distinctive terms to judge with. A query the tokenizer
-// cannot break up — CJK, or a couple of stopwords — must disable filtering
-// rather than reject every result the engines returned.
+// Scoring needs enough terms to judge with. A plan without them — the
+// planner's fallback, or a model that skipped the field — must leave the
+// engines' order alone rather than judge every page on one word.
 func TestRelevanceDisabledWithoutDistinctiveTerms(t *testing.T) {
-	for _, query := range []string{"日本語の検索", "how to", ""} {
+	for _, terms := range [][]string{nil, {}, {"mutex"}, {"Go", "mutex"}} {
 		in := []SearXNGResult{
 			{Title: "First", URL: "https://example.com/1", Content: "anything"},
 			{Title: "Second", URL: "https://example.com/2", Content: "anything"},
 		}
-		kept, skipped := rankByRelevance(in, query)
+		kept, skipped := rankByRelevance(in, terms)
 		if len(kept) != 2 || len(skipped) != 0 {
-			t.Errorf("%q: filtered without distinctive terms (kept %d, skipped %d)", query, len(kept), len(skipped))
+			t.Errorf("%q: filtered without enough terms (kept %d, skipped %d)", terms, len(kept), len(skipped))
 		}
 		if kept[0].URL != in[0].URL || kept[1].URL != in[1].URL {
-			t.Errorf("%q: engine order not preserved: %+v", query, kept)
+			t.Errorf("%q: engine order not preserved: %+v", terms, kept)
 		}
 	}
 }
@@ -169,7 +173,7 @@ func TestRankByRelevanceIsStable(t *testing.T) {
 		{Title: "sync.Mutex guide", URL: "https://a.example/1", Content: "sync.Mutex and sync.RWMutex"},
 		{Title: "sync.Mutex guide", URL: "https://b.example/2", Content: "sync.Mutex and sync.RWMutex"},
 	}
-	kept, _ := rankByRelevance(in, "sync.Mutex vs sync.RWMutex in Go")
+	kept, _ := rankByRelevance(in, []string{"sync.Mutex", "sync.RWMutex"})
 	if len(kept) != 2 || kept[0].URL != in[0].URL || kept[1].URL != in[1].URL {
 		t.Errorf("tie broke engine order: %+v", kept)
 	}
@@ -186,11 +190,49 @@ func TestRelevanceRejectsAnAllNoiseResultSet(t *testing.T) {
 		{Title: "Parcel tracking", URL: "https://courier.example/track", Content: "Find where your package is with the tracking number."},
 		{Title: "Grocery delivery slots", URL: "https://retailer.example/slots", Content: "Book a delivery slot for this week's shop."},
 	}
-	kept, skipped := rankByRelevance(in, "sync.Mutex versus sync.RWMutex contention in Go")
+	kept, skipped := rankByRelevance(in, []string{"Mutex", "RWMutex", "contention"})
 	if len(kept) != 0 {
 		t.Errorf("kept noise rather than reporting no evidence: %+v", kept)
 	}
 	if len(skipped) != 2 {
 		t.Errorf("rejections not reported: %+v", skipped)
+	}
+}
+
+// The planner qualifies identifiers ("sync.RWMutex") that pages often write
+// bare: the sync package's own documentation scored zero against them.
+func TestRelevanceMatchesQualifiedIdentifiersBare(t *testing.T) {
+	terms := []string{"sync.Mutex", "sync.RWMutex"}
+	if got := relevance(terms, "sync package - sync - Go Packages",
+		"A RWMutex.RLock cannot be upgraded into a RWMutex.Lock"); got != 1 {
+		t.Errorf("bare identifiers scored %.2f, want 1", got)
+	}
+	// A short last segment is not a stand-in for the whole term.
+	if got := relevance([]string{"google.com", "node.js"}, "Comments on JSON", ""); got != 0 {
+		t.Errorf("short segments matched: %.2f", got)
+	}
+}
+
+// "Go" is inside "good", "ago" and "Google": as a term it let every page
+// clear the floor. Too short to judge, it is left out of the score.
+func TestRelevanceIgnoresTermsTooShortToMatch(t *testing.T) {
+	in := []SearXNGResult{{Title: "A good recipe", URL: "https://food.example/1", Content: "Cooked long ago."}}
+	kept, skipped := rankByRelevance(in, []string{"Go", "RWMutex", "contention"})
+	if len(kept) != 0 || len(skipped) != 1 {
+		t.Errorf("a page matching only \"go\" inside other words was kept: %+v", kept)
+	}
+}
+
+// Planners write phrases where they were asked for words, and a page never
+// carries the phrase verbatim: "ventajas energía nuclear" rejected every page
+// on "Ventajas de la energía nuclear". A phrase matches on all of its words.
+func TestRelevanceMatchesPhrasesByTheirWords(t *testing.T) {
+	terms := []string{"ventajas energía nuclear", "residuos radiactivos"}
+	if got := relevance(terms, "Ventajas de la energía nuclear", "Los residuos son radiactivos durante siglos."); got != 1 {
+		t.Errorf("phrase terms scored %.2f, want 1", got)
+	}
+	// Every word must be there: sharing one word is not mentioning the phrase.
+	if got := relevance(terms, "Ventajas de viajar en tren", ""); got != 0 {
+		t.Errorf("a page sharing one word of each phrase scored %.2f", got)
 	}
 }

@@ -126,7 +126,7 @@ In the brief:
 | --- | ------ |
 | `Enter` | launch the research |
 | `e` | add a sub-topic (type it, `Enter` confirms) |
-| `r` | rename a sub-topic (pick its number, then edit) |
+| `r` | rename a sub-topic (pick its number, then edit); it is then searched by its new name, not the planner's query |
 | `x` | delete a sub-topic (pick its number; one must stay) |
 | `d` | cycle depth: quick → standard → deep |
 | `q` / `Esc` / `Ctrl-C` | cancel |

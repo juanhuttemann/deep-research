@@ -125,7 +125,7 @@ func TestSearchTools_Search(t *testing.T) {
 	t.Cleanup(fcServer.Close)
 
 	tools := NewSearchTools(searxServer.URL, fcServer.URL, 0)
-	results, err := tools.Search(context.Background(), "test query")
+	results, err := tools.Search(context.Background(), "test query", nil)
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestSearchTools_Search_ScrapeFailureFallback(t *testing.T) {
 	t.Cleanup(fcServer.Close)
 
 	tools := NewSearchTools(searxServer.URL, fcServer.URL, 0)
-	results, err := tools.Search(context.Background(), "test query")
+	results, err := tools.Search(context.Background(), "test query", nil)
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestSearchTools_ScrapesConcurrentlyInOrder(t *testing.T) {
 	st.MaxURLsPerQuery = 3
 	st.ScrapeParallelism = 3
 
-	res, err := st.Search(context.Background(), "q")
+	res, err := st.Search(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestSearchTools_ScrapeParallelismIsBounded(t *testing.T) {
 	st.MaxURLsPerQuery = 8
 	st.ScrapeParallelism = 2
 
-	if _, err := st.Search(context.Background(), "q"); err != nil {
+	if _, err := st.Search(context.Background(), "q", nil); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if maxInFlight > 2 {
@@ -298,7 +298,7 @@ func TestSearchTools_SignalStatusVocabulary(t *testing.T) {
 	defer fcServer.Close()
 
 	st := NewSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
-	res, err := st.Search(context.Background(), "q")
+	res, err := st.Search(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestSearchDeduplicatesResultsByURL(t *testing.T) {
 
 	tools := NewSearchTools(searx.URL, fc.URL, 0)
 	tools.MaxURLsPerQuery = 10
-	res, err := tools.Search(context.Background(), "go")
+	res, err := tools.Search(context.Background(), "go", nil)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

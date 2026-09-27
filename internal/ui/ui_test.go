@@ -52,7 +52,7 @@ func (f *fakeAssistant) Plan(ctx context.Context, question string, subTopics int
 	}, nil
 }
 
-func (f *fakeAssistant) ResearchDetail(ctx context.Context, query string) (*agent.ResearchDetail, error) {
+func (f *fakeAssistant) ResearchDetail(ctx context.Context, query string, _ []string) (*agent.ResearchDetail, error) {
 	f.call()
 	// The default finding's URL carries the query: distinct queries return
 	// distinct pages, as a real search does, so the run's cross-sub-agent
@@ -90,7 +90,7 @@ func (f *fakeAssistant) Summarize(ctx context.Context, prompt string) (*agent.Su
 
 // Research delegates to ResearchDetail for interface completeness.
 func (f *fakeAssistant) Research(ctx context.Context, query string) ([]agent.Finding, error) {
-	det, err := f.ResearchDetail(ctx, query)
+	det, err := f.ResearchDetail(ctx, query, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -386,6 +386,24 @@ func TestConfirmBriefRenamesSubtopic(t *testing.T) {
 	got, _ := waitBrief(NewByteReader([]byte("r2\n\x7f\x7f\x7f\x7f\x7f\x7fRenamed\n\r")), r, base, rebudgetForTest)
 	if got.SubTopics[1].Name != "Renamed" || got.SubTopics[0].Name != "First" {
 		t.Errorf("rename hit the wrong topic: %#v", got.SubTopics)
+	}
+}
+
+// A renamed branch is the reader's facet, not the planner's: the planner's
+// query and terms would keep searching and ranking for the name it replaced.
+func TestConfirmBriefRenameDropsThePlannersQuery(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{Enabled: false})
+	base := newTestPlan("standard", []agent.SubTopic{
+		{ID: "1", Name: "Memory", Query: "sync.Mutex memory overhead", Terms: []string{"Mutex", "memory"}},
+		{ID: "2", Name: "Same", Query: "kept query", Terms: []string{"kept", "terms"}}})
+	// "Memory" is six backspaces; the second rename confirms the seeded name.
+	got, _ := waitBrief(NewByteReader([]byte("r1\n\x7f\x7f\x7f\x7f\x7f\x7fFairness\nr2\n\n\r")), r, base, rebudgetForTest)
+	if s := got.SubTopics[0]; s.Name != "Fairness" || s.Query != "" || s.Terms != nil {
+		t.Errorf("renamed topic kept the planner's search: %#v", s)
+	}
+	if s := got.SubTopics[1]; s.Query != "kept query" || len(s.Terms) != 2 {
+		t.Errorf("an unchanged name lost the planner's search: %#v", s)
 	}
 }
 
@@ -899,6 +917,8 @@ func TestJSONLSinkProducesValidLines(t *testing.T) {
 	}
 }
 
+// A plan without a planner query — the fallback plan, or a model that
+// skipped the field — still searches, anchored on the question.
 func TestSubQueriesAnchorOnQuestion(t *testing.T) {
 	const q = "widget 2.5 vs gadget 1.5 model"
 	got := subQueries(q, agent.SubTopic{Name: "Performance Benchmarks", Notes: "Compare scores."})
@@ -908,47 +928,31 @@ func TestSubQueriesAnchorOnQuestion(t *testing.T) {
 	}
 }
 
-// The planner's note is the one place that says what the branch is looking
-// for, and it used to be searched never — a sub-agent that found nothing on
-// its first query had no second thing to ask. It is still never searched as
-// prose: backends degrade badly on a sentence, so the follow-up carries a few
-// distilled terms and stays anchored on the question.
-func TestSubQueriesFollowUpDistilsNotes(t *testing.T) {
-	const q = "q"
-	const notes = "Investigate the current perovskite tandem degradation data."
-	got := subQueries(q, agent.SubTopic{Name: "Facet", Notes: notes})
-	if len(got) != 2 {
-		t.Fatalf("got %q, want a follow-up query", got)
+// The planner's query names the subject in the question's language, so it is
+// searched first; the question anchored on the facet is the fallback. Notes
+// is a sentence for the reader and is never searched.
+func TestSubQueriesPlannerQueryFirst(t *testing.T) {
+	const q = "¿Cuáles son las ventajas de la energía nuclear en España?"
+	sub := agent.SubTopic{Name: "Nuclear Advantages", Notes: "Investigate the current advantages.",
+		Query: "ventajas energía nuclear España"}
+	got := subQueries(q, sub)
+	want := []string{sub.Query, anchoredQuery(q, sub.Name)}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 	for _, s := range got {
-		if !strings.HasPrefix(s, q+" ") {
-			t.Errorf("query %q is not anchored on the question", s)
-		}
-		if strings.Contains(s, notes) || strings.Contains(s, "the current") {
+		if strings.Contains(s, "Investigate") {
 			t.Errorf("note prose leaked into a search query: %q", s)
-		}
-	}
-	for _, want := range []string{"perovskite", "tandem", "degradation"} {
-		if !strings.Contains(got[1], want) {
-			t.Errorf("follow-up %q dropped the distinctive term %q", got[1], want)
 		}
 	}
 }
 
-// A note with nothing in it the first query did not already cover is not a
-// second query: re-issuing the same search would spend the budget twice.
+// A fallback identical to the planner's query is not a second query:
+// re-issuing the same search would spend the budget twice.
 func TestSubQueriesSkipsUselessFollowUp(t *testing.T) {
-	for name, sub := range map[string]agent.SubTopic{
-		"no notes":       {Name: "Facet"},
-		"only stopwords": {Name: "Facet", Notes: "Investigate these."},
-		"echoes the name": {Name: "Performance Benchmarks",
-			Notes: "Compare performance benchmarks."},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := subQueries("q", sub); len(got) != 1 {
-				t.Errorf("got %q, want one query", got)
-			}
-		})
+	got := subQueries("q", agent.SubTopic{Name: "Facet", Query: "Q facet"})
+	if len(got) != 1 || got[0] != "Q facet" {
+		t.Errorf("got %q, want the planner query once", got)
 	}
 }
 
@@ -1046,7 +1050,7 @@ type countingAssistant struct {
 	maxSeen  int
 }
 
-func (c *countingAssistant) ResearchDetail(ctx context.Context, q string) (*agent.ResearchDetail, error) {
+func (c *countingAssistant) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
 	c.mu.Lock()
 	c.inFlight++
 	if c.inFlight > c.maxSeen {
@@ -1059,7 +1063,7 @@ func (c *countingAssistant) ResearchDetail(ctx context.Context, q string) (*agen
 	c.mu.Lock()
 	c.inFlight--
 	c.mu.Unlock()
-	return c.Assistant.ResearchDetail(ctx, q)
+	return c.Assistant.ResearchDetail(ctx, q, terms)
 }
 
 func (c *countingAssistant) peak() int {

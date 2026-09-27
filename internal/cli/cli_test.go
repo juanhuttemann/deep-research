@@ -227,7 +227,7 @@ func (stub) Plan(_ context.Context, question string, _ int) ([]agent.SubTopic, e
 	return []agent.SubTopic{{ID: "1", Name: question}}, nil
 }
 
-func (stub) ResearchDetail(_ context.Context, query string) (*agent.ResearchDetail, error) {
+func (stub) ResearchDetail(_ context.Context, query string, _ []string) (*agent.ResearchDetail, error) {
 	return &agent.ResearchDetail{Findings: []agent.Finding{{Query: query, Title: "stub", Content: "stub", Confidence: "low"}}}, nil
 }
 

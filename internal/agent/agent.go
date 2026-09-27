@@ -55,6 +55,12 @@ type SubTopic struct {
 	ID    string
 	Name  string
 	Notes string
+	// Query and Terms are written by the planner in the question's language:
+	// the search it would type and the words a page answering it must show.
+	// Deriving either from prose took English stopword lists that grew with
+	// every noisy run and broke on any other language.
+	Query string
+	Terms []string
 }
 
 // Finding is one unit of research evidence.
@@ -113,8 +119,9 @@ type Assistant interface {
 	// ResearchDetail runs a query and returns findings together with
 	// per-source verification signals, so the UI can render source-quality
 	// indicators. When real search+scrape is unavailable it synthesises a
-	// best-effort signal set.
-	ResearchDetail(ctx context.Context, query string) (*ResearchDetail, error)
+	// best-effort signal set. terms are what a relevant result must mention;
+	// fewer than two leave the engines' own ranking standing.
+	ResearchDetail(ctx context.Context, query string, terms []string) (*ResearchDetail, error)
 	// Analyze synthesizes findings into an answer.
 	Analyze(ctx context.Context, prompt string) (*Analysis, error)
 	// FactCheck verifies claims against the findings. The prompt is composed
@@ -772,9 +779,9 @@ func (a *impl) status(msg string) {
 // findings that counted as sources, and with public instances a refusal is
 // routine: "it ran and produced a report" has to mean the same thing whether
 // or not the search answered.
-func (a *impl) ResearchDetail(ctx context.Context, query string) (*ResearchDetail, error) {
+func (a *impl) ResearchDetail(ctx context.Context, query string, terms []string) (*ResearchDetail, error) {
 	if a.searchTools != nil {
-		res, err := a.searchTools.Search(ctx, query)
+		res, err := a.searchTools.Search(ctx, query, terms)
 		if err != nil {
 			return nil, err
 		}
@@ -834,7 +841,7 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
 }
 
-const defaultPlanningInstructions = `You are a research planner. Decompose the following question into exactly %d focused, non-overlapping research sub-topics that together answer it. For each sub-topic give a name and a single sentence describing what to investigate. The name is a short human-readable title of 2-5 words in Title Case ("Benchmark Performance"), never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in English. Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"..."}]}` //nolint:lll
+const defaultPlanningInstructions = `You are a research planner. Decompose the following question into exactly %d focused, non-overlapping research sub-topics that together answer it. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. The name is a short human-readable title of 2-5 words in Title Case ("Benchmark Performance"), never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in English. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
 
 // planPrompt builds the planner prompt for a given plan breadth.
 func planPrompt(question string, subTopics int) string {
@@ -927,7 +934,24 @@ func finalizeSubTopics(in []SubTopic) []SubTopic {
 		used[t.ID] = true
 		t.Name = humanizeTopic(t.Name)
 		t.Notes = strings.TrimSpace(t.Notes)
+		t.Query = strings.TrimSpace(t.Query)
+		t.Terms = cleanTerms(t.Terms)
 		out = append(out, t)
+	}
+	return out
+}
+
+// cleanTerms drops blank and repeated terms: a repeat would count twice
+// toward a result's relevance.
+func cleanTerms(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range in {
+		t = strings.TrimSpace(t)
+		if k := strings.ToLower(t); t != "" && !seen[k] {
+			seen[k] = true
+			out = append(out, t)
+		}
 	}
 	return out
 }

@@ -75,8 +75,9 @@ planner_instructions: |
   You are a research planner. Decompose the following question into 3-6
   focused, non-overlapping research sub-topics that together answer it.
   Each sub-topic should map to an independent research stream (a sub-agent)
-  so they can be researched in parallel. For each give a name and a single
-  sentence describing what to investigate.
+  so they can be researched in parallel. For each give a name, a single
+  sentence describing what to investigate, a web search query, and the
+  terms a relevant page must mention.
 
   The name is a short human-readable title of 2-5 words in Title Case, e.g.
   "Benchmark Performance" or "Architecture and Training". It is never an
@@ -86,4 +87,14 @@ planner_instructions: |
 
   Write every name and note in English, with no words from any other
   language.
-  Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"..."}]}
+
+  The query is what a person would type into a search engine for this
+  sub-topic: keywords rather than a sentence, naming the subject of the
+  question, under 80 characters, in the language of the question.
+
+  The terms are 2-5 distinctive words or identifiers a page answering this
+  sub-topic would show in its title or snippet: names, identifiers,
+  technical terms, never generic words like "advantages" or "overview".
+  Write them in the language of the question, in their shortest common form.
+
+  Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}

@@ -10,6 +10,19 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - A question is asked with `deep-research -p "question"`; the `run`
   subcommand is gone. The run flags (`--mode`, `--silent`, `--jsonl`, …)
   moved to the root command.
+- Search queries and relevance ranking come from the planner, in the
+  question's language: each sub-topic carries a keyword `query` and the
+  `terms` a relevant page must mention. They replace two English stopword
+  lists that built queries from the question's prose and scored results on
+  its words. A non-English question no longer searches its own sentence with
+  an English facet appended and the subject clipped off, and Japanese or
+  other unspaced scripts are now ranked instead of left unfiltered or
+  rejected wholesale. A term matches regardless of accents, a phrase matches
+  on all of its words in any order, and a qualified identifier
+  (`sync.RWMutex`) also matches bare (`RWMutex`). A custom `planner_instructions`
+  should ask for the two new fields; without them a run searches the anchored
+  question unranked. A sub-topic renamed or added in the brief is searched by
+  its name, since the planner's query was written for the one it replaced.
 
 ### Removed
 

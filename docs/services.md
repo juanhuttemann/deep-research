@@ -195,8 +195,8 @@ and fetched nothing — if you see that, `SEARXNG_URL` is `off`.
 `deep-research doctor` checks both services directly.
 
 While a run is in progress each result is reported as it is handled, marked
-`ok`, `snippet`, `off-topic` (the page did not match the question, so it was
-not fetched) or `dropped`.
+`ok`, `snippet`, `off-topic` (the result mentioned none of the terms the
+planner named for its sub-topic, so it was not fetched) or `dropped`.
 
 ## Using hosted Firecrawl instead
 

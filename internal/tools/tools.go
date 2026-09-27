@@ -389,8 +389,9 @@ func CanonicalURL(raw string) string {
 // by scraping the page via Firecrawl, so findings carry the actual page
 // text (quotable content) rather than just a search snippet. The snippet
 // is kept as a fallback when scraping a URL fails, so a slow scraper
-// never drops an otherwise good result.
-func (s *SearchTools) Search(ctx context.Context, query string) (*SearchResults, error) {
+// never drops an otherwise good result. terms rank the results; see
+// rankByRelevance.
+func (s *SearchTools) Search(ctx context.Context, query string, terms []string) (*SearchResults, error) {
 	searchResults, err := s.SearXNG.Search(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
@@ -405,7 +406,7 @@ func (s *SearchTools) Search(ctx context.Context, query string) (*SearchResults,
 	// spent every slot on whatever they ranked first, which on a long
 	// technical question is routinely unrelated to it; the pages that answer
 	// the question are usually present but buried below them.
-	ranked, offTopic := rankByRelevance(dedupeResults(searchResults), query)
+	ranked, offTopic := rankByRelevance(dedupeResults(searchResults), terms)
 	if len(ranked) > s.MaxURLsPerQuery {
 		// Results past the budget were not rejected, only not reached, so they
 		// are not reported as off-topic.

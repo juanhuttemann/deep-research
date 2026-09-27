@@ -1016,7 +1016,7 @@ func TestFactCheckSaysSoWhenNothingWasRetrieved(t *testing.T) {
 // with nothing usable reported nothing and the run lost the whole facet.
 func TestSubAgentRetriesWhenTheFirstQueryYieldsNothing(t *testing.T) {
 	const question = "q"
-	sub := agent.SubTopic{ID: "1", Name: "Facet", Notes: "Examine perovskite tandem degradation."}
+	sub := agent.SubTopic{ID: "1", Name: "Facet", Query: "perovskite tandem degradation"}
 	queries := subQueries(question, sub)
 	if len(queries) != 2 {
 		t.Fatalf("expected a follow-up query, got %q", queries)
@@ -1059,7 +1059,7 @@ func TestSubAgentRetriesWhenTheFirstQueryYieldsNothing(t *testing.T) {
 // A branch that fills its budget on the first query never issues the second:
 // the follow-up is a re-formulation, not a doubling of every run.
 func TestSubAgentStopsAtOneQueryWhenTheFirstSucceeds(t *testing.T) {
-	sub := agent.SubTopic{ID: "1", Name: "Facet", Notes: "Examine perovskite tandem degradation."}
+	sub := agent.SubTopic{ID: "1", Name: "Facet", Query: "perovskite tandem degradation"}
 	sink := &MultiSink{}
 	d := NewDriver(&fakeAssistant{planTopics: []agent.SubTopic{sub}}, sink, nil, 1)
 	if _, err := d.Run(context.Background(), &Plan{
@@ -1430,7 +1430,7 @@ func TestTransientProgressDoesNotEvictTheActivityTail(t *testing.T) {
 // failingSearch refuses every query the way a rate-limited instance does.
 type failingSearch struct{ *fakeAssistant }
 
-func (failingSearch) ResearchDetail(ctx context.Context, q string) (*agent.ResearchDetail, error) {
+func (failingSearch) ResearchDetail(ctx context.Context, q string, _ []string) (*agent.ResearchDetail, error) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 	}))

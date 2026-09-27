@@ -1,9 +1,14 @@
 package tools
 
 import (
-	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Relevance ranking for search results.
@@ -18,41 +23,38 @@ import (
 //
 // Ranking here is deliberately lexical and local: no extra model call on a
 // pipeline that already pays for several, and no dependency on an engine
-// being configured well. It cannot judge meaning, so it only has to beat
-// "trust the engine order", which it does by a wide margin on real output.
+// being configured well. What it matches is not taken from the query: the
+// planner names, per sub-topic and in the question's language, the terms a
+// relevant page must mention. Guessing them from the query's own words took
+// English stopword lists that grew with every noisy run, and on any other
+// language they kept function words and split accented ones apart.
 
-// minRelevance is the floor a result must clear to be worth fetching. It sits
-// between the highest-scoring noise and the lowest-scoring genuine source
-// measured across a live capture, and noiseCorpus in the tests holds that
-// calibration: the floor exists to stop a thin result set being padded with
-// pages sharing only an incidental word ("trade", "practical") with it.
+// minRelevance is the floor a result must clear to be worth fetching. With the
+// planner's two to five terms it rejects exactly the pages that mention none
+// of them. The terms are distinctive by instruction, so one is already a real
+// link to the question, and noiseCorpus in the tests holds that calibration.
+// ponytail: one term in five clears it; raise it if a broad term such as a
+// country name starts admitting noise.
 const minRelevance = 0.2
 
-// minDistinctiveTerms is the least a query must yield before its score means
-// anything. Below it the scorer abstains and the engine order stands: a query
-// in a script this tokenizer cannot split (CJK has no spaces) would otherwise
-// score every result zero and discard the entire result set. Note this is the
-// *only* abstain: once a query is judgeable, rejecting every result is a real
-// verdict, and reporting no evidence beats citing whatever ranked first.
+// minDistinctiveTerms is the least a result set must be judged against. The
+// terms come from the planner; a plan without them (its fallback, or a model
+// that skipped the field) leaves the engine order standing rather than
+// judging every page on one word. Note this is the *only* abstain: once a
+// query is judgeable, rejecting every result is a real verdict, and reporting
+// no evidence beats citing whatever ranked first.
 const minDistinctiveTerms = 2
 
-// compoundPattern matches dotted or underscored identifiers — "sync.Mutex",
-// "http_client". These are the terms that actually discriminate a technical
-// page from an unrelated one, so they and their parts carry double weight.
-var compoundPattern = regexp.MustCompile(`[a-z0-9]+(?:[._][a-z0-9]+)+`)
-
-var wordPattern = regexp.MustCompile(`[a-z0-9]+`)
-
-// stopWords are too common to say anything about a page's subject.
-var stopWords = map[string]bool{
-	"the": true, "and": true, "for": true, "with": true, "from": true,
-	"this": true, "that": true, "when": true, "how": true, "why": true,
-	"use": true, "using": true, "are": true, "what": true, "which": true,
-	"its": true, "our": true, "your": true, "you": true, "can": true,
-	"not": true, "but": true, "between": true, "into": true, "than": true,
-	"there": true, "their": true, "does": true, "has": true, "have": true,
-	"about": true, "over": true, "under": true, "more": true, "most": true,
-	"some": true, "any": true, "all": true, "each": true, "other": true,
+// fold lower-cases s and strips its combining marks, so "energía" matches the
+// "Energia" a page title spelled without accents. It is the folding search
+// analyzers apply, and like theirs it runs on both sides of a match: a script
+// it alters (Japanese voiced kana lose their marks too) still matches itself.
+func fold(s string) string {
+	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+	if out, _, err := transform.String(t, strings.ToLower(s)); err == nil {
+		return out
+	}
+	return strings.ToLower(s)
 }
 
 // ScoredResult pairs a search result with its relevance to the query, so the
@@ -62,48 +64,62 @@ type ScoredResult struct {
 	Score float64
 }
 
-// queryTerms reduces a query to weighted terms. Compound identifiers and
-// their parts weigh double: a page mentioning "sync.RWMutex" is answering
-// this question, while one mentioning "practical" merely shares a word.
-func queryTerms(query string) map[string]float64 {
-	query = strings.ToLower(query)
-	terms := map[string]float64{}
-	for _, compound := range compoundPattern.FindAllString(query, -1) {
-		terms[compound] = 2
-		for _, part := range strings.FieldsFunc(compound, func(r rune) bool { return r == '.' || r == '_' }) {
-			if len(part) >= 3 && !stopWords[part] {
-				terms[part] = 2
-			}
-		}
-	}
-	for _, word := range wordPattern.FindAllString(query, -1) {
-		if len(word) >= 3 && !stopWords[word] && terms[word] == 0 {
-			terms[word] = 1
-		}
-	}
-	return terms
-}
-
-// relevance is the share of the query's weight that the result's title and
-// snippet account for. Substring matching is intentional: it costs nothing
-// and absorbs the morphology ("mutexes", "read-heavy") that exact word
-// matching would miss.
-func relevance(terms map[string]float64, title, snippet string) float64 {
-	total := 0.0
-	for _, w := range terms {
-		total += w
-	}
-	if total == 0 {
+// relevance is the share of the terms that the result's title and snippet
+// mention. Substring matching is intentional: it costs nothing, absorbs
+// morphology ("mutexes", "read-heavy") and needs no word boundaries, which
+// CJK text does not mark.
+func relevance(terms []string, title, snippet string) float64 {
+	if len(terms) == 0 {
 		return 1 // nothing to judge against: keep the result
 	}
-	text := strings.ToLower(title + " " + snippet)
-	matched := 0.0
-	for t, w := range terms {
-		if strings.Contains(text, t) {
-			matched += w
+	text := fold(title + " " + snippet)
+	matched := 0
+	for _, t := range terms {
+		if mentions(text, fold(t)) {
+			matched++
 		}
 	}
-	return matched / total
+	return float64(matched) / float64(len(terms))
+}
+
+// mentions reports whether folded text contains the folded term. A phrase
+// counts when every one of its words does, in any order — a search engine's
+// AND query: planners write "ventajas energía nuclear" and pages say
+// "ventajas de la energía nuclear". Requiring more words can only reject, so
+// a common one inside a phrase never admits a page.
+func mentions(text, term string) bool {
+	for _, w := range strings.Fields(term) {
+		if !containsWord(text, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// containsWord is a substring match that also lets a qualified identifier
+// count by its last segment: the planner writes "sync.RWMutex", and the
+// package's own documentation says "RWMutex.RLock". A segment under four
+// characters is too common to stand alone ("com", "js").
+func containsWord(text, w string) bool {
+	if strings.Contains(text, w) {
+		return true
+	}
+	i := strings.LastIndexAny(w, "._:/")
+	return i >= 0 && utf8.RuneCountInString(w[i+1:]) >= 4 && strings.Contains(text, w[i+1:])
+}
+
+// judgeable drops the terms substring matching cannot judge. Under three
+// bytes a term is one or two ASCII characters ("Go", "AI") or a single letter
+// of another alphabet, and it sits inside so many words ("good", "said") that
+// every page would mention it.
+func judgeable(terms []string) []string {
+	var out []string
+	for _, t := range terms {
+		if len(fold(t)) >= 3 {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // rankByRelevance orders results by how well they answer the query and splits
@@ -111,8 +127,8 @@ func relevance(terms map[string]float64, title, snippet string) float64 {
 // floor: the genuine sources are usually present but buried, so reordering
 // alone is what puts them inside the per-query budget. Ties keep the engines'
 // own order, which is still the best tiebreak available.
-func rankByRelevance(in []SearXNGResult, query string) (kept, skipped []ScoredResult) {
-	terms := queryTerms(query)
+func rankByRelevance(in []SearXNGResult, terms []string) (kept, skipped []ScoredResult) {
+	terms = judgeable(terms)
 	if len(terms) < minDistinctiveTerms {
 		for _, r := range in {
 			kept = append(kept, ScoredResult{SearXNGResult: r, Score: 1})

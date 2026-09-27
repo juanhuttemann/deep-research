@@ -408,7 +408,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		}
 		d.emit(Event{Type: Search, Query: q, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
 
-		det, err := d.Agent.ResearchDetail(ctx, q)
+		det, err := d.Agent.ResearchDetail(ctx, q, sub.Terms)
 		d.noteSearch(err)
 		if err != nil {
 			// A limiter or a challenge is a state of the run, so it travels on
@@ -572,34 +572,29 @@ const minFacetCols = 30
 
 // subQueries is the list of search queries a sub-agent issues.
 //
-// Planner sub-topic names are facets of the question ("Performance
-// Benchmarks"), not searchable questions in their own right, so every query is
-// anchored on the research question. Searching a bare facet returns results
-// with no connection to what was asked — "Training Data and Methodology"
-// retrieves generic articles about training data, never the model under study.
+// The planner's own query goes first: it names the subject in keywords and in
+// the question's language. Queries assembled from prose did neither — the
+// user's sentence with an English facet glued on, clipped to the length cap —
+// and on a non-English question that cut the subject off and mixed two
+// languages the engines could not detect, so whole runs found nothing.
 //
-// Notes is never searched as written: it is a full descriptive sentence, and
-// backends degrade badly on prose. What it contributes is the follow-up — a
-// few distilled terms, anchored on the question like the first query — issued
-// only if the first query leaves the branch's budget unspent.
+// The second query is the question anchored on the facet, and it is a
+// fallback, not a second search: runSubAgent stops issuing queries as soon as
+// the branch has taken its share of sources. It is also the only query when
+// the planner wrote none (its fallback plan, or a model that skipped the
+// field). Planner sub-topic names are facets of the question ("Performance
+// Benchmarks"), not searchable on their own — "Training Data and Methodology"
+// retrieves generic articles about training data, never the model under study
+// — which is why the facet is always anchored on the question.
 func subQueries(question string, sub agent.SubTopic) []string {
-	primary := anchoredQuery(question, sub.Name)
-	if primary == "" {
-		return nil
+	var out []string
+	if q := clipWords(sub.Query, maxQueryLen); q != "" {
+		out = append(out, q)
 	}
-	// The second query is a re-formulation, not a second search: runSubAgent
-	// stops issuing queries as soon as the branch has taken its share of
-	// sources, so this one runs only when the first came back short. Without
-	// it a sub-agent that found nothing simply reported nothing, and the
-	// planner's own description of what to look for was never searched at all.
-	facet := notesFacet(sub.Notes, question+" "+sub.Name)
-	if facet == "" {
-		return []string{primary}
+	if q := anchoredQuery(question, sub.Name); q != "" && (len(out) == 0 || !strings.EqualFold(q, out[0])) {
+		out = append(out, q)
 	}
-	if alt := anchoredQuery(question, facet); alt != "" && alt != primary {
-		return []string{primary, alt}
-	}
-	return []string{primary}
+	return out
 }
 
 // anchoredQuery joins the research question to one facet, trimmed to the
@@ -640,63 +635,6 @@ func clipWords(s string, width int) string {
 	}
 	return strings.TrimSpace(cut)
 }
-
-// maxNotesTerms bounds the re-formulation: a handful of distinctive words
-// from the planner's note, not the prose sentence it wrote. Backends degrade
-// badly on prose, which is why Notes is never searched verbatim.
-const maxNotesTerms = 4
-
-// queryStopWords are the connective and instructional words a planner note is
-// mostly made of ("investigate the current state of…"). Searching them adds
-// nothing and crowds out the terms that actually narrow the query.
-var queryStopWords = map[string]bool{
-	"about": true, "accepted": true, "account": true, "across": true, "added": true,
-	"analysis": true, "aspects": true, "assess": true, "available": true,
-	"been": true, "both": true, "compare": true, "covering": true, "current": true,
-	"detailed": true, "findings": true, "focus": true, "general": true,
-	"overview": true, "primary": true, "relevant": true, "specific": true,
-	"topic": true, "topics": true,
-	"describe": true, "detail": true, "determine": true, "different": true,
-	"documented": true, "evaluate": true, "examine": true, "explore": true,
-	"from": true, "have": true, "identify": true, "include": true, "including": true,
-	"information": true, "investigate": true, "into": true, "its": true, "look": true,
-	"more": true, "most": true, "over": true, "provide": true, "recent": true,
-	"related": true, "research": true, "review": true, "should": true, "such": true,
-	"that": true, "their": true, "them": true, "these": true, "they": true,
-	"this": true, "those": true, "understand": true, "used": true, "using": true,
-	"various": true, "what": true, "when": true, "where": true, "which": true,
-	"while": true, "with": true, "within": true, "your": true,
-}
-
-// notesFacet distils a planner note into a short list of distinctive terms.
-// Words already in the question or the sub-topic name are dropped: repeating
-// them would re-issue the query that already came back short. Fewer than two
-// terms is not a different query, so it yields nothing.
-func notesFacet(notes, exclude string) string {
-	seen := map[string]bool{}
-	for _, w := range strings.Fields(strings.ToLower(exclude)) {
-		seen[trimTerm(w)] = true
-	}
-	var terms []string
-	for _, w := range strings.Fields(strings.ToLower(notes)) {
-		w = trimTerm(w)
-		if len([]rune(w)) < 4 || queryStopWords[w] || seen[w] {
-			continue
-		}
-		seen[w] = true
-		terms = append(terms, w)
-		if len(terms) == maxNotesTerms {
-			break
-		}
-	}
-	if len(terms) < 2 {
-		return ""
-	}
-	return strings.Join(terms, " ")
-}
-
-// trimTerm strips the punctuation a word carries inside a sentence.
-func trimTerm(w string) string { return strings.Trim(w, ".,;:!?()[]\"'`—–-") }
 
 // queryPrefix keeps complete runes within a display-column budget, without
 // adding the ellipsis intended for UI labels.
