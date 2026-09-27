@@ -661,6 +661,31 @@ func TestDailyFreeModelLimitFailsFast(t *testing.T) {
 	}
 }
 
+// An expired key was retried like a blip: the planner sat through 4m and 8m
+// deadlines before reporting a 401 that no retry could fix.
+func TestRejectedKeyFailsFast(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":{"message":"API key expired.","code":401}}`)
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+		ModelCallTimeout: 5 * time.Second, ModelCallRetries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Summarize(context.Background(), "p")
+	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") || !strings.Contains(err.Error(), "API key expired") {
+		t.Errorf("err = %v, want the key named and the provider's reason kept", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("%d requests with a rejected key, want 1", n)
+	}
+}
+
 // A per-minute 429 says when to come back. Retrying after the fixed half
 // second instead hit the same limit again and spent the retry.
 func TestRateLimitRetryWaitsForRetryAfter(t *testing.T) {

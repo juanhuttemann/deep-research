@@ -71,7 +71,7 @@ the API key in `.env`, not in the config file.
 | --- | ------- | ------- |
 | `data_file` | `~/.deep-research/research.jsonl` | append-only run history |
 | `model_call_timeout` | `120s` | one attempt at one model call |
-| `model_call_retries` | `2` | extra attempts for a failed call; each retry doubles that timeout |
+| `model_call_retries` | `2` | extra attempts for a failed call; each retry doubles that timeout. A rejected key (401) is not retried |
 | `run_timeout` | `30m` | the whole run, including search and scraping |
 | `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works |
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |

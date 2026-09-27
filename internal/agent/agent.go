@@ -406,6 +406,12 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 			return "", fmt.Errorf("the provider's daily request limit for %s is reached; it resets at 00:00 UTC"+
 				" — add credits or set OPENAI_MODEL to a paid model: %w", a.model, err)
 		}
+		// An expired or revoked key stays rejected; retrying it sat through
+		// every doubled deadline — minutes — before reporting a certain 401.
+		if apiErr := (*openai.Error)(nil); errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
+			return "", fmt.Errorf("the provider rejected the API key — set a valid OPENAI_API_KEY"+
+				" (free keys: https://openrouter.ai/keys): %w", err)
+		}
 		// The caller gave up (reader cancelled, or the whole run timed out):
 		// retrying would only stall a run nobody is waiting for.
 		if attempt >= a.retries || ctx.Err() != nil {

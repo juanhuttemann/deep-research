@@ -30,6 +30,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   assistant researched nothing, so a run with it only exercised the CLI;
   a stray `offline: true` in a config file now does nothing.
 
+### Fixed
+
+- A rejected API key (401, e.g. an expired OpenRouter key) fails at once
+  with a message naming `OPENAI_API_KEY`, where it used to retry through
+  minutes of doubled deadlines before failing with the raw response.
+
 ## [0.2.0] - 2026-09-25
 
 Two defaults change what an existing setup does: a run with no API key now
