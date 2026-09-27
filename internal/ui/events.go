@@ -39,6 +39,13 @@ const (
 	Info EventType = "info"
 	// Error surfaces a fatal or non-fatal failure.
 	Error EventType = "error"
+	// Done is the last line of every --jsonl run, sent once the report files
+	// and the history record are written. Status is complete, incomplete,
+	// failed or cancelled; Detail is the error; Artifacts are the files. A
+	// caller watching the stream learns the outcome from it instead of
+	// scraping stderr or guessing filenames, and a stream that ends without
+	// one means the process was killed.
+	Done EventType = "done"
 )
 
 // Event is a single, self-describing signal emitted by the driver. Every
@@ -80,6 +87,8 @@ type Event struct {
 	// adding to the history. The live frame shows only the latest; JSONL and
 	// the exported timeline keep every one.
 	Transient bool `json:"transient,omitempty"`
+	// Artifacts are the report files a finished run wrote (Done only).
+	Artifacts []string `json:"artifacts,omitempty"`
 }
 
 func (e Event) withTime() Event {

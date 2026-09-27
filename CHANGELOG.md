@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `--jsonl` runs end on one `done` event, written after the report files:
+  `status` (`complete`, `incomplete`, `failed`, `cancelled`), the error in
+  `detail`, and the files written in `artifacts`. A calling program no
+  longer has to guess report filenames or read fatal errors off stderr.
+  See "Driving it from another program" in `docs/usage.md`.
+- `make e2e` runs the built binary against the real provider and search. It
+  is not part of `make verify`.
+
 ### Changed
 
 - A question is asked with `deep-research -p "question"`; the `run`
@@ -32,6 +42,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- `--jsonl` carried none of the assistant's progress: no retries, none of the
+  streamed status lines, and nothing at all while planning. A slow model call
+  and a hung process looked the same on the stream. They now arrive as
+  `info` events, the status lines marked `transient`.
 - A rejected API key (401, e.g. an expired OpenRouter key) fails at once
   with a message naming `OPENAI_API_KEY`, where it used to retry through
   minutes of doubled deadlines before failing with the raw response.

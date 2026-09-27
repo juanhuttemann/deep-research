@@ -21,7 +21,13 @@ make build                  # stamps the version into the deep-research binary
 make test                   # go test -race ./...
 go test -race ./internal/ui # a single package
 make lint                   # fmt vet cyclo ineffassign golangci deadcode
+make e2e                    # the built binary against the real provider and search
 ```
+
+`make e2e` is not part of the gate: it spends about four model requests and
+depends on public search. It reads `OPENAI_API_KEY` from the environment
+(never put a key in a committed file); without one only the rejected-key
+test runs.
 
 `.github/workflows/ci.yml` runs the same checks on every push and pull
 request, plus two things `make verify` cannot do locally: it cross-compiles

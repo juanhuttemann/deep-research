@@ -1513,3 +1513,72 @@ func TestBriefSaysKeysTypedDuringPlanningWereIgnored(t *testing.T) {
 		t.Errorf("brief does not mention the ignored key:\n%s", buf.String())
 	}
 }
+
+// ---- --jsonl progress -----------------------------------------------------
+
+// Under --jsonl the assistant's progress went nowhere: the CLI silenced its
+// stderr logger and ui.Run routed it into events only for the live UI. The
+// plan call, every retry and a stalled stream left the stream silent, so a
+// caller watching it could not tell a slow run from a hung one.
+func TestJSONLCarriesPlanningProgress(t *testing.T) {
+	fa := &progressDuringPlan{fakeAssistant: &fakeAssistant{}, msg: "asking test-model for sub-topics"}
+	var stdout bytes.Buffer
+	if _, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "quick",
+		JSONL: true, OutDir: t.TempDir(), Stdout: &stdout, Stderr: io.Discard}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	ev, ok := findEvent(t, stdout.String(), func(e Event) bool { return e.Type == Info && e.Detail == fa.msg })
+	if !ok {
+		t.Fatalf("planning progress missing from the stream:\n%s", stdout.String())
+	}
+	if ev.Phase != "Plan" {
+		t.Errorf("planning progress filed under %q, want Plan", ev.Phase)
+	}
+}
+
+// statusDuringSummarize reports streamed-phase status from inside Summarize,
+// the way the real assistant does while the report streams in.
+type statusDuringSummarize struct {
+	*fakeAssistant
+	status func(string)
+}
+
+func (s *statusDuringSummarize) SetStatus(f func(string)) { s.status = f }
+
+func (s *statusDuringSummarize) Summarize(ctx context.Context, prompt string) (*agent.Summary, error) {
+	if s.status != nil {
+		s.status("writing the report — 120 words")
+	}
+	return s.fakeAssistant.Summarize(ctx, prompt)
+}
+
+func TestJSONLCarriesStreamStatus(t *testing.T) {
+	fa := &statusDuringSummarize{fakeAssistant: &fakeAssistant{}}
+	var stdout bytes.Buffer
+	if _, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "quick",
+		JSONL: true, OutDir: t.TempDir(), Stdout: &stdout, Stderr: io.Discard}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	ev, ok := findEvent(t, stdout.String(), func(e Event) bool { return e.Type == Info && e.Transient })
+	if !ok {
+		t.Fatalf("stream status missing from the stream:\n%s", stdout.String())
+	}
+	if ev.Phase != "Summarize" || !strings.Contains(ev.Detail, "120 words") {
+		t.Errorf("status event = %+v, want the Summarize status line", ev)
+	}
+}
+
+// findEvent decodes a JSONL stream and returns the first event match accepts.
+func findEvent(t *testing.T, stream string, match func(Event) bool) (Event, bool) {
+	t.Helper()
+	for _, ln := range strings.Split(strings.TrimSpace(stream), "\n") {
+		var ev Event
+		if err := json.Unmarshal([]byte(ln), &ev); err != nil {
+			t.Fatalf("stream line is not an event: %q: %v", ln, err)
+		}
+		if match(ev) {
+			return ev, true
+		}
+	}
+	return Event{}, false
+}

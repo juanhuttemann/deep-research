@@ -38,12 +38,11 @@ func New(load func() (Deps, error)) *cobra.Command {
 		if !cmd.Flags().Changed("prompt") {
 			return cmd.Help()
 		}
-		question, _ := cmd.Flags().GetString("prompt")
-		d, err := load()
-		if err != nil {
-			return err
+		res, err := research(cmd, load)
+		if jsonl, _ := cmd.Flags().GetBool("jsonl"); jsonl {
+			ui.JSONL{W: cmd.OutOrStdout()}.Emit(doneEvent(res, err))
 		}
-		return runResearch(cmd, d, question)
+		return err
 	}
 	root.Flags().StringP("prompt", "p", "", "the question to research")
 	root.Flags().StringP("output", "o", "", "write report to file")
@@ -175,22 +174,53 @@ func runDeadline(d Deps) time.Duration {
 	return 30 * time.Minute
 }
 
-func runResearch(cmd *cobra.Command, d Deps, question string) error {
+// research loads the config and runs the question. It is split from RunE so
+// every way a run can end, a config that does not load included, reaches the
+// done event.
+func research(cmd *cobra.Command, load func() (Deps, error)) (ui.RunResult, error) {
+	question, _ := cmd.Flags().GetString("prompt")
+	d, err := load()
+	if err != nil {
+		return ui.RunResult{}, err
+	}
+	return runResearch(cmd, d, question)
+}
+
+// doneEvent is the last line of a --jsonl run: how it ended and the files it
+// wrote. An incomplete run also returns an error, so it is told apart from a
+// failed one by the report it still delivered.
+func doneEvent(res ui.RunResult, err error) ui.Event {
+	e := ui.Event{Type: ui.Done, Time: time.Now(), Status: "complete", Artifacts: res.Paths()}
+	switch {
+	case res.Report != nil && res.Report.Error != "":
+		e.Status = "incomplete"
+	case err != nil:
+		e.Status = "failed"
+	case res.Cancelled:
+		e.Status = "cancelled"
+	}
+	if err != nil {
+		e.Detail = err.Error()
+	}
+	return e
+}
+
+func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, error) {
 	// An empty question plans nothing, and the run would still spend its
 	// model calls writing a report about nothing.
 	if strings.TrimSpace(question) == "" {
-		return errors.New("the question is empty")
+		return ui.RunResult{}, errors.New("the question is empty")
 	}
 	// A misspelt tier used to fall through to standard without a word, so
 	// "--mode deeep" ran a study the reader never asked for. Checked before
 	// the assistant, so a typo is reported before a missing key.
 	mode, _ := cmd.Flags().GetString("mode")
 	if _, err := ui.ParseDepthMode(mode); err != nil {
-		return err
+		return ui.RunResult{}, err
 	}
 	assistant, err := pickAssistant(d)
 	if err != nil {
-		return err
+		return ui.RunResult{}, err
 	}
 
 	silent, _ := cmd.Flags().GetBool("silent")
@@ -201,8 +231,8 @@ func runResearch(cmd *cobra.Command, d Deps, question string) error {
 
 	// The agent's own progress lines are the fallback log for a plain pipe.
 	// They are suppressed everywhere else: they would tear the live UI's
-	// in-place repaint, duplicate the driver's events in --jsonl, and defeat
-	// the point of --silent.
+	// in-place repaint and defeat the point of --silent, and the UI and
+	// --jsonl get them as events from ui.Run instead.
 	if drawsUI(cmd, silent, jsonl) || silent || jsonl {
 		assistant.SetProgress(func(string) {})
 	} else {
@@ -232,11 +262,11 @@ func runResearch(cmd *cobra.Command, d Deps, question string) error {
 		Stderr:          cmd.ErrOrStderr(),
 	})
 	if err != nil {
-		return fmt.Errorf("research failed: %w", err)
+		return res, fmt.Errorf("research failed: %w", err)
 	}
 	if res.Cancelled {
 		fmt.Fprintln(cmd.ErrOrStderr(), "cancelled")
-		return nil
+		return res, nil
 	}
 	result := res.Report
 	if len(result.Findings) == 0 {
@@ -246,14 +276,14 @@ func runResearch(cmd *cobra.Command, d Deps, question string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not save result: %v\n", err)
 	}
 	if err := printResult(cmd, result, silent || jsonl); err != nil {
-		return err
+		return res, err
 	}
 	// The partial run is saved and printed, but it did not finish: scripts
 	// deciding on the exit status must not read it as a complete report.
 	if result.Error != "" {
-		return fmt.Errorf("research incomplete (the partial report was saved): %s", result.Error)
+		return res, fmt.Errorf("research incomplete (the partial report was saved): %s", result.Error)
 	}
-	return nil
+	return res, nil
 }
 
 // drawsUI reports whether ui.Run will paint the live terminal UI, which it

@@ -21,6 +21,8 @@ reported and skipped, not a build failure; `make tools` installs all four.
 
 Other targets: `make test`, `make build`, `make lint`,
 `go test -race ./internal/ui/` for one package.
+`make e2e` runs the built binary against the real provider (spends model
+requests, needs `OPENAI_API_KEY` in the environment; not part of the gate).
 `./deep-research -p "question"` to exercise the CLI (needs an API key).
 
 `make verify` does not cross-compile. CI does

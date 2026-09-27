@@ -1,10 +1,17 @@
-.PHONY: test build run fmt vet cyclo ineffassign golangci deadcode lint verify tools
+.PHONY: test e2e build run fmt vet cyclo ineffassign golangci deadcode lint verify tools
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
 # race the shipped verify target used to miss entirely.
 test:
 	go test -race ./...
+
+# The e2e suite runs the built binary against the real provider and search.
+# It is not part of verify: a run spends about four model requests, which
+# free models cap per day, and public SearXNG can refuse it on any given day.
+# Needs OPENAI_API_KEY; without one only the rejected-key test runs.
+e2e:
+	go test -tags e2e -count=1 -timeout 15m -v ./cmd/deep-research/
 
 # VERSION is stamped into the binary so --version reports the build rather
 # than the hardcoded "dev" it used to print for every release.

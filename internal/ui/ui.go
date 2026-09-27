@@ -50,14 +50,21 @@ type RunResult struct {
 	Cancelled bool
 }
 
+// Paths lists the artifacts that were actually written; a failed write left
+// its path empty.
+func (r RunResult) Paths() []string {
+	var paths []string
+	for _, p := range []string{r.MDPath, r.PDFPath, r.JSONPath} {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 // Run executes the full interactive (or headless) research experience.
 func Run(ctx context.Context, opts Options) (RunResult, error) {
 	o := opts.withDefaults()
-
-	plan, err := o.buildPlan(ctx)
-	if err != nil {
-		return RunResult{}, err
-	}
 
 	renderer := NewRenderer(o.Stdout, Theme{Enabled: !o.NoColor && isTTYWriter(o.Stdout)})
 	// The renderer hides the cursor and runs an animation goroutine while the
@@ -67,6 +74,17 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 
 	interactive := isTTYReader(o.Input) && isTTYWriter(o.Stdout) && !o.Quiet && !o.JSONL
 	sink := o.buildSink(renderer, interactive)
+	// Planning runs before the driver exists, and under --jsonl nothing else
+	// is on the stream while it does: a slow or retried plan call looked
+	// exactly like a hung process to whatever was watching.
+	if o.JSONL {
+		wireProgress(o.Assistant, func(e Event) { e.Phase = "Plan"; sink.Emit(e) })
+	}
+
+	plan, err := o.buildPlan(ctx)
+	if err != nil {
+		return RunResult{}, err
+	}
 
 	res := RunResult{}
 
@@ -84,17 +102,12 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	driver := NewDriver(o.Assistant, sink, input, o.Parallelism)
 	driver.now = o.Now
 	driver.detached = o.Detach
-	if interactive {
+	if interactive || o.JSONL {
 		// A retried model call is the assistant's own progress line. Without
-		// routing it into the activity feed, a retry that takes minutes looks
-		// like a frozen spinner. Non-interactive runs keep the stderr logger
-		// the CLI installed.
-		o.Assistant.SetProgress(func(msg string) { driver.emit(Event{Type: Info, Detail: msg}) })
-		// Streamed-phase progress is status: one row replaced in place, not
-		// an activity line every five seconds.
-		if s, ok := o.Assistant.(interface{ SetStatus(func(string)) }); ok {
-			s.SetStatus(func(msg string) { driver.emit(Event{Type: Info, Detail: msg, Transient: true}) })
-		}
+		// routing it into the events, a retry that takes minutes looks like a
+		// frozen spinner on the frame and like silence on the stream. Other
+		// non-interactive runs keep the stderr logger the CLI installed.
+		wireProgress(o.Assistant, driver.emit)
 	}
 
 	result, err := driver.Run(ctx, plan)
@@ -184,22 +197,27 @@ func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive 
 	return plan, action == actionCancel
 }
 
-// buildSink fans events to the machine stream, the live UI, or both.
+// buildSink sends events to the machine stream or the live UI. --jsonl never
+// draws the UI (interactive excludes it), so the stream always owns stdout.
 func (o Options) buildSink(renderer *Renderer, interactive bool) *MultiSink {
 	var sinks []Sink
 	if o.JSONL {
-		// The machine stream takes stdout unless a TUI is also drawing, in
-		// which case the TUI keeps stdout and the JSONL goes to stderr.
-		to := o.Stderr
-		if !interactive {
-			to = o.Stdout
-		}
-		sinks = append(sinks, JSONL{W: to})
+		sinks = append(sinks, JSONL{W: o.Stdout})
 	}
 	if interactive {
 		sinks = append(sinks, renderer)
 	}
 	return &MultiSink{Sinks: sinks}
+}
+
+// wireProgress routes the assistant's progress into events: which model is
+// asked and each retry as Info, streamed-phase status as transient Info — one
+// row replaced in place on the frame, not an activity line every five seconds.
+func wireProgress(a agent.Assistant, emit func(Event)) {
+	a.SetProgress(func(msg string) { emit(Event{Type: Info, Detail: msg}) })
+	if s, ok := a.(interface{ SetStatus(func(string)) }); ok {
+		s.SetStatus(func(msg string) { emit(Event{Type: Info, Detail: msg, Transient: true}) })
+	}
 }
 
 // openInput returns the single Input used for both the brief and the run.
@@ -444,12 +462,7 @@ func notify(msg string) {
 // "Saved to" header unconditionally told the reader their report had been
 // saved even when every write had failed and the list below it was empty.
 func reportFiles(w io.Writer, dir string, res RunResult) {
-	paths := make([]string, 0, 3)
-	for _, p := range []string{res.MDPath, res.PDFPath, res.JSONPath} {
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
+	paths := res.Paths()
 	if len(paths) == 0 {
 		_, _ = fmt.Fprintf(w, "\nno report files were written (see the warnings above)\n")
 		return

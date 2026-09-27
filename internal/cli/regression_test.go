@@ -299,3 +299,55 @@ func TestInitDockerSaysWhatToRun(t *testing.T) {
 		}
 	}
 }
+
+// A --jsonl caller had no line saying the run was over or where its report
+// was: the report event came before the files were written and named none,
+// and a fatal error reached only stderr. Every run now ends on one done line.
+func TestJSONLEndsOnDone(t *testing.T) {
+	dir := t.TempDir()
+	deps := Deps{
+		Assistant: always(stub{}),
+		Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
+			Config: agent.Config{ModelCallTimeout: time.Second}},
+	}
+	cases := []struct {
+		name, question, status, detail string
+		files                          int
+	}{
+		{"complete", "q", "complete", "", 3},
+		{"failed", "  ", "failed", "empty", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := New(func() (Deps, error) { return deps, nil })
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			cmd.SetIn(strings.NewReader(""))
+			cmd.SetArgs([]string{"-p", tc.question, "--jsonl", "--reports", t.TempDir()})
+			err := cmd.Execute()
+			if (err != nil) != (tc.status != "complete") {
+				t.Errorf("err = %v for a %s run", err, tc.status)
+			}
+			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+			var done struct {
+				Type, Status, Detail string
+				Artifacts            []string
+			}
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &done); err != nil {
+				t.Fatalf("last line is not an event: %q", lines[len(lines)-1])
+			}
+			if done.Type != "done" || done.Status != tc.status || !strings.Contains(done.Detail, tc.detail) {
+				t.Errorf("last event = %+v, want done/%s mentioning %q", done, tc.status, tc.detail)
+			}
+			if len(done.Artifacts) != tc.files {
+				t.Errorf("artifacts = %v, want %d", done.Artifacts, tc.files)
+			}
+			for _, p := range done.Artifacts {
+				if _, err := os.Stat(p); err != nil {
+					t.Errorf("done names a file that is not there: %v", err)
+				}
+			}
+		})
+	}
+}

@@ -48,6 +48,7 @@ claims for the fact-check, words for the report — with the change since the
 last line, and "no new text for Ns" once the stream stops growing. These
 lines are not added to the activity tail, so they cannot push the source
 lines out of it; `--jsonl` still carries every one (`"transient": true`).
+See [Driving it from another program](#driving-it-from-another-program).
 
 ### Examples
 
@@ -61,6 +62,37 @@ deep-research -p "question" --mode deep
 # Feed another program or agent
 deep-research -p "question" --jsonl
 ```
+
+## Driving it from another program
+
+`--jsonl` is the integration surface: one JSON event per line on stdout,
+nothing else on stdout, warnings on stderr.
+
+```bash
+dir=$(mktemp -d)
+deep-research -p "question" --jsonl --reports "$dir" > "$dir/events.jsonl"
+tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
+```
+
+- **Every run ends on one `done` line**, written after the report files and
+  the history record: `status` is `complete`, `incomplete` (a late phase
+  failed; the partial report was saved), `failed` or `cancelled`, `detail`
+  is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote.
+  Validation errors (an empty question, a bad `--mode`, no key) end on it
+  too. A stream that stops without one means the process was killed.
+- **Silence means stuck.** While a model call runs, a `transient` `info` line
+  arrives at least every five seconds — waiting for the first token, the
+  count so far, or "no new text for Ns". Retries and which model is asked
+  are `info` lines too, planning included.
+- The exit status is non-zero for `incomplete` and `failed`.
+- Use a fresh `--reports` directory per run: artifact names come from the
+  question, so the same question asked twice into one directory overwrites
+  the first run's files.
+
+The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
+`citation`, `token`, `report`, `detach` and `error`; their fields are the
+`Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
+structured result: analysis, fact-check, sources and the whole timeline.
 
 ## `list`
 
