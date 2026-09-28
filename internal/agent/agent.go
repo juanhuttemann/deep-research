@@ -123,9 +123,11 @@ type Recommendation struct {
 	When   string   `json:"when"`
 	Claims []string `json:"claims,omitempty"`
 	// Blocked says why the recommendation was not approved: a claim it names
-	// did not pass the fact-check. It is kept for audit and never reaches the
-	// report's answer.
-	Blocked string `json:"blocked,omitempty"`
+	// did not pass the fact-check, or the check found it does not follow from
+	// them. It is kept for audit and shown in the answer only as not
+	// established. Failed are the IDs of the claims that did not pass.
+	Blocked string   `json:"blocked,omitempty"`
+	Failed  []string `json:"failed,omitempty"`
 }
 
 // Conflict is a disagreement between claims and how the analysis resolved
@@ -154,6 +156,17 @@ type FactCheckResult struct {
 	// decide which recommendations stand, and are kept as the checker gave
 	// them so an audit can compare them with what the run concluded.
 	Verdicts []Verdict `json:"verdicts,omitempty"`
+	// Inferences are the checker's judgement of each recommendation (r1,
+	// r2, ... in the analysis's order): whether the claims it names justify
+	// it as written. Supported premises do not make a conclusion follow.
+	Inferences []Inference `json:"inferences,omitempty"`
+}
+
+// Inference is whether a recommendation follows from the claims it names.
+type Inference struct {
+	ID      string `json:"id"`
+	Follows bool   `json:"follows"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // Verdict is the fact-checker's judgement of one claim. Claim is the claim's
@@ -1353,7 +1366,28 @@ func parseFactCheck(out string) *FactCheckResult {
 		Unverified:     parseUnverified(m["unverified"]),
 		Contradictions: parseContradictions(m["contradictions"]),
 		Verdicts:       parseVerdicts(m["verdicts"]),
+		Inferences:     parseInferences(m["recommendations"]),
 	}
+}
+
+// parseInferences reads the checker's recommendation judgements. "follows"
+// counts only when it is plainly yes: a model that answers "partly" or
+// leaves it out has not found that the recommendation follows.
+func parseInferences(v any) []Inference {
+	var out []Inference
+	for _, m := range objects(v) {
+		inf := Inference{ID: scalar(m["id"]), Reason: getString(m, "reason", "")}
+		switch f := m["follows"].(type) {
+		case bool:
+			inf.Follows = f
+		case string:
+			inf.Follows = strings.EqualFold(f, "true") || strings.EqualFold(f, "yes")
+		}
+		if inf.ID != "" {
+			out = append(out, inf)
+		}
+	}
+	return out
 }
 
 func parseVerdicts(v any) []Verdict {

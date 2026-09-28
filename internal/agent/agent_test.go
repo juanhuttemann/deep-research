@@ -471,3 +471,19 @@ func TestCallGivesUpAfterItsRetries(t *testing.T) {
 		t.Errorf("want 1 attempt + 1 retry = 2 calls, got %d", n)
 	}
 }
+
+// "follows" counts only when plainly yes: a "partly" or a missing value is
+// not a finding that the recommendation follows.
+func TestParseInferences(t *testing.T) {
+	fc := parseFactCheck(`{"verdicts":[],"recommendations":[
+		{"id":"r1","follows":true},{"id":"r2","follows":"yes"},{"id":3,"follows":"partly"},{"id":"r4"}]}`)
+	want := map[string]bool{"r1": true, "r2": true, "3": false, "r4": false}
+	if len(fc.Inferences) != 4 {
+		t.Fatalf("inferences = %+v", fc.Inferences)
+	}
+	for _, inf := range fc.Inferences {
+		if inf.Follows != want[inf.ID] {
+			t.Errorf("%s follows = %v, want %v", inf.ID, inf.Follows, want[inf.ID])
+		}
+	}
+}

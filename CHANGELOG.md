@@ -49,8 +49,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   conclusions; it used to say only that no recommendation passed.
 - The fact-check governs the report. It returns one verdict per claim ID,
   and code holds the answer to them: a recommendation is approved only when
-  every claim it names is supported, and one whose deciding claim failed
-  no longer stands on an incidental claim that passed. A verdict for a
+  every claim it names is supported and the check judges that it follows
+  from them (supported premises do not make a conclusion follow), and one
+  whose deciding claim failed no longer stands on an incidental claim that
+  passed. The answer names each recommendation that was not approved as
+  not established, with the claim that failed, so a two-option question
+  answered for one option no longer reads as a win for it. A verdict for a
   claim ID the analysis does not have, a missing or duplicated verdict, or
   a "supported" verdict with any quote that is not in the cited page
   counts as insufficient. Quotes are matched through what text extraction
@@ -63,7 +67,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   nothing, and neither does an analysis whose recommendations name no
   claim. The report's answer section is written from the approved
   recommendations in the analyzer's own words, or says that none passed;
-  an answer section the summarizer writes anyway is dropped. The
+  an answer section the summarizer writes anyway, or a paragraph above its
+  first heading restating the answer, is dropped. The
   summarizer no longer sees the analyzer's unchecked answer prose, nor
   does the fallback report written when the summary fails.
 - The analysis returns a decision: how it reads the question, atomic claims

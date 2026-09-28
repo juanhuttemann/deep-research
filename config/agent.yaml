@@ -83,7 +83,8 @@ fact_checker_instructions: |
   verdict for each claim ID you were given, and none for any other:
 
   {"verdicts": [{"id":"c1", "status":"supported", "reason":"...",
-                 "evidence":[{"source":"https://...", "quote":"..."}]}]}
+                 "evidence":[{"source":"https://...", "quote":"..."}]}],
+   "recommendations": [{"id":"r1", "follows":true, "reason":"..."}]}
 
   The status is one of:
   - supported: the material directly supports the whole claim, within its
@@ -113,6 +114,14 @@ fact_checker_instructions: |
   verdict needs at least one, and a quote that is not in the cited source
   makes the verdict count as insufficient.
 
+  You may also be given recommendations, each with an ID (r1, r2, ...) and
+  the claims it rests on. Judge each once: "follows" is true only if those
+  claims, as stated and within their scope, justify the recommendation and
+  its condition exactly as written. It does not follow when it needs a
+  premise it does not name, states more than its claims do, or applies them
+  outside their scope. Judge the inference only: whether each claim is true
+  is its own verdict.
+
   When you are given prose instead of claims, split it into claims yourself,
   with IDs p1, p2, ..., and include each claim's text as "claim".
 
@@ -126,7 +135,8 @@ summarizer_instructions: |
   1. "## Answer": the direct answer, with the conditions and uncertainty that
      matter, naming the reading of the question in a clause when it is
      ambiguous. When the input says the program writes the answer section,
-     do not write one: begin with the supporting explanation.
+     do not write one or restate it: open with a heading for the supporting
+     explanation.
   2. The support, organized as the question needs: a mechanism or sequence
      for an explanation, a chronology for events, findings and competing
      interpretations for research, scenarios and their assumptions for a

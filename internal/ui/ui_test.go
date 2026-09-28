@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1316,6 +1317,15 @@ func decisionFixture() ([]agent.Finding, *agent.Analysis) {
 	return findings, a
 }
 
+// follows judges each named recommendation to follow from its claims.
+func follows(ids ...string) []agent.Inference {
+	var out []agent.Inference
+	for _, id := range ids {
+		out = append(out, agent.Inference{ID: id, Follows: true})
+	}
+	return out
+}
+
 func verdict(id, status, source, quote string) agent.Verdict {
 	return agent.Verdict{ID: id, Status: status, Reason: "r", Evidence: []agent.Evidence{{Source: source, Quote: quote}}}
 }
@@ -1330,7 +1340,7 @@ func TestRecommendationStandsOnlyOnSupportedPremises(t *testing.T) {
 		verdict("c1", "supported", "https://p.example/pricing", "Serverless is billed per GB-hour of data stored."),
 		verdict("c2", "contradicted", "https://p.example/pricing", "save up to 55%"),
 		verdict("c3", "supported", "https://p.example/pricing", "Serverless has no minimum charge."),
-	}}
+	}, Inferences: follows("r1", "r2", "r3")}
 	govern(a, fc, nil, findings)
 	if ok := approvedRecommendations(a); len(ok) != 1 || ok[0].Choose != "Serverless" {
 		t.Fatalf("approved = %+v, want only the one resting on c1", ok)
@@ -1424,7 +1434,7 @@ func TestFailedSummaryDeliversTheCheckedDecision(t *testing.T) {
 	findings, a := decisionFixture()
 	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
-	}}
+	}, Inferences: follows("r1")}
 	govern(a, fc, nil, findings)
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
 	res, err := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, fc, "report writing failed", errors.New("500"))
@@ -1590,5 +1600,72 @@ func TestLocateThroughPDFAndWikiArtifacts(t *testing.T) {
 	// did not encode readably cannot vouch for one.
 	if locate("more than \uf653\uf644 billion", "more than 180 billion") {
 		t.Error("a number the page does not show was located")
+	}
+}
+
+// Supported premises do not make a recommendation follow: the check judges
+// the inference too, and a recommendation it does not find following, or
+// does not judge, is blocked.
+func TestRecommendationMustFollowFromItsClaims(t *testing.T) {
+	quote := "Serverless is billed per GB-hour of data stored."
+	for _, tc := range []struct {
+		name string
+		inf  []agent.Inference
+		want bool
+	}{
+		{"follows", follows("r1"), true},
+		{"does not follow", []agent.Inference{{ID: "r1", Follows: false, Reason: "billing says nothing about traffic"}}, false},
+		{"not judged", nil, false},
+		{"judged twice", append(follows("r1"), agent.Inference{ID: "r1", Follows: false}), false},
+	} {
+		findings, a := decisionFixture()
+		a.Recommendations = a.Recommendations[:1]
+		fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{verdict("c1", "supported", "1", quote)}, Inferences: tc.inf}
+		govern(a, fc, nil, findings)
+		if got := len(approvedRecommendations(a)) == 1; got != tc.want {
+			t.Errorf("%s: approved = %v (%s), want %v", tc.name, got, a.Recommendations[0].Blocked, tc.want)
+		}
+	}
+	findings, a := decisionFixture()
+	fc := &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "r9", Follows: true}}}
+	if unknown := govern(a, fc, nil, findings); !slices.Contains(unknown, "r9") {
+		t.Errorf("unknown = %v, want the invented recommendation r9", unknown)
+	}
+}
+
+// With one option approved and the other blocked, the answer read as a win
+// for the one; the other is now named as not established, with the claim
+// that failed.
+func TestAnswerNamesTheOptionsNotEstablished(t *testing.T) {
+	findings, a := decisionFixture()
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+		verdict("c2", "partial", "1", "save up to 55%"),
+	}, Inferences: follows("r1", "r2", "r3")}
+	govern(a, fc, nil, findings)
+	got := renderAnswer(a)
+	if !strings.Contains(got, "Not established in this run") ||
+		!strings.Contains(got, "- **Node-based**: traffic is steady (partial: \u201cReserved nodes save 90%\u201d)") {
+		t.Errorf("answer does not name the blocked option and its failed claim:\n%s", got)
+	}
+	govern(a, nil, errors.New("timeout"), findings)
+	if got := renderAnswer(a); strings.Contains(got, "Not established") {
+		t.Errorf("with no fact-check there is no per-option reason to give:\n%s", got)
+	}
+}
+
+// Told the program writes the answer, the summarizer still restated it in a
+// paragraph above its first heading.
+func TestRestatedAnswerAboveTheFirstHeadingIsDropped(t *testing.T) {
+	findings, a := decisionFixture()
+	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+	}, Inferences: follows("r1")}, nil, findings)
+	sum := withAnswer(&agent.Summary{Report: "Serverless is the pick for everyone.\n\n## How billing works\n\nx"}, a)
+	if strings.Contains(sum.Report, "pick for everyone") || !strings.Contains(sum.Report, "## How billing works") {
+		t.Errorf("report = %q, want the restatement dropped and the explanation kept", sum.Report)
+	}
+	if got := dropLeadingProse("no headings at all"); got != "no headings at all" {
+		t.Errorf("a report with no heading lost its text: %q", got)
 	}
 }

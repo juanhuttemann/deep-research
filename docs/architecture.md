@@ -47,8 +47,10 @@ and resolved conflicts. The Driver holds it to the run in code
   `supported` verdict must quote contiguous passages that `locate` finds, every
   one, in the cited pages' stored text, and with search off (no fetched page)
   nothing is supported. A recommendation is approved only when every
-  claim it names is supported, and is otherwise kept, `blocked`, for audit.
-  A fact-check that did not run approves nothing.
+  claim it names is supported and the fact-check judges (by its ID, r1,
+  r2, ...) that it follows from them; otherwise it is kept, `blocked`, for
+  audit, and the answer names it as not established with the claim that
+  failed. A fact-check that did not run approves nothing.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the

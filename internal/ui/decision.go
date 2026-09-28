@@ -105,22 +105,24 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	// on: they are blocked like any other that names no claim, and prose
 	// verdicts are held to the same quote check before the reports list them.
 	if len(a.Claims) == 0 {
-		blockRecommendations(a)
+		blockRecommendations(a, nil)
 		if fc != nil && len(fc.Verdicts) > 0 {
 			fillVerdictLists(fc, proseEntries(fc.Verdicts, findings, pages))
 		}
 		return nil
 	}
 	verdicts := map[string][]agent.Verdict{}
+	var inferences map[string][]agent.Inference
 	if fc != nil {
 		verdicts, unknown = verdictsByClaim(a, fc)
+		inferences = inferencesByRecommendation(a, fc, &unknown)
 	}
 	for i := range a.Claims {
 		if c := &a.Claims[i]; c.Status != statusUnsourced {
 			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, fcErr, findings, pages)
 		}
 	}
-	blockRecommendations(a)
+	blockRecommendations(a, inferences)
 	// Derived even when the checker answered in the older list shape: its
 	// lists say nothing about the claims by ID, and kept as they came they
 	// reported as confirmed a claim this pass had rejected.
@@ -281,8 +283,11 @@ func visibleText(s string) string {
 // blockRecommendations blocks every recommendation that names a claim that is
 // not supported, or names none: the claims it names are its premises, and a
 // recommendation standing on what is left after one of them failed is one
-// the evidence did not reach.
-func blockRecommendations(a *agent.Analysis) {
+// the evidence did not reach. One whose premises all passed is blocked too
+// unless the fact-check found it follows from them: supported claims do not
+// make a conclusion follow, and before this nothing checked that it did.
+// inferences is nil when there was no fact-check to judge them.
+func blockRecommendations(a *agent.Analysis, inferences map[string][]agent.Inference) {
 	byID := map[string]agent.Claim{}
 	for _, c := range a.Claims {
 		byID[c.ID] = c
@@ -293,18 +298,56 @@ func blockRecommendations(a *agent.Analysis) {
 			r.Blocked = "it names no claim to rest on"
 			continue
 		}
-		var failed []string
+		var reasons []string
+		r.Failed = nil
 		for _, id := range r.Claims {
 			c, ok := byID[id]
 			switch {
 			case !ok:
-				failed = append(failed, id+" is not a claim of the analysis")
+				reasons = append(reasons, id+" is not a claim of the analysis")
 			case c.Status != statusSupported:
-				failed = append(failed, id+" "+c.Status+": "+c.Note)
+				reasons = append(reasons, id+" "+c.Status+": "+c.Note)
+				r.Failed = append(r.Failed, id)
 			}
 		}
-		r.Blocked = strings.Join(failed, "; ")
+		if len(reasons) == 0 && inferences != nil {
+			reasons = inferenceFailure(inferences[recommendationID(i)])
+		}
+		r.Blocked = strings.Join(reasons, "; ")
 	}
+}
+
+// inferenceFailure is why a recommendation whose premises passed does not
+// stand on the checker's judgement of it, or nothing when it does.
+func inferenceFailure(vs []agent.Inference) []string {
+	switch {
+	case len(vs) == 0:
+		return []string{"the fact-check did not judge whether it follows from its claims"}
+	case len(vs) > 1:
+		return []string{"the fact-check judged it more than once"}
+	case !vs[0].Follows:
+		return []string{"it does not follow from its claims: " + vs[0].Reason}
+	}
+	return nil
+}
+
+// recommendationID is the ID the fact-check knows a recommendation by: its
+// place in the analysis, since the analyzer gives recommendations none.
+func recommendationID(i int) string { return "r" + strconv.Itoa(i+1) }
+
+// inferencesByRecommendation groups the checker's recommendation judgements
+// by ID, adding to unknown the IDs that are not a recommendation's.
+func inferencesByRecommendation(a *agent.Analysis, fc *agent.FactCheckResult, unknown *[]string) map[string][]agent.Inference {
+	by := map[string][]agent.Inference{}
+	for _, inf := range fc.Inferences {
+		n, err := strconv.Atoi(strings.TrimPrefix(inf.ID, "r"))
+		if err != nil || n < 1 || n > len(a.Recommendations) {
+			*unknown = append(*unknown, inf.ID)
+			continue
+		}
+		by[inf.ID] = append(by[inf.ID], inf)
+	}
+	return by
 }
 
 // approvedRecommendations are the recommendations the fact-check let stand.
@@ -371,6 +414,12 @@ func claimsToCheck(a *agent.Analysis) string {
 	}
 	var sb strings.Builder
 	writeClaims(&sb, a.Claims)
+	if len(a.Recommendations) > 0 {
+		sb.WriteString("\nRecommendations (id: choose ... when ...; the claims it rests on):\n")
+		for i, r := range a.Recommendations {
+			fmt.Fprintf(&sb, "  - %s: choose %s when %s [%s]\n", recommendationID(i), r.Choose, r.When, strings.Join(r.Claims, ", "))
+		}
+	}
 	return sb.String()
 }
 
@@ -450,8 +499,9 @@ func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 		}
 	}
 	if len(a.Recommendations) > 0 {
-		sb.WriteString("The report's \"## Answer\" section is written by the program from the approved" +
-			" recommendations: do not write an answer section, begin with the supporting explanation.\n")
+		sb.WriteString("The report's \"## Answer\" section is written by the program: it lists the approved" +
+			" recommendations and names the others as not established. Do not write an answer or restate it:" +
+			" open with a heading for the supporting explanation.\n")
 		ok := approvedRecommendations(a)
 		if len(ok) == 0 {
 			sb.WriteString("No recommendation was approved.\n")
@@ -471,21 +521,69 @@ func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 	}
 }
 
-// renderAnswer is the report's answer section, written from the approved
-// recommendations rather than left to the summarizer: its prose could state
-// a recommendation the fact-check blocked. It uses only the analyzer's own
-// words, in the question's language, with no connecting words of its own.
-func renderAnswer(recs []agent.Recommendation) string {
+// renderAnswer is the report's answer section, written from the checked
+// decision rather than left to the summarizer, whose prose could state a
+// recommendation the fact-check blocked. The approved recommendations come
+// first, in the analyzer's own words and the question's language. The
+// blocked ones follow as not established, each with the claim that failed:
+// without them a two-option question answered for one option read as a
+// decisive win for it, when the other was only not verified in this run.
+// They are left out when the check did not run or had nothing to check
+// against, since then there is no reason per option to give.
+func renderAnswer(a *agent.Analysis) string {
 	var sb strings.Builder
 	sb.WriteString("## Answer\n\n")
-	for _, r := range recs {
-		sb.WriteString("- **" + strings.TrimSpace(r.Choose) + "**")
-		if when := strings.TrimSpace(r.When); when != "" {
-			sb.WriteString(": " + when)
+	ok := approvedRecommendations(a)
+	if len(ok) == 0 {
+		sb.WriteString(noApproval(a) + "\n")
+	}
+	for _, r := range ok {
+		writeChoice(&sb, r, "")
+	}
+	if noApproval(a) != noApprovalEvidence {
+		return sb.String()
+	}
+	var blocked []agent.Recommendation
+	for _, r := range a.Recommendations {
+		if r.Blocked != "" {
+			blocked = append(blocked, r)
 		}
-		sb.WriteString("\n")
+	}
+	if len(blocked) > 0 {
+		sb.WriteString("\nNot established in this run:\n\n")
+		for _, r := range blocked {
+			writeChoice(&sb, r, notEstablished(r, a.Claims))
+		}
 	}
 	return sb.String()
+}
+
+// writeChoice writes one recommendation as a list item, with why it is not
+// established when it is not.
+func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
+	sb.WriteString("- **" + strings.TrimSpace(r.Choose) + "**")
+	if when := strings.TrimSpace(r.When); when != "" {
+		sb.WriteString(": " + when)
+	}
+	if why != "" {
+		sb.WriteString(" (" + why + ")")
+	}
+	sb.WriteString("\n")
+}
+
+// notEstablished names what blocked a recommendation: the claims that did not
+// pass, by their text and status, or the checker's reason it does not follow.
+func notEstablished(r agent.Recommendation, claims []agent.Claim) string {
+	var parts []string
+	for _, c := range claims {
+		if slices.Contains(r.Failed, c.ID) {
+			parts = append(parts, c.Status+": \u201c"+c.Text+"\u201d")
+		}
+	}
+	if len(parts) == 0 {
+		return r.Blocked
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Why nothing was approved. A single "no recommendation passed" read as the
@@ -517,10 +615,7 @@ func decidedAnswer(a *agent.Analysis) string {
 	if len(a.Recommendations) == 0 {
 		return ""
 	}
-	if ok := approvedRecommendations(a); len(ok) > 0 {
-		return renderAnswer(ok)
-	}
-	return "## Answer\n\n" + noApproval(a) + "\n"
+	return renderAnswer(a)
 }
 
 // withAnswer puts the decided answer at the top of the report. A title line
@@ -533,7 +628,7 @@ func withAnswer(sum *agent.Summary, a *agent.Analysis) *agent.Summary {
 	if answer == "" {
 		return sum
 	}
-	sum.Report = answer + "\n" + dropAnswerSection(sum.Report)
+	sum.Report = answer + "\n" + dropLeadingProse(dropAnswerSection(sum.Report))
 	sum.Executive = strings.TrimSpace(strings.TrimPrefix(answer, "## Answer"))
 	return sum
 }
@@ -566,6 +661,21 @@ func dropAnswerSection(report string) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// dropLeadingProse removes the text before a report's first heading. The
+// summarizer is told the program writes the answer and to open with a
+// heading; the paragraph it wrote above that heading anyway restated the
+// answer, unchecked and in its own words. A report with no heading at all is
+// kept whole.
+func dropLeadingProse(report string) string {
+	lines := strings.Split(report, "\n")
+	for i, ln := range lines {
+		if headingLevel(ln) > 0 {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return report
 }
 
 // headingLevel is an ATX heading's level, 0 for any other line.
