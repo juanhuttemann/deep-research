@@ -507,5 +507,9 @@ func (s *SearchTools) fetch(ctx context.Context, r SearXNGResult) (SearchFinding
 		signal.Status, signal.Code = "dropped", scrapeCode(err)
 		s.log(fmt.Sprintf("    dropped  %s", DomainOf(r.URL)))
 	}
-	return SearchFinding{Title: title, Content: content, URL: r.URL, Engine: r.Engine, Confidence: "high"}, signal
+	// No confidence is claimed: every fetched source was labelled "high", a
+	// snippet-only one included, and the report printed it beside each
+	// citation. How the source was obtained is the signal's status; how far
+	// it can be trusted depends on the claim it is cited for.
+	return SearchFinding{Title: title, Content: content, URL: r.URL, Engine: r.Engine}, signal
 }

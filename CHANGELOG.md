@@ -31,6 +31,17 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The fact-check governs the report. It returns one verdict per claim ID,
+  and code holds the answer to them: a recommendation is approved only when
+  every claim it names is supported, and one whose deciding claim failed
+  no longer stands on an incidental claim that passed. A verdict for a
+  claim ID the analysis does not have, a missing or duplicated verdict, or
+  a "supported" verdict whose quote is not in the cited page counts as
+  insufficient. A fact-check that did not run approves nothing. The
+  report's answer section is written from the approved recommendations in
+  the analyzer's own words, and the summarizer no longer sees the
+  analyzer's unchecked answer prose; nor does the fallback report written
+  when the summary fails.
 - The analysis returns a decision: how it reads the question, atomic claims
   with the option, criterion, scope and sources of each, conditional
   recommendations ("choose X when Y") naming the claims they rest on, and
@@ -73,6 +84,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Every web source was labelled "high" confidence, a snippet-only one
+  included, and the report printed it by each citation. Sources now carry
+  only how they were obtained.
+- A `--trace` recorded the analysis after the run had edited it (sources
+  dropped, recommendations blocked) as the model's output. Each phase's
+  output is recorded as it was returned.
 - The model saw the first 1500 characters of each source, which on a
   documentation page were navigation and a cookie dialog. It now sees the
   passages that match the queries that found the page, and pages are

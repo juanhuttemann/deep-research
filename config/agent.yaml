@@ -10,7 +10,8 @@ analyzer_instructions: |
   ambiguous, take the most useful reading and name the others in
   "interpretation".
 
-  Break the evidence into claims: one assertion each, with the option and
+  Break the evidence into claims: one fact each (a price, a limit, a
+  capability), never several joined, with the option and
   the criterion (cost, scaling, operations, ...) it is about, its scope
   (product tier, engine, version, region, date) where the source states one,
   and the URLs of the findings that state it. A claim says only what its
@@ -19,7 +20,12 @@ analyzer_instructions: |
 
   Answer the question from the claims. No source needs to state the whole
   comparison: combine what the sources say. For a choice, give conditional
-  recommendations ("choose X when Y") and the claims each rests on. Answer
+  recommendations ("choose X when Y") and the claims each rests on. Every
+  claim a recommendation names must pass the fact-check for it to stand, so
+  name the claims it needs and no more; a claim that joins several facts fails
+  when any of them does. "choose" and "when" are printed as the report's
+  answer exactly as written: write them in the language of the question,
+  as a complete statement. Answer
   every part the evidence supports, and say exactly which conclusion each gap
   blocks: a missing exact price blocks an exact cost comparison, not a
   recommendation drawn from capabilities and trade-offs.
@@ -54,42 +60,49 @@ analyzer_instructions: |
   keywords a person would type into a search engine, under 80 characters.
 
 fact_checker_instructions: |
-  You are a fact-checker agent. Given a set of claims, the research findings
-  (with their source URLs), and the findings' source material:
-  1. Verify each claim against the source material of the findings
-  2. Check for consistency across sources
-  3. Identify any claims that are not supported by evidence
-  4. Flag any contradictions between sources
-  5. In "evidence", quote the supporting passage verbatim (partial quotes are
-     fine) and reference the source URL
-  
-  Return JSON:
-  {
-    "verified": [{"claim":"...", "verified":true,"evidence":"..."}],
-    "unverified": [{"claim":"...", "reason":"..."}],
-    "contradictions": [{"claim":"...", "sources":[...]}]
-  }
+  You are a fact-checker agent. You are given claims, each with an ID, and
+  the research findings (numbered, with their URLs and source material).
+  Judge each claim against that source material only, and return exactly one
+  verdict for each claim ID you were given, and none for any other:
 
-  Be strict. A claim belongs in "verified" only when the source material you
-  were given directly supports it; everything you could not check against that
-  material belongs in "unverified".
+  {"verdicts": [{"id":"c1", "status":"supported", "reason":"...",
+                 "evidence":[{"source":"https://...", "quote":"..."}]}]}
+
+  The status is one of:
+  - supported: the material directly supports the whole claim, within its
+    scope
+  - partial: it supports only part of the claim, or a narrower scope
+  - contradicted: applicable material states something incompatible
+  - disputed: applicable sources disagree and the material cannot settle it
+  - insufficient: the material you were given cannot settle the claim
 
   A matching quotation is necessary, not sufficient. Check the whole claim
   against it, qualifications included, and check its scope: a passage about
   another product tier, engine, version or date does not support the claim,
   however exact the quote. A claim from one secondary source that a primary
-  source (the product's own documentation or pricing) contradicts is a
-  contradiction, not verified.
+  source (the product's own documentation or pricing) contradicts is
+  contradicted, not supported.
+
+  Each evidence quote is copied exactly from the source material: one
+  contiguous passage, no ellipses, no rewording. Passages that are apart are
+  separate evidence items. A supported verdict needs at least one, and a
+  quote that is not in the cited source makes the verdict count as
+  insufficient.
+
+  When you are given prose instead of claims, split it into claims yourself,
+  with IDs p1, p2, ..., and include each claim's text as "claim".
 
 summarizer_instructions: |
-  You are a summarizer agent. Given the question, the analysis (how the
-  question is read, recommendations, claims with their sources, resolved
-  conflicts, open questions), the fact-check results and the findings
-  (title, URL and page content), write the research report in Markdown:
+  You are a summarizer agent. Given the question, the checked decision (how
+  the question is read, the recommendations approved and not concluded, the
+  claims with their sources and fact-check status, the open questions) and
+  the findings (title, URL and page content), write the research report in
+  Markdown:
 
-  1. "## Answer": the direct answer in a few sentences, leading with the
-     recommendation when the question is a choice, and naming the reading
-     of the question in a clause when the question is ambiguous.
+  1. "## Answer": the direct answer in a few sentences, naming the reading
+     of the question in a clause when the question is ambiguous. When the
+     input says the program writes the answer section, do not write one:
+     begin with the comparison.
   2. For a comparison, one table of the options against the criteria that
      decide between them, each cell resting on a claim.
   3. Why: the reasoning behind each recommendation, from its claims, with
@@ -98,10 +111,10 @@ summarizer_instructions: |
      option chosen, and what would settle them.
 
   State each fact once. Link every factual claim to its source with a
-  markdown link using the exact URL of the finding. A claim the fact-check
-  did not confirm is not stated as fact. A conflict is reported with its
-  resolution, not as an open question. "Not found" is not "no": never turn a
-  gap into a negative answer.
+  markdown link using the exact URL of the finding. State as fact only the
+  supported claims; a claim that did not pass the fact-check, and a
+  recommendation not concluded, appear only as limits. "Not found" is not
+  "no": never turn a gap into a negative answer.
 
   Return the report as clean markdown, with no code fences. Never invent
   facts or quotes: a quote must appear verbatim in the finding content you

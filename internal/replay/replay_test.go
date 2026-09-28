@@ -2,6 +2,7 @@ package replay
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -84,7 +85,7 @@ func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 // searched; searching the recorded ones keeps the replay on the same evidence.
 func TestReplaySearchesTheRecordedFollowUps(t *testing.T) {
 	tr := &Trace{Question: "q", Plan: []agent.SubTopic{{ID: "1"}},
-		Phases: []Phase{{Name: "analyze", Output: map[string]any{"follow_up": []any{"recorded follow-up"}}}}}
+		Phases: []Phase{{Name: "analyze", Output: json.RawMessage(`{"follow_up":["recorded follow-up"]}`)}}}
 	p := Play(&live{}, tr)
 	first, _ := p.Analyze(context.Background(), "p")
 	if len(first.FollowUp) != 1 || first.FollowUp[0] != "recorded follow-up" {
@@ -129,5 +130,23 @@ func TestTraceStoresEachPageTextOnce(t *testing.T) {
 		if got := tr.Searches[i].Result.Findings[0].Content; got != want {
 			t.Errorf("search %d restored %d bytes, want %d", i, len(got), len(want))
 		}
+	}
+}
+
+// The Driver edits the analysis it gets back; a trace that kept a pointer
+// recorded those edits as the model's own output.
+func TestTraceRecordsThePhaseOutputAsReturned(t *testing.T) {
+	rec := Record(&live{}, "q", "standard", 0)
+	rec.trace.Plan = []agent.SubTopic{{ID: "1"}}
+	a, _ := rec.Analyze(context.Background(), "p")
+	a.Answer = "edited after the phase returned"
+	path := filepath.Join(t.TempDir(), "run.trace.json")
+	if err := rec.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := Load(path)
+	var got agent.Analysis
+	if err := json.Unmarshal(tr.Phases[0].Output, &got); err != nil || got.Answer != "live answer" {
+		t.Errorf("recorded answer = %q (%v), want the model's", got.Answer, err)
 	}
 }

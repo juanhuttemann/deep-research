@@ -55,12 +55,15 @@ type Search struct {
 	Error    string                `json:"error,omitempty"`
 }
 
-// Phase is one model phase's input and output.
+// Phase is one model phase's input and output. The output is serialized when
+// the phase returns: the Driver goes on to edit the analysis it got back
+// (checkAnalysis drops sources and blocks recommendations), and a pointer
+// kept until the trace was written recorded those edits as the model's.
 type Phase struct {
-	Name   string `json:"name"`
-	Prompt string `json:"prompt"`
-	Output any    `json:"output,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Name   string          `json:"name"`
+	Prompt string          `json:"prompt"`
+	Output json.RawMessage `json:"output,omitempty"`
+	Error  string          `json:"error,omitempty"`
 }
 
 // Recorder wraps an assistant and records what it was asked and answered.
@@ -114,7 +117,8 @@ func (r *Recorder) Summarize(ctx context.Context, prompt string) (*agent.Summary
 }
 
 func (r *Recorder) phase(name, prompt string, out any, err error) {
-	p := Phase{Name: name, Prompt: prompt, Output: out}
+	b, _ := json.Marshal(out)
+	p := Phase{Name: name, Prompt: prompt, Output: b}
 	if err != nil {
 		p.Error = err.Error()
 	}
@@ -237,16 +241,14 @@ func (p *Player) Analyze(ctx context.Context, prompt string) (*agent.Analysis, e
 }
 
 // recordedFollowUps are the follow-up queries of the recorded run's first
-// analysis, the ones its follow-up round searched. A trace loaded from disk
-// holds the output as decoded JSON, a recorder's own as the Analysis.
+// analysis, the ones its follow-up round searched.
 func recordedFollowUps(t *Trace) []string {
 	for _, ph := range t.Phases {
 		if ph.Name != "analyze" {
 			continue
 		}
-		b, _ := json.Marshal(ph.Output)
 		var a agent.Analysis
-		if json.Unmarshal(b, &a) != nil {
+		if json.Unmarshal(ph.Output, &a) != nil {
 			return nil
 		}
 		return a.FollowUp

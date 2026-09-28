@@ -34,11 +34,23 @@ navigation and a cookie dialog.
 The analysis is a decision, not only prose: its reading of the question,
 atomic claims (each with the option and criterion it is about, its scope and
 its sources), conditional recommendations naming the claims they rest on,
-and resolved conflicts. The Driver holds it to the run (`checkAnalysis`): a
-claim keeps only sources that are pages the run fetched, claim IDs are
-unique, and a recommendation stands only on claims that kept a source; one
-left with none is dropped and recorded as a gap. The fact-check verifies the claims,
-and the summarizer writes the report from the decision, its gaps included.
+and resolved conflicts. The Driver holds it to the run in code
+(`internal/ui/decision.go`):
+
+- `checkAnalysis`: a claim keeps only sources that are pages the run
+  fetched (one left with none is `unsourced`), and claim IDs are unique.
+- `govern`: the fact-check returns one verdict per claim ID (`supported`,
+  `partial`, `contradicted`, `disputed`, `insufficient`). A claim with no
+  verdict, several, or one for an ID it does not have is `insufficient`; a
+  `supported` verdict must quote a contiguous passage that `locate` finds in
+  the cited page's stored text. A recommendation is approved only when every
+  claim it names is supported, and is otherwise kept, `blocked`, for audit.
+  A fact-check that did not run approves nothing.
+- The summarizer gets only the checked decision: approved and blocked
+  recommendations, claims by status, gaps and sources; not the analyzer's
+  answer prose. The report's `## Answer` section is rendered from the
+  approved recommendations in the analyzer's own words, and a report that
+  cannot be written falls back to that section, not to the prose.
 
 The `agent` package knows how to talk to one model and how to parse what
 comes back. It never decides what to ask or in what order.

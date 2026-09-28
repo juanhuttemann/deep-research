@@ -109,6 +109,11 @@ type Claim struct {
 	Criterion string   `json:"criterion,omitempty"`
 	Scope     string   `json:"scope,omitempty"`
 	Sources   []string `json:"sources,omitempty"`
+	// Status is what the run concluded about the claim: a verdict status
+	// once the fact-check is applied, "unsourced" when no fetched page backs
+	// it. Only "supported" lets a claim carry a recommendation. Note says why.
+	Status string `json:"status,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Recommendation is a conditional answer: choose an option when a condition
@@ -117,6 +122,10 @@ type Recommendation struct {
 	Choose string   `json:"choose"`
 	When   string   `json:"when"`
 	Claims []string `json:"claims,omitempty"`
+	// Blocked says why the recommendation was not approved: a claim it names
+	// did not pass the fact-check. It is kept for audit and never reaches the
+	// report's answer.
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // Conflict is a disagreement between claims and how the analysis resolved
@@ -140,6 +149,27 @@ type FactCheckResult struct {
 	Verified       []VerifiedClaim `json:"verified"`
 	Unverified     []string        `json:"unverified"`
 	Contradictions []Contradiction `json:"contradictions"`
+	// Verdicts are the checker's judgements, one per claim ID. The lists
+	// above are derived from them for the reports; the verdicts are what
+	// decide which recommendations stand, and are kept as the checker gave
+	// them so an audit can compare them with what the run concluded.
+	Verdicts []Verdict `json:"verdicts,omitempty"`
+}
+
+// Verdict is the fact-checker's judgement of one claim. Claim is the claim's
+// text, which the checker gives only for claims it split out of prose itself.
+type Verdict struct {
+	ID       string     `json:"id"`
+	Claim    string     `json:"claim,omitempty"`
+	Status   string     `json:"status"`
+	Reason   string     `json:"reason,omitempty"`
+	Evidence []Evidence `json:"evidence,omitempty"`
+}
+
+// Evidence is one contiguous passage quoted from one source.
+type Evidence struct {
+	Source string `json:"source"`
+	Quote  string `json:"quote"`
 }
 
 // VerifiedClaim is a claim checked against the sources.
@@ -1322,7 +1352,23 @@ func parseFactCheck(out string) *FactCheckResult {
 		Verified:       parseVerified(m["verified"]),
 		Unverified:     parseUnverified(m["unverified"]),
 		Contradictions: parseContradictions(m["contradictions"]),
+		Verdicts:       parseVerdicts(m["verdicts"]),
 	}
+}
+
+func parseVerdicts(v any) []Verdict {
+	var out []Verdict
+	for _, m := range objects(v) {
+		vd := Verdict{ID: scalar(m["id"]), Claim: getString(m, "claim", ""),
+			Status: strings.ToLower(getString(m, "status", "")), Reason: getString(m, "reason", "")}
+		for _, e := range objects(m["evidence"]) {
+			vd.Evidence = append(vd.Evidence, Evidence{Source: scalar(e["source"]), Quote: getString(e, "quote", "")})
+		}
+		if vd.ID != "" {
+			out = append(out, vd)
+		}
+	}
+	return out
 }
 
 // parseUnverified reads the unverified list, which models return either as

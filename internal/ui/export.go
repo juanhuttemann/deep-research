@@ -186,11 +186,15 @@ func writeCitationList(sb *strings.Builder, heading string, cits []MetaCitation)
 	}
 	fmt.Fprintf(sb, "## %s (%d)\n\n", heading, len(cits))
 	for i, c := range cits {
+		label := c.Status
+		if c.Confidence != "" {
+			label = "_" + c.Confidence + "_ (" + c.Status + ")"
+		}
 		if c.URL == "" {
-			fmt.Fprintf(sb, "%d. %s — _%s_ (%s, no URL)\n", i+1, c.Title, c.Confidence, c.Status)
+			fmt.Fprintf(sb, "%d. %s — %s, no URL\n", i+1, c.Title, label)
 			continue
 		}
-		fmt.Fprintf(sb, "%d. [%s](%s) — _%s_ (%s)\n", i+1, c.Title, c.URL, c.Confidence, c.Status)
+		fmt.Fprintf(sb, "%d. [%s](%s) — %s\n", i+1, c.Title, c.URL, label)
 	}
 	sb.WriteString("\n")
 }

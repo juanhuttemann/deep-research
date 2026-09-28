@@ -1259,7 +1259,7 @@ func TestSlugDistinguishesQuestions(t *testing.T) {
 }
 
 // The model writes sources and claim IDs freely: an invented URL, a page the
-// run never fetched or a dangling ID would reach the report looking sourced.
+// run never fetched or a repeated ID would reach the report looking sourced.
 // A source given as the prompt's entry number is the finding at that number.
 func TestCheckAnalysisHoldsReferencesToWhatWasRetrieved(t *testing.T) {
 	findings := []agent.Finding{
@@ -1274,58 +1274,165 @@ func TestCheckAnalysisHoldsReferencesToWhatWasRetrieved(t *testing.T) {
 			{ID: "c3", Text: "t", Sources: []string{"https://model.example/recalled"}},
 			{ID: "c1", Text: "a second claim reusing an ID"},
 		},
-		Recommendations: []agent.Recommendation{
-			{Choose: "X", When: "w", Claims: []string{"c1", "c7"}},
-			{Choose: "Y", When: "v", Claims: []string{"c3"}},
-		},
 		Conflicts: []agent.Conflict{{Claims: []string{"c2", "c8"}, Resolution: "c2 holds"}},
 	}
 	checkAnalysis(a, findings)
-	if got := a.Claims[2].Sources; len(got) != 0 {
-		t.Errorf("c3 sources = %v, want none: the run fetched pages, and this one it never did", got)
-	}
-	if a.Claims[3].ID == "c1" {
-		t.Error("a repeated claim ID was kept, leaving every reference to it ambiguous")
-	}
-	if len(a.Recommendations) != 1 || a.Recommendations[0].Choose != "X" {
-		t.Errorf("recommendations = %+v, want Y dropped for resting on no retrieved source", a.Recommendations)
-	}
-	if len(a.Gaps) != 1 || !strings.Contains(a.Gaps[0], "Y") {
-		t.Errorf("gaps = %v, want the dropped recommendation recorded", a.Gaps)
-	}
 	if got := a.Claims[0].Sources; len(got) != 1 || got[0] != "https://a.example/doc/" {
 		t.Errorf("c1 sources = %v, want only the retrieved page", got)
 	}
 	if got := a.Claims[1].Sources; len(got) != 1 || got[0] != "https://b.example/pricing" {
 		t.Errorf("c2 sources = %v, want entry 2 resolved and entry 9 dropped", got)
 	}
-	if got := a.Recommendations[0].Claims; len(got) != 1 || got[0] != "c1" {
-		t.Errorf("recommendation claims = %v, want the dangling c7 dropped", got)
+	if c := a.Claims[2]; len(c.Sources) != 0 || c.Status != statusUnsourced {
+		t.Errorf("c3 = %+v, want unsourced: the run fetched pages, and this one it never did", c)
+	}
+	if a.Claims[3].ID == "c1" {
+		t.Error("a repeated claim ID was kept, leaving every reference to it ambiguous")
 	}
 	if got := a.Conflicts[0].Claims; len(got) != 1 || got[0] != "c2" {
 		t.Errorf("conflict claims = %v, want the dangling c8 dropped", got)
 	}
 }
 
-// The report is written from the decision and the fact-check checks the
-// claims it rests on, not the answer prose alone.
-func TestDecisionReachesTheSummarizerAndTheFactCheck(t *testing.T) {
-	a := &agent.Analysis{Answer: "prose", Interpretation: "X vs Y",
-		Claims:          []agent.Claim{{ID: "c1", Text: "X scales itself", Option: "X", Sources: []string{"https://a.example"}}},
-		Recommendations: []agent.Recommendation{{Choose: "X", When: "traffic is spiky", Claims: []string{"c1"}}},
-		Conflicts:       []agent.Conflict{{Claims: []string{"c1", "c2"}, Resolution: "c1 holds", Why: "primary docs"}},
+// decisionFixture is a checked-evidence setup: one fetched page whose text
+// holds the passages the verdicts quote.
+func decisionFixture() ([]agent.Finding, *agent.Analysis) {
+	page := "## Pricing\n\nServerless is **billed per GB-hour** of data stored.\n\n" +
+		"Reserved nodes save up to 55% on a [3-year term](https://p.example/ri)."
+	findings := []agent.Finding{{URL: "https://p.example/pricing", Status: "ok", Content: page}}
+	a := &agent.Analysis{
+		Answer: "UNCHECKED PROSE",
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "Serverless bills per GB-hour", Sources: []string{"https://p.example/pricing"}},
+			{ID: "c2", Text: "Reserved nodes save 90%", Sources: []string{"https://p.example/pricing"}},
+			{ID: "c3", Text: "Serverless has no minimum", Sources: []string{"https://p.example/pricing"}},
+		},
+		Recommendations: []agent.Recommendation{
+			{Choose: "Serverless", When: "traffic is spiky", Claims: []string{"c1"}},
+			{Choose: "Node-based", When: "traffic is steady", Claims: []string{"c1", "c2"}},
+			{Choose: "Serverless, small caches", When: "data is tiny", Claims: []string{"c3"}},
+		},
 	}
-	p := summarizePrompt("q", a, nil, nil, true)
-	for _, want := range []string{"X vs Y", "Choose X when traffic is spiky [c1]", "c1 [X] X scales itself (https://a.example)", "c1 vs c2: c1 holds. primary docs"} {
-		if !strings.Contains(p, want) {
-			t.Errorf("summarize prompt lacks %q:\n%s", want, p)
+	return findings, a
+}
+
+func verdict(id, status, source, quote string) agent.Verdict {
+	return agent.Verdict{ID: id, Status: status, Reason: "r", Evidence: []agent.Evidence{{Source: source, Quote: quote}}}
+}
+
+// Every claim a recommendation names is a premise: one that fails blocks the
+// recommendation, even when another it named passed. Keeping it on what was
+// left let an incidental fact carry a conclusion whose deciding claim failed.
+// A "supported" verdict whose quote is not in the page does not count.
+func TestRecommendationStandsOnlyOnSupportedPremises(t *testing.T) {
+	findings, a := decisionFixture()
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "https://p.example/pricing", "Serverless is billed per GB-hour of data stored."),
+		verdict("c2", "contradicted", "https://p.example/pricing", "save up to 55%"),
+		verdict("c3", "supported", "https://p.example/pricing", "Serverless has no minimum charge."),
+	}}
+	govern(a, fc, nil, findings)
+	if ok := approvedRecommendations(a); len(ok) != 1 || ok[0].Choose != "Serverless" {
+		t.Fatalf("approved = %+v, want only the one resting on c1", ok)
+	}
+	if b := a.Recommendations[1].Blocked; !strings.Contains(b, "c2 contradicted") {
+		t.Errorf("node-based blocked = %q, want it to name the failed c2", b)
+	}
+	if b := a.Recommendations[2].Blocked; !strings.Contains(b, "quote_not_located") {
+		t.Errorf("c3's recommendation blocked = %q, want the unlocated quote named", b)
+	}
+	p := summarizePrompt("q", a, fc, findings, true)
+	if strings.Contains(p, "UNCHECKED PROSE") {
+		t.Error("the analyzer's unchecked answer prose reached the summarizer")
+	}
+	if !strings.Contains(p, "Not concluded") || !strings.Contains(p, "Node-based when traffic is steady") {
+		t.Errorf("the blocked recommendation is not marked as not concluded:\n%s", p)
+	}
+	sum := withAnswer(&agent.Summary{Report: "# q\n\n## Answer\n\nNode-based wins.\n\n## Comparison\n\ntable"}, approvedRecommendations(a))
+	if !strings.HasPrefix(sum.Report, "## Answer\n\n- **Serverless**: traffic is spiky\n") ||
+		strings.Contains(sum.Report, "Node-based wins") || strings.Contains(sum.Report, "# q") {
+		t.Errorf("report = %q, want the rendered answer in place of the summarizer's", sum.Report)
+	}
+}
+
+// The checker returned verdicts for claims it was not given, several for one
+// claim, and none for another. None of those may support a claim.
+func TestMalformedVerdictsNeverSupportAClaim(t *testing.T) {
+	findings, a := decisionFixture()
+	quote := "Serverless is billed per GB-hour of data stored."
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c2", "supported", "1", "save up to 55%"),
+		verdict("c2", "contradicted", "1", "save up to 55%"),
+		verdict("c9", "supported", "1", quote),
+		verdict("c3", "true", "1", quote),
+	}}
+	unknown := govern(a, fc, nil, findings)
+	if len(unknown) != 1 || unknown[0] != "c9" {
+		t.Errorf("unknown = %v, want the invented c9", unknown)
+	}
+	for _, c := range a.Claims {
+		if c.Status != statusInsufficient {
+			t.Errorf("%s = %s (%s), want insufficient", c.ID, c.Status, c.Note)
 		}
 	}
-	if got := claimsToCheck(a); !strings.Contains(got, "X scales itself") || strings.Contains(got, "prose") {
-		t.Errorf("fact-check claims = %q, want the claims, not the prose", got)
+	if len(approvedRecommendations(a)) != 0 {
+		t.Error("a recommendation was approved on malformed verdicts")
 	}
-	if got := claimsToCheck(&agent.Analysis{Answer: "prose"}); got != "prose" {
-		t.Errorf("without claims the fact-check should check the answer, got %q", got)
+	if len(fc.Unverified) != 3 || len(fc.Verified) != 0 {
+		t.Errorf("report lists = %d unverified, %d verified; want the three claims unverified", len(fc.Unverified), len(fc.Verified))
+	}
+}
+
+// A fact-check that did not run approves nothing, and the summarizer is told
+// so, without the candidates being called wrong.
+func TestFailedFactCheckApprovesNothing(t *testing.T) {
+	findings, a := decisionFixture()
+	govern(a, nil, errors.New("deadline exceeded"), findings)
+	if len(approvedRecommendations(a)) != 0 {
+		t.Error("a recommendation was approved with no fact-check")
+	}
+	if !strings.Contains(a.Claims[0].Note, "fact_check_unavailable: deadline exceeded") {
+		t.Errorf("note = %q, want the failure named", a.Claims[0].Note)
+	}
+	if p := summarizePrompt("q", a, nil, findings, true); !strings.Contains(p, "could not be completed") {
+		t.Errorf("the summarizer is not told the check failed:\n%s", p)
+	}
+}
+
+// A quote is located through Markdown presentation, but not through a
+// paraphrase, a changed number or changed case.
+func TestLocateQuoteThroughMarkdownOnly(t *testing.T) {
+	page := "Reserved nodes save **up to 55%** on a [3-year term](https://x) — see `cache.r7g`."
+	for quote, want := range map[string]bool{
+		"save **up to 55%** on a": true,
+		"Reserved nodes save up to 55% on a 3-year term - see cache.r7g.": true,
+		"Reserved nodes save up to 60% on a 3-year term":                  false,
+		"reserved nodes save up to 55%":                                   false,
+		"Reserved nodes can save as much as 55%":                          false,
+		"":                                                                false,
+	} {
+		if got := locate(page, quote); got != want {
+			t.Errorf("locate(%q) = %v, want %v", quote, got, want)
+		}
+	}
+}
+
+// The report's own fallback printed the analyzer's answer prose when the
+// summary could not be written, skipping the fact-check the summary is held
+// to. A checked analysis falls back to its approved decision instead.
+func TestFailedSummaryDeliversTheCheckedDecision(t *testing.T) {
+	findings, a := decisionFixture()
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+	}}
+	govern(a, fc, nil, findings)
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	res, err := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, fc, "report writing failed", errors.New("500"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Summary.Report; strings.Contains(r, "UNCHECKED PROSE") || !strings.Contains(r, "- **Serverless**: traffic is spiky") {
+		t.Errorf("fallback report = %q, want the approved decision and not the prose", r)
 	}
 }
 
