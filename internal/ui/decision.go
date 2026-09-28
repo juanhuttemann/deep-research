@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"html"
 	"regexp"
 	"slices"
 	"strconv"
@@ -226,13 +227,35 @@ func locate(page, quote string) bool {
 	if strings.Contains(page, q) {
 		return true
 	}
-	vq := visibleText(q)
-	return vq != "" && strings.Contains(visibleText(page), vq)
+	vq, vp := visibleText(q), visibleText(page)
+	if vq == "" {
+		return false
+	}
+	if strings.Contains(vp, vq) {
+		return true
+	}
+	// PDF text breaks words across lines with a hyphen ("capital re-\nserves"),
+	// and a real hyphen can fall at a line end too ("well-\nknown"): the line
+	// is joined both ways, only as a last attempt.
+	for _, join := range []string{"$1$2", "$1-$2"} {
+		if strings.Contains(visibleText(lineHyphen.ReplaceAllString(page, join)), vq) {
+			return true
+		}
+	}
+	return false
 }
 
+// lineHyphen is a word hyphenated across a line break.
+var lineHyphen = regexp.MustCompile(`(\p{L})-\n[ \t]*(\p{Ll})`)
+
 var (
-	// A link's target may hold one level of parentheses (a_(b)).
-	mdLink     = regexp.MustCompile(`!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`)
+	// A link's target may hold one level of parentheses (a_(b)), and its
+	// label one pair of brackets: a citation link is "[[43]](...)".
+	mdLink    = regexp.MustCompile(`!?\[((?:[^\[\]]|\[[^\]]*\])*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`)
+	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>`)
+	// A numbered citation marker ("[43]") sits inside the sentence it cites,
+	// and a quote of that sentence leaves it out.
+	mdCite     = regexp.MustCompile(`\[\d{1,4}\]`)
 	mdEscape   = regexp.MustCompile("\\\\([\\\\`*_{}\\[\\]()#+\\-.!|>~])")
 	mdCode     = regexp.MustCompile("`([^`]*)`")
 	mdStrong   = regexp.MustCompile(`(\*\*|__)(\S(?:.*?\S)?)(\*\*|__)`)
@@ -242,8 +265,12 @@ var (
 )
 
 func visibleText(s string) string {
-	s = mdEscape.ReplaceAllString(s, "$1")
-	s = mdLink.ReplaceAllString(s, "$1")
+	// Scraped text keeps HTML entities ("term &lt; currentTerm") and line
+	// breaks inside table cells ("<br>") that a quote writes as what they show.
+	s = html.UnescapeString(htmlBreak.ReplaceAllString(s, " "))
+	// NFKC also makes a PDF's ligature characters ("ﬁ") the letters they are.
+	s = norm.NFKC.String(mdEscape.ReplaceAllString(s, "$1"))
+	s = mdCite.ReplaceAllString(mdLink.ReplaceAllString(s, "$1"), "")
 	s = mdCode.ReplaceAllString(s, "$1")
 	s = mdStrong.ReplaceAllString(s, "$2")
 	s = mdStar.ReplaceAllString(s, "$1$2")

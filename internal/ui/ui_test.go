@@ -1568,3 +1568,27 @@ func TestLocateIgnoresUnicodeNormalForm(t *testing.T) {
 		t.Error("a quote differing only in normal form was not located")
 	}
 }
+
+// Research sources are often PDFs and wikis: a sentence split by a hyphen at
+// a line end, a citation marker inside it, a ligature character. Each lost a
+// correct claim on a history question.
+func TestLocateThroughPDFAndWikiArtifacts(t *testing.T) {
+	for _, tc := range []struct{ page, quote string }{
+		{"put aside  capital  re-\nserves as a cushion", "put aside capital reserves as a cushion"},
+		{"derivatives markets.[\\[43\\]](https://w.example/x#cite_note-43)\n These markets", "derivatives markets. These markets"},
+		{"markets.[43] These", "markets. These"},
+		{"the \ufb01nancial system", "the financial system"},
+		{"a well-\nknown case", "a well-known case"},
+		{"1.  Reply false if term &lt; currentTerm (§5.1)", "1. Reply false if term < currentTerm (§5.1)"},
+		{"| HP Split Systems  <br>(Ducted) | ≥ 8.1 HSPF2 |", "| HP Split Systems \n(Ducted) | ≥ 8.1 HSPF2 |"},
+	} {
+		if !locate(tc.page, tc.quote) {
+			t.Errorf("locate(%q, %q) = false", tc.page, tc.quote)
+		}
+	}
+	// The number is what the quote is evidence of: text whose digits the PDF
+	// did not encode readably cannot vouch for one.
+	if locate("more than \uf653\uf644 billion", "more than 180 billion") {
+		t.Error("a number the page does not show was located")
+	}
+}

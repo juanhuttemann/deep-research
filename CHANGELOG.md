@@ -53,8 +53,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   no longer stands on an incidental claim that passed. A verdict for a
   claim ID the analysis does not have, a missing or duplicated verdict, or
   a "supported" verdict with any quote that is not in the cited page
-  counts as insufficient (quotes are compared in Unicode normal form, so an
-  accent written as one code point or two is the same text); with search
+  counts as insufficient. Quotes are matched through what text extraction
+  does to a page: Unicode normal forms and ligatures, HTML entities and
+  `<br>` in table cells, citation markers such as "[43]", and words
+  hyphenated across a PDF's line breaks; digits a PDF did not encode
+  readably are not guessed. With search
   off no claim can be supported, since
   the findings are the model's own. A fact-check that did not run approves
   nothing, and neither does an analysis whose recommendations name no
