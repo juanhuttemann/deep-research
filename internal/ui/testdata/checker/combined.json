@@ -1,0 +1,94 @@
+{
+ "about": "Both live failures in one fact-check: a claim contradicted by a paragraph deep in a page it does not cite, and a recommendation that turns its rule's AND into OR beside a weaker 'consider' premise. Catching one must not cost the other.",
+ "findings": [
+  {
+   "url": "https://blog.example/cachecloud-guide",
+   "title": "CacheCloud guide",
+   "query": "CacheCloud pricing guide",
+   "content": "Our 2026 guide: Savings Plans do not apply to CacheCloud, so reserved nodes are the only discount."
+  },
+  {
+   "url": "https://cachecloud.example/pricing",
+   "title": "CacheCloud pricing",
+   "query": "CacheCloud node price per hour",
+   "content": "# CacheCloud pricing\n\nThe CacheCloud cache.m1.large node costs $0.061 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m2.large node costs $0.072 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m3.large node costs $0.083 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m4.large node costs $0.094 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m5.large node costs $0.105 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m6.large node costs $0.116 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m7.large node costs $0.127 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m8.large node costs $0.138 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m9.large node costs $0.149 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.m10.large node costs $0.160 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r1.large node costs $0.261 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r2.large node costs $0.272 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r3.large node costs $0.283 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r4.large node costs $0.294 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r5.large node costs $0.305 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r6.large node costs $0.316 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r7.large node costs $0.327 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r8.large node costs $0.338 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r9.large node costs $0.349 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.r10.large node costs $0.360 per hour on demand, billed per node-hour for each node in the cluster.\n\n## Pricing options\n\nYou can pay on demand, run serverless, or commit to Database Savings Plans. Database Savings Plans apply to all CacheCloud usage, serverless and node-based, with a one-year commitment.\n\nThe CacheCloud cache.t1.large node costs $0.461 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t2.large node costs $0.472 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t3.large node costs $0.483 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t4.large node costs $0.494 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t5.large node costs $0.505 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t6.large node costs $0.516 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t7.large node costs $0.527 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t8.large node costs $0.538 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t9.large node costs $0.549 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.t10.large node costs $0.560 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c1.large node costs $0.661 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c2.large node costs $0.672 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c3.large node costs $0.683 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c4.large node costs $0.694 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c5.large node costs $0.705 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c6.large node costs $0.716 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c7.large node costs $0.727 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c8.large node costs $0.738 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c9.large node costs $0.749 per hour on demand, billed per node-hour for each node in the cluster.\n\nThe CacheCloud cache.c10.large node costs $0.760 per hour on demand, billed per node-hour for each node in the cluster.\n\nCacheCloud backup storage in region us-east is billed per GB-month.\n\nCacheCloud backup storage in region us-west is billed per GB-month.\n\nCacheCloud backup storage in region eu-west is billed per GB-month.\n\nCacheCloud backup storage in region ap-south is billed per GB-month.\n\nCacheCloud backup storage in region sa-east is billed per GB-month.\n\nCacheCloud backup storage in region ca-central is billed per GB-month."
+  },
+  {
+   "url": "https://guide.example/dual-fuel",
+   "title": "Rebate guide",
+   "query": "dual-fuel heat pump furnace rule",
+   "content": "Rebate guide. If your home has a heating load over 40,000 BTU/hr and is in a cold climate with a design temperature below 5°F, pair a heat pump with a gas furnace (dual-fuel) to maximize rebates and comfort."
+  },
+  {
+   "url": "https://installers.example/cold",
+   "title": "Installer advice",
+   "query": "dual-fuel very cold climate",
+   "content": "Installers suggest that homeowners in very cold climates consider a dual-fuel system."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "Savings Plans do not apply to CacheCloud.",
+   "sources": [
+    "https://blog.example/cachecloud-guide"
+   ]
+  },
+  {
+   "id": "c2",
+   "claim": "CacheCloud nodes are billed per node-hour.",
+   "sources": [
+    "https://cachecloud.example/pricing"
+   ]
+  },
+  {
+   "id": "c3",
+   "claim": "A home with a heating load over 40,000 BTU/hr in a cold climate with a design temperature below 5°F should pair a heat pump with a gas furnace (dual-fuel).",
+   "option": "dual-fuel",
+   "sources": [
+    "https://guide.example/dual-fuel"
+   ]
+  },
+  {
+   "id": "c4",
+   "claim": "Installers suggest that homeowners in very cold climates consider a dual-fuel system.",
+   "option": "dual-fuel",
+   "sources": [
+    "https://installers.example/cold"
+   ]
+  }
+ ],
+ "recommendations": [
+  {
+   "choose": "a dual-fuel system",
+   "when": "the heating load is over 40,000 BTU/hr or the design temperature is below 5°F",
+   "claims": [
+    "c3",
+    "c4"
+   ]
+  },
+  {
+   "choose": "a dual-fuel system",
+   "when": "the heating load is over 40,000 BTU/hr and the design temperature is below 5°F",
+   "claims": [
+    "c3"
+   ]
+  }
+ ],
+ "expect": {
+  "supported": [
+   "c2",
+   "c3",
+   "c4"
+  ],
+  "not_supported": [
+   "c1"
+  ],
+  "approved": [
+   "r2"
+  ],
+  "blocked": [
+   "r1"
+  ]
+ }
+}

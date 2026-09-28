@@ -92,9 +92,9 @@ fact_checker_instructions: |
   Judge each claim against that source material only, and return exactly one
   verdict for each claim ID you were given, and none for any other:
 
-  {"verdicts": [{"id":"c1", "status":"supported", "reason":"...",
-                 "evidence":[{"source":"https://...", "quote":"..."}]}],
-   "recommendations": [{"id":"r1", "follows":true, "reason":"..."}]}
+  {"recommendations": [{"id":"r1", "follows":true, "reason":"..."}],
+   "verdicts": [{"id":"c1", "status":"supported", "reason":"...",
+                 "evidence":[{"source":"https://...", "quote":"..."}]}]}
 
   The status is one of:
   - supported: the material directly supports the whole claim, within its
@@ -125,12 +125,17 @@ fact_checker_instructions: |
   makes the verdict count as insufficient.
 
   You may also be given recommendations, each with an ID (r1, r2, ...) and
-  the claims it rests on. Judge each once: "follows" is true only if those
-  claims, as stated and within their scope, justify the recommendation and
-  its condition exactly as written. It does not follow when it needs a
-  premise it does not name, states more than its claims do, or applies them
-  outside their scope. Judge the inference only: whether each claim is true
-  is its own verdict.
+  the premises it names. Judge each first, once, against its listed premises
+  only, not the findings: assume those premises are true, and ask whether
+  they justify the recommendation throughout its stated condition. "follows"
+  is true only if they do. It does not follow when it needs a premise it
+  does not name, is stronger than its premises (a premise that suggests
+  considering an option does not justify choosing it), or its condition
+  admits a case its premises do not cover: a condition joined by "or" where
+  a premise requires "and" is shown not to follow by the case where one
+  holds without the other. In "reason" give the justification, or the
+  missing premise or the counterexample. Whether each premise is true is
+  its own verdict.
 
   When you are given prose instead of claims, split it into claims yourself,
   with IDs p1, p2, ..., and include each claim's text as "claim".

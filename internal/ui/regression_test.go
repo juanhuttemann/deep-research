@@ -659,7 +659,7 @@ func TestPostResearchPromptsBoundFindingContent(t *testing.T) {
 	analysis := &agent.Analysis{Answer: "answer"}
 	for name, prompt := range map[string]string{
 		"analyze":    analyzePrompt("q", findings, nil),
-		"fact-check": factCheckPrompt("claims", findings, true),
+		"fact-check": factCheckPrompt("claims", findings, true, nil),
 		"summarize":  summarizePrompt("q", analysis, nil, findings, true),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -991,14 +991,14 @@ func TestFactCheckSaysSoWhenNothingWasRetrieved(t *testing.T) {
 		t.Error("a snippet from a search backend is a retrieved source")
 	}
 
-	self := factCheckPrompt("claim", unretrieved, false)
+	self := factCheckPrompt("claim", unretrieved, false, nil)
 	if !strings.Contains(self, "not fetched") || !strings.Contains(self, "unverified") {
 		t.Errorf("self-consistency prompt does not say what the material is:\n%s", self)
 	}
 	if strings.HasPrefix(self, "Verify these claims") {
 		t.Error("self-consistency prompt still asks for verification")
 	}
-	if got := factCheckPrompt("claim", retrieved, true); !strings.HasPrefix(got, "Verify these claims") {
+	if got := factCheckPrompt("claim", retrieved, true, nil); !strings.HasPrefix(got, "Verify these claims") {
 		t.Errorf("retrieved-source prompt changed:\n%s", got)
 	}
 
@@ -1154,7 +1154,7 @@ func TestMixedRunMarksFindingsThatWereNeverFetched(t *testing.T) {
 	}
 	for name, prompt := range map[string]string{
 		"analyze":    analyzePrompt("q", mixed, nil),
-		"fact-check": factCheckPrompt("claim", mixed, true),
+		"fact-check": factCheckPrompt("claim", mixed, true, nil),
 		"summarize":  summarizePrompt("q", &agent.Analysis{Answer: "a"}, nil, mixed, true),
 	} {
 		if !strings.Contains(prompt, "Invented (https://invented.example) [never fetched]") {

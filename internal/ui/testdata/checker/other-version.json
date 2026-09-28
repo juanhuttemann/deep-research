@@ -1,0 +1,36 @@
+{
+ "about": "A statement about another version is not a contradiction: the versioned claim stands, the unversioned one does not.",
+ "findings": [
+  {
+   "url": "https://widgetdb.example/backups",
+   "title": "Backups",
+   "query": "WidgetDB backup pricing",
+   "content": "In WidgetDB version 2, backups are free. WidgetDB version 3 charges $0.05 per GB-month for backups."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "In WidgetDB version 2, backups are free.",
+   "scope": "version 2",
+   "sources": [
+    "https://widgetdb.example/backups"
+   ]
+  },
+  {
+   "id": "c2",
+   "claim": "WidgetDB backups are free.",
+   "sources": [
+    "https://widgetdb.example/backups"
+   ]
+  }
+ ],
+ "expect": {
+  "supported": [
+   "c1"
+  ],
+  "not_supported": [
+   "c2"
+  ]
+ }
+}

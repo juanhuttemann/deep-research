@@ -209,7 +209,7 @@ func TestExcerptReachesPastAPagesOpeningBoilerplate(t *testing.T) {
 	answer := "WidgetDB integrates with Application Auto Scaling to add and remove nodes automatically."
 	page := strings.Repeat(cookie, 60) + "## Scaling\n\n" + answer + "\n\n" + strings.Repeat("See also the release notes.\n\n", 40)
 
-	got := Excerpt(page, "WidgetDB automatic node scaling", 1500)
+	got := ExcerptFor(page, []string{"WidgetDB automatic node scaling"}, nil, 1500)
 	if !strings.Contains(got, answer) {
 		t.Errorf("excerpt missed the answering passage:\n%s", got)
 	}
@@ -235,7 +235,7 @@ func TestExcerptKeepsThePassagesSectionScope(t *testing.T) {
 		" operators who plan capacity for write-heavy workloads across several availability zones.\n\n" +
 		"**Pricing**  \nSynchronous writes are priced at 18% on top of the standard node-hour price.\n\n" + filler
 
-	got := Excerpt(page, "EngineB node pricing synchronous writes", 1500)
+	got := ExcerptFor(page, []string{"EngineB node pricing synchronous writes"}, nil, 1500)
 	if !strings.Contains(got, "18%") {
 		t.Fatalf("excerpt missed the priced passage:\n%s", got)
 	}

@@ -57,6 +57,12 @@ and resolved conflicts. The Driver holds it to the run in code
   (`acceptRevisions`); one fact-check call judges whether each revision
   follows, given only the pages its claims cite. An approved revision takes
   its original's place in the answer; the original stays, blocked.
+- What the fact-check sees: each page excerpted by the claims under check,
+  those citing it first, then the others (`tools.ExcerptFor`), so a
+  contradiction on a page a claim does not cite reaches the check; and each
+  recommendation followed by the text of the claims it names, judged first
+  and against those alone. `make eval-replay` measures both on frozen
+  analyses (`internal/ui/testdata/checker`).
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the

@@ -259,7 +259,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// exists. If it fails there is still a complete, citable report to
 	// deliver, so the failure is surfaced and the run continues rather than
 	// discarding every search and the analysis behind it.
-	fc, err := d.Agent.FactCheck(ctx, factCheckPrompt(claimsToCheck(analysis), findings, retrieved))
+	fc, err := d.Agent.FactCheck(ctx, factCheckPrompt(claimsToCheck(analysis), findings, retrieved, analysis.Claims))
 	if err != nil {
 		fc = nil
 		d.emit(Event{Type: Error, Phase: "Fact-Check",
@@ -836,13 +836,21 @@ const maxPromptFindingChars = 1500
 // kinds — the search falls back to the model per query — and a run-level flag
 // let one fetched page vouch for every invented one beside it.
 func writeFindings(sb *strings.Builder, findings []agent.Finding) {
+	writeFindingsFor(sb, findings, nil)
+}
+
+// writeFindingsFor lists findings with each excerpt chosen by the claims
+// under check, those citing the page first (see tools.ExcerptFor), or, with
+// no claims, by the searches that found the page.
+func writeFindingsFor(sb *strings.Builder, findings []agent.Finding, claims []agent.Claim) {
 	for i, f := range findings {
 		mark := ""
 		if !fetched(f) {
 			mark = " " + neverFetched
 		}
+		first, second := excerptQueries(f, claims)
 		sb.WriteString("  " + strconv.Itoa(i+1) + ". " + f.Title + " (" + f.URL + ")" + mark + "\n    ")
-		sb.WriteString(clipPromptContent(f.Content, strings.Join(append([]string{f.Query}, f.AlsoFoundBy...), " ")))
+		sb.WriteString(clipPromptContent(f.Content, first, second))
 		sb.WriteString("\n")
 	}
 	if n := countFetched(findings); n > 0 && n < len(findings) {
@@ -855,11 +863,28 @@ func writeFindings(sb *strings.Builder, findings []agent.Finding) {
 // passages that match query, and marks the cut so the model reads the source
 // as excerpted rather than complete. The prefix it used to keep was, on a
 // documentation page, its cookie dialog and navigation.
-func clipPromptContent(s, query string) string {
+func clipPromptContent(s string, first, second []string) string {
 	if len(s) <= maxPromptFindingChars {
 		return s
 	}
-	return tools.Excerpt(s, query, maxPromptFindingChars) + " …[truncated]"
+	return tools.ExcerptFor(s, first, second, maxPromptFindingChars) + " …[truncated]"
+}
+
+// excerptQueries chooses what a page shows: the texts of the claims that cite
+// it, then of the other claims; with no claims, the searches that found it.
+func excerptQueries(f agent.Finding, claims []agent.Claim) (first, second []string) {
+	if len(claims) == 0 {
+		return []string{strings.Join(append([]string{f.Query}, f.AlsoFoundBy...), " ")}, nil
+	}
+	page := tools.CanonicalURL(f.URL)
+	for _, c := range claims {
+		if slices.ContainsFunc(c.Sources, func(u string) bool { return tools.CanonicalURL(u) == page }) {
+			first = append(first, c.Text)
+		} else {
+			second = append(second, c.Text)
+		}
+	}
+	return first, second
 }
 
 func analyzePrompt(question string, findings []agent.Finding, uncovered []string) string {
@@ -882,7 +907,10 @@ func analyzePrompt(question string, findings []agent.Finding, uncovered []string
 // factCheckPrompt asks the fact-checker to compare the analysis against the
 // evidence. Both halves have to be here: sending the answer alone left the
 // strictest phase of the pipeline checking the answer against itself.
-func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool) string {
+// excerptFor chooses what each page shows the checker: the claims under check
+// when there are any (see ExcerptFor), the searches that found the page
+// otherwise.
+func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool, excerptFor []agent.Claim) string {
 	var sb strings.Builder
 	if retrieved {
 		sb.WriteString("Verify these claims against the research findings below.\n\nClaims:\n")
@@ -896,7 +924,7 @@ func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool) st
 	}
 	sb.WriteString(answer)
 	sb.WriteString("\n\nResearch findings (title, URL, source material):\n")
-	writeFindings(&sb, findings)
+	writeFindingsFor(&sb, findings, excerptFor)
 	return sb.String()
 }
 

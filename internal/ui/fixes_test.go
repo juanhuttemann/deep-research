@@ -21,7 +21,7 @@ func TestFactCheckPromptCarriesTheFindings(t *testing.T) {
 		{Title: "Solid State Review", URL: "https://example.com/a", Content: "Cells reached 400 Wh/kg."},
 		{Title: "Pilot Line", URL: "https://example.com/b", Content: "Production starts in 2027."},
 	}
-	got := factCheckPrompt("Batteries hit 400 Wh/kg.", findings, true)
+	got := factCheckPrompt("Batteries hit 400 Wh/kg.", findings, true, nil)
 
 	for _, want := range []string{
 		"Batteries hit 400 Wh/kg.",

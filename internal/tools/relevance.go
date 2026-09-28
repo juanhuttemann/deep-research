@@ -152,8 +152,8 @@ func rankByRelevance(in []SearXNGResult, terms []string) (kept, skipped []Scored
 	return kept, skipped
 }
 
-// Excerpt returns the passages of content that bear most on query, in page
-// order and within limit bytes. A scraped page opens with whatever its site
+// ExcerptFor returns the passages of content that bear most on the queries,
+// in page order and within limit bytes. A scraped page opens with whatever its site
 // puts first, and documentation sites routinely spend their first kilobytes on
 // a cookie dialog and navigation: a prefix cut handed the model those and cut
 // off the section that answered the query.
@@ -164,12 +164,22 @@ func rankByRelevance(in []SearXNGResult, terms []string) (kept, skipped []Scored
 // no stopword list is needed. A query that matches no block gets the prefix.
 // ponytail: lexical; a query in an unspaced script (Japanese, Chinese) is one
 // word that rarely matches, and falls back to the prefix as it did before.
-func Excerpt(content, query string, limit int) string {
+//
+// The queries come in two tiers. Each query's best passage comes first, the
+// first tier's before the second's, then every block by its best score
+// against any one query. The fact-check excerpts each page by the claims it
+// checks: those that cite the page first, then the others, since a page a
+// claim does not cite can still contradict it. Chosen by the search that
+// found it, a vendor's pricing page showed its node prices and left out the
+// paragraph that contradicted the claim under check; with every claim in one
+// tier, thirty-six claims' weak matches filled a page's excerpt and pushed
+// out the passage the page was cited for.
+func ExcerptFor(content string, first, second []string, limit int) string {
 	if len(content) <= limit {
 		return content
 	}
 	blocks := splitLeads(blockBreak.Split(content, -1))
-	keep := pickBlocks(blocks, blockScores(blocks, queryWords(query)), limit)
+	keep := pickBlocks(blocks, bestScores(blocks, first, second), limit)
 	if keep == nil {
 		return truncateUTF8Bare(content, limit)
 	}
@@ -247,6 +257,36 @@ func blockScores(blocks, words []string) []float64 {
 		scores[i] /= 0.25 + 0.75*max(float64(len(b)), avg)/max(avg, 1)
 	}
 	return scores
+}
+
+// bestScores is each block's best score against any one query, each query's
+// scores scaled so that its own best block scores 1, and that one block (the
+// first, on a tie) raised above every other, a first-tier query's highest:
+// on a page of near-identical paragraphs thirty blocks tied at the top for
+// one query and filled the budget before another query's best block was
+// reached. With one query the order is blockScores's own.
+func bestScores(blocks, first, second []string) []float64 {
+	best := make([]float64, len(blocks))
+	for tier, queries := range [][]string{first, second} {
+		lift := 3.0 - float64(tier) // 3 for the first tier, 2 for the second
+		for _, q := range queries {
+			s := blockScores(blocks, queryWords(q))
+			top, at := 0.0, -1
+			for i, v := range s {
+				if v > top {
+					top, at = v, i
+				}
+			}
+			if at < 0 {
+				continue
+			}
+			for i, v := range s {
+				best[i] = max(best[i], v/top)
+			}
+			best[at] = max(best[at], lift)
+		}
+	}
+	return best
 }
 
 // pickBlocks takes the best-scoring blocks that fit in limit, best first,

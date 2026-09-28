@@ -140,6 +140,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - A `--trace` recorded the analysis after the run had edited it (sources
   dropped, recommendations blocked) as the model's output. Each phase's
   output is recorded as it was returned.
+- The fact-check sees each page excerpted by the claims it checks: the
+  passage bearing on each claim that cites the page first, then on each
+  other claim, since a page a claim does not cite can contradict it. It
+  used to see the passages the search that found the page asked for, and
+  verified a blog's "Savings Plans do not apply" while the vendor's own
+  pricing page, among the sources, said otherwise further down. Each
+  recommendation is given to the check with the text of the claims it
+  names, and judged against them alone: listed by ID beside dozens of
+  claims, an "or" where its rule said "and" was approved in five checks of
+  eleven once the excerpts carried more text on the topic.
 - The model saw the first 1500 characters of each source, which on a
   documentation page were navigation and a cookie dialog. It now sees the
   passages that match the queries that found the page, and pages are

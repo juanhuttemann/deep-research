@@ -419,14 +419,48 @@ func claimsToCheck(a *agent.Analysis) string {
 		return a.Answer
 	}
 	var sb strings.Builder
+	writePremisePackets(&sb, a, nil)
+	sb.WriteString("Claims:\n")
 	writeClaims(&sb, a.Claims)
-	if len(a.Recommendations) > 0 {
-		sb.WriteString("\nRecommendations (id: choose ... when ...; the claims it rests on):\n")
-		for i, r := range a.Recommendations {
-			fmt.Fprintf(&sb, "  - %s: choose %s when %s [%s]\n", recommendationID(i), r.Choose, r.When, strings.Join(r.Claims, ", "))
+	return sb.String()
+}
+
+// writePremisePackets lists recommendations, each followed by the full text
+// of the claims it names and nothing else, for the fact-check to judge the
+// inference on. Listed by ID at the end of the claims, the premises were
+// dozens of lines away among thirty-six claims and pages of evidence, and
+// the check approved a recommendation that turned its rule's "and" into
+// "or" in five runs out of eleven. only limits the list to those indices.
+func writePremisePackets(sb *strings.Builder, a *agent.Analysis, only []int) {
+	byID := map[string]agent.Claim{}
+	for _, c := range a.Claims {
+		byID[c.ID] = c
+	}
+	wrote := false
+	for i, r := range a.Recommendations {
+		if only != nil && !slices.Contains(only, i) {
+			continue
+		}
+		if !wrote {
+			sb.WriteString("Recommendations to judge, each with the premises it names:\n")
+			wrote = true
+		}
+		fmt.Fprintf(sb, "  - %s: choose %s when %s\n", recommendationID(i), r.Choose, r.When)
+		for _, id := range r.Claims {
+			if c, ok := byID[id]; ok {
+				scope := ""
+				if c.Scope != "" {
+					scope = " [scope: " + c.Scope + "]"
+				}
+				fmt.Fprintf(sb, "      premise %s: %s%s\n", id, c.Text, scope)
+			} else {
+				fmt.Fprintf(sb, "      premise %s: (not a claim of the analysis)\n", id)
+			}
 		}
 	}
-	return sb.String()
+	if wrote {
+		sb.WriteString("\n")
+	}
 }
 
 // writeClaims lists claims one per line with what they are about and where
@@ -850,19 +884,16 @@ func revisionCheckPrompt(a *agent.Analysis, added []int, findings []agent.Findin
 		}
 	}
 	var sb strings.Builder
+	writePremisePackets(&sb, a, added)
+	sb.WriteString("Claims:\n")
 	writeClaims(&sb, claims)
-	sb.WriteString("\nRecommendations (id: choose ... when ...; the claims it rests on):\n")
-	for _, i := range added {
-		r := a.Recommendations[i]
-		fmt.Fprintf(&sb, "  - %s: choose %s when %s [%s]\n", recommendationID(i), r.Choose, r.When, strings.Join(r.Claims, ", "))
-	}
 	var pages []agent.Finding
 	for _, f := range findings {
 		if urls[tools.CanonicalURL(f.URL)] {
 			pages = append(pages, f)
 		}
 	}
-	return factCheckPrompt(sb.String(), pages, true)
+	return factCheckPrompt(sb.String(), pages, true, claims)
 }
 
 // judgeRevisions blocks each revision the check did not find following from

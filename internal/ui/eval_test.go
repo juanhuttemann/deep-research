@@ -29,12 +29,17 @@ import (
 type evalScore struct {
 	claimsRight, falseAccepts, falseRejects int
 	recsRight, falseApprovals, falseBlocks  int
-	errors                                  int
+	// rawWrong counts inference judgements that were wrong whatever the
+	// governed outcome: a recommendation that should not follow, judged to
+	// follow and blocked only because a premise failed, is still a checker
+	// that got the inference wrong.
+	rawWrong int
+	errors   int
 }
 
 func (s evalScore) String() string {
-	return fmt.Sprintf("claims right %d, false accepts %d, false rejects %d; recommendations right %d, false approvals %d, false blocks %d; errors %d",
-		s.claimsRight, s.falseAccepts, s.falseRejects, s.recsRight, s.falseApprovals, s.falseBlocks, s.errors)
+	return fmt.Sprintf("claims right %d, false accepts %d, false rejects %d; recommendations right %d, false approvals %d, false blocks %d; wrong inference judgements %d; errors %d",
+		s.claimsRight, s.falseAccepts, s.falseRejects, s.recsRight, s.falseApprovals, s.falseBlocks, s.rawWrong, s.errors)
 }
 
 func TestEvalChecker(t *testing.T) {
@@ -72,14 +77,22 @@ func TestEvalChecker(t *testing.T) {
 func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalScore, string) {
 	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations)}
 	checkAnalysis(a, c.Findings)
-	fc, err := asst.FactCheck(ctx, factCheckPrompt(claimsToCheck(a), c.Findings, true))
+	fc, err := asst.FactCheck(ctx, factCheckPrompt(claimsToCheck(a), c.Findings, true, a.Claims))
 	if err != nil {
 		return evalScore{errors: 1}, " (" + err.Error() + ")"
 	}
 	govern(a, fc, nil, c.Findings)
-
 	var s evalScore
-	var misses []string
+	misses := scoreClaims(&s, c, a)
+	misses = append(misses, scoreInferences(&s, c, fc)...)
+	misses = append(misses, scoreRecommendations(&s, c, a)...)
+	if len(misses) == 0 {
+		return s, ""
+	}
+	return s, "\n    " + strings.Join(misses, "\n    ")
+}
+
+func scoreClaims(s *evalScore, c checkerCase, a *agent.Analysis) (misses []string) {
 	status := map[string]string{}
 	for _, cl := range a.Claims {
 		status[cl.ID] = cl.Status
@@ -100,30 +113,61 @@ func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalSco
 			s.claimsRight++
 		}
 	}
-	approved := func(id string) bool {
-		n, _ := strconv.Atoi(strings.TrimPrefix(id, "r"))
-		return a.Recommendations[n-1].Blocked == ""
+	return misses
+}
+
+// scoreInferences scores the checker's raw "follows", whatever governance
+// then made of it.
+func scoreInferences(s *evalScore, c checkerCase, fc *agent.FactCheckResult) (misses []string) {
+	follows := map[string]bool{}
+	for _, inf := range fc.Inferences {
+		follows[inf.ID] = inf.Follows
 	}
 	for _, id := range c.Expect.Approved {
-		if approved(id) {
-			s.recsRight++
-		} else {
-			s.falseBlocks++
-			misses = append(misses, id+" blocked: "+a.Recommendations[mustIndex(id)].Blocked)
+		if !follows[id] {
+			s.rawWrong++
+			misses = append(misses, id+" judged not to follow")
 		}
 	}
 	for _, id := range c.Expect.Blocked {
-		if approved(id) {
+		if follows[id] && inferenceOnly(c, id) {
+			s.rawWrong++
+			misses = append(misses, id+" judged to follow")
+		}
+	}
+	return misses
+}
+
+func scoreRecommendations(s *evalScore, c checkerCase, a *agent.Analysis) (misses []string) {
+	for _, id := range c.Expect.Approved {
+		if b := a.Recommendations[mustIndex(id)].Blocked; b == "" {
+			s.recsRight++
+		} else {
+			s.falseBlocks++
+			misses = append(misses, id+" blocked: "+b)
+		}
+	}
+	for _, id := range c.Expect.Blocked {
+		if a.Recommendations[mustIndex(id)].Blocked == "" {
 			s.falseApprovals++
 			misses = append(misses, id+" approved")
 		} else {
 			s.recsRight++
 		}
 	}
-	if len(misses) == 0 {
-		return s, ""
+	return misses
+}
+
+// inferenceOnly reports whether an expected block rests on the inference: a
+// recommendation expected blocked because a premise fails may well follow
+// from its premises.
+func inferenceOnly(c checkerCase, id string) bool {
+	for _, cl := range c.Recommendations[mustIndex(id)].Claims {
+		if slices.Contains(c.Expect.NotSupported, cl) {
+			return false
+		}
 	}
-	return s, "\n    " + strings.Join(misses, "\n    ")
+	return true
 }
 
 func mustIndex(id string) int {
@@ -136,6 +180,6 @@ func addScore(a, b evalScore) evalScore {
 		claimsRight: a.claimsRight + b.claimsRight, falseAccepts: a.falseAccepts + b.falseAccepts,
 		falseRejects: a.falseRejects + b.falseRejects, recsRight: a.recsRight + b.recsRight,
 		falseApprovals: a.falseApprovals + b.falseApprovals, falseBlocks: a.falseBlocks + b.falseBlocks,
-		errors: a.errors + b.errors,
+		rawWrong: a.rawWrong + b.rawWrong, errors: a.errors + b.errors,
 	}
 }

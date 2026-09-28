@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -247,17 +248,57 @@ func TestExcerptPrefersAFocusedPassageOverABulkyOne(t *testing.T) {
 	focused := "Widget clusters scale nodes on a schedule."
 	page := strings.Repeat("Unrelated paragraph about billing.\n\n", 30) + bulky + "\n\n" + focused + "\n\n" +
 		strings.Repeat("Another unrelated paragraph.\n\n", 30)
-	if got := Excerpt(page, "widget node scaling", 300); !strings.Contains(got, focused) {
+	if got := ExcerptFor(page, []string{"widget node scaling"}, nil, 300); !strings.Contains(got, focused) {
 		t.Errorf("excerpt chose the bulk over the focused passage:\n%s", got)
 	}
 }
 
 func TestExcerptKeepsTheOpeningWhenNothingMatches(t *testing.T) {
 	page := strings.Repeat("abcdefghij ", 500)
-	if got := Excerpt(page, "unrelated query", 100); got != page[:100] {
+	if got := ExcerptFor(page, []string{"unrelated query"}, nil, 100); got != page[:100] {
 		t.Errorf("no-match excerpt = %q, want the page's first 100 bytes", got)
 	}
-	if got := Excerpt("short page", "anything", 100); got != "short page" {
+	if got := ExcerptFor("short page", []string{"anything"}, nil, 100); got != "short page" {
 		t.Errorf("a page under the limit was changed: %q", got)
+	}
+}
+
+// Excerpted by several queries, a page gives each query its best passage: one
+// query made of all their words chose the blocks matching most words overall.
+func TestExcerptForGivesEachQueryItsPassage(t *testing.T) {
+	var b strings.Builder
+	for i := range 30 {
+		fmt.Fprintf(&b, "WidgetCloud node %d costs a dollar per hour, billed per node-hour.\n\n", i)
+	}
+	b.WriteString("Database Savings Plans apply to all WidgetCloud usage with a one-year commitment.\n\n")
+	for i := range 30 {
+		fmt.Fprintf(&b, "WidgetCloud backup %d is billed per GB-month.\n\n", i)
+	}
+	page := b.String()
+	got := ExcerptFor(page, []string{"WidgetCloud nodes are billed per node-hour"}, []string{"Savings Plans do not apply to WidgetCloud"}, 600)
+	if !strings.Contains(got, "Database Savings Plans apply") || !strings.Contains(got, "billed per node-hour") {
+		t.Errorf("excerpt lacks one query's passage:\n%s", got)
+	}
+	if one := ExcerptFor(page, []string{"WidgetCloud node price per hour"}, nil, 600); strings.Contains(one, "Savings Plans") {
+		t.Errorf("the single-query excerpt was expected to miss it (the case this fixes):\n%s", one)
+	}
+}
+
+// Thirty-six claims' best blocks in one tier filled a page's excerpt with
+// weak matches and pushed out the passage the page was cited for: the
+// claims citing the page come first.
+func TestExcerptForPutsTheCitingClaimFirst(t *testing.T) {
+	var b strings.Builder
+	for i := range 40 {
+		fmt.Fprintf(&b, "Topic %d paragraph mentions heating item%d and cooling item%d.\n\n", i, i, i)
+	}
+	b.WriteString("Dual-fuel is indicated when the load exceeds 40,000 BTU/hr and the design temperature is below 5F.\n\n")
+	var others []string
+	for i := range 40 {
+		others = append(others, fmt.Sprintf("heating item%d", i))
+	}
+	got := ExcerptFor(b.String(), []string{"dual-fuel load 40,000 BTU/hr design temperature 5F"}, others, 500)
+	if !strings.Contains(got, "Dual-fuel is indicated") {
+		t.Errorf("the citing claim's passage was pushed out:\n%s", got)
 	}
 }

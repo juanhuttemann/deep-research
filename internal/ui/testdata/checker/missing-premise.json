@@ -1,0 +1,58 @@
+{
+ "about": "A recommendation that needs a premise it does not name does not follow, although the premise is among the claims.",
+ "findings": [
+  {
+   "url": "https://learn.example/python",
+   "title": "Python",
+   "query": "Python beginners data science",
+   "content": "Python's syntax is widely considered easier for beginners. Python is also the most widely used language in data science."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "Python's syntax is widely considered easier for beginners.",
+   "option": "Python",
+   "sources": [
+    "https://learn.example/python"
+   ]
+  },
+  {
+   "id": "c2",
+   "claim": "Python is the most widely used language in data science.",
+   "option": "Python",
+   "sources": [
+    "https://learn.example/python"
+   ]
+  }
+ ],
+ "recommendations": [
+  {
+   "choose": "Python",
+   "when": "you are a beginner who wants a career in data science",
+   "claims": [
+    "c1"
+   ]
+  },
+  {
+   "choose": "Python",
+   "when": "you are a beginner who wants a career in data science",
+   "claims": [
+    "c1",
+    "c2"
+   ]
+  }
+ ],
+ "expect": {
+  "supported": [
+   "c1",
+   "c2"
+  ],
+  "approved": [
+   "r2"
+  ],
+  "blocked": [
+   "r1"
+  ]
+ }
+}
