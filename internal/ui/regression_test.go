@@ -1693,3 +1693,62 @@ func TestSummarizerSeesTheAnalysisGaps(t *testing.T) {
 		t.Errorf("summarize prompt lacks the analysis gaps:\n%s", p)
 	}
 }
+
+// repairingAssistant scripts a run whose first check blocks a recommendation
+// for not following from its claim, and whose repair pass narrows it.
+type repairingAssistant struct {
+	*fakeAssistant
+	checks int
+}
+
+func (r *repairingAssistant) Analyze(_ context.Context, p string) (*agent.Analysis, error) {
+	if strings.Contains(p, "were not established") {
+		return &agent.Analysis{Recommendations: []agent.Recommendation{
+			{Revises: "r1", Choose: "Dual-fuel", When: "the load is high and the climate is severe", Claims: []string{"c1"}},
+		}}, nil
+	}
+	return &agent.Analysis{Answer: "a", Confidence: "medium",
+		Claims: []agent.Claim{{ID: "c1", Text: "Dual-fuel suits high loads in severe climates", Sources: []string{"https://h.example/guide"}}},
+		Recommendations: []agent.Recommendation{
+			{Choose: "Dual-fuel", When: "the load is high or the climate is severe", Claims: []string{"c1"}},
+		}}, nil
+}
+
+func (r *repairingAssistant) FactCheck(context.Context, string) (*agent.FactCheckResult, error) {
+	r.checks++
+	if r.checks == 1 {
+		return &agent.FactCheckResult{
+			Verdicts: []agent.Verdict{{ID: "c1", Status: "supported", Evidence: []agent.Evidence{
+				{Source: "https://h.example/guide", Quote: "Dual-fuel suits high loads in severe climates"}}}},
+			Inferences: []agent.Inference{{ID: "r1", Follows: false, Reason: "the claim says and, not or"}},
+		}, nil
+	}
+	return &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "r2", Follows: true}}}, nil
+}
+
+// A heating question lost its dual-fuel option because the recommendation
+// said "or" where its claim said "and": the check was right to block it,
+// and the answer had nothing in its place although the claim supported a
+// narrower recommendation. The repair pass writes and checks that one.
+func TestRepairPassRestoresAnOptionTheClaimsSupport(t *testing.T) {
+	topics := []agent.SubTopic{{ID: "1", Name: "Heating"}}
+	plan := newTestPlan("quick", topics)
+	q := subQueries(plan.Question, topics[0])[0]
+	fa := &repairingAssistant{fakeAssistant: &fakeAssistant{
+		planTopics: topics,
+		findings: map[string][]agent.Finding{q: {{Query: q, Title: "Guide", URL: "https://h.example/guide",
+			Content: "Dual-fuel suits high loads in severe climates, the guide says."}}},
+		signals: map[string][]agent.SourceSignal{q: {{URL: "https://h.example/guide", Domain: "h.example", Status: "ok"}}},
+	}}
+	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fa.checks != 2 {
+		t.Errorf("fact-check ran %d times, want 2 (claims, then the revision)", fa.checks)
+	}
+	if r := res.Summary.Report; !strings.Contains(r, "- **Dual-fuel**: the load is high and the climate is severe") ||
+		strings.Contains(r, "Not established") {
+		t.Errorf("report does not answer with the checked revision:\n%s", r)
+	}
+}

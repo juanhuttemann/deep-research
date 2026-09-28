@@ -6,7 +6,7 @@ A run is four phases, in order, with one bounded follow-up round inside
 analyze:
 
 ```
-research → analyze → [follow-up research → analyze] → fact-check → summarize
+research → analyze → [follow-up research → analyze] → fact-check → [repair → fact-check] → summarize
 ```
 
 Each assistant phase is a single model call. There are no multi-turn loops
@@ -51,6 +51,12 @@ and resolved conflicts. The Driver holds it to the run in code
   r2, ...) that it follows from them; otherwise it is kept, `blocked`, for
   audit, and the answer names it as not established with the claim that
   failed. A fact-check that did not run approves nothing.
+- The repair pass: when a recommendation is blocked and some claims passed,
+  one analyzer call revises the blocked ones from the supported claims only
+  (`repairPrompt`); code drops a revision that cites any other claim
+  (`acceptRevisions`); one fact-check call judges whether each revision
+  follows, given only the pages its claims cite. An approved revision takes
+  its original's place in the answer; the original stays, blocked.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the

@@ -498,12 +498,7 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 // which the program renders as the report's answer, and the blocked ones,
 // which it may explain but never recommend.
 func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
-	var blocked []agent.Recommendation
-	for _, r := range a.Recommendations {
-		if r.Blocked != "" {
-			blocked = append(blocked, r)
-		}
-	}
+	blocked := notEstablishedRecommendations(a)
 	if len(a.Recommendations) > 0 {
 		sb.WriteString("The report's \"## Answer\" section is written by the program: it lists the approved" +
 			" recommendations and names the others as not established. Do not write an answer or restate it:" +
@@ -549,12 +544,7 @@ func renderAnswer(a *agent.Analysis) string {
 	if noApproval(a) != noApprovalEvidence {
 		return sb.String()
 	}
-	var blocked []agent.Recommendation
-	for _, r := range a.Recommendations {
-		if r.Blocked != "" {
-			blocked = append(blocked, r)
-		}
-	}
+	blocked := notEstablishedRecommendations(a)
 	if len(blocked) > 0 {
 		sb.WriteString("\nNot established in this run:\n\n")
 		for _, r := range blocked {
@@ -562,6 +552,19 @@ func renderAnswer(a *agent.Analysis) string {
 		}
 	}
 	return sb.String()
+}
+
+// notEstablishedRecommendations are the blocked recommendations the answer
+// names: the analyzer's own, except those a revision replaced. A revision
+// that was blocked too is not named again; its original stands for it.
+func notEstablishedRecommendations(a *agent.Analysis) []agent.Recommendation {
+	var out []agent.Recommendation
+	for i, r := range a.Recommendations {
+		if r.Blocked != "" && r.Revises == "" && !replaced(a, i) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // writeChoice writes one recommendation as a list item, with why it is not
@@ -692,4 +695,152 @@ func headingLevel(ln string) int {
 		return 0
 	}
 	return n
+}
+
+// The repair pass. A recommendation blocked for an over-broad condition lost
+// an option the evidence supported: a heating question's dual-fuel option
+// was blocked because it said "or" where its claim said "and", a
+// programming question's Python option because it added a condition no
+// claim stated. The analyzer revises each blocked recommendation from the
+// claims that passed, and every revision is checked like the originals; a
+// revision may cite no other claim, so no new fact enters without a
+// verdict. The originals stay, blocked, for audit.
+
+// maxRevisions bounds the candidates the repair pass may add, so it cannot
+// turn one blocked recommendation into a list of guesses.
+const maxRevisions = 4
+
+// blockedRecommendations are the recommendations the check did not approve,
+// with their IDs.
+func blockedRecommendations(a *agent.Analysis) map[string]agent.Recommendation {
+	out := map[string]agent.Recommendation{}
+	for i, r := range a.Recommendations {
+		if r.Blocked != "" && r.Revises == "" {
+			out[recommendationID(i)] = r
+		}
+	}
+	return out
+}
+
+// repairPrompt asks the analyzer to revise the blocked recommendations from
+// the supported claims only. The analyzer's own instructions still apply:
+// the language of "choose" and "when", naming every claim a recommendation
+// needs.
+func repairPrompt(question string, a *agent.Analysis) string {
+	var sb strings.Builder
+	sb.WriteString("Question: " + question + "\n\n")
+	sb.WriteString("These recommendations were not established: a claim they rest on did not pass the fact-check," +
+		" or the check found they do not follow from their claims.\n")
+	for i, r := range a.Recommendations {
+		if r.Blocked != "" && r.Revises == "" {
+			fmt.Fprintf(&sb, "  - %s: choose %s when %s [%s] — %s\n", recommendationID(i), r.Choose, r.When,
+				strings.Join(r.Claims, ", "), r.Blocked)
+		}
+	}
+	sb.WriteString("\nSupported claims, the only ones you may cite:\n")
+	writeClaims(&sb, supportedClaims(a))
+	sb.WriteString("\nWrite revised recommendations that these claims justify exactly as written: narrow a" +
+		" condition, split a recommendation, or drop what the claims do not support. Cite only the claims above," +
+		" every one a revision needs; give in \"revises\" the ID of the recommendation it replaces. Leave out a" +
+		" recommendation nothing above can replace. Return only JSON:\n" +
+		`{"recommendations":[{"revises":"r1","choose":"...","when":"...","claims":["c1"]}]}` + "\n")
+	return sb.String()
+}
+
+// supportedClaims are the claims that passed the fact-check.
+func supportedClaims(a *agent.Analysis) []agent.Claim {
+	var out []agent.Claim
+	for _, c := range a.Claims {
+		if c.Status == statusSupported {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// acceptRevisions appends the revisions that cite only supported claims and
+// revise a blocked recommendation, up to maxRevisions, and returns their
+// indices. A revision citing any other claim is dropped: it would rest on a
+// fact that has no verdict, or one that failed.
+func acceptRevisions(a *agent.Analysis, revisions []agent.Recommendation) []int {
+	blocked := blockedRecommendations(a)
+	supported := map[string]bool{}
+	for _, c := range supportedClaims(a) {
+		supported[c.ID] = true
+	}
+	var added []int
+	for _, r := range revisions {
+		if _, ok := blocked[r.Revises]; !ok || len(r.Claims) == 0 || len(added) == maxRevisions {
+			continue
+		}
+		if slices.ContainsFunc(r.Claims, func(id string) bool { return !supported[id] }) {
+			continue
+		}
+		r.Blocked, r.Failed = "", nil
+		a.Recommendations = append(a.Recommendations, r)
+		added = append(added, len(a.Recommendations)-1)
+	}
+	return added
+}
+
+// revisionCheckPrompt asks the fact-checker whether each revision follows
+// from its claims. It is given the claims the revisions cite and only the
+// pages those claims come from: the claims already have their verdicts, and
+// the question now is the inference.
+func revisionCheckPrompt(a *agent.Analysis, added []int, findings []agent.Finding) string {
+	cited := map[string]bool{}
+	for _, i := range added {
+		for _, id := range a.Recommendations[i].Claims {
+			cited[id] = true
+		}
+	}
+	var claims []agent.Claim
+	urls := map[string]bool{}
+	for _, c := range a.Claims {
+		if cited[c.ID] {
+			claims = append(claims, c)
+			for _, u := range c.Sources {
+				urls[tools.CanonicalURL(u)] = true
+			}
+		}
+	}
+	var sb strings.Builder
+	writeClaims(&sb, claims)
+	sb.WriteString("\nRecommendations (id: choose ... when ...; the claims it rests on):\n")
+	for _, i := range added {
+		r := a.Recommendations[i]
+		fmt.Fprintf(&sb, "  - %s: choose %s when %s [%s]\n", recommendationID(i), r.Choose, r.When, strings.Join(r.Claims, ", "))
+	}
+	var pages []agent.Finding
+	for _, f := range findings {
+		if urls[tools.CanonicalURL(f.URL)] {
+			pages = append(pages, f)
+		}
+	}
+	return factCheckPrompt(sb.String(), pages, true)
+}
+
+// judgeRevisions blocks each revision the check did not find following from
+// its claims, and records the check's judgements for audit.
+func judgeRevisions(a *agent.Analysis, added []int, fc, recheck *agent.FactCheckResult) {
+	by := map[string][]agent.Inference{}
+	for _, inf := range recheck.Inferences {
+		by[inf.ID] = append(by[inf.ID], inf)
+	}
+	for _, i := range added {
+		id := recommendationID(i)
+		a.Recommendations[i].Blocked = strings.Join(inferenceFailure(by[id]), "; ")
+		if fc != nil {
+			fc.Inferences = append(fc.Inferences, by[id]...)
+		}
+	}
+}
+
+// replaced reports whether a blocked recommendation has an approved revision,
+// in which case the answer shows the revision and not the original.
+func replaced(a *agent.Analysis, i int) bool {
+	id := recommendationID(i)
+	return slices.ContainsFunc(a.Recommendations, func(r agent.Recommendation) bool {
+		return r.Revises == id && r.Blocked == ""
+	})
 }

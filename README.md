@@ -134,9 +134,9 @@ Firecrawl, for full page text, runs from its own repository:
 `openrouter/free` costs nothing and picks an available free model per request,
 so runs are not reproducible model-for-model — which is why every report
 records what served it. Free models are capped per minute and per UTC day; a
-run is 4 or 5 model requests with search (plan, analyze, a second analyze
-when follow-up searches found evidence, fact-check, summarize), more with
-search off. Hitting the daily cap fails at once with a message
+run is 4 to 7 model requests with search (plan, analyze, a second analyze
+when follow-up searches found evidence, fact-check, a revision and its
+check when a recommendation was blocked, summarize), more with search off. Hitting the daily cap fails at once with a message
 instead of burning retries; a per-minute limit waits for the provider's
 `Retry-After`.
 

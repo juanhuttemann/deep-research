@@ -266,6 +266,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 			Detail: "fact-check unavailable, reporting unverified: " + err.Error()})
 	}
 	d.applyVerdicts(analysis, fc, err, findings)
+	d.repair(ctx, plan.Question, analysis, fc, findings)
 
 	d.emit(Event{Type: Phase, Phase: "Summarize", Detail: "Writing the report"})
 	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved)
@@ -310,6 +311,41 @@ func (d *Driver) applyVerdicts(a *agent.Analysis, fc *agent.FactCheckResult, fcE
 	d.emit(Event{Type: Info, Phase: "Fact-Check", Detail: fmt.Sprintf(
 		"%d of %d claims supported (%d with no located quote); %d of %d recommendations approved",
 		supported, len(a.Claims), unlocated, len(approvedRecommendations(a)), len(a.Recommendations))})
+}
+
+// repair runs the repair pass (see repairPrompt) when the check blocked a
+// recommendation and some claims passed: one analyzer call to revise, one
+// fact-check call to judge the revisions. A failure in either leaves the
+// recommendations as the first check left them.
+func (d *Driver) repair(ctx context.Context, question string, a *agent.Analysis, fc *agent.FactCheckResult, findings []agent.Finding) {
+	n := len(blockedRecommendations(a))
+	if fc == nil || n == 0 || len(supportedClaims(a)) == 0 || ctx.Err() != nil {
+		return
+	}
+	d.emit(Event{Type: Phase, Phase: "Fact-Check", Detail: fmt.Sprintf("Revising %d recommendations the check did not approve", n)})
+	rev, err := d.Agent.Analyze(ctx, repairPrompt(question, a))
+	if err != nil {
+		d.emit(Event{Type: Error, Phase: "Fact-Check", Detail: "repair pass failed, keeping the check's result: " + err.Error()})
+		return
+	}
+	added := acceptRevisions(a, rev.Recommendations)
+	if len(added) == 0 {
+		return
+	}
+	recheck, err := d.Agent.FactCheck(ctx, revisionCheckPrompt(a, added, findings))
+	if err != nil {
+		for _, i := range added {
+			a.Recommendations[i].Blocked = "fact_check_unavailable: " + err.Error()
+		}
+		d.emit(Event{Type: Error, Phase: "Fact-Check", Detail: "checking the revisions failed: " + err.Error()})
+		return
+	}
+	judgeRevisions(a, added, fc, recheck)
+	var ok int
+	for _, i := range added {
+		ok += btoi(a.Recommendations[i].Blocked == "")
+	}
+	d.emit(Event{Type: Info, Phase: "Fact-Check", Detail: fmt.Sprintf("%d of %d revised recommendations approved", ok, len(added))})
 }
 
 func btoi(b bool) int {

@@ -23,6 +23,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   each time, so a prompt or model change could not be told apart from a
   change in what the web returned. See "Replaying a run" in
   `docs/usage.md`.
+- A repair pass for blocked recommendations. A recommendation blocked for
+  an over-broad condition took an option the evidence supported out of the
+  answer: a heating question's dual-fuel option said "or" where its claim
+  said "and", a programming question's Python option added a condition no
+  claim stated. When a recommendation is blocked and some claims passed,
+  the analyzer revises it from the supported claims only, and the
+  fact-check judges each revision; an approved one replaces its original
+  in the answer, which stays in the `.json` as blocked. It costs an analyze
+  and a fact-check call, only in a run where something was blocked.
 - A follow-up round: after the first analysis, its first three follow-up
   queries are searched as extra sub-agents, and the run analyzes once more
   if they found evidence. The report used to list them as "suggested

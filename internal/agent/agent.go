@@ -128,6 +128,9 @@ type Recommendation struct {
 	// established. Failed are the IDs of the claims that did not pass.
 	Blocked string   `json:"blocked,omitempty"`
 	Failed  []string `json:"failed,omitempty"`
+	// Revises is the ID (r1, r2, ...) of the blocked recommendation this one
+	// was written to replace, for a recommendation from the repair pass.
+	Revises string `json:"revises,omitempty"`
 }
 
 // Conflict is a disagreement between claims and how the analysis resolved
@@ -1275,7 +1278,8 @@ func parseClaims(v any) []Claim {
 func parseRecommendations(v any) []Recommendation {
 	var out []Recommendation
 	for _, m := range objects(v) {
-		r := Recommendation{Choose: getString(m, "choose", ""), When: getString(m, "when", ""), Claims: scalars(m["claims"])}
+		r := Recommendation{Choose: getString(m, "choose", ""), When: getString(m, "when", ""),
+			Claims: scalars(m["claims"]), Revises: scalar(m["revises"])}
 		if r.Choose != "" {
 			out = append(out, r)
 		}

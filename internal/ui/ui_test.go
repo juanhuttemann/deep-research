@@ -1670,3 +1670,55 @@ func TestRestatedAnswerAboveTheFirstHeadingIsDropped(t *testing.T) {
 		t.Errorf("a report with no heading lost its text: %q", got)
 	}
 }
+
+// A revision may cite only claims that passed and must revise a blocked
+// recommendation; the pass cannot add more than maxRevisions.
+func TestAcceptRevisionsOnlyOnSupportedClaims(t *testing.T) {
+	findings, a := decisionFixture()
+	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+		verdict("c2", "partial", "1", "save up to 55%"),
+	}, Inferences: follows("r1", "r2", "r3")}, nil, findings)
+	added := acceptRevisions(a, []agent.Recommendation{
+		{Revises: "r2", Choose: "Node-based", When: "billing by the hour suits you", Claims: []string{"c1"}},
+		{Revises: "r2", Choose: "Node-based", When: "you want 90% off", Claims: []string{"c2"}},
+		{Revises: "r1", Choose: "Serverless", When: "again", Claims: []string{"c1"}},
+		{Revises: "r2", Choose: "Node-based", When: "no claim"},
+	})
+	if len(added) != 1 || a.Recommendations[added[0]].When != "billing by the hour suits you" {
+		t.Errorf("accepted %v, want only the revision of a blocked recommendation on supported claims", added)
+	}
+	_, fresh := decisionFixture()
+	govern(fresh, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+	}}, nil, findings)
+	var many []agent.Recommendation
+	for range 10 {
+		many = append(many, agent.Recommendation{Revises: "r3", Choose: "x", When: "y", Claims: []string{"c1"}})
+	}
+	if got := acceptRevisions(fresh, many); len(got) != maxRevisions {
+		t.Errorf("accepted %d revisions, want the cap of %d", len(got), maxRevisions)
+	}
+}
+
+// An approved revision takes its original's place in the answer; a revision
+// that was blocked too leaves the original named as not established.
+func TestApprovedRevisionReplacesItsOriginal(t *testing.T) {
+	findings, a := decisionFixture()
+	a.Recommendations = a.Recommendations[:2]
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+		verdict("c2", "partial", "1", "save up to 55%"),
+	}, Inferences: follows("r1", "r2")}
+	govern(a, fc, nil, findings)
+	added := acceptRevisions(a, []agent.Recommendation{{Revises: "r2", Choose: "Node-based", When: "hourly billing suits you", Claims: []string{"c1"}}})
+	judgeRevisions(a, added, fc, &agent.FactCheckResult{Inferences: follows("r3")})
+	got := renderAnswer(a)
+	if !strings.Contains(got, "- **Node-based**: hourly billing suits you") || strings.Contains(got, "Not established") {
+		t.Errorf("answer does not show the revision in place of the original:\n%s", got)
+	}
+	a.Recommendations[2].Blocked = "it does not follow from its claims: r"
+	if got := renderAnswer(a); !strings.Contains(got, "Not established") || !strings.Contains(got, "traffic is steady") {
+		t.Errorf("with the revision blocked the original should be named as not established:\n%s", got)
+	}
+}
