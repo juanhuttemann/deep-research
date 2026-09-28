@@ -487,3 +487,16 @@ func TestParseInferences(t *testing.T) {
 		}
 	}
 }
+
+// Conclusions parse as statements; the checker's judgements are read from
+// "inferences" and from the older "recommendations" key alike.
+func TestParseConclusionsAndInferences(t *testing.T) {
+	a := parseAnalysis(`{"answer":"a","conclusions":[{"statement":"S","claims":["c1"]},{"claims":["c2"]}]}`)
+	if len(a.Conclusions) != 1 || a.Conclusions[0].Statement != "S" {
+		t.Errorf("conclusions = %+v, want the one with a statement", a.Conclusions)
+	}
+	fc := parseFactCheck(`{"inferences":[{"id":"k1","follows":true}],"recommendations":[{"id":"r1","follows":true}]}`)
+	if len(fc.Inferences) != 2 {
+		t.Errorf("inferences = %+v, want both keys read", fc.Inferences)
+	}
+}

@@ -47,6 +47,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- Every answer is checked, not only a choice: the analysis states its
+  conclusions, each on the claims it names, and they are governed as
+  recommendations are (premises supported, the check judging that the
+  statement follows, the repair pass, the answer written from what passed).
+  An explanation, an account of events or a forecast was answered in the
+  summarizer's unchecked prose. A forecast has to state its assumptions and
+  horizon, an opinion who holds it. An analysis with claims and no
+  conclusion says so instead of falling back to prose. The explanation
+  below the answer is still written by the summarizer from checked
+  material; docs/architecture.md says what is and is not guaranteed.
 - The prompts no longer assume a product comparison. How a source's
   authority is weighed is set per kind of claim (a treatment's effect,
   history, statistics, news, law, a product) instead of by a product's

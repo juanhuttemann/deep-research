@@ -96,7 +96,11 @@ type Analysis struct {
 	Interpretation  string           `json:"interpretation,omitempty"`
 	Claims          []Claim          `json:"claims,omitempty"`
 	Recommendations []Recommendation `json:"recommendations,omitempty"`
-	Conflicts       []Conflict       `json:"conflicts,omitempty"`
+	// Conclusions are the answer's statements, each on the claims it names,
+	// checked like recommendations: an explanation, account or forecast
+	// answered in unchecked prose while a choice was held to its premises.
+	Conclusions []Recommendation `json:"conclusions,omitempty"`
+	Conflicts   []Conflict       `json:"conflicts,omitempty"`
 	// Labels are the words the program itself writes into the report (the
 	// answer heading, "not established", status names), in the question's
 	// language, keyed as the analyzer prompt lists them.
@@ -122,10 +126,15 @@ type Claim struct {
 
 // Recommendation is a conditional answer: choose an option when a condition
 // holds, because of the claims it names.
+//
+// A conclusion, the answer's statement for a question that asks for no
+// choice, is the same type with Statement set and no Choose or When: it is
+// governed, repaired and rendered as a recommendation is.
 type Recommendation struct {
-	Choose string   `json:"choose"`
-	When   string   `json:"when"`
-	Claims []string `json:"claims,omitempty"`
+	Choose    string   `json:"choose,omitempty"`
+	When      string   `json:"when,omitempty"`
+	Statement string   `json:"statement,omitempty"`
+	Claims    []string `json:"claims,omitempty"`
 	// Blocked says why the recommendation was not approved: a claim it names
 	// did not pass the fact-check, or the check found it does not follow from
 	// them. It is kept for audit and shown in the answer only as not
@@ -1219,6 +1228,7 @@ func parseAnalysis(out string) *Analysis {
 		Interpretation:  getString(m, "interpretation", ""),
 		Claims:          parseClaims(m["claims"]),
 		Recommendations: parseRecommendations(m["recommendations"]),
+		Conclusions:     parseConclusions(m["conclusions"]),
 		Conflicts:       parseConflicts(m["conflicts"]),
 		Labels:          parseLabels(m["labels"]),
 	}
@@ -1298,6 +1308,17 @@ func parseRecommendations(v any) []Recommendation {
 			Claims: scalars(m["claims"]), Revises: scalar(m["revises"])}
 		if r.Choose != "" {
 			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func parseConclusions(v any) []Recommendation {
+	var out []Recommendation
+	for _, m := range objects(v) {
+		c := Recommendation{Statement: getString(m, "statement", ""), Claims: scalars(m["claims"]), Revises: scalar(m["revises"])}
+		if c.Statement != "" {
+			out = append(out, c)
 		}
 	}
 	return out
@@ -1386,7 +1407,10 @@ func parseFactCheck(out string) *FactCheckResult {
 		Unverified:     parseUnverified(m["unverified"]),
 		Contradictions: parseContradictions(m["contradictions"]),
 		Verdicts:       parseVerdicts(m["verdicts"]),
-		Inferences:     parseInferences(m["recommendations"]),
+		// "inferences" judges recommendations and conclusions alike; a
+		// checker following the earlier prompt calls the list
+		// "recommendations".
+		Inferences: append(parseInferences(m["inferences"]), parseInferences(m["recommendations"])...),
 	}
 }
 

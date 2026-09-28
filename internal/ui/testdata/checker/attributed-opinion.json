@@ -1,0 +1,45 @@
+{
+ "about": "A source arguing a position supports that it argues it, not that the position is right.",
+ "findings": [
+  {
+   "url": "https://essays.example/remote",
+   "title": "Essay",
+   "query": "remote work productivity argument",
+   "content": "In this essay, economist Jane Roe argues that remote work raises productivity for most office workers."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "Economist Jane Roe argues that remote work raises productivity for most office workers.",
+   "sources": [
+    "https://essays.example/remote"
+   ]
+  }
+ ],
+ "conclusions": [
+  {
+   "statement": "Remote work raises productivity for most office workers.",
+   "claims": [
+    "c1"
+   ]
+  },
+  {
+   "statement": "Economist Jane Roe argues that remote work raises productivity for most office workers.",
+   "claims": [
+    "c1"
+   ]
+  }
+ ],
+ "expect": {
+  "supported": [
+   "c1"
+  ],
+  "approved": [
+   "k2"
+  ],
+  "blocked": [
+   "k1"
+  ]
+ }
+}

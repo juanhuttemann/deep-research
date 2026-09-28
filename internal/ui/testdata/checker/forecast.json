@@ -1,0 +1,45 @@
+{
+ "about": "A forecast follows from evidence only under the assumptions and horizon it states: stated as a certainty it does not follow.",
+ "findings": [
+  {
+   "url": "https://market.example/outlook",
+   "title": "Market outlook",
+   "query": "widget price forecast 2030",
+   "content": "Our base case assumes demand grows 8% a year through 2030; under that assumption we project the widget price at $120 per unit in 2030, with a range of $90 to $150."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "The outlook projects the widget price at $120 per unit in 2030, with a range of $90 to $150, assuming demand grows 8% a year through 2030.",
+   "sources": [
+    "https://market.example/outlook"
+   ]
+  }
+ ],
+ "conclusions": [
+  {
+   "statement": "The widget price will be $120 per unit in 2030.",
+   "claims": [
+    "c1"
+   ]
+  },
+  {
+   "statement": "If demand grows 8% a year through 2030, one outlook projects about $120 per unit in 2030, within $90 to $150.",
+   "claims": [
+    "c1"
+   ]
+  }
+ ],
+ "expect": {
+  "supported": [
+   "c1"
+  ],
+  "approved": [
+   "k2"
+  ],
+  "blocked": [
+   "k1"
+  ]
+ }
+}

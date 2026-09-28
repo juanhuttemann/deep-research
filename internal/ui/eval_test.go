@@ -38,7 +38,7 @@ type evalScore struct {
 }
 
 func (s evalScore) String() string {
-	return fmt.Sprintf("claims right %d, false accepts %d, false rejects %d; recommendations right %d, false approvals %d, false blocks %d; wrong inference judgements %d; errors %d",
+	return fmt.Sprintf("claims right %d, false accepts %d, false rejects %d; recommendations and conclusions right %d, false approvals %d, false blocks %d; wrong inference judgements %d; errors %d",
 		s.claimsRight, s.falseAccepts, s.falseRejects, s.recsRight, s.falseApprovals, s.falseBlocks, s.rawWrong, s.errors)
 }
 
@@ -75,7 +75,8 @@ func TestEvalChecker(t *testing.T) {
 
 // evalCase runs the fact-check and governance on one case and scores them.
 func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalScore, string) {
-	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations)}
+	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations),
+		Conclusions: slices.Clone(c.Conclusions)}
 	checkAnalysis(a, c.Findings)
 	fc, err := asst.FactCheck(ctx, factCheckPrompt(claimsToCheck(a), c.Findings, true, a.Claims))
 	if err != nil {
@@ -140,15 +141,15 @@ func scoreInferences(s *evalScore, c checkerCase, fc *agent.FactCheckResult) (mi
 
 func scoreRecommendations(s *evalScore, c checkerCase, a *agent.Analysis) (misses []string) {
 	for _, id := range c.Expect.Approved {
-		if b := a.Recommendations[mustIndex(id)].Blocked; b == "" {
+		if u, _ := unitByID(a, id); u.r.Blocked == "" {
 			s.recsRight++
 		} else {
 			s.falseBlocks++
-			misses = append(misses, id+" blocked: "+b)
+			misses = append(misses, id+" blocked: "+u.r.Blocked)
 		}
 	}
 	for _, id := range c.Expect.Blocked {
-		if a.Recommendations[mustIndex(id)].Blocked == "" {
+		if u, _ := unitByID(a, id); u.r.Blocked == "" {
 			s.falseApprovals++
 			misses = append(misses, id+" approved")
 		} else {
@@ -162,17 +163,13 @@ func scoreRecommendations(s *evalScore, c checkerCase, a *agent.Analysis) (misse
 // recommendation expected blocked because a premise fails may well follow
 // from its premises.
 func inferenceOnly(c checkerCase, id string) bool {
-	for _, cl := range c.Recommendations[mustIndex(id)].Claims {
+	u, _ := unitByID(&agent.Analysis{Recommendations: c.Recommendations, Conclusions: c.Conclusions}, id)
+	for _, cl := range u.r.Claims {
 		if slices.Contains(c.Expect.NotSupported, cl) {
 			return false
 		}
 	}
 	return true
-}
-
-func mustIndex(id string) int {
-	n, _ := strconv.Atoi(strings.TrimPrefix(id, "r"))
-	return n - 1
 }
 
 func addScore(a, b evalScore) evalScore {

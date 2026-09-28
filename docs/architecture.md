@@ -35,8 +35,10 @@ budget, so its scope survives the cut.
 
 The analysis is a decision, not only prose: its reading of the question,
 atomic claims (each with the option and criterion it is about, its scope and
-its sources), conditional recommendations naming the claims they rest on,
-and resolved conflicts. The Driver holds it to the run in code
+its sources), conclusions (the answer's statements) and, for a choice,
+conditional recommendations, each naming the claims it rests on, and
+resolved conflicts. Conclusions (k1, k2, ...) and recommendations (r1,
+r2, ...) are governed alike; "recommendation" below means either. The Driver holds it to the run in code
 (`internal/ui/decision.go`):
 
 - `checkAnalysis`: a claim keeps only sources that are pages the run
@@ -63,6 +65,15 @@ and resolved conflicts. The Driver holds it to the run in code
   recommendation followed by the text of the claims it names, judged first
   and against those alone. `make eval-replay` measures both on frozen
   analyses (`internal/ui/testdata/checker`).
+
+What this guarantees, and what it does not: the report's answer section is
+written by the program from what passed, so no statement the check blocked
+is stated there, and every claim it stands on quotes a passage that is in a
+page the run fetched. Whether a passage supports a claim, and whether claims
+justify a statement, are the checking model's judgements. The explanation
+the summarizer writes below the answer is model prose held only by its
+instructions: it is given nothing but checked material, and told never to
+assert what was not established.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the

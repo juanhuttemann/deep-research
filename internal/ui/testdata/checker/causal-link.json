@@ -1,0 +1,63 @@
+{
+ "about": "A causal conclusion needs its causal link among its premises: two facts that happened do not make one the cause of the other.",
+ "findings": [
+  {
+   "url": "https://history.example/2008",
+   "title": "Crisis timeline",
+   "query": "2008 crisis timeline",
+   "content": "Subprime mortgage defaults rose sharply in 2007. Lehman Brothers failed in September 2008. The inquiry found that Lehman's heavy exposure to subprime-backed securities caused its losses."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "Subprime mortgage defaults rose sharply in 2007.",
+   "sources": [
+    "https://history.example/2008"
+   ]
+  },
+  {
+   "id": "c2",
+   "claim": "Lehman Brothers failed in September 2008.",
+   "sources": [
+    "https://history.example/2008"
+   ]
+  },
+  {
+   "id": "c3",
+   "claim": "The inquiry found that Lehman's heavy exposure to subprime-backed securities caused its losses.",
+   "sources": [
+    "https://history.example/2008"
+   ]
+  }
+ ],
+ "conclusions": [
+  {
+   "statement": "Rising subprime defaults caused Lehman Brothers' failure.",
+   "claims": [
+    "c1",
+    "c2"
+   ]
+  },
+  {
+   "statement": "The inquiry attributes Lehman Brothers' losses to its exposure to subprime-backed securities, as subprime defaults rose in 2007.",
+   "claims": [
+    "c1",
+    "c3"
+   ]
+  }
+ ],
+ "expect": {
+  "supported": [
+   "c1",
+   "c2",
+   "c3"
+  ],
+  "approved": [
+   "k2"
+  ],
+  "blocked": [
+   "k1"
+  ]
+ }
+}

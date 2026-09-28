@@ -105,7 +105,7 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	// on: they are blocked like any other that names no claim, and prose
 	// verdicts are held to the same quote check before the reports list them.
 	if len(a.Claims) == 0 {
-		blockRecommendations(a, nil)
+		blockUnits(a, nil)
 		if fc != nil && len(fc.Verdicts) > 0 {
 			fillVerdictLists(fc, proseEntries(fc.Verdicts, findings, pages))
 		}
@@ -115,14 +115,14 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	var inferences map[string][]agent.Inference
 	if fc != nil {
 		verdicts, unknown = verdictsByClaim(a, fc)
-		inferences = inferencesByRecommendation(a, fc, &unknown)
+		inferences = inferencesByUnit(a, fc, &unknown)
 	}
 	for i := range a.Claims {
 		if c := &a.Claims[i]; c.Status != statusUnsourced {
 			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, fcErr, findings, pages)
 		}
 	}
-	blockRecommendations(a, inferences)
+	blockUnits(a, inferences)
 	// Derived even when the checker answered in the older list shape: its
 	// lists say nothing about the claims by ID, and kept as they came they
 	// reported as confirmed a claim this pass had rejected.
@@ -286,20 +286,57 @@ func visibleText(s string) string {
 	return strings.Join(strings.Fields(plainPunct.Replace(s)), " ")
 }
 
-// blockRecommendations blocks every recommendation that names a claim that is
-// not supported, or names none: the claims it names are its premises, and a
-// recommendation standing on what is left after one of them failed is one
-// the evidence did not reach. One whose premises all passed is blocked too
-// unless the fact-check found it follows from them: supported claims do not
-// make a conclusion follow, and before this nothing checked that it did.
-// inferences is nil when there was no fact-check to judge them.
-func blockRecommendations(a *agent.Analysis, inferences map[string][]agent.Inference) {
+// unit is one statement of the answer the fact-check governs: a
+// recommendation (r1, r2, ...) or a conclusion (k1, k2, ...), known by its
+// place in the analysis, since the analyzer gives them no IDs.
+type unit struct {
+	id string
+	r  *agent.Recommendation
+}
+
+// units are the analysis's recommendations, then its conclusions.
+func units(a *agent.Analysis) []unit {
+	var out []unit
+	for i := range a.Recommendations {
+		out = append(out, unit{"r" + strconv.Itoa(i+1), &a.Recommendations[i]})
+	}
+	for i := range a.Conclusions {
+		out = append(out, unit{"k" + strconv.Itoa(i+1), &a.Conclusions[i]})
+	}
+	return out
+}
+
+// unitByID finds a unit by its ID.
+func unitByID(a *agent.Analysis, id string) (unit, bool) {
+	for _, u := range units(a) {
+		if u.id == id {
+			return u, true
+		}
+	}
+	return unit{}, false
+}
+
+// statement is how a unit reads to the fact-check and the repair pass.
+func statement(r agent.Recommendation) string {
+	if r.Statement != "" {
+		return "conclude: " + r.Statement
+	}
+	return "choose " + r.Choose + " when " + r.When
+}
+
+// blockUnits blocks every unit that names a claim that is not supported, or
+// names none: the claims it names are its premises, and a conclusion
+// standing on what is left after one of them failed is one the evidence did
+// not reach. One whose premises all passed is blocked too unless the
+// fact-check found it follows from them: supported claims do not make a
+// conclusion follow. inferences is nil when there was no fact-check.
+func blockUnits(a *agent.Analysis, inferences map[string][]agent.Inference) {
 	byID := map[string]agent.Claim{}
 	for _, c := range a.Claims {
 		byID[c.ID] = c
 	}
-	for i := range a.Recommendations {
-		r := &a.Recommendations[i]
+	for _, u := range units(a) {
+		r := u.r
 		if len(r.Claims) == 0 {
 			r.Blocked = "it names no claim to rest on"
 			continue
@@ -317,14 +354,14 @@ func blockRecommendations(a *agent.Analysis, inferences map[string][]agent.Infer
 			}
 		}
 		if len(reasons) == 0 && inferences != nil {
-			reasons = inferenceFailure(inferences[recommendationID(i)])
+			reasons = inferenceFailure(inferences[u.id])
 		}
 		r.Blocked = strings.Join(reasons, "; ")
 	}
 }
 
-// inferenceFailure is why a recommendation whose premises passed does not
-// stand on the checker's judgement of it, or nothing when it does.
+// inferenceFailure is why a unit whose premises passed does not stand on the
+// checker's judgement of it, or nothing when it does.
 func inferenceFailure(vs []agent.Inference) []string {
 	switch {
 	case len(vs) == 0:
@@ -337,17 +374,16 @@ func inferenceFailure(vs []agent.Inference) []string {
 	return nil
 }
 
-// recommendationID is the ID the fact-check knows a recommendation by: its
-// place in the analysis, since the analyzer gives recommendations none.
-func recommendationID(i int) string { return "r" + strconv.Itoa(i+1) }
-
-// inferencesByRecommendation groups the checker's recommendation judgements
-// by ID, adding to unknown the IDs that are not a recommendation's.
-func inferencesByRecommendation(a *agent.Analysis, fc *agent.FactCheckResult, unknown *[]string) map[string][]agent.Inference {
+// inferencesByUnit groups the checker's judgements by unit ID, adding to
+// unknown the IDs that are not a unit's.
+func inferencesByUnit(a *agent.Analysis, fc *agent.FactCheckResult, unknown *[]string) map[string][]agent.Inference {
+	known := map[string]bool{}
+	for _, u := range units(a) {
+		known[u.id] = true
+	}
 	by := map[string][]agent.Inference{}
 	for _, inf := range fc.Inferences {
-		n, err := strconv.Atoi(strings.TrimPrefix(inf.ID, "r"))
-		if err != nil || n < 1 || n > len(a.Recommendations) {
+		if !known[inf.ID] {
 			*unknown = append(*unknown, inf.ID)
 			continue
 		}
@@ -356,12 +392,13 @@ func inferencesByRecommendation(a *agent.Analysis, fc *agent.FactCheckResult, un
 	return by
 }
 
-// approvedRecommendations are the recommendations the fact-check let stand.
-func approvedRecommendations(a *agent.Analysis) []agent.Recommendation {
+// approvedUnits are the recommendations and conclusions the fact-check let
+// stand, recommendations first.
+func approvedUnits(a *agent.Analysis) []agent.Recommendation {
 	var out []agent.Recommendation
-	for _, r := range a.Recommendations {
-		if r.Blocked == "" {
-			out = append(out, r)
+	for _, u := range units(a) {
+		if u.r.Blocked == "" {
+			out = append(out, *u.r)
 		}
 	}
 	return out
@@ -425,28 +462,28 @@ func claimsToCheck(a *agent.Analysis) string {
 	return sb.String()
 }
 
-// writePremisePackets lists recommendations, each followed by the full text
-// of the claims it names and nothing else, for the fact-check to judge the
+// writePremisePackets lists the units, each followed by the full text of the
+// claims it names and nothing else, for the fact-check to judge the
 // inference on. Listed by ID at the end of the claims, the premises were
 // dozens of lines away among thirty-six claims and pages of evidence, and
 // the check approved a recommendation that turned its rule's "and" into
-// "or" in five runs out of eleven. only limits the list to those indices.
-func writePremisePackets(sb *strings.Builder, a *agent.Analysis, only []int) {
+// "or" in five runs out of eleven. only limits the list to those IDs.
+func writePremisePackets(sb *strings.Builder, a *agent.Analysis, only []string) {
 	byID := map[string]agent.Claim{}
 	for _, c := range a.Claims {
 		byID[c.ID] = c
 	}
 	wrote := false
-	for i, r := range a.Recommendations {
-		if only != nil && !slices.Contains(only, i) {
+	for _, u := range units(a) {
+		if only != nil && !slices.Contains(only, u.id) {
 			continue
 		}
 		if !wrote {
-			sb.WriteString("Recommendations to judge, each with the premises it names:\n")
+			sb.WriteString("Recommendations and conclusions to judge, each with the premises it names:\n")
 			wrote = true
 		}
-		fmt.Fprintf(sb, "  - %s: choose %s when %s\n", recommendationID(i), r.Choose, r.When)
-		for _, id := range r.Claims {
+		fmt.Fprintf(sb, "  - %s: %s\n", u.id, statement(*u.r))
+		for _, id := range u.r.Claims {
 			if c, ok := byID[id]; ok {
 				scope := ""
 				if c.Scope != "" {
@@ -495,10 +532,7 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 	if a.Interpretation != "" {
 		sb.WriteString("How the question is read: " + a.Interpretation + "\n\n")
 	}
-	if len(a.Recommendations) == 0 {
-		sb.WriteString("Title the answer section \"## " + label(a, "answer") + "\".\n\n")
-	}
-	writeRecommendations(&sb, a)
+	writeDecided(&sb, a)
 	var supported, failed []agent.Claim
 	for _, c := range a.Claims {
 		if c.Status == statusSupported {
@@ -531,29 +565,26 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 	return sb.String()
 }
 
-// writeRecommendations gives the summarizer the approved recommendations,
-// which the program renders as the report's answer, and the blocked ones,
-// which it may explain but never recommend.
-func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
-	blocked := notEstablishedRecommendations(a)
-	if len(a.Recommendations) > 0 {
-		sb.WriteString("The report's \"## " + label(a, "answer") + "\" section is written by the program: it lists the approved" +
-			" recommendations and names the others as not established. Do not write an answer or restate it:" +
-			" open with a heading for the supporting explanation.\n")
-		ok := approvedRecommendations(a)
-		if len(ok) == 0 {
-			sb.WriteString("No recommendation was approved.\n")
-		}
-		for _, r := range ok {
-			fmt.Fprintf(sb, "  - Approved: choose %s when %s [%s]\n", r.Choose, r.When, strings.Join(r.Claims, ", "))
-		}
-		sb.WriteString("\n")
+// writeDecided tells the summarizer the program writes the answer, from the
+// approved recommendations and conclusions, and names the ones not
+// established, which it may explain but never assert.
+func writeDecided(sb *strings.Builder, a *agent.Analysis) {
+	sb.WriteString("The report's \"## " + label(a, "answer") + "\" section is written by the program: it states the" +
+		" approved recommendations and conclusions and names the others as not established. Do not write an answer" +
+		" or restate it: open with a heading for the supporting explanation.\n")
+	ok := approvedUnits(a)
+	if len(ok) == 0 {
+		sb.WriteString("Nothing was approved.\n")
 	}
-	if len(blocked) > 0 {
-		sb.WriteString("Not concluded: a claim each rests on did not pass the fact-check. Explain them under the" +
-			" limits; never recommend them:\n")
+	for _, r := range ok {
+		fmt.Fprintf(sb, "  - Approved: %s [%s]\n", statement(r), strings.Join(r.Claims, ", "))
+	}
+	sb.WriteString("\n")
+	if blocked := notEstablishedUnits(a); len(blocked) > 0 {
+		sb.WriteString("Not established: a claim each rests on did not pass the fact-check, or it does not follow" +
+			" from them. Explain them under the limits; never assert them:\n")
 		for _, r := range blocked {
-			fmt.Fprintf(sb, "  - %s when %s — %s\n", r.Choose, r.When, r.Blocked)
+			fmt.Fprintf(sb, "  - %s — %s\n", statement(r), r.Blocked)
 		}
 		sb.WriteString("\n")
 	}
@@ -571,8 +602,11 @@ func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 func renderAnswer(a *agent.Analysis) string {
 	var sb strings.Builder
 	sb.WriteString("## " + label(a, "answer") + "\n\n")
-	ok := approvedRecommendations(a)
-	if len(ok) == 0 {
+	ok := approvedUnits(a)
+	switch {
+	case len(units(a)) == 0:
+		sb.WriteString(label(a, "no_conclusion") + "\n")
+	case len(ok) == 0:
 		sb.WriteString(label(a, noApproval(a)) + "\n")
 	}
 	for _, r := range ok {
@@ -581,7 +615,7 @@ func renderAnswer(a *agent.Analysis) string {
 	if noApproval(a) != noApprovalEvidence {
 		return sb.String()
 	}
-	blocked := notEstablishedRecommendations(a)
+	blocked := notEstablishedUnits(a)
 	if len(blocked) > 0 {
 		sb.WriteString("\n" + label(a, "not_established") + ":\n\n")
 		for _, r := range blocked {
@@ -591,14 +625,14 @@ func renderAnswer(a *agent.Analysis) string {
 	return sb.String()
 }
 
-// notEstablishedRecommendations are the blocked recommendations the answer
-// names: the analyzer's own, except those a revision replaced. A revision
-// that was blocked too is not named again; its original stands for it.
-func notEstablishedRecommendations(a *agent.Analysis) []agent.Recommendation {
+// notEstablishedUnits are the blocked units the answer names: the analyzer's
+// own, except those a revision replaced. A revision that was blocked too is
+// not named again; its original stands for it.
+func notEstablishedUnits(a *agent.Analysis) []agent.Recommendation {
 	var out []agent.Recommendation
-	for i, r := range a.Recommendations {
-		if r.Blocked != "" && r.Revises == "" && !replaced(a, i) {
-			out = append(out, r)
+	for _, u := range units(a) {
+		if u.r.Blocked != "" && u.r.Revises == "" && !replaced(a, u.id) {
+			out = append(out, *u.r)
 		}
 	}
 	return out
@@ -607,9 +641,13 @@ func notEstablishedRecommendations(a *agent.Analysis) []agent.Recommendation {
 // writeChoice writes one recommendation as a list item, with why it is not
 // established when it is not.
 func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
-	sb.WriteString("- **" + strings.TrimSpace(r.Choose) + "**")
-	if when := strings.TrimSpace(r.When); when != "" {
-		sb.WriteString(": " + when)
+	if st := strings.TrimSpace(r.Statement); st != "" {
+		sb.WriteString("- " + st)
+	} else {
+		sb.WriteString("- **" + strings.TrimSpace(r.Choose) + "**")
+		if when := strings.TrimSpace(r.When); when != "" {
+			sb.WriteString(": " + when)
+		}
 	}
 	if why != "" {
 		sb.WriteString(" (" + why + ")")
@@ -663,6 +701,7 @@ func noApproval(a *agent.Analysis) string {
 var englishLabels = map[string]string{
 	"answer":            "Answer",
 	"not_established":   "Not established in this run",
+	"no_conclusion":     "The analysis stated no conclusion the fact-check could check.",
 	"does_not_follow":   "does not follow from its claims",
 	statusPartial:       "partial",
 	statusContradicted:  "contradicted",
@@ -689,11 +728,13 @@ func label(a *agent.Analysis, key string) string {
 // it does not follow from its claims.
 const followPrefix = "it does not follow from its claims: "
 
-// decidedAnswer is the report's answer for an analysis that made
-// recommendations: the approved ones, or a statement that none passed. It is
-// empty for an analysis that made none, whose answer the summarizer writes.
+// decidedAnswer is the report's answer for an analysis that made claims: the
+// approved recommendations and conclusions, or why none stand. It is empty
+// only for an analysis with no claims and nothing to govern (a model that
+// skipped the structure), whose prose the summarizer is given instead: an
+// empty list of conclusions never brings the unchecked answer back.
 func decidedAnswer(a *agent.Analysis) string {
-	if len(a.Recommendations) == 0 {
+	if len(a.Claims) == 0 && len(units(a)) == 0 {
 		return ""
 	}
 	return renderAnswer(a)
@@ -789,40 +830,37 @@ func headingLevel(ln string) int {
 // turn one blocked recommendation into a list of guesses.
 const maxRevisions = 4
 
-// blockedRecommendations are the recommendations the check did not approve,
-// with their IDs.
-func blockedRecommendations(a *agent.Analysis) map[string]agent.Recommendation {
-	out := map[string]agent.Recommendation{}
-	for i, r := range a.Recommendations {
-		if r.Blocked != "" && r.Revises == "" {
-			out[recommendationID(i)] = r
+// blockedUnits are the analyzer's own units the check did not approve.
+func blockedUnits(a *agent.Analysis) []unit {
+	var out []unit
+	for _, u := range units(a) {
+		if u.r.Blocked != "" && u.r.Revises == "" {
+			out = append(out, u)
 		}
 	}
 	return out
 }
 
-// repairPrompt asks the analyzer to revise the blocked recommendations from
-// the supported claims only. The analyzer's own instructions still apply:
-// the language of "choose" and "when", naming every claim a recommendation
-// needs.
+// repairPrompt asks the analyzer to revise the blocked recommendations and
+// conclusions from the supported claims only. The analyzer's own
+// instructions still apply: the language of what it writes, naming every
+// claim a statement needs.
 func repairPrompt(question string, a *agent.Analysis) string {
 	var sb strings.Builder
 	sb.WriteString("Question: " + question + "\n\n")
-	sb.WriteString("These recommendations were not established: a claim they rest on did not pass the fact-check," +
-		" or the check found they do not follow from their claims.\n")
-	for i, r := range a.Recommendations {
-		if r.Blocked != "" && r.Revises == "" {
-			fmt.Fprintf(&sb, "  - %s: choose %s when %s [%s] — %s\n", recommendationID(i), r.Choose, r.When,
-				strings.Join(r.Claims, ", "), r.Blocked)
-		}
+	sb.WriteString("These were not established: a claim they rest on did not pass the fact-check, or the check" +
+		" found they do not follow from their claims.\n")
+	for _, u := range blockedUnits(a) {
+		fmt.Fprintf(&sb, "  - %s: %s [%s] — %s\n", u.id, statement(*u.r), strings.Join(u.r.Claims, ", "), u.r.Blocked)
 	}
 	sb.WriteString("\nSupported claims, the only ones you may cite:\n")
 	writeClaims(&sb, supportedClaims(a))
-	sb.WriteString("\nWrite revised recommendations that these claims justify exactly as written: narrow a" +
-		" condition, split a recommendation, or drop what the claims do not support. Cite only the claims above," +
-		" every one a revision needs; give in \"revises\" the ID of the recommendation it replaces. Leave out a" +
-		" recommendation nothing above can replace. Return only JSON:\n" +
-		`{"recommendations":[{"revises":"r1","choose":"...","when":"...","claims":["c1"]}]}` + "\n")
+	sb.WriteString("\nRevise each so these claims justify it exactly as written: narrow a condition or a" +
+		" statement, split it, or drop what the claims do not support. Cite only the claims above, every one a" +
+		" revision needs; give in \"revises\" the ID it replaces, a recommendation's (r...) as a recommendation," +
+		" a conclusion's (k...) as a conclusion. Leave out one nothing above can replace. Return only JSON:\n" +
+		`{"recommendations":[{"revises":"r1","choose":"...","when":"...","claims":["c1"]}],` +
+		`"conclusions":[{"revises":"k1","statement":"...","claims":["c2"]}]}` + "\n")
 	return sb.String()
 }
 
@@ -838,26 +876,36 @@ func supportedClaims(a *agent.Analysis) []agent.Claim {
 }
 
 // acceptRevisions appends the revisions that cite only supported claims and
-// revise a blocked recommendation, up to maxRevisions, and returns their
-// indices. A revision citing any other claim is dropped: it would rest on a
-// fact that has no verdict, or one that failed.
-func acceptRevisions(a *agent.Analysis, revisions []agent.Recommendation) []int {
-	blocked := blockedRecommendations(a)
+// revise a blocked unit of their own kind, up to maxRevisions, and returns
+// their IDs. A revision citing any other claim is dropped: it would rest on
+// a fact that has no verdict, or one that failed.
+func acceptRevisions(a *agent.Analysis, rev *agent.Analysis) []string {
+	blocked := map[string]bool{}
+	for _, u := range blockedUnits(a) {
+		blocked[u.id] = true
+	}
 	supported := map[string]bool{}
 	for _, c := range supportedClaims(a) {
 		supported[c.ID] = true
 	}
-	var added []int
-	for _, r := range revisions {
-		if _, ok := blocked[r.Revises]; !ok || len(r.Claims) == 0 || len(added) == maxRevisions {
-			continue
+	ok := func(r agent.Recommendation, prefix string) bool {
+		return blocked[r.Revises] && strings.HasPrefix(r.Revises, prefix) && len(r.Claims) > 0 &&
+			!slices.ContainsFunc(r.Claims, func(id string) bool { return !supported[id] })
+	}
+	var added []string
+	for _, r := range rev.Recommendations {
+		if len(added) < maxRevisions && ok(r, "r") {
+			r.Blocked, r.Failed, r.Statement = "", nil, ""
+			a.Recommendations = append(a.Recommendations, r)
+			added = append(added, "r"+strconv.Itoa(len(a.Recommendations)))
 		}
-		if slices.ContainsFunc(r.Claims, func(id string) bool { return !supported[id] }) {
-			continue
+	}
+	for _, r := range rev.Conclusions {
+		if len(added) < maxRevisions && ok(r, "k") {
+			r.Blocked, r.Failed, r.Choose, r.When = "", nil, "", ""
+			a.Conclusions = append(a.Conclusions, r)
+			added = append(added, "k"+strconv.Itoa(len(a.Conclusions)))
 		}
-		r.Blocked, r.Failed = "", nil
-		a.Recommendations = append(a.Recommendations, r)
-		added = append(added, len(a.Recommendations)-1)
 	}
 	return added
 }
@@ -866,11 +914,13 @@ func acceptRevisions(a *agent.Analysis, revisions []agent.Recommendation) []int 
 // from its claims. It is given the claims the revisions cite and only the
 // pages those claims come from: the claims already have their verdicts, and
 // the question now is the inference.
-func revisionCheckPrompt(a *agent.Analysis, added []int, findings []agent.Finding) string {
+func revisionCheckPrompt(a *agent.Analysis, added []string, findings []agent.Finding) string {
 	cited := map[string]bool{}
-	for _, i := range added {
-		for _, id := range a.Recommendations[i].Claims {
-			cited[id] = true
+	for _, id := range added {
+		if u, ok := unitByID(a, id); ok {
+			for _, c := range u.r.Claims {
+				cited[c] = true
+			}
 		}
 	}
 	var claims []agent.Claim
@@ -898,25 +948,23 @@ func revisionCheckPrompt(a *agent.Analysis, added []int, findings []agent.Findin
 
 // judgeRevisions blocks each revision the check did not find following from
 // its claims, and records the check's judgements for audit.
-func judgeRevisions(a *agent.Analysis, added []int, fc, recheck *agent.FactCheckResult) {
+func judgeRevisions(a *agent.Analysis, added []string, fc, recheck *agent.FactCheckResult) {
 	by := map[string][]agent.Inference{}
 	for _, inf := range recheck.Inferences {
 		by[inf.ID] = append(by[inf.ID], inf)
 	}
-	for _, i := range added {
-		id := recommendationID(i)
-		a.Recommendations[i].Blocked = strings.Join(inferenceFailure(by[id]), "; ")
+	for _, id := range added {
+		if u, ok := unitByID(a, id); ok {
+			u.r.Blocked = strings.Join(inferenceFailure(by[id]), "; ")
+		}
 		if fc != nil {
 			fc.Inferences = append(fc.Inferences, by[id]...)
 		}
 	}
 }
 
-// replaced reports whether a blocked recommendation has an approved revision,
-// in which case the answer shows the revision and not the original.
-func replaced(a *agent.Analysis, i int) bool {
-	id := recommendationID(i)
-	return slices.ContainsFunc(a.Recommendations, func(r agent.Recommendation) bool {
-		return r.Revises == id && r.Blocked == ""
-	})
+// replaced reports whether a blocked unit has an approved revision, in which
+// case the answer shows the revision and not the original.
+func replaced(a *agent.Analysis, id string) bool {
+	return slices.ContainsFunc(units(a), func(u unit) bool { return u.r.Revises == id && u.r.Blocked == "" })
 }

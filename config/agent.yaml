@@ -31,12 +31,17 @@ analyzer_instructions: |
   supports, and say exactly which conclusion each gap blocks or qualifies:
   uncertainty about one part does not suppress the parts that stand.
 
-  Give recommendations only when the question asks for a choice or an
-  action; otherwise leave the list empty. A recommendation ("choose X when
-  Y") names every claim it needs, and stands only if each passes the
-  fact-check, so name the claims it needs and no background ones. "choose"
-  and "when" are printed as the report's answer exactly as written: write
-  them in the language of the question, as a complete statement.
+  State the answer as conclusions: each one statement, naming every claim it
+  needs and no background ones. It stands only if each claim it names
+  passes the fact-check and the check finds the statement follows from
+  them, so keep each to what its claims justify. A forecast states its
+  assumptions, horizon and uncertainty in the statement; a question of
+  opinion is answered with positions attributed to who holds them, or
+  conditional on values the statement names. Give recommendations as well
+  only when the question asks for a choice or an action: "choose X when Y",
+  under the same rule. Conclusions, "choose" and "when" are printed as the
+  report's answer exactly as written: write them in the language of the
+  question, each as a complete statement.
 
   When claims seem to disagree, first check that they make the same
   assertion under comparable definitions and scope. Then weigh the source
@@ -60,12 +65,14 @@ analyzer_instructions: |
     "interpretation": "how the question is read, and the other readings",
     "answer": "the direct answer to the question, with its conditions and uncertainty",
     "claims": [{"id":"c1", "claim":"...", "option":"...", "criterion":"...", "scope":"...", "sources":["https://..."]}],
+    "conclusions": [{"statement":"...", "claims":["c1","c2"]}],
     "recommendations": [{"choose":"...", "when":"...", "claims":["c1","c3"]}],
     "conflicts": [{"claims":["c2","c5"], "resolution":"c2 holds", "why":"..."}],
     "gaps": ["what is unknown, and which conclusion it blocks"],
     "confidence": "high/medium/low",
     "follow_up_queries": ["web search queries that would settle the gaps"],
     "labels": {"answer":"Answer", "not_established":"Not established in this run",
+               "no_conclusion":"The analysis stated no conclusion the fact-check could check.",
                "does_not_follow":"does not follow from its claims", "partial":"partial",
                "contradicted":"contradicted", "disputed":"disputed", "insufficient":"insufficient",
                "unsourced":"unsourced",
@@ -92,7 +99,7 @@ fact_checker_instructions: |
   Judge each claim against that source material only, and return exactly one
   verdict for each claim ID you were given, and none for any other:
 
-  {"recommendations": [{"id":"r1", "follows":true, "reason":"..."}],
+  {"inferences": [{"id":"r1", "follows":true, "reason":"..."}],
    "verdicts": [{"id":"c1", "status":"supported", "reason":"...",
                  "evidence":[{"source":"https://...", "quote":"..."}]}]}
 
@@ -124,11 +131,14 @@ fact_checker_instructions: |
   verdict needs at least one, and a quote that is not in the cited source
   makes the verdict count as insufficient.
 
-  You may also be given recommendations, each with an ID (r1, r2, ...) and
-  the premises it names. Judge each first, once, against its listed premises
-  only, not the findings: assume those premises are true, and ask whether
-  they justify the recommendation throughout its stated condition. "follows"
-  is true only if they do. It does not follow when it needs a premise it
+  You may also be given recommendations (r1, r2, ...) and conclusions (k1,
+  k2, ...), each with the premises it names. Judge each first, once, in
+  "inferences", against its listed premises only, not the findings: assume
+  those premises are true, and ask whether they justify the statement
+  throughout its stated condition. "follows" is true only if they do. A
+  forecast follows when its premises support it under the assumptions and
+  horizon it states, not because it will come true; an attributed position
+  follows when the premises show who holds it. It does not follow when it needs a premise it
   does not name, is stronger than its premises (a premise that suggests
   considering an option does not justify choosing it), or its condition
   admits a case its premises do not cover: a condition joined by "or" where

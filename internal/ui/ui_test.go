@@ -1342,7 +1342,7 @@ func TestRecommendationStandsOnlyOnSupportedPremises(t *testing.T) {
 		verdict("c3", "supported", "https://p.example/pricing", "Serverless has no minimum charge."),
 	}, Inferences: follows("r1", "r2", "r3")}
 	govern(a, fc, nil, findings)
-	if ok := approvedRecommendations(a); len(ok) != 1 || ok[0].Choose != "Serverless" {
+	if ok := approvedUnits(a); len(ok) != 1 || ok[0].Choose != "Serverless" {
 		t.Fatalf("approved = %+v, want only the one resting on c1", ok)
 	}
 	if b := a.Recommendations[1].Blocked; !strings.Contains(b, "c2 contradicted") {
@@ -1355,7 +1355,7 @@ func TestRecommendationStandsOnlyOnSupportedPremises(t *testing.T) {
 	if strings.Contains(p, "UNCHECKED PROSE") {
 		t.Error("the analyzer's unchecked answer prose reached the summarizer")
 	}
-	if !strings.Contains(p, "Not concluded") || !strings.Contains(p, "Node-based when traffic is steady") {
+	if !strings.Contains(p, "Not established") || !strings.Contains(p, "choose Node-based when traffic is steady") {
 		t.Errorf("the blocked recommendation is not marked as not concluded:\n%s", p)
 	}
 	sum := withAnswer(&agent.Summary{Report: "# q\n\n## Answer\n\nNode-based wins.\n\n## Comparison\n\ntable"}, a)
@@ -1385,7 +1385,7 @@ func TestMalformedVerdictsNeverSupportAClaim(t *testing.T) {
 			t.Errorf("%s = %s (%s), want insufficient", c.ID, c.Status, c.Note)
 		}
 	}
-	if len(approvedRecommendations(a)) != 0 {
+	if len(approvedUnits(a)) != 0 {
 		t.Error("a recommendation was approved on malformed verdicts")
 	}
 	if len(fc.Unverified) != 3 || len(fc.Verified) != 0 {
@@ -1398,7 +1398,7 @@ func TestMalformedVerdictsNeverSupportAClaim(t *testing.T) {
 func TestFailedFactCheckApprovesNothing(t *testing.T) {
 	findings, a := decisionFixture()
 	govern(a, nil, errors.New("deadline exceeded"), findings)
-	if len(approvedRecommendations(a)) != 0 {
+	if len(approvedUnits(a)) != 0 {
 		t.Error("a recommendation was approved with no fact-check")
 	}
 	if !strings.Contains(a.Claims[0].Note, "fact_check_unavailable: deadline exceeded") {
@@ -1478,7 +1478,7 @@ func TestAnalysisWithoutClaimsApprovesNothing(t *testing.T) {
 		{ID: "p1", Claim: "X is cheap", Status: "supported", Evidence: []agent.Evidence{{Source: "1", Quote: "not on the page"}}},
 	}}
 	govern(a, fc, nil, findings)
-	if len(approvedRecommendations(a)) != 0 {
+	if len(approvedUnits(a)) != 0 {
 		t.Error("a recommendation naming no claim was approved")
 	}
 	if len(fc.Verified) != 0 || len(fc.Unverified) != 1 {
@@ -1496,7 +1496,7 @@ func TestModelFindingsCannotSupportAClaim(t *testing.T) {
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 	}}
 	govern(a, fc, nil, findings)
-	if a.Claims[0].Status == statusSupported || len(approvedRecommendations(a)) != 0 {
+	if a.Claims[0].Status == statusSupported || len(approvedUnits(a)) != 0 {
 		t.Errorf("c1 = %s (%s): a claim was supported by the model's own recollection", a.Claims[0].Status, a.Claims[0].Note)
 	}
 }
@@ -1623,7 +1623,7 @@ func TestRecommendationMustFollowFromItsClaims(t *testing.T) {
 		a.Recommendations = a.Recommendations[:1]
 		fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{verdict("c1", "supported", "1", quote)}, Inferences: tc.inf}
 		govern(a, fc, nil, findings)
-		if got := len(approvedRecommendations(a)) == 1; got != tc.want {
+		if got := len(approvedUnits(a)) == 1; got != tc.want {
 			t.Errorf("%s: approved = %v (%s), want %v", tc.name, got, a.Recommendations[0].Blocked, tc.want)
 		}
 	}
@@ -1679,13 +1679,13 @@ func TestAcceptRevisionsOnlyOnSupportedClaims(t *testing.T) {
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2", "r3")}, nil, findings)
-	added := acceptRevisions(a, []agent.Recommendation{
+	added := acceptRevisions(a, &agent.Analysis{Recommendations: []agent.Recommendation{
 		{Revises: "r2", Choose: "Node-based", When: "billing by the hour suits you", Claims: []string{"c1"}},
 		{Revises: "r2", Choose: "Node-based", When: "you want 90% off", Claims: []string{"c2"}},
 		{Revises: "r1", Choose: "Serverless", When: "again", Claims: []string{"c1"}},
 		{Revises: "r2", Choose: "Node-based", When: "no claim"},
-	})
-	if len(added) != 1 || a.Recommendations[added[0]].When != "billing by the hour suits you" {
+	}})
+	if u, _ := unitByID(a, added[0]); len(added) != 1 || u.r.When != "billing by the hour suits you" {
 		t.Errorf("accepted %v, want only the revision of a blocked recommendation on supported claims", added)
 	}
 	_, fresh := decisionFixture()
@@ -1696,7 +1696,7 @@ func TestAcceptRevisionsOnlyOnSupportedClaims(t *testing.T) {
 	for range 10 {
 		many = append(many, agent.Recommendation{Revises: "r3", Choose: "x", When: "y", Claims: []string{"c1"}})
 	}
-	if got := acceptRevisions(fresh, many); len(got) != maxRevisions {
+	if got := acceptRevisions(fresh, &agent.Analysis{Recommendations: many}); len(got) != maxRevisions {
 		t.Errorf("accepted %d revisions, want the cap of %d", len(got), maxRevisions)
 	}
 }
@@ -1711,7 +1711,7 @@ func TestApprovedRevisionReplacesItsOriginal(t *testing.T) {
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2")}
 	govern(a, fc, nil, findings)
-	added := acceptRevisions(a, []agent.Recommendation{{Revises: "r2", Choose: "Node-based", When: "hourly billing suits you", Claims: []string{"c1"}}})
+	added := acceptRevisions(a, &agent.Analysis{Recommendations: []agent.Recommendation{{Revises: "r2", Choose: "Node-based", When: "hourly billing suits you", Claims: []string{"c1"}}}})
 	judgeRevisions(a, added, fc, &agent.FactCheckResult{Inferences: follows("r3")})
 	got := renderAnswer(a)
 	if !strings.Contains(got, "- **Node-based**: hourly billing suits you") || strings.Contains(got, "Not established") {
@@ -1761,6 +1761,7 @@ type checkerCase struct {
 	Findings        []agent.Finding        `json:"findings"`
 	Claims          []agent.Claim          `json:"claims"`
 	Recommendations []agent.Recommendation `json:"recommendations"`
+	Conclusions     []agent.Recommendation `json:"conclusions"`
 	Expect          struct {
 		Supported    []string `json:"supported"`
 		NotSupported []string `json:"not_supported"`
@@ -1815,13 +1816,94 @@ func TestCheckerCasesAreWellFormed(t *testing.T) {
 				t.Errorf("%s: expectation names claim %s it does not have", c.Name, id)
 			}
 		}
+		a := &agent.Analysis{Recommendations: c.Recommendations, Conclusions: c.Conclusions}
 		for _, id := range append(c.Expect.Approved, c.Expect.Blocked...) {
-			if n, err := strconv.Atoi(strings.TrimPrefix(id, "r")); err != nil || n < 1 || n > len(c.Recommendations) {
-				t.Errorf("%s: expectation names recommendation %s it does not have", c.Name, id)
+			if _, ok := unitByID(a, id); !ok {
+				t.Errorf("%s: expectation names %s, which it does not have", c.Name, id)
 			}
 		}
 		if c.About == "" || len(c.Expect.Supported)+len(c.Expect.Approved) == 0 {
 			t.Errorf("%s: a case needs what it tests and a positive expectation", c.Name)
 		}
+	}
+}
+
+// ---- conclusions: the answer of a question that asks for no choice --------
+
+// conclusionFixture is an explanatory answer on one fetched page.
+func conclusionFixture() ([]agent.Finding, *agent.Analysis) {
+	page := "Raft elects a leader when a follower's election timeout expires. A candidate needs votes from a majority of servers."
+	findings := []agent.Finding{{URL: "https://raft.example/paper", Status: "ok", Content: page}}
+	a := &agent.Analysis{
+		Answer: "UNCHECKED PROSE",
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "A follower starts an election when its election timeout expires.", Sources: []string{"https://raft.example/paper"}},
+			{ID: "c2", Text: "A candidate needs votes from a majority of servers.", Sources: []string{"https://raft.example/paper"}},
+			{ID: "c3", Text: "Elections always finish within one round.", Sources: []string{"https://raft.example/paper"}},
+		},
+		Conclusions: []agent.Recommendation{
+			{Statement: "An election starts on a follower's timeout and is won with a majority of votes.", Claims: []string{"c1", "c2"}},
+			{Statement: "An election always settles within a single round.", Claims: []string{"c3"}},
+		},
+	}
+	return findings, a
+}
+
+// An explanatory answer was unchecked prose while a choice was held to its
+// premises: conclusions are governed the same way, by k IDs.
+func TestConclusionsAreGovernedLikeRecommendations(t *testing.T) {
+	findings, a := conclusionFixture()
+	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Raft elects a leader when a follower's election timeout expires."),
+		verdict("c2", "supported", "1", "A candidate needs votes from a majority of servers."),
+		verdict("c3", "insufficient", "1", "A candidate needs votes"),
+	}, Inferences: follows("k1", "k2")}, nil, findings)
+	got := renderAnswer(a)
+	if !strings.Contains(got, "- An election starts on a follower's timeout and is won with a majority of votes.") {
+		t.Errorf("the approved conclusion is not the answer:\n%s", got)
+	}
+	if !strings.Contains(got, "Not established in this run") || !strings.Contains(got, "always settles") {
+		t.Errorf("the blocked conclusion is not named as not established:\n%s", got)
+	}
+	if p := claimsToCheck(a); !strings.Contains(p, "k1: conclude: An election starts") || !strings.Contains(p, "premise c2:") {
+		t.Errorf("the fact-check is not given the conclusion with its premises:\n%s", p)
+	}
+	if p := summarizePrompt("q", a, &agent.FactCheckResult{}, findings, true); strings.Contains(p, "UNCHECKED PROSE") {
+		t.Error("the analyzer's prose reached the summarizer beside its checked conclusions")
+	}
+}
+
+// An analysis with claims and no conclusion at all used to get the
+// summarizer's unchecked answer; the answer now says nothing was concluded.
+func TestNoConclusionStatedIsSaid(t *testing.T) {
+	findings, a := conclusionFixture()
+	a.Conclusions = nil
+	govern(a, &agent.FactCheckResult{}, nil, findings)
+	sum := withAnswer(&agent.Summary{Report: "## Answer\n\nRaft is simple.\n\n## How it works\n\nx"}, a)
+	if strings.Contains(sum.Report, "Raft is simple") || !strings.Contains(sum.Report, englishLabels["no_conclusion"]) {
+		t.Errorf("report = %q, want the no-conclusion answer in place of the summarizer's", sum.Report)
+	}
+}
+
+// The repair pass revises a blocked conclusion as it does a recommendation,
+// and only as a conclusion.
+func TestRepairRevisesAConclusion(t *testing.T) {
+	findings, a := conclusionFixture()
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Raft elects a leader when a follower's election timeout expires."),
+		verdict("c2", "supported", "1", "A candidate needs votes from a majority of servers."),
+	}, Inferences: []agent.Inference{{ID: "k1", Follows: false, Reason: "says nothing of ties"}, {ID: "k2", Follows: true}}}
+	govern(a, fc, nil, findings)
+	added := acceptRevisions(a, &agent.Analysis{
+		Conclusions:     []agent.Recommendation{{Revises: "k1", Statement: "A follower whose timeout expires stands for election.", Claims: []string{"c1"}}},
+		Recommendations: []agent.Recommendation{{Revises: "k1", Choose: "x", When: "y", Claims: []string{"c1"}}},
+	})
+	if len(added) != 1 || added[0] != "k3" {
+		t.Fatalf("added %v, want only the conclusion revising k1, as k3", added)
+	}
+	judgeRevisions(a, added, fc, &agent.FactCheckResult{Inferences: follows("k3")})
+	got := renderAnswer(a)
+	if !strings.Contains(got, "- A follower whose timeout expires stands for election.") || strings.Contains(got, "won with a majority") {
+		t.Errorf("the revision does not replace the original conclusion:\n%s", got)
 	}
 }
