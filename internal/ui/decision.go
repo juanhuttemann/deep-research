@@ -332,7 +332,7 @@ func inferenceFailure(vs []agent.Inference) []string {
 	case len(vs) > 1:
 		return []string{"the fact-check judged it more than once"}
 	case !vs[0].Follows:
-		return []string{"it does not follow from its claims: " + vs[0].Reason}
+		return []string{followPrefix + vs[0].Reason}
 	}
 	return nil
 }
@@ -461,6 +461,9 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 	if a.Interpretation != "" {
 		sb.WriteString("How the question is read: " + a.Interpretation + "\n\n")
 	}
+	if len(a.Recommendations) == 0 {
+		sb.WriteString("Title the answer section \"## " + label(a, "answer") + "\".\n\n")
+	}
 	writeRecommendations(&sb, a)
 	var supported, failed []agent.Claim
 	for _, c := range a.Claims {
@@ -500,7 +503,7 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 	blocked := notEstablishedRecommendations(a)
 	if len(a.Recommendations) > 0 {
-		sb.WriteString("The report's \"## Answer\" section is written by the program: it lists the approved" +
+		sb.WriteString("The report's \"## " + label(a, "answer") + "\" section is written by the program: it lists the approved" +
 			" recommendations and names the others as not established. Do not write an answer or restate it:" +
 			" open with a heading for the supporting explanation.\n")
 		ok := approvedRecommendations(a)
@@ -533,10 +536,10 @@ func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 // against, since then there is no reason per option to give.
 func renderAnswer(a *agent.Analysis) string {
 	var sb strings.Builder
-	sb.WriteString("## Answer\n\n")
+	sb.WriteString("## " + label(a, "answer") + "\n\n")
 	ok := approvedRecommendations(a)
 	if len(ok) == 0 {
-		sb.WriteString(noApproval(a) + "\n")
+		sb.WriteString(label(a, noApproval(a)) + "\n")
 	}
 	for _, r := range ok {
 		writeChoice(&sb, r, "")
@@ -546,9 +549,9 @@ func renderAnswer(a *agent.Analysis) string {
 	}
 	blocked := notEstablishedRecommendations(a)
 	if len(blocked) > 0 {
-		sb.WriteString("\nNot established in this run:\n\n")
+		sb.WriteString("\n" + label(a, "not_established") + ":\n\n")
 		for _, r := range blocked {
-			writeChoice(&sb, r, notEstablished(r, a.Claims))
+			writeChoice(&sb, r, notEstablished(a, r))
 		}
 	}
 	return sb.String()
@@ -582,29 +585,32 @@ func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
 
 // notEstablished names what blocked a recommendation: the claims that did not
 // pass, by their text and status, or the checker's reason it does not follow.
-func notEstablished(r agent.Recommendation, claims []agent.Claim) string {
+func notEstablished(a *agent.Analysis, r agent.Recommendation) string {
 	var parts []string
-	for _, c := range claims {
+	for _, c := range a.Claims {
 		if slices.Contains(r.Failed, c.ID) {
-			parts = append(parts, c.Status+": \u201c"+c.Text+"\u201d")
+			parts = append(parts, label(a, c.Status)+": \u201c"+c.Text+"\u201d")
 		}
 	}
-	if len(parts) == 0 {
-		return r.Blocked
+	if len(parts) > 0 {
+		return strings.Join(parts, "; ")
 	}
-	return strings.Join(parts, "; ")
+	if reason, ok := strings.CutPrefix(r.Blocked, followPrefix); ok {
+		return label(a, "does_not_follow") + ": " + reason
+	}
+	return r.Blocked
 }
 
 // Why nothing was approved. A single "no recommendation passed" read as the
 // candidates being disproved, when the check may not have run, or had no
-// retrieved page to check them against.
+// retrieved page to check them against. These are label keys.
 const (
-	noApprovalUnchecked = "Verification could not be completed, so the proposed conclusions remain unverified."
-	noApprovalNoSources = "No source was retrieved, so the proposed conclusions could not be verified."
-	noApprovalEvidence  = "The evidence gathered does not establish the proposed conclusions."
+	noApprovalUnchecked = "no_approval_unchecked"
+	noApprovalNoSources = "no_approval_no_sources"
+	noApprovalEvidence  = "no_approval_evidence"
 )
 
-// noApproval is the answer when nothing was approved, naming the cause.
+// noApproval is the label key for why nothing was approved.
 func noApproval(a *agent.Analysis) string {
 	for _, c := range a.Claims {
 		switch {
@@ -616,6 +622,38 @@ func noApproval(a *agent.Analysis) string {
 	}
 	return noApprovalEvidence
 }
+
+// englishLabels are the words the program writes into a report when the
+// analysis gave none in the question's language. A Spanish report read
+// "Not established in this run" between Spanish sentences.
+var englishLabels = map[string]string{
+	"answer":            "Answer",
+	"not_established":   "Not established in this run",
+	"does_not_follow":   "does not follow from its claims",
+	statusPartial:       "partial",
+	statusContradicted:  "contradicted",
+	statusDisputed:      "disputed",
+	statusInsufficient:  "insufficient",
+	statusUnsourced:     "unsourced",
+	noApprovalUnchecked: "Verification could not be completed, so the proposed conclusions remain unverified.",
+	noApprovalNoSources: "No source was retrieved, so the proposed conclusions could not be verified.",
+	noApprovalEvidence:  "The evidence gathered does not establish the proposed conclusions.",
+}
+
+// label is the analysis's wording for key when it gave a plain one, the
+// English otherwise. A value is written into the report as it is, so one
+// with Markdown or a line break in it, or too long for a label, is not used.
+func label(a *agent.Analysis, key string) string {
+	v := strings.TrimSpace(a.Labels[key])
+	if v == "" || len(v) > 200 || strings.ContainsAny(v, "\n#*_[]`<>|") {
+		return englishLabels[key]
+	}
+	return v
+}
+
+// followPrefix starts a recommendation's blocked reason when the check found
+// it does not follow from its claims.
+const followPrefix = "it does not follow from its claims: "
 
 // decidedAnswer is the report's answer for an analysis that made
 // recommendations: the approved ones, or a statement that none passed. It is
@@ -637,8 +675,9 @@ func withAnswer(sum *agent.Summary, a *agent.Analysis) *agent.Summary {
 	if answer == "" {
 		return sum
 	}
-	sum.Report = answer + "\n" + dropLeadingProse(dropAnswerSection(sum.Report))
-	sum.Executive = strings.TrimSpace(strings.TrimPrefix(answer, "## Answer"))
+	heading := "## " + label(a, "answer")
+	sum.Report = answer + "\n" + dropLeadingProse(dropAnswerSection(sum.Report, label(a, "answer")))
+	sum.Executive = strings.TrimSpace(strings.TrimPrefix(answer, heading))
 	return sum
 }
 
@@ -649,7 +688,7 @@ func withAnswer(sum *agent.Summary, a *agent.Analysis) *agent.Summary {
 // a conclusion stated in another section, is beyond it.
 // ponytail: heading match only; holding every section's prose to the
 // blocked recommendations would need the summarizer to return structure.
-func dropAnswerSection(report string) string {
+func dropAnswerSection(report, heading string) string {
 	lines := strings.Split(strings.TrimSpace(report), "\n")
 	if len(lines) > 0 && headingLevel(lines[0]) == 1 {
 		lines = lines[1:]
@@ -659,7 +698,7 @@ func dropAnswerSection(report string) string {
 	for _, ln := range lines {
 		if lvl := headingLevel(ln); lvl > 0 {
 			switch {
-			case strings.EqualFold(strings.Trim(strings.TrimSpace(ln), "# \t"), "Answer"):
+			case isAnswerHeading(strings.Trim(strings.TrimSpace(ln), "# \t"), heading):
 				skipLevel = lvl
 			case skipLevel > 0 && lvl <= skipLevel:
 				skipLevel = 0
@@ -685,6 +724,12 @@ func dropLeadingProse(report string) string {
 		}
 	}
 	return report
+}
+
+// isAnswerHeading reports whether a heading's text is the answer section's,
+// in English or in the analysis's wording.
+func isAnswerHeading(text, heading string) bool {
+	return strings.EqualFold(text, "Answer") || strings.EqualFold(text, heading)
 }
 
 // headingLevel is an ATX heading's level, 0 for any other line.

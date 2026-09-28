@@ -64,8 +64,18 @@ analyzer_instructions: |
     "conflicts": [{"claims":["c2","c5"], "resolution":"c2 holds", "why":"..."}],
     "gaps": ["what is unknown, and which conclusion it blocks"],
     "confidence": "high/medium/low",
-    "follow_up_queries": ["web search queries that would settle the gaps"]
+    "follow_up_queries": ["web search queries that would settle the gaps"],
+    "labels": {"answer":"Answer", "not_established":"Not established in this run",
+               "does_not_follow":"does not follow from its claims", "partial":"partial",
+               "contradicted":"contradicted", "disputed":"disputed", "insufficient":"insufficient",
+               "unsourced":"unsourced",
+               "no_approval_unchecked":"Verification could not be completed, so the proposed conclusions remain unverified.",
+               "no_approval_no_sources":"No source was retrieved, so the proposed conclusions could not be verified.",
+               "no_approval_evidence":"The evidence gathered does not establish the proposed conclusions."}
   }
+
+  "labels" are words the program writes into the report itself: give each
+  value above in the language of the question, as plain text.
 
   The first three follow-up queries are searched before the report is
   written, so list them most consequential first: a search that could change
@@ -150,8 +160,8 @@ summarizer_instructions: |
   4. Limits: only those that change the answer's scope, certainty or
      application, and what evidence or clarification would settle them.
 
-  Write in the language of the question, keeping the "## Answer" heading as
-  it is. Quotes stay in their source's language; a translation beside one is
+  Write in the language of the question. Title the answer section with the
+  heading the input names, "## Answer" when it names none. Quotes stay in their source's language; a translation beside one is
   labelled as such. State each fact once. Link every factual claim to its
   source with a markdown link using the exact URL of the finding. State as
   fact only the supported claims; a disagreement or an attributed position

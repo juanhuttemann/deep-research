@@ -1464,7 +1464,7 @@ func TestNoApprovedRecommendationReplacesTheSummarizersAnswer(t *testing.T) {
 	findings, a := decisionFixture()
 	govern(a, &agent.FactCheckResult{}, nil, findings)
 	sum := withAnswer(&agent.Summary{Report: "## Answer\n\nChoose Node-based.\n\n## Why\n\nx"}, a)
-	if strings.Contains(sum.Report, "Choose Node-based") || !strings.Contains(sum.Report, noApprovalEvidence) {
+	if strings.Contains(sum.Report, "Choose Node-based") || !strings.Contains(sum.Report, englishLabels[noApprovalEvidence]) {
 		t.Errorf("report = %q, want the no-approval answer in place of the summarizer's", sum.Report)
 	}
 }
@@ -1529,7 +1529,7 @@ func TestDropAnswerSectionVariants(t *testing.T) {
 		"  ## Answer\n\nChoose Blocked.\n\n## Why\n\nkept",
 		"## Answer\n\n### Detail\n\nChoose Blocked.\n\n## Why\n\nkept",
 	} {
-		if got := dropAnswerSection(report); strings.Contains(got, "Blocked") || !strings.Contains(got, "kept") {
+		if got := dropAnswerSection(report, "Answer"); strings.Contains(got, "Blocked") || !strings.Contains(got, "kept") {
 			t.Errorf("dropAnswerSection(%q) = %q", report, got)
 		}
 	}
@@ -1566,7 +1566,7 @@ func TestFallbackAfterFailedCheckIsLowConfidence(t *testing.T) {
 	govern(a, nil, errors.New("timeout"), findings)
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
 	res, _ := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, nil, "report writing failed", errors.New("500"))
-	if res.Summary.Confidence != "low" || !strings.Contains(res.Summary.Report, noApprovalUnchecked) {
+	if res.Summary.Confidence != "low" || !strings.Contains(res.Summary.Report, englishLabels[noApprovalUnchecked]) {
 		t.Errorf("fallback = %q, %q; want low confidence and no approval", res.Summary.Confidence, res.Summary.Report)
 	}
 }
@@ -1720,5 +1720,32 @@ func TestApprovedRevisionReplacesItsOriginal(t *testing.T) {
 	a.Recommendations[2].Blocked = "it does not follow from its claims: r"
 	if got := renderAnswer(a); !strings.Contains(got, "Not established") || !strings.Contains(got, "traffic is steady") {
 		t.Errorf("with the revision blocked the original should be named as not established:\n%s", got)
+	}
+}
+
+// A Spanish report read "Not established in this run" and "partial" between
+// Spanish sentences. The analysis gives the program's words in the
+// question's language; one that could break the report's Markdown is not
+// used, and a missing one falls back to English.
+func TestAnswerUsesTheAnalysisLabels(t *testing.T) {
+	findings, a := decisionFixture()
+	a.Labels = map[string]string{"answer": "Respuesta", "not_established": "No establecido en esta ejecuci\u00f3n",
+		"partial": "parcial", "does_not_follow": "## injected"}
+	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+		verdict("c2", "partial", "1", "save up to 55%"),
+	}, Inferences: follows("r1", "r2", "r3")}, nil, findings)
+	got := renderAnswer(a)
+	for _, want := range []string{"## Respuesta\n", "No establecido en esta ejecuci\u00f3n:", "(parcial: \u201c"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("answer lacks %q:\n%s", want, got)
+		}
+	}
+	if label(a, "does_not_follow") != englishLabels["does_not_follow"] {
+		t.Error("a label carrying Markdown was used")
+	}
+	sum := withAnswer(&agent.Summary{Report: "## Respuesta\n\nPython gana.\n\n## Por qu\u00e9\n\nx"}, a)
+	if strings.Contains(sum.Report, "Python gana") {
+		t.Errorf("the summarizer's localized answer section was kept:\n%s", sum.Report)
 	}
 }

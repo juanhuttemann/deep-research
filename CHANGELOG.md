@@ -53,6 +53,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   finds too little. Fact-check quotes stay in the source's language. With
   search off the search agent names pages it recalls and describes them,
   instead of writing "excerpts" from memory.
+- The words the program writes into a report itself (the answer heading,
+  "not established", status names, why nothing was approved) come in the
+  question's language: the analysis supplies them, and English is used for
+  any it leaves out or that carries Markdown. A Spanish report used to
+  read "Not established in this run" between Spanish sentences.
 - When nothing is approved the answer says why: the check did not run, no
   source was retrieved, or the evidence does not establish the proposed
   conclusions; it used to say only that no recommendation passed.

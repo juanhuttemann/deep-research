@@ -97,6 +97,10 @@ type Analysis struct {
 	Claims          []Claim          `json:"claims,omitempty"`
 	Recommendations []Recommendation `json:"recommendations,omitempty"`
 	Conflicts       []Conflict       `json:"conflicts,omitempty"`
+	// Labels are the words the program itself writes into the report (the
+	// answer heading, "not established", status names), in the question's
+	// language, keyed as the analyzer prompt lists them.
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // Claim is one atomic assertion the analysis rests on, with what it is about
@@ -1216,7 +1220,19 @@ func parseAnalysis(out string) *Analysis {
 		Claims:          parseClaims(m["claims"]),
 		Recommendations: parseRecommendations(m["recommendations"]),
 		Conflicts:       parseConflicts(m["conflicts"]),
+		Labels:          parseLabels(m["labels"]),
 	}
+}
+
+func parseLabels(v any) map[string]string {
+	m, _ := v.(map[string]any)
+	out := map[string]string{}
+	for k, val := range m {
+		if s, ok := val.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 // objects returns the JSON objects in an array value, skipping anything else
