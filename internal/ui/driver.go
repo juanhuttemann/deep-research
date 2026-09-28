@@ -358,7 +358,7 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 		if answer := decidedAnswer(analysis); answer != "" {
 			report += answer
 		} else {
-			report += noApproval
+			report += noApproval(analysis)
 		}
 		// A fact-check that did not run verified nothing, whatever the
 		// analyzer thought of its own answer.

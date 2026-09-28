@@ -31,13 +31,31 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The prompts no longer assume a product comparison. How a source's
+  authority is weighed is set per kind of claim (a treatment's effect,
+  history, statistics, news, law, a product) instead of by a product's
+  documentation and pricing page; a claim's scope can be a period, place,
+  jurisdiction, population or definition, not only a product version; the
+  report is organized as the question needs (a mechanism, a chronology,
+  findings, scenarios, arguments) with a comparison table only for a
+  comparison; recommendations are made only when a choice is asked for.
+  Sub-topic names and notes are written in the question's language, not
+  English, since a name is searched after the question when the query
+  finds too little. Fact-check quotes stay in the source's language. With
+  search off the search agent names pages it recalls and describes them,
+  instead of writing "excerpts" from memory.
+- When nothing is approved the answer says why: the check did not run, no
+  source was retrieved, or the evidence does not establish the proposed
+  conclusions; it used to say only that no recommendation passed.
 - The fact-check governs the report. It returns one verdict per claim ID,
   and code holds the answer to them: a recommendation is approved only when
   every claim it names is supported, and one whose deciding claim failed
   no longer stands on an incidental claim that passed. A verdict for a
   claim ID the analysis does not have, a missing or duplicated verdict, or
   a "supported" verdict with any quote that is not in the cited page
-  counts as insufficient; with search off no claim can be supported, since
+  counts as insufficient (quotes are compared in Unicode normal form, so an
+  accent written as one code point or two is the same text); with search
+  off no claim can be supported, since
   the findings are the model's own. A fact-check that did not run approves
   nothing, and neither does an analysis whose recommendations name no
   claim. The report's answer section is written from the approved

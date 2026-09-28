@@ -9,6 +9,7 @@ import (
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/tools"
+	"golang.org/x/text/unicode/norm"
 )
 
 // The decision: what the run may conclude from the analysis, held to the
@@ -215,6 +216,9 @@ func quotesLocated(evidence []agent.Evidence, findings []agent.Finding, pages ma
 // word order and accents are kept: they are what a quote is evidence of. A
 // paraphrase or an elided quote is not located.
 func locate(page, quote string) bool {
+	// One accented letter can be written as one code point or two; a quote
+	// copied from a page may use the other form than the stored text.
+	page, quote = norm.NFC.String(page), norm.NFC.String(quote)
 	q := strings.TrimSpace(quote)
 	if q == "" {
 		return false
@@ -390,7 +394,8 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 		sb.WriteString("\n")
 	}
 	if len(failed) > 0 {
-		sb.WriteString("Claims that did not pass the fact-check. Mention them only as limits, never as fact:\n")
+		sb.WriteString("Claims that did not pass the fact-check. Never state them as fact: a disputed one may be" +
+			" described as a disagreement where it bears on the answer, the rest belong under the limits:\n")
 		writeClaims(&sb, failed)
 		sb.WriteString("\n")
 	}
@@ -419,7 +424,7 @@ func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 	}
 	if len(a.Recommendations) > 0 {
 		sb.WriteString("The report's \"## Answer\" section is written by the program from the approved" +
-			" recommendations: do not write an answer section, begin with the comparison.\n")
+			" recommendations: do not write an answer section, begin with the supporting explanation.\n")
 		ok := approvedRecommendations(a)
 		if len(ok) == 0 {
 			sb.WriteString("No recommendation was approved.\n")
@@ -456,9 +461,27 @@ func renderAnswer(recs []agent.Recommendation) string {
 	return sb.String()
 }
 
-// noApproval is the answer when an analysis made recommendations and none
-// passed the fact-check.
-const noApproval = "No recommendation passed the fact-check."
+// Why nothing was approved. A single "no recommendation passed" read as the
+// candidates being disproved, when the check may not have run, or had no
+// retrieved page to check them against.
+const (
+	noApprovalUnchecked = "Verification could not be completed, so the proposed conclusions remain unverified."
+	noApprovalNoSources = "No source was retrieved, so the proposed conclusions could not be verified."
+	noApprovalEvidence  = "The evidence gathered does not establish the proposed conclusions."
+)
+
+// noApproval is the answer when nothing was approved, naming the cause.
+func noApproval(a *agent.Analysis) string {
+	for _, c := range a.Claims {
+		switch {
+		case strings.HasPrefix(c.Note, "fact_check_unavailable"):
+			return noApprovalUnchecked
+		case strings.HasPrefix(c.Note, "no page was retrieved"):
+			return noApprovalNoSources
+		}
+	}
+	return noApprovalEvidence
+}
 
 // decidedAnswer is the report's answer for an analysis that made
 // recommendations: the approved ones, or a statement that none passed. It is
@@ -470,7 +493,7 @@ func decidedAnswer(a *agent.Analysis) string {
 	if ok := approvedRecommendations(a); len(ok) > 0 {
 		return renderAnswer(ok)
 	}
-	return "## Answer\n\n" + noApproval + "\n"
+	return "## Answer\n\n" + noApproval(a) + "\n"
 }
 
 // withAnswer puts the decided answer at the top of the report. A title line

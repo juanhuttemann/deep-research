@@ -1454,7 +1454,7 @@ func TestNoApprovedRecommendationReplacesTheSummarizersAnswer(t *testing.T) {
 	findings, a := decisionFixture()
 	govern(a, &agent.FactCheckResult{}, nil, findings)
 	sum := withAnswer(&agent.Summary{Report: "## Answer\n\nChoose Node-based.\n\n## Why\n\nx"}, a)
-	if strings.Contains(sum.Report, "Choose Node-based") || !strings.Contains(sum.Report, noApproval) {
+	if strings.Contains(sum.Report, "Choose Node-based") || !strings.Contains(sum.Report, noApprovalEvidence) {
 		t.Errorf("report = %q, want the no-approval answer in place of the summarizer's", sum.Report)
 	}
 }
@@ -1556,7 +1556,15 @@ func TestFallbackAfterFailedCheckIsLowConfidence(t *testing.T) {
 	govern(a, nil, errors.New("timeout"), findings)
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
 	res, _ := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, nil, "report writing failed", errors.New("500"))
-	if res.Summary.Confidence != "low" || !strings.Contains(res.Summary.Report, noApproval) {
+	if res.Summary.Confidence != "low" || !strings.Contains(res.Summary.Report, noApprovalUnchecked) {
 		t.Errorf("fallback = %q, %q; want low confidence and no approval", res.Summary.Confidence, res.Summary.Report)
+	}
+}
+
+// A quote copied with a decomposed accent (e + combining acute) is the same
+// text as the page's precomposed one.
+func TestLocateIgnoresUnicodeNormalForm(t *testing.T) {
+	if !locate("Le caf\u00e9 est ouvert.", "Le cafe\u0301 est ouvert.") {
+		t.Error("a quote differing only in normal form was not located")
 	}
 }
