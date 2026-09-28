@@ -1589,6 +1589,7 @@ func TestLocateThroughPDFAndWikiArtifacts(t *testing.T) {
 		{"markets.[43] These", "markets. These"},
 		{"the \ufb01nancial system", "the financial system"},
 		{"a well-\nknown case", "a well-known case"},
+		{"due to the securitization of _subprime_ _mortgages_ into *mortgage-backed* *securities*", "due to the securitization of subprime mortgages into mortgage-backed securities"},
 		{"1.  Reply false if term &lt; currentTerm (§5.1)", "1. Reply false if term < currentTerm (§5.1)"},
 		{"| HP Split Systems  <br>(Ducted) | ≥ 8.1 HSPF2 |", "| HP Split Systems \n(Ducted) | ≥ 8.1 HSPF2 |"},
 	} {

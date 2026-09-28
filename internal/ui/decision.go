@@ -274,9 +274,15 @@ func visibleText(s string) string {
 	s = norm.NFKC.String(mdEscape.ReplaceAllString(s, "$1"))
 	s = mdCite.ReplaceAllString(mdLink.ReplaceAllString(s, "$1"), "")
 	s = mdCode.ReplaceAllString(s, "$1")
-	s = mdStrong.ReplaceAllString(s, "$2")
-	s = mdStar.ReplaceAllString(s, "$1$2")
-	s = mdUnder.ReplaceAllString(s, "$1$2$3")
+	// Emphasis rules are applied until nothing changes: a match takes the
+	// space after it, so in "_subprime_ _mortgages_" one pass freed only the
+	// first word.
+	for prev := ""; prev != s; {
+		prev = s
+		s = mdStrong.ReplaceAllString(s, "$2")
+		s = mdStar.ReplaceAllString(s, "$1$2")
+		s = mdUnder.ReplaceAllString(s, "$1$2$3")
+	}
 	return strings.Join(strings.Fields(plainPunct.Replace(s)), " ")
 }
 
