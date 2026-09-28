@@ -1,0 +1,21 @@
+{
+  "about": "The live miss: a recommendation that turns AND into OR, citing beside the rule a weaker claim ('consider dual-fuel in very cold climates') that seems to cover one branch. Advice to consider does not license choosing, so the OR recommendation still does not follow.",
+  "findings": [
+    {"url": "https://guide.example/dual-fuel", "title": "Rebate guide", "query": "dual-fuel heat pump furnace rule",
+     "content": "Rebate guide. If your home has a heating load over 40,000 BTU/hr and is in a cold climate with a design temperature below 5°F, pair a heat pump with a gas furnace (dual-fuel) to maximize rebates and comfort."},
+    {"url": "https://installers.example/cold", "title": "Installer advice", "query": "dual-fuel very cold climate",
+     "content": "Installers suggest that homeowners in very cold climates consider a dual-fuel system."},
+    {"url": "https://hvac.example/dual-fuel", "title": "What dual-fuel is", "query": "what is a dual-fuel system",
+     "content": "A dual-fuel system pairs an electric heat pump with a gas furnace that takes over in extreme cold."}
+  ],
+  "claims": [
+    {"id": "c1", "claim": "A home with a heating load over 40,000 BTU/hr in a cold climate with a design temperature below 5°F should pair a heat pump with a gas furnace (dual-fuel).", "option": "dual-fuel", "sources": ["https://guide.example/dual-fuel"]},
+    {"id": "c2", "claim": "Installers suggest that homeowners in very cold climates consider a dual-fuel system.", "option": "dual-fuel", "sources": ["https://installers.example/cold"]},
+    {"id": "c3", "claim": "A dual-fuel system pairs an electric heat pump with a gas furnace that takes over in extreme cold.", "option": "dual-fuel", "sources": ["https://hvac.example/dual-fuel"]}
+  ],
+  "recommendations": [
+    {"choose": "a dual-fuel system", "when": "the heating load is over 40,000 BTU/hr or the design temperature is below 5°F", "claims": ["c1", "c2", "c3"]},
+    {"choose": "a dual-fuel system", "when": "the heating load is over 40,000 BTU/hr and the design temperature is below 5°F", "claims": ["c1", "c3"]}
+  ],
+  "expect": {"supported": ["c1", "c2", "c3"], "approved": ["r2"], "blocked": ["r1"]}
+}

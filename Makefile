@@ -18,6 +18,7 @@ e2e:
 # and reports false approvals, false blocks, false accepts and false rejects.
 # It spends one model request per case, times EVAL_REPEAT (default 1), so it
 # is not part of verify. Needs the model configured as for a run.
+# EVAL_CASE=name runs only the cases whose name contains it.
 eval-replay:
 	go test -tags eval -count=1 -timeout 30m -run TestEvalChecker -v ./internal/ui/
 

@@ -54,6 +54,11 @@ func TestEvalChecker(t *testing.T) {
 
 	var total evalScore
 	for _, c := range cases {
+		// EVAL_CASE runs the cases whose name contains it, to measure one
+		// failure without paying for the rest.
+		if only := os.Getenv("EVAL_CASE"); only != "" && !strings.Contains(c.Name, only) {
+			continue
+		}
 		for run := range repeat {
 			s, detail := evalCase(t.Context(), asst, c)
 			total = addScore(total, s)
