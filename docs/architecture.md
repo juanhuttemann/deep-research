@@ -53,6 +53,8 @@ internal/
             is configured; Diagnose for `doctor`
   cli       cobra commands (run / list / init / doctor)
   config    config resolution (env > config dir > embedded defaults) + .env
+  replay    --trace recorder and --replay player: wraps the assistant to
+            record, or serve back, the plan and every search result
   store     append-only JSONL run history
   tools     SearXNG search (JSON or HTML, one or many instances, searx.space
             discovery) + Firecrawl scrape HTTP clients
@@ -66,7 +68,8 @@ degrades to one log line per event.
 ## Layering
 
 ```
-cli → { agent, config, store, ui }
+cli → { agent, config, replay, store, ui }
+replay → agent
 agent → tools
 tools → (standalone HTTP clients)
 ```

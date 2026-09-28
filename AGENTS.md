@@ -58,8 +58,8 @@ invariants:
   decides what to ask or in what order. Don't move sequencing into agent.
 - Each assistant phase is a single model call; no multi-turn loops inside an
   agent method.
-- Layering: `cli` → {agent, config, store, ui}; `agent` → `tools`; `tools` is
-  standalone HTTP clients. Don't import upward.
+- Layering: `cli` → {agent, config, replay, store, ui}; `replay` → `agent`;
+  `agent` → `tools`; `tools` is standalone HTTP clients. Don't import upward.
 - Config precedence is env > `config/config.yaml` > embedded defaults, and
   every `config.yaml` key is overridable as `DEEP_RESEARCH_<KEY>`. New config
   keys must work through all three channels, and be documented in

@@ -43,10 +43,12 @@ type Options struct {
 
 // RunResult carries the artifacts produced by a run.
 type RunResult struct {
-	Report    *agent.ResearchResult
-	MDPath    string
-	PDFPath   string
-	JSONPath  string
+	Report   *agent.ResearchResult
+	MDPath   string
+	PDFPath  string
+	JSONPath string
+	// TracePath is the --trace file, written by the CLI after the run.
+	TracePath string
 	Cancelled bool
 }
 
@@ -54,7 +56,7 @@ type RunResult struct {
 // its path empty.
 func (r RunResult) Paths() []string {
 	var paths []string
-	for _, p := range []string{r.MDPath, r.PDFPath, r.JSONPath} {
+	for _, p := range []string{r.MDPath, r.PDFPath, r.JSONPath, r.TracePath} {
 		if p != "" {
 			paths = append(paths, p)
 		}

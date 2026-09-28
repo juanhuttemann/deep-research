@@ -238,3 +238,57 @@ func (stub) TokensUsed() int          { return 0 }
 func always(a agent.Assistant) func() (agent.Assistant, error) {
 	return func() (agent.Assistant, error) { return a, nil }
 }
+
+// searchCounter is the stub assistant counting the searches it runs.
+type searchCounter struct {
+	stub
+	searches *int
+}
+
+func (s searchCounter) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
+	*s.searches++
+	return s.stub.ResearchDetail(ctx, q, terms)
+}
+
+// A prompt or model change could not be told apart from a change in what the
+// web returned: every live run searched again and planned differently. A
+// traced run is replayed on its recorded plan and searches, without
+// searching, into its own directory, and is not saved to the history twice.
+func TestTracedRunReplaysWithoutSearching(t *testing.T) {
+	dir := t.TempDir()
+	history := filepath.Join(dir, "r.jsonl")
+	var searches int
+	deps := Deps{
+		Assistant: always(searchCounter{searches: &searches}),
+		Config:    config.Config{DataFile: history, Config: agent.Config{ModelCallTimeout: time.Second}},
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := New(func() (Deps, error) { return deps, nil })
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	run("-p", "q", "--silent", "--reports", dir, "--trace", "--mode", "quick")
+	traces, _ := filepath.Glob(filepath.Join(dir, "*.trace.json"))
+	if len(traces) != 1 || searches == 0 {
+		t.Fatalf("traced run wrote %v after %d searches", traces, searches)
+	}
+	saved, _ := os.ReadFile(history)
+
+	searches = 0
+	run("--replay", traces[0], "--silent", "--reports", dir)
+	if searches != 0 {
+		t.Errorf("the replay searched %d times", searches)
+	}
+	if mds, _ := filepath.Glob(filepath.Join(dir, "replay", "*.md")); len(mds) != 1 {
+		t.Errorf("replay wrote %v, want one report under replay/", mds)
+	}
+	if after, _ := os.ReadFile(history); len(after) != len(saved) {
+		t.Error("the replay was saved to the history")
+	}
+}

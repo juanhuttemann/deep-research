@@ -27,9 +27,37 @@ progress meter, a rolling activity tail, and running source/token counters.
 | `--silent`, `-s` | off | no live UI; print only the report |
 | `--detach` | off | release the live display as soon as the run starts (same as pressing `b`) |
 | `--no-color` | off | disable ANSI colour (`NO_COLOR=1` does the same) |
+| `--trace` | off | also write `<report>.trace.json`: the plan, every search result with its full page text, and each model phase's prompt and output |
+| `--replay TRACE` | — | re-run analyze, fact-check and summarize on a trace's recorded plan and search results, without searching; see below |
 | `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
+
+### Replaying a run
+
+A live run searches again and plans differently every time, so a prompt or
+model change cannot be told apart from a change in what the web returned.
+`--trace` records a run; `--replay` runs the model phases again on exactly
+that evidence:
+
+```bash
+deep-research -p "question" --trace          # reports/<name>.trace.json
+deep-research --replay reports/<name>.trace.json
+OPENAI_MODEL=other/model deep-research --replay reports/<name>.trace.json
+```
+
+A replay takes its question, `--mode` and `--sources` from the trace (the
+flags override them), writes its report under `<reports>/replay/` so the
+original is not overwritten, and is not saved to the history. It spends
+model requests on analyze, fact-check and summarize only. Its follow-up
+round searches the recorded run's follow-up queries, not the ones the
+replayed analysis words, so both runs end on the same evidence; any other
+search that was not recorded fails instead of searching live. Its
+sub-agents run one at a time: in parallel they race for pages several
+searches return, which changes the pages each counts and whether it runs its
+fallback query. Two replays of one trace therefore see the same evidence,
+but a replay can differ from the live run it was recorded from by a page or
+so; compare replays with replays. `--replay` cannot be combined with `-p`.
 
 An empty question is rejected, and so is a run with no API key; neither
 writes anything.

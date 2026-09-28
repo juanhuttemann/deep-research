@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
+	"github.com/juanhuttemann/deep-research/internal/replay"
 	"github.com/juanhuttemann/deep-research/internal/store"
 	"github.com/juanhuttemann/deep-research/internal/ui"
 )
@@ -35,7 +37,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 
 	// A question is a flag on the root, not a subcommand: `deep-research -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("prompt") {
+		if !cmd.Flags().Changed("prompt") && !cmd.Flags().Changed("replay") {
 			return cmd.Help()
 		}
 		res, err := research(cmd, load)
@@ -63,6 +65,11 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// report with the event stream, leaving the machine-readable output
 	// unparseable, so the combination is rejected instead of guessed at.
 	root.MarkFlagsMutuallyExclusive("silent", "jsonl")
+	root.Flags().Bool("trace", false, "also write <report>.trace.json: the plan, every search result and each model phase's prompt and output")
+	root.Flags().String("replay", "", "re-run the model phases on a trace's recorded plan and search results, without searching")
+	// A replay's question is the recorded one; a second question would be
+	// answered from evidence gathered for another.
+	root.MarkFlagsMutuallyExclusive("prompt", "replay")
 
 	initCmd := &cobra.Command{
 		Use:   "init",
@@ -212,6 +219,18 @@ func doneEvent(res ui.RunResult, err error) ui.Event {
 }
 
 func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, error) {
+	tr, question, err := replayTrace(cmd, question)
+	if err != nil {
+		return ui.RunResult{}, err
+	}
+	// Sub-agents running at once race for the pages several searches return:
+	// whichever claims a page first counts it, which decides whether another
+	// falls short of its budget and runs its fallback query. A replay served
+	// from memory loses nothing by running them one at a time, in plan order,
+	// and two replays of one trace then see exactly the same evidence.
+	if tr != nil {
+		d.Config.Parallelism = 1
+	}
 	// An empty question plans nothing, and the run would still spend its
 	// model calls writing a report about nothing.
 	if strings.TrimSpace(question) == "" {
@@ -228,6 +247,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if err != nil {
 		return ui.RunResult{}, err
 	}
+	assistant, rec := wrapAssistant(cmd, assistant, tr, question, mode, sourceBudget(cmd, d))
 
 	silent, _ := cmd.Flags().GetBool("silent")
 	jsonl, _ := cmd.Flags().GetBool("jsonl")
@@ -274,22 +294,83 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		fmt.Fprintln(cmd.ErrOrStderr(), "cancelled")
 		return res, nil
 	}
-	result := res.Report
+	writeTrace(cmd, rec, &res)
+	return res, deliver(cmd, d, res.Report, tr == nil, silent || jsonl)
+}
+
+// deliver warns about an empty run, saves it to the history and prints it.
+// A replay is not saved: it is an experiment on a run the history already
+// holds, and saving it would list the same question twice.
+func deliver(cmd *cobra.Command, d Deps, result *agent.ResearchResult, save, printed bool) error {
 	if len(result.Findings) == 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: research produced no findings; the search agent returned nothing usable\n")
 	}
-	if err := saveRun(d, result); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not save result: %v\n", err)
+	if save {
+		if err := saveRun(d, result); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not save result: %v\n", err)
+		}
 	}
-	if err := printResult(cmd, result, silent || jsonl); err != nil {
-		return res, err
+	if err := printResult(cmd, result, printed); err != nil {
+		return err
 	}
 	// The partial run is saved and printed, but it did not finish: scripts
 	// deciding on the exit status must not read it as a complete report.
 	if result.Error != "" {
-		return res, fmt.Errorf("research incomplete (the partial report was saved): %s", result.Error)
+		return fmt.Errorf("research incomplete (the partial report was saved): %s", result.Error)
 	}
-	return res, nil
+	return nil
+}
+
+// replayTrace loads the trace --replay names and gives the run its question
+// and, unless the flags override them, its depth tier and source budget: the
+// recorded results were cut at that budget, and a replay at another one would
+// not see the same evidence. A replay writes to <reports>/replay: its report
+// is named after the same question, and in the reports directory itself it
+// would overwrite the report it is meant to be compared against.
+func replayTrace(cmd *cobra.Command, question string) (*replay.Trace, string, error) {
+	path, _ := cmd.Flags().GetString("replay")
+	if path == "" {
+		return nil, question, nil
+	}
+	t, err := replay.Load(path)
+	if err != nil {
+		return nil, "", err
+	}
+	for name, v := range map[string]string{"mode": t.Mode, "sources": strconv.Itoa(t.Sources)} {
+		if !cmd.Flags().Changed(name) && v != "" {
+			_ = cmd.Flags().Set(name, v)
+		}
+	}
+	reports, _ := cmd.Flags().GetString("reports")
+	_ = cmd.Flags().Set("reports", filepath.Join(reports, "replay"))
+	return t, t.Question, nil
+}
+
+// wrapAssistant puts the replay player and the trace recorder the flags ask
+// for around the assistant. rec is nil without --trace.
+func wrapAssistant(cmd *cobra.Command, a agent.Assistant, tr *replay.Trace, question, mode string, sources int) (agent.Assistant, *replay.Recorder) {
+	if tr != nil {
+		a = replay.Play(a, tr)
+	}
+	if on, _ := cmd.Flags().GetBool("trace"); !on {
+		return a, nil
+	}
+	rec := replay.Record(a, question, mode, sources)
+	return rec, rec
+}
+
+// writeTrace saves a recorded run next to its report, named after it.
+func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
+	if rec == nil || res.MDPath == "" {
+		return
+	}
+	path := strings.TrimSuffix(res.MDPath, ".md") + ".trace.json"
+	if err := rec.Write(path); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not write the trace: %v\n", err)
+		return
+	}
+	res.TracePath = path
+	fmt.Fprintf(cmd.ErrOrStderr(), "trace %s\n", path)
 }
 
 // drawsUI reports whether ui.Run will paint the live terminal UI, which it

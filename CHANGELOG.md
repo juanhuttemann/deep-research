@@ -16,6 +16,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   is not part of `make verify`.
 - `search` events carry the `terms` their results were judged against, so
   the `.json` timeline and `--jsonl` show why a result was called off-topic.
+- `--trace` writes `<report>.trace.json` with the plan, every search result
+  (full page text) and each model phase's prompt and output, and
+  `--replay TRACE` runs analyze, fact-check and summarize again on that
+  recorded evidence without searching. A live run plans and searches anew
+  each time, so a prompt or model change could not be told apart from a
+  change in what the web returned. See "Replaying a run" in
+  `docs/usage.md`.
 - A follow-up round: after the first analysis, its first three follow-up
   queries are searched as extra sub-agents, and the run analyzes once more
   if they found evidence. The report used to list them as "suggested
