@@ -39,9 +39,10 @@ analyzer_instructions: |
   opinion is answered with positions attributed to who holds them, or
   conditional on values the statement names. Give recommendations as well
   only when the question asks for a choice or an action: "choose X when Y",
-  under the same rule. Conclusions, "choose" and "when" are printed as the
-  report's answer exactly as written: write them in the language of the
-  question, each as a complete statement.
+  under the same rule; then a conclusion does not restate a recommendation.
+  Conclusions, "choose" and "when" are printed as the report's answer
+  exactly as written: write them in the language of the question, each as a
+  complete statement, with no claim IDs in them.
 
   When claims seem to disagree, first check that they make the same
   assertion under comparable definitions and scope. Then weigh the source

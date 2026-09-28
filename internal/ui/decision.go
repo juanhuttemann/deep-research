@@ -641,11 +641,11 @@ func notEstablishedUnits(a *agent.Analysis) []agent.Recommendation {
 // writeChoice writes one recommendation as a list item, with why it is not
 // established when it is not.
 func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
-	if st := strings.TrimSpace(r.Statement); st != "" {
+	if st := readerText(r.Statement); st != "" {
 		sb.WriteString("- " + st)
 	} else {
-		sb.WriteString("- **" + strings.TrimSpace(r.Choose) + "**")
-		if when := strings.TrimSpace(r.When); when != "" {
+		sb.WriteString("- **" + readerText(r.Choose) + "**")
+		if when := readerText(r.When); when != "" {
 			sb.WriteString(": " + when)
 		}
 	}
@@ -653,6 +653,15 @@ func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
 		sb.WriteString(" (" + why + ")")
 	}
 	sb.WriteString("\n")
+}
+
+// claimRefs are claim IDs the analyzer wrote into a statement ("(c1)",
+// "(c9, c10)"): they mean nothing to a reader of the answer.
+var claimRefs = regexp.MustCompile(`\s*\((?:c\d+(?:\s*[,;]\s*|\s+and\s+)?)+\)`)
+
+// readerText is a statement as the answer prints it, without claim IDs.
+func readerText(s string) string {
+	return strings.TrimSpace(claimRefs.ReplaceAllString(s, ""))
 }
 
 // notEstablished names what blocked a recommendation: the claims that did not

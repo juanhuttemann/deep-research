@@ -1907,3 +1907,17 @@ func TestRepairRevisesAConclusion(t *testing.T) {
 		t.Errorf("the revision does not replace the original conclusion:\n%s", got)
 	}
 }
+
+// Claim IDs the analyzer wrote into a statement reached the answer:
+// "... two deployment options (c1), and ... (c3)".
+func TestAnswerStatementsCarryNoClaimIDs(t *testing.T) {
+	for in, want := range map[string]string{
+		"two deployment options (c1), and fixed needs (c3)": "two deployment options, and fixed needs",
+		"up to 300 nodes (c9, c10); scaling (c9 and c11)":   "up to 300 nodes; scaling",
+		"a figure (in c1 units) stays":                      "a figure (in c1 units) stays",
+	} {
+		if got := readerText(in); got != want {
+			t.Errorf("readerText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

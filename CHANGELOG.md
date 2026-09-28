@@ -144,6 +144,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Claim IDs the analyzer wrote into a conclusion ("two deployment options
+  (c1)") reached the answer; they are removed when it is printed. A
+  conclusion no longer restates a recommendation beside it.
 - An analysis that came back malformed (no claims, nothing to govern, only
   JSON: a model returned `{"/": "placeholder"}`) sent the report to the
   unchecked-prose path; it is asked for once more. A re-analysis after the
