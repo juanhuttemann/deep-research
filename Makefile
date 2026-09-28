@@ -1,4 +1,4 @@
-.PHONY: test e2e build run fmt vet cyclo ineffassign golangci deadcode lint verify tools
+.PHONY: test e2e eval-replay build run fmt vet cyclo ineffassign golangci deadcode lint verify tools
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -12,6 +12,14 @@ test:
 # Needs OPENAI_API_KEY; without one only the rejected-key test runs.
 e2e:
 	go test -tags e2e -count=1 -timeout 15m -v ./cmd/deep-research/
+
+# The checker eval runs the live fact-check and the governance code on
+# frozen analyses whose right outcome is known (internal/ui/testdata/checker)
+# and reports false approvals, false blocks, false accepts and false rejects.
+# It spends one model request per case, times EVAL_REPEAT (default 1), so it
+# is not part of verify. Needs the model configured as for a run.
+eval-replay:
+	go test -tags eval -count=1 -timeout 30m -run TestEvalChecker -v ./internal/ui/
 
 # VERSION is stamped into the binary so --version reports the build rather
 # than the hardcoded "dev" it used to print for every release.

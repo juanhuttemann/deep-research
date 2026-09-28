@@ -1,0 +1,11 @@
+{
+  "about": "A vendor's statement supports that the vendor said it, not that it is true.",
+  "findings": [{"url": "https://widgetdb.example/", "title": "WidgetDB", "query": "WidgetDB performance",
+    "content": "WidgetDB's marketing page states that WidgetDB is the fastest database available."}],
+  "claims": [
+    {"id": "c1", "claim": "WidgetDB is the fastest database available.", "option": "WidgetDB", "sources": ["https://widgetdb.example/"]},
+    {"id": "c2", "claim": "WidgetDB's vendor claims WidgetDB is the fastest database available.", "option": "WidgetDB", "sources": ["https://widgetdb.example/"]}
+  ],
+  "recommendations": [{"choose": "WidgetDB", "when": "speed is your priority", "claims": ["c1"]}],
+  "expect": {"supported": ["c2"], "not_supported": ["c1"], "blocked": ["r1"]}
+}

@@ -1,0 +1,11 @@
+{
+  "about": "A recommendation that turns its claim's AND into OR does not follow; the same recommendation with AND does.",
+  "findings": [{"url": "https://guide.example/dual-fuel", "title": "Rebate guide", "query": "dual-fuel heat pump furnace rule",
+    "content": "Rebate guide. If your home has a heating load over 40,000 BTU/hr and is in a cold climate with a design temperature below 5°F, pair a heat pump with a gas furnace (dual-fuel) to maximize rebates and comfort."}],
+  "claims": [{"id": "c1", "claim": "A home with a heating load over 40,000 BTU/hr in a cold climate with a design temperature below 5°F should pair a heat pump with a gas furnace (dual-fuel).", "option": "dual-fuel", "sources": ["https://guide.example/dual-fuel"]}],
+  "recommendations": [
+    {"choose": "a dual-fuel system", "when": "the heating load is over 40,000 BTU/hr or the design temperature is below 5°F", "claims": ["c1"]},
+    {"choose": "a dual-fuel system", "when": "the heating load is over 40,000 BTU/hr and the design temperature is below 5°F", "claims": ["c1"]}
+  ],
+  "expect": {"supported": ["c1"], "approved": ["r2"], "blocked": ["r1"]}
+}

@@ -1,0 +1,10 @@
+{
+  "about": "One trial's result is not a general claim about everyone.",
+  "findings": [{"url": "https://trials.example/if-cr", "title": "Trial report", "query": "intermittent fasting calorie restriction trial",
+    "content": "A 2025 trial of 165 adults found that 4:3 intermittent fasting produced 7.6% weight loss versus 5.0% with daily calorie restriction at 12 months."}],
+  "claims": [
+    {"id": "c1", "claim": "Intermittent fasting produces more weight loss than calorie restriction for everyone.", "sources": ["https://trials.example/if-cr"]},
+    {"id": "c2", "claim": "In a 2025 trial of 165 adults, 4:3 intermittent fasting produced 7.6% weight loss versus 5.0% with daily calorie restriction at 12 months.", "scope": "one trial, 165 adults, 12 months", "sources": ["https://trials.example/if-cr"]}
+  ],
+  "expect": {"supported": ["c2"], "not_supported": ["c1"]}
+}

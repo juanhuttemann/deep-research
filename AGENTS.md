@@ -23,6 +23,11 @@ Other targets: `make test`, `make build`, `make lint`,
 `go test -race ./internal/ui/` for one package.
 `make e2e` runs the built binary against the real provider (spends model
 requests, needs `OPENAI_API_KEY` in the environment; not part of the gate).
+`make eval-replay` runs the live fact-check and governance on the frozen
+analyses in `internal/ui/testdata/checker` and reports false approvals,
+blocks, accepts and rejects (`EVAL_REPEAT=n` to measure variance; spends one
+request per case and repeat; not part of the gate). Add a case there for
+each checker failure found in a real run.
 `./deep-research -p "question"` to exercise the CLI (needs an API key).
 
 `make verify` does not cross-compile. CI does

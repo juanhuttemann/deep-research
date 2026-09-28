@@ -14,6 +14,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   See "Driving it from another program" in `docs/usage.md`.
 - `make e2e` runs the built binary against the real provider and search. It
   is not part of `make verify`.
+- `make eval-replay` measures the fact-check on its own: the live checker
+  and the governance code run on frozen analyses whose right outcome is
+  known (and/or, consider vs choose, attribution, jurisdiction, units, an
+  added condition, a study's scope, negation) and it reports false
+  approvals, false blocks, false accepts and false rejects. `EVAL_REPEAT`
+  repeats each case to measure variance. Replaying a recorded run
+  re-runs the analysis too, so it compares analyses as much as checkers.
 - `search` events carry the `terms` their results were judged against, so
   the `.json` timeline and `--jsonl` show why a result was called off-topic.
 - `--trace` writes `<report>.trace.json` with the plan, every search result

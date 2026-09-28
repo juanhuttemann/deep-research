@@ -1,0 +1,11 @@
+{
+  "about": "A condition no claim states makes the recommendation not follow, however consistent it sounds.",
+  "findings": [{"url": "https://learn.example/first-language", "title": "First language", "query": "Python JavaScript beginners",
+    "content": "Python's syntax is widely considered easier for beginners than JavaScript's."}],
+  "claims": [{"id": "c1", "claim": "Python's syntax is widely considered easier for beginners than JavaScript's.", "option": "Python", "sources": ["https://learn.example/first-language"]}],
+  "recommendations": [
+    {"choose": "Python", "when": "you are a beginner who plans to work in finance", "claims": ["c1"]},
+    {"choose": "Python", "when": "you are a beginner and want the syntax considered easier", "claims": ["c1"]}
+  ],
+  "expect": {"supported": ["c1"], "approved": ["r2"], "blocked": ["r1"]}
+}

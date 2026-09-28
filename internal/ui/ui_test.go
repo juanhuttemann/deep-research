@@ -1749,3 +1749,79 @@ func TestAnswerUsesTheAnalysisLabels(t *testing.T) {
 		t.Errorf("the summarizer's localized answer section was kept:\n%s", sum.Report)
 	}
 }
+
+// ---- checker eval cases (testdata/checker) --------------------------------
+
+// checkerCase is a frozen analysis with the outcome a correct fact-check and
+// governance should reach. make eval-replay runs the live checker on them;
+// here they are only held to being well formed.
+type checkerCase struct {
+	Name            string
+	About           string                 `json:"about"`
+	Findings        []agent.Finding        `json:"findings"`
+	Claims          []agent.Claim          `json:"claims"`
+	Recommendations []agent.Recommendation `json:"recommendations"`
+	Expect          struct {
+		Supported    []string `json:"supported"`
+		NotSupported []string `json:"not_supported"`
+		Approved     []string `json:"approved"`
+		Blocked      []string `json:"blocked"`
+	} `json:"expect"`
+}
+
+func loadCheckerCases(t *testing.T) []checkerCase {
+	t.Helper()
+	paths, _ := filepath.Glob("testdata/checker/*.json")
+	if len(paths) == 0 {
+		t.Fatal("no checker cases in testdata/checker")
+	}
+	var out []checkerCase
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var c checkerCase
+		if err := json.Unmarshal(b, &c); err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		c.Name = strings.TrimSuffix(filepath.Base(p), ".json")
+		for i := range c.Findings {
+			c.Findings[i].Status = "ok"
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// A case whose expectation names a claim or recommendation it does not have,
+// or cites a page it does not hold, would score nonsense.
+func TestCheckerCasesAreWellFormed(t *testing.T) {
+	for _, c := range loadCheckerCases(t) {
+		pages, claims := map[string]bool{}, map[string]bool{}
+		for _, f := range c.Findings {
+			pages[f.URL] = true
+		}
+		for _, cl := range c.Claims {
+			claims[cl.ID] = true
+			for _, s := range cl.Sources {
+				if !pages[s] {
+					t.Errorf("%s: %s cites %s, not one of its pages", c.Name, cl.ID, s)
+				}
+			}
+		}
+		for _, id := range append(c.Expect.Supported, c.Expect.NotSupported...) {
+			if !claims[id] {
+				t.Errorf("%s: expectation names claim %s it does not have", c.Name, id)
+			}
+		}
+		for _, id := range append(c.Expect.Approved, c.Expect.Blocked...) {
+			if n, err := strconv.Atoi(strings.TrimPrefix(id, "r")); err != nil || n < 1 || n > len(c.Recommendations) {
+				t.Errorf("%s: expectation names recommendation %s it does not have", c.Name, id)
+			}
+		}
+		if c.About == "" || len(c.Expect.Supported)+len(c.Expect.Approved) == 0 {
+			t.Errorf("%s: a case needs what it tests and a positive expectation", c.Name)
+		}
+	}
+}

@@ -1,0 +1,10 @@
+{
+  "about": "The same number in another unit is a different claim.",
+  "findings": [{"url": "https://cloud.example/pricing", "title": "Pricing", "query": "storage price",
+    "content": "Storage is billed at $0.125 per GB-hour."}],
+  "claims": [
+    {"id": "c1", "claim": "Storage is billed at $0.125 per GB-month.", "sources": ["https://cloud.example/pricing"]},
+    {"id": "c2", "claim": "Storage is billed at $0.125 per GB-hour.", "sources": ["https://cloud.example/pricing"]}
+  ],
+  "expect": {"supported": ["c2"], "not_supported": ["c1"]}
+}

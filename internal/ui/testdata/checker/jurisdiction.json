@@ -1,0 +1,10 @@
+{
+  "about": "A figure for one jurisdiction is not a fact about another.",
+  "findings": [{"url": "https://tax.example/vat", "title": "VAT rates", "query": "standard VAT rate",
+    "content": "In Germany, the standard VAT rate is 19%."}],
+  "claims": [
+    {"id": "c1", "claim": "The standard VAT rate in France is 19%.", "scope": "France", "sources": ["https://tax.example/vat"]},
+    {"id": "c2", "claim": "The standard VAT rate in Germany is 19%.", "scope": "Germany", "sources": ["https://tax.example/vat"]}
+  ],
+  "expect": {"supported": ["c2"], "not_supported": ["c1"]}
+}

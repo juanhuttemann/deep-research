@@ -1,0 +1,11 @@
+{
+  "about": "Advice to consider an option does not license choosing it.",
+  "findings": [{"url": "https://installers.example/cold", "title": "Installer advice", "query": "dual-fuel very cold climate",
+    "content": "Installers suggest that homeowners in very cold climates consider a dual-fuel system."}],
+  "claims": [{"id": "c1", "claim": "Installers suggest that homeowners in very cold climates consider a dual-fuel system.", "option": "dual-fuel", "sources": ["https://installers.example/cold"]}],
+  "recommendations": [
+    {"choose": "a dual-fuel system", "when": "you live in a very cold climate", "claims": ["c1"]},
+    {"choose": "to consider a dual-fuel system", "when": "you live in a very cold climate", "claims": ["c1"]}
+  ],
+  "expect": {"supported": ["c1"], "approved": ["r2"], "blocked": ["r1"]}
+}

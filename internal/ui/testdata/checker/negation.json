@@ -1,0 +1,10 @@
+{
+  "about": "A claim that drops a negation is contradicted, however many words it shares with the page.",
+  "findings": [{"url": "https://cache.example/pricing", "title": "Pricing notes", "query": "reserved nodes serverless",
+    "content": "Note: Reserved nodes are not available with Serverless caches."}],
+  "claims": [
+    {"id": "c1", "claim": "Reserved nodes are available with Serverless caches.", "sources": ["https://cache.example/pricing"]},
+    {"id": "c2", "claim": "Reserved nodes are not available with Serverless caches.", "sources": ["https://cache.example/pricing"]}
+  ],
+  "expect": {"supported": ["c2"], "not_supported": ["c1"]}
+}
