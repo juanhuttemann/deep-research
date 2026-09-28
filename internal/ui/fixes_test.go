@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -354,17 +355,20 @@ func TestReportFilesSaysNothingWasWritten(t *testing.T) {
 	}
 }
 
-// Follow-up queries were parsed and then read by nothing at all.
+// Follow-up queries and gaps were parsed and then read by nothing at all. The
+// gaps now reach the report through the summarizer (the body states the ones
+// that limit the answer), so the Markdown lists only the searches; both stay
+// in the sidecar.
 func TestMarkdownReportCarriesOpenQuestions(t *testing.T) {
 	res := testResult()
 	res.Analysis.Gaps = []string{"long-term cycle life"}
 	res.Analysis.FollowUp = []string{"solid-state cycle life 2026"}
 	md := MarkdownReport(res)
-	if !strings.Contains(md, "long-term cycle life") {
-		t.Error("markdown report drops the analyzer's gaps")
-	}
 	if !strings.Contains(md, "solid-state cycle life 2026") {
 		t.Error("markdown report drops the analyzer's follow-up queries")
+	}
+	if m := BuildMeta(res, nil, "quick", 0, 0); m.Analysis == nil || !slices.Contains(m.Analysis.Gaps, "long-term cycle life") {
+		t.Error("sidecar drops the analyzer's gaps")
 	}
 }
 

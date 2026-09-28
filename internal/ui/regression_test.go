@@ -1320,7 +1320,10 @@ func TestTabsCannotOverflowTheFrame(t *testing.T) {
 }
 
 // The analyzer's per-topic evidence and confidence, and the fact-check
-// verdicts, were parsed and stored and never reached either artifact.
+// verdicts, were parsed and stored and never reached either artifact. Then
+// the Markdown appended all of them after a body written from the same
+// material, repeating every finding: it now states the verdict counts and
+// lists only what the check did not confirm, and the sidecar keeps the rest.
 func TestArtifactsCarryTopicsAndFactCheck(t *testing.T) {
 	res := testResult()
 	res.Analysis.Topics = []agent.Topic{{Name: "Cost", Findings: []string{"cells cost $80/kWh"}, Confidence: "medium"}}
@@ -1330,9 +1333,14 @@ func TestArtifactsCarryTopicsAndFactCheck(t *testing.T) {
 		Contradictions: []agent.Contradiction{{Claim: "launch year", Sources: []string{"a", "b"}}},
 	}
 	md := MarkdownReport(res)
-	for _, want := range []string{"Cost", "cells cost $80/kWh", "ok claim", "bad claim", "loose claim", "launch year"} {
+	for _, want := range []string{"Confirmed against their sources: 1 · not confirmed: 2 · contradictions: 1", "bad claim", "loose claim", "launch year"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	for _, repeated := range []string{"cells cost $80/kWh", "ok claim"} {
+		if strings.Contains(md, repeated) {
+			t.Errorf("markdown repeats %q after the body:\n%s", repeated, md)
 		}
 	}
 	if strings.Contains(md, "- ✓ bad claim") {

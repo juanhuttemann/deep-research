@@ -245,6 +245,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err != nil {
 		return d.partial(ctx, plan, findings, nil, nil, "analysis failed", err)
 	}
+	checkAnalysis(analysis, findings)
 	analysis, findings = d.followUp(ctx, plan, analysis, findings, uncovered)
 
 	// What this phase can honestly claim depends on where the "sources" came
@@ -258,7 +259,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// exists. If it fails there is still a complete, citable report to
 	// deliver, so the failure is surfaced and the run continues rather than
 	// discarding every search and the analysis behind it.
-	fc, err := d.Agent.FactCheck(ctx, factCheckPrompt(analysis.Answer, findings, retrieved))
+	fc, err := d.Agent.FactCheck(ctx, factCheckPrompt(claimsToCheck(analysis), findings, retrieved))
 	if err != nil {
 		fc = nil
 		d.emit(Event{Type: Error, Phase: "Fact-Check",
@@ -433,7 +434,73 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 		d.emit(Event{Type: Error, Phase: "Analyze", Detail: "re-analysis failed, keeping the first analysis: " + err.Error()})
 		return analysis, findings
 	}
+	checkAnalysis(again, findings)
 	return again, findings
+}
+
+// checkAnalysis holds the analysis to what the run retrieved, in code rather
+// than by asking the model: a claim keeps only sources that are pages the run
+// fetched, claim IDs are unique, and a recommendation stands only on claims
+// that kept a source. The model writes all of these freely, and an invented
+// URL, a page it never saw or a dangling claim ID reached the report looking
+// sourced. A recommendation left with no supported claim is dropped, and the
+// drop is recorded as a gap so the report says what could not be concluded.
+func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
+	evidence := evidenceURLs(findings)
+	ids, supported := map[string]bool{}, map[string]bool{}
+	for i := range a.Claims {
+		c := &a.Claims[i]
+		c.Sources = claimSources(c.Sources, findings, evidence)
+		// A repeated ID made every reference to it ambiguous; references go
+		// to the first claim that used it.
+		if ids[c.ID] {
+			c.ID = c.ID + "." + strconv.Itoa(i+1)
+		}
+		ids[c.ID], supported[c.ID] = true, len(c.Sources) > 0
+	}
+	kept := a.Recommendations[:0]
+	for _, r := range a.Recommendations {
+		r.Claims = slices.DeleteFunc(r.Claims, func(id string) bool { return !supported[id] })
+		if len(r.Claims) == 0 {
+			a.Gaps = append(a.Gaps, "No recommendation to choose "+r.Choose+" when "+r.When+
+				": none of the claims it named rests on a retrieved source.")
+			continue
+		}
+		kept = append(kept, r)
+	}
+	a.Recommendations = kept
+	for i := range a.Conflicts {
+		a.Conflicts[i].Claims = slices.DeleteFunc(a.Conflicts[i].Claims, func(id string) bool { return !ids[id] })
+	}
+}
+
+// evidenceURLs are the pages a claim may cite: the ones the run fetched. A
+// run that fetched nothing (search off) has only the model's own findings,
+// which the report already presents as unverified, so they all count.
+func evidenceURLs(findings []agent.Finding) map[string]bool {
+	retrieved := sourcesRetrieved(findings)
+	out := map[string]bool{}
+	for _, f := range findings {
+		if f.URL != "" && (fetched(f) || !retrieved) {
+			out[tools.CanonicalURL(f.URL)] = true
+		}
+	}
+	return out
+}
+
+// claimSources keeps a claim's sources that are evidence, resolving one given
+// as the prompt's entry number to that entry's URL.
+func claimSources(srcs []string, findings []agent.Finding, evidence map[string]bool) []string {
+	var out []string
+	for _, s := range srcs {
+		if n, err := strconv.Atoi(strings.TrimPrefix(s, "#")); err == nil && n >= 1 && n <= len(findings) {
+			s = findings[n-1].URL
+		}
+		if s != "" && evidence[tools.CanonicalURL(s)] && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // mergeFindings keeps one finding per page, in first-seen order. A page that
@@ -811,6 +878,61 @@ func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool) st
 	return sb.String()
 }
 
+// claimsToCheck is what the fact-checker verifies: the analysis's atomic
+// claims when it made them, since those are what the report is built from and
+// each can be checked on its own; the answer prose otherwise.
+func claimsToCheck(a *agent.Analysis) string {
+	if len(a.Claims) == 0 {
+		return a.Answer
+	}
+	var sb strings.Builder
+	writeClaims(&sb, a.Claims)
+	return sb.String()
+}
+
+// writeClaims lists claims one per line with what they are about and where
+// they come from; a claim no retrieved page backs says so.
+func writeClaims(sb *strings.Builder, claims []agent.Claim) {
+	for _, c := range claims {
+		about := strings.Trim(c.Option+" / "+c.Criterion, " /")
+		if c.Scope != "" {
+			about = strings.Trim(about+"; "+c.Scope, "; ")
+		}
+		src := strings.Join(c.Sources, ", ")
+		if src == "" {
+			src = "no retrieved source"
+		}
+		fmt.Fprintf(sb, "  - %s [%s] %s (%s)\n", c.ID, about, c.Text, src)
+	}
+}
+
+// writeDecision gives the summarizer the decision the analysis reached, which
+// the report leads with, and the claims and resolved conflicts behind it.
+func writeDecision(sb *strings.Builder, a *agent.Analysis) {
+	if a.Interpretation != "" {
+		sb.WriteString("How the question is read: " + a.Interpretation + "\n\n")
+	}
+	if len(a.Recommendations) > 0 {
+		sb.WriteString("Recommendations (lead the report with these):\n")
+		for _, r := range a.Recommendations {
+			fmt.Fprintf(sb, "  - Choose %s when %s [%s]\n", r.Choose, r.When, strings.Join(r.Claims, ", "))
+		}
+		sb.WriteString("\n")
+	}
+	if len(a.Claims) > 0 {
+		sb.WriteString("Claims (id [about; scope] claim (sources)):\n")
+		writeClaims(sb, a.Claims)
+		sb.WriteString("\n")
+	}
+	if len(a.Conflicts) > 0 {
+		sb.WriteString("Conflicts and how they were resolved:\n")
+		for _, c := range a.Conflicts {
+			fmt.Fprintf(sb, "  - %s: %s. %s\n", strings.Join(c.Claims, " vs "), c.Resolution, c.Why)
+		}
+		sb.WriteString("\n")
+	}
+}
+
 // writeTopicEvidence gives the summarizer the analyzer's per-topic evidence
 // and confidence, the structured half of the analysis the answer text flattens.
 func writeTopicEvidence(sb *strings.Builder, topics []agent.Topic) {
@@ -868,6 +990,7 @@ func factCheckDetail(findings []agent.Finding) string {
 func summarizePrompt(question string, analysis *agent.Analysis, fc *agent.FactCheckResult, findings []agent.Finding, retrieved bool) string {
 	var sb strings.Builder
 	sb.WriteString("Question: " + question + "\n\nSynthesized answer:\n" + analysis.Answer + "\n\n")
+	writeDecision(&sb, analysis)
 	writeTopicEvidence(&sb, analysis.Topics)
 	// The analyzer's open questions are what stop a report from answering "no"
 	// where the evidence only said nothing. The summarizer never saw them, and

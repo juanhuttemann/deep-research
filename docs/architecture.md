@@ -29,8 +29,16 @@ A page that several searches return is one source, counted and cited once;
 the queries that found it are kept on it. Each phase's prompt caps a source at
 1500 characters, and what fills them is the page's passages that match those
 queries (`tools.Excerpt`), not its opening, which on a documentation site is
-navigation and a cookie dialog. The analysis's open questions reach the
-summarizer, so a gap is reported as open rather than answered "no".
+navigation and a cookie dialog.
+
+The analysis is a decision, not only prose: its reading of the question,
+atomic claims (each with the option and criterion it is about, its scope and
+its sources), conditional recommendations naming the claims they rest on,
+and resolved conflicts. The Driver holds it to the run (`checkAnalysis`): a
+claim keeps only sources that are pages the run fetched, claim IDs are
+unique, and a recommendation stands only on claims that kept a source; one
+left with none is dropped and recorded as a gap. The fact-check verifies the claims,
+and the summarizer writes the report from the decision, its gaps included.
 
 The `agent` package knows how to talk to one model and how to parse what
 comes back. It never decides what to ask or in what order.

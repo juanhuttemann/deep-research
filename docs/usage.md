@@ -197,12 +197,14 @@ question stem plus a 128-bit hash; reports created with the earlier short
 hash keep their old filenames.
 
 `--output FILE` writes the same document as the `.md` artifact: the question
-as a title, the confidence and model lines, the report body, the analysis's
-evidence by topic, its open questions, the fact-check verdicts claim by
-claim, and the citation lists split into sources the report cites and
+as a title, the confidence and model lines, the report body, the searches
+the analysis suggests, the fact-check counts with each claim it did not
+confirm, and the citation lists split into sources the report cites and
 sources the run only retrieved. A source with no URL is listed by title and
-marked `no URL`. The `.json` sidecar carries the same `model`, `provider`, `served_by`,
-`topics` and `fact_check`, plus `error` for an incomplete run, and each
+marked `no URL`. The `.json` sidecar carries the same `model`, `provider`,
+`served_by`, the whole `analysis` (its reading of the question, claims with
+sources, recommendations, resolved conflicts, gaps and follow-ups), `topics`
+and every `fact_check` verdict, plus `error` for an incomplete run, and each
 `citation` event in its timeline names its source.
 
 Token counts come from the usage the provider reports.

@@ -88,6 +88,44 @@ type Analysis struct {
 	Gaps       []string `json:"gaps"`
 	Confidence string   `json:"confidence"`
 	FollowUp   []string `json:"follow_up"`
+	// The decision the analysis reached, as data the later phases can check
+	// and render. An answer string alone let the analysis list facts, name
+	// disagreements and stop: nothing asked it to resolve them into an answer,
+	// and the summarizer faithfully reported a gap where the evidence already
+	// supported a conditional recommendation.
+	Interpretation  string           `json:"interpretation,omitempty"`
+	Claims          []Claim          `json:"claims,omitempty"`
+	Recommendations []Recommendation `json:"recommendations,omitempty"`
+	Conflicts       []Conflict       `json:"conflicts,omitempty"`
+}
+
+// Claim is one atomic assertion the analysis rests on, with what it is about
+// and the sources that state it. Scope (engine, version, region, date) is
+// kept because a quote that is exact can still be about something else.
+type Claim struct {
+	ID        string   `json:"id"`
+	Text      string   `json:"claim"`
+	Option    string   `json:"option,omitempty"`
+	Criterion string   `json:"criterion,omitempty"`
+	Scope     string   `json:"scope,omitempty"`
+	Sources   []string `json:"sources,omitempty"`
+}
+
+// Recommendation is a conditional answer: choose an option when a condition
+// holds, because of the claims it names.
+type Recommendation struct {
+	Choose string   `json:"choose"`
+	When   string   `json:"when"`
+	Claims []string `json:"claims,omitempty"`
+}
+
+// Conflict is a disagreement between claims and how the analysis resolved
+// it. Disagreement alone does not leave a question open: the resolution says
+// which claim holds and why, or "unresolved" when the evidence cannot decide.
+type Conflict struct {
+	Claims     []string `json:"claims"`
+	Resolution string   `json:"resolution"`
+	Why        string   `json:"why,omitempty"`
 }
 
 // Topic is a topic cluster inside an analysis.
@@ -270,7 +308,7 @@ func New(cfg Config) (Assistant, error) {
 	}
 	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions))
 	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions), "analyzing",
-		entriesUnit("section so far", "sections so far", "answer", "name", "gaps", "follow_up", "follow_up_queries"), jsonFormat)
+		entriesUnit("section so far", "sections so far", "answer", "name", "claim", "choose", "gaps", "follow_up", "follow_up_queries"), jsonFormat)
 	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions), "fact-checking",
 		entriesUnit("claim checked", "claims checked", "claim"), jsonFormat)
 	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions), "writing the report", wordsUnit)
@@ -1123,12 +1161,94 @@ func parseAnalysis(out string) *Analysis {
 		return &Analysis{Answer: strings.TrimSpace(out), Gaps: []string{}, Confidence: "medium"}
 	}
 	return &Analysis{
-		Answer:     getString(m, "answer", strings.TrimSpace(out)),
-		Gaps:       getStringSlice(m, "gaps", []string{}),
-		Confidence: getString(m, "confidence", "medium"),
-		FollowUp:   followUps(m),
-		Topics:     parseTopics(m["topics"]),
+		Answer:          getString(m, "answer", strings.TrimSpace(out)),
+		Gaps:            getStringSlice(m, "gaps", []string{}),
+		Confidence:      getString(m, "confidence", "medium"),
+		FollowUp:        followUps(m),
+		Topics:          parseTopics(m["topics"]),
+		Interpretation:  getString(m, "interpretation", ""),
+		Claims:          parseClaims(m["claims"]),
+		Recommendations: parseRecommendations(m["recommendations"]),
+		Conflicts:       parseConflicts(m["conflicts"]),
 	}
+}
+
+// objects returns the JSON objects in an array value, skipping anything else
+// a model put in it.
+func objects(v any) []map[string]any {
+	arr, _ := v.([]any)
+	var out []map[string]any
+	for _, item := range arr {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// scalar reads a value a model may write as a string or a number ("id": 3).
+func scalar(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	}
+	return ""
+}
+
+// scalars reads a list of IDs or URLs, tolerating a single value in place of
+// a list.
+func scalars(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		arr = []any{v}
+	}
+	var out []string
+	for _, item := range arr {
+		if s := scalar(item); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func parseClaims(v any) []Claim {
+	var out []Claim
+	for i, m := range objects(v) {
+		c := Claim{ID: scalar(m["id"]), Text: getString(m, "claim", ""), Option: getString(m, "option", ""),
+			Criterion: getString(m, "criterion", ""), Scope: getString(m, "scope", ""), Sources: scalars(m["sources"])}
+		if c.Text == "" {
+			continue
+		}
+		if c.ID == "" {
+			c.ID = "c" + strconv.Itoa(i+1)
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func parseRecommendations(v any) []Recommendation {
+	var out []Recommendation
+	for _, m := range objects(v) {
+		r := Recommendation{Choose: getString(m, "choose", ""), When: getString(m, "when", ""), Claims: scalars(m["claims"])}
+		if r.Choose != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func parseConflicts(v any) []Conflict {
+	var out []Conflict
+	for _, m := range objects(v) {
+		c := Conflict{Claims: scalars(m["claims"]), Resolution: getString(m, "resolution", ""), Why: getString(m, "why", "")}
+		if c.Resolution != "" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // Structured phases may wrap their JSON in explanatory prose. Decode those

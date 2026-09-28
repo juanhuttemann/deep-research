@@ -88,10 +88,13 @@ The **report** is rendered in the terminal and saved to `reports/` as `.md`,
 
 - the model that wrote it — the configured one, and which models a router
   actually served;
-- the evidence by topic, with the analysis's confidence for each;
-- open questions and suggested follow-up searches;
-- the fact-check, claim by claim: verified, not verified, unverified,
-  contradicted;
+- the answer first: for a choice, which option to pick under which
+  conditions, then a comparison of the options and the reasoning, each
+  claim linked to its source;
+- the limits that could change the answer, and searches that could settle
+  them;
+- the fact-check: how many claims were confirmed, and each one that was not
+  confirmed or was contradicted;
 - citations split into sources the report cites and sources it only read,
   each labelled `ok` (page fetched), `degraded` (search snippet only) or
   `unverified` (model-supplied, never fetched).

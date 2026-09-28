@@ -98,6 +98,29 @@ func TestParseAnalysisJSON(t *testing.T) {
 	}
 }
 
+// Models write IDs as numbers and a single source as a bare string; reading
+// only the documented shape dropped the decision the analysis had reached.
+func TestParseAnalysisReadsTheDecision(t *testing.T) {
+	a := parseAnalysis(`{"answer":"a","interpretation":"X vs Y",
+		"claims":[{"id":1,"claim":"X scales itself","option":"X","sources":"https://x.example"},
+		          {"claim":"Y is cheaper when steady","sources":["https://y.example"]},
+		          {"id":"c9"}],
+		"recommendations":[{"choose":"X","when":"traffic is spiky","claims":[1,"c2"]},{"when":"no option"}],
+		"conflicts":[{"claims":["1","c2"],"resolution":"1 holds","why":"primary docs"}]}`)
+	if a.Interpretation != "X vs Y" {
+		t.Errorf("interpretation = %q", a.Interpretation)
+	}
+	if len(a.Claims) != 2 || a.Claims[0].ID != "1" || a.Claims[1].ID != "c2" || a.Claims[0].Sources[0] != "https://x.example" {
+		t.Errorf("claims = %+v, want two, IDs 1 and c2, a bare source read as a list", a.Claims)
+	}
+	if len(a.Recommendations) != 1 || !slices.Equal(a.Recommendations[0].Claims, []string{"1", "c2"}) {
+		t.Errorf("recommendations = %+v, want the one that names an option", a.Recommendations)
+	}
+	if len(a.Conflicts) != 1 || a.Conflicts[0].Resolution != "1 holds" {
+		t.Errorf("conflicts = %+v", a.Conflicts)
+	}
+}
+
 func TestParseAnalysisFencedJSON(t *testing.T) {
 	out := "Sure, here is the analysis:\n```json\n{\"answer\":\"A\",\"gaps\":[],\"confidence\":\"high\"}\n```\nDone."
 	a := parseAnalysis(out)

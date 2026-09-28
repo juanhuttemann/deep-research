@@ -24,6 +24,23 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The analysis returns a decision: how it reads the question, atomic claims
+  with the option, criterion, scope and sources of each, conditional
+  recommendations ("choose X when Y") naming the claims they rest on, and
+  disagreements resolved by which source is placed to know. Reports listed
+  facts, called a point "contested" when a third-party blog disagreed with
+  the product's own documentation, and stated no answer where the evidence
+  supported one. Code, not the prompt, holds it to the run: a claim may cite
+  only pages the run fetched, claim IDs are unique, and a recommendation
+  stands only on claims that kept a source; one left with none is dropped
+  and recorded as an open question. The fact-check now checks the claims,
+  and scope as well as quotes.
+- The report leads with the answer, then compares the options, the
+  reasoning and the limits that could change the answer. The Markdown no
+  longer appends the evidence by topic, the gaps and every confirmed claim
+  after a body written from the same material: it lists the suggested
+  searches, the fact-check counts and each claim not confirmed. The `.json`
+  sidecar carries the whole `analysis`.
 - A question is asked with `deep-research -p "question"`; the `run`
   subcommand is gone. The run flags (`--mode`, `--silent`, `--jsonl`, …)
   moved to the root command.

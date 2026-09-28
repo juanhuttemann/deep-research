@@ -35,6 +35,10 @@ type Meta struct {
 	Error string `json:"error,omitempty"`
 	// Topics is the analyzer's per-topic evidence with its own confidence.
 	Topics []agent.Topic `json:"topics,omitempty"`
+	// Analysis is the whole analysis: the decision, its claims and conflicts,
+	// the gaps and follow-ups. The Markdown report shows only what its body
+	// does not already carry.
+	Analysis *agent.Analysis `json:"analysis,omitempty"`
 	// FactCheck is the verification pass's verdicts, so a consumer can see
 	// which claims were checked rather than inferring it from the prose.
 	FactCheck *agent.FactCheckResult `json:"fact_check,omitempty"`
@@ -110,8 +114,11 @@ func MarkdownReport(res *agent.ResearchResult) string {
 		sb.WriteString("\n\n")
 	}
 
+	// The body is written from the analysis and the fact-check, so appending
+	// them again repeated every finding two or three times. What the body
+	// cannot carry is kept: the searches still worth running and the claims
+	// the check did not confirm. The whole of both stays in the .json sidecar.
 	if res.Analysis != nil {
-		writeTopics(&sb, res.Analysis.Topics)
 		writeOpenQuestions(&sb, res.Analysis)
 	}
 	writeFactCheck(&sb, res.FactCheck)
@@ -188,61 +195,50 @@ func writeCitationList(sb *strings.Builder, heading string, cits []MetaCitation)
 	sb.WriteString("\n")
 }
 
-// writeOpenQuestions records what the analysis could not settle: the gaps it
-// identified and the follow-up queries it suggested. Both were parsed and then
-// read by nothing, so the one part of the run that says what is still unknown
-// never reached the reader.
+// writeOpenQuestions lists the searches the analysis says could settle what
+// is still open. The gaps themselves are in the body: the summarizer is given
+// them and states the ones that limit the answer.
 func writeOpenQuestions(sb *strings.Builder, a *agent.Analysis) {
-	if len(a.Gaps) == 0 && len(a.FollowUp) == 0 {
-		return
-	}
-	sb.WriteString("## Open Questions\n\n")
-	for _, g := range a.Gaps {
-		if g = strings.TrimSpace(g); g != "" {
-			fmt.Fprintf(sb, "- %s\n", g)
-		}
-	}
+	var qs []string
 	for _, q := range a.FollowUp {
 		if q = strings.TrimSpace(q); q != "" {
-			fmt.Fprintf(sb, "- _suggested search:_ %s\n", q)
+			qs = append(qs, q)
 		}
+	}
+	if len(qs) == 0 {
+		return
+	}
+	sb.WriteString("## Suggested Searches\n\n")
+	for _, q := range qs {
+		fmt.Fprintf(sb, "- %s\n", q)
 	}
 	sb.WriteString("\n")
 }
 
-// writeTopics lists the analyzer's per-topic evidence and confidence. It was
-// parsed, stored in the history and read by nothing.
-func writeTopics(sb *strings.Builder, topics []agent.Topic) {
-	if len(topics) == 0 {
-		return
-	}
-	sb.WriteString("## Evidence by Topic\n\n")
-	for _, t := range topics {
-		fmt.Fprintf(sb, "### %s\n\n_Confidence: %s_\n\n", t.Name, t.Confidence)
-		for _, f := range t.Findings {
-			if f = strings.TrimSpace(f); f != "" {
-				fmt.Fprintf(sb, "- %s\n", f)
-			}
-		}
-		sb.WriteString("\n")
-	}
-}
-
-// writeFactCheck records what the verification pass concluded, claim by
-// claim. Leaving it to the summarizer's prose meant a reader could not tell
-// which claims the pipeline had actually checked. The verdict is the flag,
-// not the array a claim arrived in.
+// writeFactCheck records what the verification pass concluded. Leaving it to
+// the summarizer's prose meant a reader could not tell which claims the
+// pipeline had checked, so the counts are always stated. Confirmed claims are
+// the body's own, quoted there; listing them again with their evidence
+// doubled the report, so only the claims the check did not confirm are
+// listed. The verdict is the flag, not the array a claim arrived in.
 func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult) {
 	if fc == nil || len(fc.Verified)+len(fc.Unverified)+len(fc.Contradictions) == 0 {
 		return
 	}
-	sb.WriteString("## Fact-Check\n\n")
+	var confirmed int
+	var rejected []agent.VerifiedClaim
 	for _, c := range fc.Verified {
-		mark := "✓ verified"
-		if !c.Verified {
-			mark = "✗ not verified"
+		if c.Verified {
+			confirmed++
+		} else {
+			rejected = append(rejected, c)
 		}
-		fmt.Fprintf(sb, "- %s: %s", mark, c.Claim)
+	}
+	sb.WriteString("## Fact-Check\n\n")
+	fmt.Fprintf(sb, "Confirmed against their sources: %d · not confirmed: %d · contradictions: %d\n\n",
+		confirmed, len(rejected)+len(fc.Unverified), len(fc.Contradictions))
+	for _, c := range rejected {
+		fmt.Fprintf(sb, "- ✗ not verified: %s", c.Claim)
 		if c.Evidence != "" {
 			fmt.Fprintf(sb, " — %s", c.Evidence)
 		}
@@ -355,7 +351,7 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 		FactCheck:        res.FactCheck,
 	}
 	if res.Analysis != nil {
-		m.Topics = res.Analysis.Topics
+		m.Topics, m.Analysis = res.Analysis.Topics, res.Analysis
 	}
 	// The sidecar records the same cited/retrieved distinction the Markdown
 	// export draws, so a consumer of the trace can tell which sources the

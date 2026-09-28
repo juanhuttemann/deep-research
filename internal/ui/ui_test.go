@@ -1257,3 +1257,84 @@ func TestSlugDistinguishesQuestions(t *testing.T) {
 		t.Error("an empty question still needs a filename")
 	}
 }
+
+// The model writes sources and claim IDs freely: an invented URL, a page the
+// run never fetched or a dangling ID would reach the report looking sourced.
+// A source given as the prompt's entry number is the finding at that number.
+func TestCheckAnalysisHoldsReferencesToWhatWasRetrieved(t *testing.T) {
+	findings := []agent.Finding{
+		{URL: "https://a.example/doc", Status: "ok"},
+		{URL: "https://b.example/pricing", Status: "degraded"},
+		{URL: "https://model.example/recalled", Status: "unverified"},
+	}
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "t", Sources: []string{"https://a.example/doc/", "https://invented.example"}},
+			{ID: "c2", Text: "t", Sources: []string{"2", "#9"}},
+			{ID: "c3", Text: "t", Sources: []string{"https://model.example/recalled"}},
+			{ID: "c1", Text: "a second claim reusing an ID"},
+		},
+		Recommendations: []agent.Recommendation{
+			{Choose: "X", When: "w", Claims: []string{"c1", "c7"}},
+			{Choose: "Y", When: "v", Claims: []string{"c3"}},
+		},
+		Conflicts: []agent.Conflict{{Claims: []string{"c2", "c8"}, Resolution: "c2 holds"}},
+	}
+	checkAnalysis(a, findings)
+	if got := a.Claims[2].Sources; len(got) != 0 {
+		t.Errorf("c3 sources = %v, want none: the run fetched pages, and this one it never did", got)
+	}
+	if a.Claims[3].ID == "c1" {
+		t.Error("a repeated claim ID was kept, leaving every reference to it ambiguous")
+	}
+	if len(a.Recommendations) != 1 || a.Recommendations[0].Choose != "X" {
+		t.Errorf("recommendations = %+v, want Y dropped for resting on no retrieved source", a.Recommendations)
+	}
+	if len(a.Gaps) != 1 || !strings.Contains(a.Gaps[0], "Y") {
+		t.Errorf("gaps = %v, want the dropped recommendation recorded", a.Gaps)
+	}
+	if got := a.Claims[0].Sources; len(got) != 1 || got[0] != "https://a.example/doc/" {
+		t.Errorf("c1 sources = %v, want only the retrieved page", got)
+	}
+	if got := a.Claims[1].Sources; len(got) != 1 || got[0] != "https://b.example/pricing" {
+		t.Errorf("c2 sources = %v, want entry 2 resolved and entry 9 dropped", got)
+	}
+	if got := a.Recommendations[0].Claims; len(got) != 1 || got[0] != "c1" {
+		t.Errorf("recommendation claims = %v, want the dangling c7 dropped", got)
+	}
+	if got := a.Conflicts[0].Claims; len(got) != 1 || got[0] != "c2" {
+		t.Errorf("conflict claims = %v, want the dangling c8 dropped", got)
+	}
+}
+
+// The report is written from the decision and the fact-check checks the
+// claims it rests on, not the answer prose alone.
+func TestDecisionReachesTheSummarizerAndTheFactCheck(t *testing.T) {
+	a := &agent.Analysis{Answer: "prose", Interpretation: "X vs Y",
+		Claims:          []agent.Claim{{ID: "c1", Text: "X scales itself", Option: "X", Sources: []string{"https://a.example"}}},
+		Recommendations: []agent.Recommendation{{Choose: "X", When: "traffic is spiky", Claims: []string{"c1"}}},
+		Conflicts:       []agent.Conflict{{Claims: []string{"c1", "c2"}, Resolution: "c1 holds", Why: "primary docs"}},
+	}
+	p := summarizePrompt("q", a, nil, nil, true)
+	for _, want := range []string{"X vs Y", "Choose X when traffic is spiky [c1]", "c1 [X] X scales itself (https://a.example)", "c1 vs c2: c1 holds. primary docs"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("summarize prompt lacks %q:\n%s", want, p)
+		}
+	}
+	if got := claimsToCheck(a); !strings.Contains(got, "X scales itself") || strings.Contains(got, "prose") {
+		t.Errorf("fact-check claims = %q, want the claims, not the prose", got)
+	}
+	if got := claimsToCheck(&agent.Analysis{Answer: "prose"}); got != "prose" {
+		t.Errorf("without claims the fact-check should check the answer, got %q", got)
+	}
+}
+
+// With search off nothing is fetched and every finding is the model's own;
+// holding claims to fetched pages there would strip every source.
+func TestCheckAnalysisKeepsModelFindingsWhenNothingWasFetched(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{{ID: "c1", Text: "t", Sources: []string{"https://model.example/a"}}}}
+	checkAnalysis(a, []agent.Finding{{URL: "https://model.example/a", Status: "unverified"}})
+	if len(a.Claims[0].Sources) != 1 {
+		t.Errorf("sources = %v, want the model's finding kept", a.Claims[0].Sources)
+	}
+}
