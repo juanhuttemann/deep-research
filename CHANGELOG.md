@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
 ### Added
 
 - `--jsonl` runs end on one `done` event, written after the report files:
@@ -326,5 +328,7 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/juanhuttemann/deep-research/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/juanhuttemann/deep-research/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/juanhuttemann/deep-research/releases/tag/v0.1.0
