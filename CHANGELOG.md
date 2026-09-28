@@ -36,12 +36,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   every claim it names is supported, and one whose deciding claim failed
   no longer stands on an incidental claim that passed. A verdict for a
   claim ID the analysis does not have, a missing or duplicated verdict, or
-  a "supported" verdict whose quote is not in the cited page counts as
-  insufficient. A fact-check that did not run approves nothing. The
-  report's answer section is written from the approved recommendations in
-  the analyzer's own words, and the summarizer no longer sees the
-  analyzer's unchecked answer prose; nor does the fallback report written
-  when the summary fails.
+  a "supported" verdict with any quote that is not in the cited page
+  counts as insufficient; with search off no claim can be supported, since
+  the findings are the model's own. A fact-check that did not run approves
+  nothing, and neither does an analysis whose recommendations name no
+  claim. The report's answer section is written from the approved
+  recommendations in the analyzer's own words, or says that none passed;
+  an answer section the summarizer writes anyway is dropped. The
+  summarizer no longer sees the analyzer's unchecked answer prose, nor
+  does the fallback report written when the summary fails.
 - The analysis returns a decision: how it reads the question, atomic claims
   with the option, criterion, scope and sources of each, conditional
   recommendations ("choose X when Y") naming the claims they rest on, and

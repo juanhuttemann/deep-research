@@ -42,15 +42,17 @@ and resolved conflicts. The Driver holds it to the run in code
 - `govern`: the fact-check returns one verdict per claim ID (`supported`,
   `partial`, `contradicted`, `disputed`, `insufficient`). A claim with no
   verdict, several, or one for an ID it does not have is `insufficient`; a
-  `supported` verdict must quote a contiguous passage that `locate` finds in
-  the cited page's stored text. A recommendation is approved only when every
+  `supported` verdict must quote contiguous passages that `locate` finds, every
+  one, in the cited pages' stored text, and with search off (no fetched page)
+  nothing is supported. A recommendation is approved only when every
   claim it names is supported, and is otherwise kept, `blocked`, for audit.
   A fact-check that did not run approves nothing.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the
-  approved recommendations in the analyzer's own words, and a report that
-  cannot be written falls back to that section, not to the prose.
+  approved recommendations in the analyzer's own words, or says none
+  passed, and a report that cannot be written falls back to that section,
+  not to the prose.
 
 The `agent` package knows how to talk to one model and how to parse what
 comes back. It never decides what to ask or in what order.

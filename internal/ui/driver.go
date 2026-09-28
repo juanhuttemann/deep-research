@@ -273,7 +273,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err != nil {
 		return d.partial(ctx, plan, findings, analysis, fc, "report writing failed", err)
 	}
-	summary = withAnswer(summary, approvedRecommendations(analysis))
+	summary = withAnswer(summary, analysis)
 	// The summarizer writes prose, so it reports no confidence of its own. The
 	// analyzer's is the run's, and without carrying it over the report prints
 	// a bare "Confidence:" line and the exports record an empty string. A run
@@ -354,13 +354,18 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 	switch {
 	// An analysis that made claims is delivered as its checked decision: its
 	// answer prose was written before the fact-check and would bypass it.
-	case analysis != nil && len(analysis.Claims) > 0:
-		if ok := approvedRecommendations(analysis); len(ok) > 0 {
-			report += renderAnswer(ok)
+	case analysis != nil && (len(analysis.Claims) > 0 || len(analysis.Recommendations) > 0):
+		if answer := decidedAnswer(analysis); answer != "" {
+			report += answer
 		} else {
-			report += "No recommendation passed the fact-check."
+			report += noApproval
 		}
+		// A fact-check that did not run verified nothing, whatever the
+		// analyzer thought of its own answer.
 		confidence = analysis.Confidence
+		if fc == nil {
+			confidence = "low"
+		}
 	case analysis != nil && strings.TrimSpace(analysis.Answer) != "":
 		report += "The analysis it would have been written from:\n\n" + analysis.Answer
 		confidence = analysis.Confidence

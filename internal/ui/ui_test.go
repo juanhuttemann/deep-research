@@ -1348,7 +1348,7 @@ func TestRecommendationStandsOnlyOnSupportedPremises(t *testing.T) {
 	if !strings.Contains(p, "Not concluded") || !strings.Contains(p, "Node-based when traffic is steady") {
 		t.Errorf("the blocked recommendation is not marked as not concluded:\n%s", p)
 	}
-	sum := withAnswer(&agent.Summary{Report: "# q\n\n## Answer\n\nNode-based wins.\n\n## Comparison\n\ntable"}, approvedRecommendations(a))
+	sum := withAnswer(&agent.Summary{Report: "# q\n\n## Answer\n\nNode-based wins.\n\n## Comparison\n\ntable"}, a)
 	if !strings.HasPrefix(sum.Report, "## Answer\n\n- **Serverless**: traffic is spiky\n") ||
 		strings.Contains(sum.Report, "Node-based wins") || strings.Contains(sum.Report, "# q") {
 		t.Errorf("report = %q, want the rendered answer in place of the summarizer's", sum.Report)
@@ -1443,5 +1443,120 @@ func TestCheckAnalysisKeepsModelFindingsWhenNothingWasFetched(t *testing.T) {
 	checkAnalysis(a, []agent.Finding{{URL: "https://model.example/a", Status: "unverified"}})
 	if len(a.Claims[0].Sources) != 1 {
 		t.Errorf("sources = %v, want the model's finding kept", a.Claims[0].Sources)
+	}
+}
+
+// ---- review of the verdict pass: each test names the hole it closes ------
+
+// With every recommendation blocked, the summarizer's own answer section went
+// through untouched, and it could state a blocked choice.
+func TestNoApprovedRecommendationReplacesTheSummarizersAnswer(t *testing.T) {
+	findings, a := decisionFixture()
+	govern(a, &agent.FactCheckResult{}, nil, findings)
+	sum := withAnswer(&agent.Summary{Report: "## Answer\n\nChoose Node-based.\n\n## Why\n\nx"}, a)
+	if strings.Contains(sum.Report, "Choose Node-based") || !strings.Contains(sum.Report, noApproval) {
+		t.Errorf("report = %q, want the no-approval answer in place of the summarizer's", sum.Report)
+	}
+}
+
+// Recommendations with no claims skipped the check and counted as approved,
+// and a prose verdict's invented quote was listed as confirmed.
+func TestAnalysisWithoutClaimsApprovesNothing(t *testing.T) {
+	findings, _ := decisionFixture()
+	a := &agent.Analysis{Recommendations: []agent.Recommendation{{Choose: "X", When: "w"}}}
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		{ID: "p1", Claim: "X is cheap", Status: "supported", Evidence: []agent.Evidence{{Source: "1", Quote: "not on the page"}}},
+	}}
+	govern(a, fc, nil, findings)
+	if len(approvedRecommendations(a)) != 0 {
+		t.Error("a recommendation naming no claim was approved")
+	}
+	if len(fc.Verified) != 0 || len(fc.Unverified) != 1 {
+		t.Errorf("verified %v, unverified %v: an invented quote was confirmed", fc.Verified, fc.Unverified)
+	}
+}
+
+// With search off the findings are the model's own; a quote "located" in
+// them verified the model against itself.
+func TestModelFindingsCannotSupportAClaim(t *testing.T) {
+	findings, a := decisionFixture()
+	findings[0].Status = "unverified"
+	checkAnalysis(a, findings)
+	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+	}}
+	govern(a, fc, nil, findings)
+	if a.Claims[0].Status == statusSupported || len(approvedRecommendations(a)) != 0 {
+		t.Errorf("c1 = %s (%s): a claim was supported by the model's own recollection", a.Claims[0].Status, a.Claims[0].Note)
+	}
+}
+
+// Deleting every underscore, asterisk and backslash matched quotes the page
+// does not contain, and a link whose target held parentheses never matched.
+func TestLocateRemovesOnlyMarkup(t *testing.T) {
+	for _, tc := range []struct {
+		page, quote string
+		want        bool
+	}{
+		{"Use `cache_size` here.", "Use cachesize here.", false},
+		{"Use `cache_size` here.", "Use cache_size here.", true},
+		{"Price is 2*3 dollars.", "Price is 23 dollars.", false},
+		{"See [pricing](https://example.com/a_(b)) for rates.", "See pricing for rates.", true},
+		{"It is _very_ fast and **cheap**.", "It is very fast and cheap.", true},
+		{`A literal \*star\* here.`, "A literal *star* here.", true},
+	} {
+		if got := locate(tc.page, tc.quote); got != tc.want {
+			t.Errorf("locate(%q, %q) = %v, want %v", tc.page, tc.quote, got, tc.want)
+		}
+	}
+}
+
+// "## Answer ##", an indented heading and sub-headings inside the section all
+// kept the summarizer's answer in the report.
+func TestDropAnswerSectionVariants(t *testing.T) {
+	for _, report := range []string{
+		"## Answer ##\n\nChoose Blocked.\n\n## Why\n\nkept",
+		"  ## Answer\n\nChoose Blocked.\n\n## Why\n\nkept",
+		"## Answer\n\n### Detail\n\nChoose Blocked.\n\n## Why\n\nkept",
+	} {
+		if got := dropAnswerSection(report); strings.Contains(got, "Blocked") || !strings.Contains(got, "kept") {
+			t.Errorf("dropAnswerSection(%q) = %q", report, got)
+		}
+	}
+}
+
+// A checker that answered in the older list shape left its "verified" list in
+// the report beside claims this pass had rejected for having no verdict.
+func TestOlderVerdictListsDoNotOutliveTheCheck(t *testing.T) {
+	findings, a := decisionFixture()
+	fc := &agent.FactCheckResult{Verified: []agent.VerifiedClaim{{Claim: "c1", Verified: true}}}
+	govern(a, fc, nil, findings)
+	if len(fc.Verified) != 0 {
+		t.Errorf("verified = %v, want none: no claim had a verdict", fc.Verified)
+	}
+}
+
+// One genuine quote beside an invented one left the verdict standing on the
+// invented passage.
+func TestEveryQuotedPassageMustBeLocated(t *testing.T) {
+	findings, a := decisionFixture()
+	v := verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored.")
+	v.Evidence = append(v.Evidence, agent.Evidence{Source: "1", Quote: "and it is free under 1 GB"})
+	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{v}}, nil, findings)
+	if a.Claims[0].Status == statusSupported {
+		t.Error("a verdict with an invented passage stood on the genuine one")
+	}
+}
+
+// The fallback report kept the analyzer's high confidence after a fact-check
+// that did not run.
+func TestFallbackAfterFailedCheckIsLowConfidence(t *testing.T) {
+	findings, a := decisionFixture()
+	a.Confidence = "high"
+	govern(a, nil, errors.New("timeout"), findings)
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	res, _ := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, nil, "report writing failed", errors.New("500"))
+	if res.Summary.Confidence != "low" || !strings.Contains(res.Summary.Report, noApproval) {
+		t.Errorf("fallback = %q, %q; want low confidence and no approval", res.Summary.Confidence, res.Summary.Report)
 	}
 }

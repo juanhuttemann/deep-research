@@ -98,9 +98,14 @@ func resolveSource(s string, findings []agent.Finding) string {
 // It returns the IDs the checker judged that the analysis does not contain,
 // which are ignored: a verdict can only judge a claim, never add one.
 func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings []agent.Finding) (unknown []string) {
+	pages := fetchedPages(findings)
+	// An analysis with no claims gives its recommendations nothing to stand
+	// on: they are blocked like any other that names no claim, and prose
+	// verdicts are held to the same quote check before the reports list them.
 	if len(a.Claims) == 0 {
-		if fc != nil {
-			deriveVerdictLists(fc, nil)
+		blockRecommendations(a)
+		if fc != nil && len(fc.Verdicts) > 0 {
+			fillVerdictLists(fc, proseEntries(fc.Verdicts, findings, pages))
 		}
 		return nil
 	}
@@ -108,15 +113,17 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	if fc != nil {
 		verdicts, unknown = verdictsByClaim(a, fc)
 	}
-	pages := evidencePages(findings)
 	for i := range a.Claims {
 		if c := &a.Claims[i]; c.Status != statusUnsourced {
 			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, fcErr, findings, pages)
 		}
 	}
 	blockRecommendations(a)
+	// Derived even when the checker answered in the older list shape: its
+	// lists say nothing about the claims by ID, and kept as they came they
+	// reported as confirmed a claim this pass had rejected.
 	if fc != nil {
-		deriveVerdictLists(fc, a.Claims)
+		fillVerdictLists(fc, claimEntries(a.Claims))
 	}
 	return unknown
 }
@@ -149,6 +156,8 @@ func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Findin
 			reason += ": " + fcErr.Error()
 		}
 		return statusInsufficient, reason
+	case len(pages) == 0:
+		return statusInsufficient, "no page was retrieved: the findings are the model's own recollection"
 	case len(vs) == 0:
 		return statusInsufficient, "the fact-check gave no verdict for it"
 	case len(vs) > 1:
@@ -157,8 +166,8 @@ func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Findin
 	v := vs[0]
 	switch v.Status {
 	case statusSupported:
-		if !quoteLocated(v.Evidence, findings, pages) {
-			return statusInsufficient, "quote_not_located: no quoted passage is in the page it cites; " + v.Reason
+		if !quotesLocated(v.Evidence, findings, pages) {
+			return statusInsufficient, "quote_not_located: a quoted passage is not in the page it cites; " + v.Reason
 		}
 		return statusSupported, v.Reason
 	case statusPartial, statusContradicted, statusDisputed, statusInsufficient:
@@ -167,37 +176,44 @@ func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Findin
 	return statusInsufficient, fmt.Sprintf("the fact-check gave it an unrecognized status %q", v.Status)
 }
 
-// evidencePages maps each page a claim may cite to the text the run holds.
-func evidencePages(findings []agent.Finding) map[string]string {
-	ok := evidenceURLs(findings)
+// fetchedPages maps each page the run fetched to the text it holds. Unlike
+// the sources a claim may cite, it has no exception for a run that fetched
+// nothing: text the model wrote itself is not a page to quote from, and a
+// quote located in it verified the model against its own recollection.
+func fetchedPages(findings []agent.Finding) map[string]string {
 	pages := map[string]string{}
 	for _, f := range findings {
-		if key := tools.CanonicalURL(f.URL); ok[key] {
-			pages[key] = f.Content
+		if f.URL != "" && fetched(f) {
+			pages[tools.CanonicalURL(f.URL)] = f.Content
 		}
 	}
 	return pages
 }
 
-// quoteLocated reports whether any evidence item quotes a passage that is in
-// the page it names. It proves provenance only: that the words are the
-// source's. Whether they support the claim is the checker's judgement.
-func quoteLocated(evidence []agent.Evidence, findings []agent.Finding, pages map[string]string) bool {
+// quotesLocated reports whether there is evidence and every item quotes a
+// passage that is in the page it names. Every one, not any: a genuine quote
+// beside an invented one left the verdict standing on the invented passage,
+// which may be the one that carried the claim. It proves provenance only,
+// that the words are the source's; whether they support the claim is the
+// checker's judgement.
+func quotesLocated(evidence []agent.Evidence, findings []agent.Finding, pages map[string]string) bool {
 	for _, e := range evidence {
 		page, ok := pages[tools.CanonicalURL(resolveSource(e.Source, findings))]
-		if ok && locate(page, e.Quote) {
-			return true
+		if !ok || !locate(page, e.Quote) {
+			return false
 		}
 	}
-	return false
+	return len(evidence) > 0
 }
 
 // locate reports whether quote is a contiguous passage of page. An exact
 // match comes first; failing that, both sides are compared as the text a
-// reader sees, with Markdown's link targets, emphasis, code and table marks,
-// escapes and typographic quotes and dashes set aside and whitespace
-// collapsed. Case, numbers, word order and accents are kept: they are what a
-// quote is evidence of. A paraphrase or an elided quote is not located.
+// reader sees: link targets, emphasis and code delimiters, backslash escapes
+// and table bars removed, typographic quotes and dashes made plain, and
+// whitespace collapsed. Only markup is removed. An underscore inside a word
+// (cache_size) or a lone asterisk (2*3) is text and stays. Case, numbers,
+// word order and accents are kept: they are what a quote is evidence of. A
+// paraphrase or an elided quote is not located.
 func locate(page, quote string) bool {
 	q := strings.TrimSpace(quote)
 	if q == "" {
@@ -211,14 +227,24 @@ func locate(page, quote string) bool {
 }
 
 var (
-	mdLink     = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
-	mdPresents = strings.NewReplacer("*", "", "_", "", "`", "", "|", " ", `\`, "",
-		"’", "'", "‘", "'", "“", `"`, "”", `"`, "–", "-", "—", "-", " ", " ")
+	// A link's target may hold one level of parentheses (a_(b)).
+	mdLink     = regexp.MustCompile(`!?\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`)
+	mdEscape   = regexp.MustCompile("\\\\([\\\\`*_{}\\[\\]()#+\\-.!|>~])")
+	mdCode     = regexp.MustCompile("`([^`]*)`")
+	mdStrong   = regexp.MustCompile(`(\*\*|__)(\S(?:.*?\S)?)(\*\*|__)`)
+	mdStar     = regexp.MustCompile(`(^|[^*\p{L}\p{N}])\*([^*\s](?:[^*]*[^*\s])?)\*`)
+	mdUnder    = regexp.MustCompile(`(^|[^\p{L}\p{N}_])_([^_\s](?:[^_]*[^_\s])?)_($|[^\p{L}\p{N}_])`)
+	plainPunct = strings.NewReplacer("|", " ", "’", "'", "‘", "'", "“", `"`, "”", `"`, "–", "-", "—", "-", " ", " ")
 )
 
 func visibleText(s string) string {
-	s = mdPresents.Replace(mdLink.ReplaceAllString(s, "$1"))
-	return strings.Join(strings.Fields(s), " ")
+	s = mdEscape.ReplaceAllString(s, "$1")
+	s = mdLink.ReplaceAllString(s, "$1")
+	s = mdCode.ReplaceAllString(s, "$1")
+	s = mdStrong.ReplaceAllString(s, "$2")
+	s = mdStar.ReplaceAllString(s, "$1$2")
+	s = mdUnder.ReplaceAllString(s, "$1$2$3")
+	return strings.Join(strings.Fields(plainPunct.Replace(s)), " ")
 }
 
 // blockRecommendations blocks every recommendation that names a claim that is
@@ -261,25 +287,35 @@ func approvedRecommendations(a *agent.Analysis) []agent.Recommendation {
 	return out
 }
 
-// deriveVerdictLists fills the fact-check's verified, unverified and
-// contradiction lists, which the reports render, from the verdicts: from the
-// claims' checked statuses when the analysis made claims, from the verdicts
-// as given when it wrote prose. Output in the older list shape, with no
-// verdicts, is left as it came.
-func deriveVerdictLists(fc *agent.FactCheckResult, claims []agent.Claim) {
-	if len(fc.Verdicts) == 0 {
-		return
-	}
-	type entry struct{ text, status, note string }
-	var entries []entry
+// verdictEntry is one line of the fact-check lists the reports render.
+type verdictEntry struct{ text, status, note string }
+
+// claimEntries are the claims with the statuses this pass gave them.
+func claimEntries(claims []agent.Claim) []verdictEntry {
+	var out []verdictEntry
 	for _, c := range claims {
-		entries = append(entries, entry{c.ID + ": " + c.Text, c.Status, c.Note})
+		out = append(out, verdictEntry{c.ID + ": " + c.Text, c.Status, c.Note})
 	}
-	if claims == nil {
-		for _, v := range fc.Verdicts {
-			entries = append(entries, entry{strings.TrimSpace(v.ID + ": " + v.Claim), v.Status, v.Reason})
+	return out
+}
+
+// proseEntries are the claims the checker split out of prose, each held to
+// the same quote check a claim of the analysis is.
+func proseEntries(vs []agent.Verdict, findings []agent.Finding, pages map[string]string) []verdictEntry {
+	var out []verdictEntry
+	for _, v := range vs {
+		status, note := v.Status, v.Reason
+		if status == statusSupported && (len(pages) == 0 || !quotesLocated(v.Evidence, findings, pages)) {
+			status, note = statusInsufficient, "quote_not_located: "+v.Reason
 		}
+		out = append(out, verdictEntry{strings.TrimSpace(v.ID + ": " + v.Claim), status, note})
 	}
+	return out
+}
+
+// fillVerdictLists replaces the fact-check's verified, unverified and
+// contradiction lists, which the reports render, with the given entries.
+func fillVerdictLists(fc *agent.FactCheckResult, entries []verdictEntry) {
 	fc.Verified, fc.Unverified, fc.Contradictions = nil, nil, nil
 	for _, e := range entries {
 		switch e.status {
@@ -359,8 +395,8 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 		sb.WriteString("\n")
 	}
 	if fc == nil {
-		sb.WriteString("The fact-check could not be completed, so no recommendation passed verification. Say so where" +
-			" the answer would be, without implying the candidate recommendations are wrong.\n\n")
+		sb.WriteString("The fact-check could not be completed, so nothing passed verification. Say so, without" +
+			" implying the candidate recommendations are wrong.\n\n")
 	}
 	writeGaps(&sb, a.Gaps)
 	sb.WriteString("Sources (title, URL, content) — link and quote these:\n")
@@ -381,11 +417,15 @@ func writeRecommendations(sb *strings.Builder, a *agent.Analysis) {
 			blocked = append(blocked, r)
 		}
 	}
-	if ok := approvedRecommendations(a); len(ok) > 0 {
-		sb.WriteString("Approved recommendations. The report's \"## Answer\" section is written by the program from" +
-			" these: do not write an answer section, begin with the comparison.\n")
+	if len(a.Recommendations) > 0 {
+		sb.WriteString("The report's \"## Answer\" section is written by the program from the approved" +
+			" recommendations: do not write an answer section, begin with the comparison.\n")
+		ok := approvedRecommendations(a)
+		if len(ok) == 0 {
+			sb.WriteString("No recommendation was approved.\n")
+		}
 		for _, r := range ok {
-			fmt.Fprintf(sb, "  - Choose %s when %s [%s]\n", r.Choose, r.When, strings.Join(r.Claims, ", "))
+			fmt.Fprintf(sb, "  - Approved: choose %s when %s [%s]\n", r.Choose, r.When, strings.Join(r.Claims, ", "))
 		}
 		sb.WriteString("\n")
 	}
@@ -416,35 +456,74 @@ func renderAnswer(recs []agent.Recommendation) string {
 	return sb.String()
 }
 
-// withAnswer puts the rendered answer at the top of the report. A title line
+// noApproval is the answer when an analysis made recommendations and none
+// passed the fact-check.
+const noApproval = "No recommendation passed the fact-check."
+
+// decidedAnswer is the report's answer for an analysis that made
+// recommendations: the approved ones, or a statement that none passed. It is
+// empty for an analysis that made none, whose answer the summarizer writes.
+func decidedAnswer(a *agent.Analysis) string {
+	if len(a.Recommendations) == 0 {
+		return ""
+	}
+	if ok := approvedRecommendations(a); len(ok) > 0 {
+		return renderAnswer(ok)
+	}
+	return "## Answer\n\n" + noApproval + "\n"
+}
+
+// withAnswer puts the decided answer at the top of the report. A title line
 // and an answer section the summarizer wrote anyway are removed: the first
-// would sit below the answer, the second repeat it unchecked.
-func withAnswer(sum *agent.Summary, recs []agent.Recommendation) *agent.Summary {
-	if len(recs) == 0 {
+// would sit below the answer, the second repeat it unchecked. When nothing
+// was approved the summarizer's answer is removed all the same: it is the
+// one place a blocked recommendation would otherwise be stated.
+func withAnswer(sum *agent.Summary, a *agent.Analysis) *agent.Summary {
+	answer := decidedAnswer(a)
+	if answer == "" {
 		return sum
 	}
-	answer := renderAnswer(recs)
 	sum.Report = answer + "\n" + dropAnswerSection(sum.Report)
 	sum.Executive = strings.TrimSpace(strings.TrimPrefix(answer, "## Answer"))
 	return sum
 }
 
-// dropAnswerSection removes a leading "# title" line and a "## Answer"
-// section from a report.
+// dropAnswerSection removes a leading "# title" line and an "Answer"
+// section, sub-headings included, from a report. It knows the heading the
+// summarizer is told to use, in its Markdown variants ("## Answer ##",
+// indented); an answer under a heading of the summarizer's own choosing, or
+// a conclusion stated in another section, is beyond it.
+// ponytail: heading match only; holding every section's prose to the
+// blocked recommendations would need the summarizer to return structure.
 func dropAnswerSection(report string) string {
 	lines := strings.Split(strings.TrimSpace(report), "\n")
-	if len(lines) > 0 && strings.HasPrefix(lines[0], "# ") {
+	if len(lines) > 0 && headingLevel(lines[0]) == 1 {
 		lines = lines[1:]
 	}
 	var out []string
-	skipping := false
+	skipLevel := 0
 	for _, ln := range lines {
-		if strings.HasPrefix(ln, "# ") || strings.HasPrefix(ln, "## ") {
-			skipping = strings.EqualFold(strings.TrimSpace(strings.TrimLeft(ln, "# ")), "Answer")
+		if lvl := headingLevel(ln); lvl > 0 {
+			switch {
+			case strings.EqualFold(strings.Trim(strings.TrimSpace(ln), "# \t"), "Answer"):
+				skipLevel = lvl
+			case skipLevel > 0 && lvl <= skipLevel:
+				skipLevel = 0
+			}
 		}
-		if !skipping {
+		if skipLevel == 0 {
 			out = append(out, ln)
 		}
 	}
 	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// headingLevel is an ATX heading's level, 0 for any other line.
+func headingLevel(ln string) int {
+	t := strings.TrimSpace(ln)
+	n := len(t) - len(strings.TrimLeft(t, "#"))
+	if n == 0 || n > 6 || (len(t) > n && t[n] != ' ' && t[n] != '\t') {
+		return 0
+	}
+	return n
 }
