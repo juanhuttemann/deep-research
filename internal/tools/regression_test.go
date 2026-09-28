@@ -220,3 +220,29 @@ func TestExcerptReachesPastAPagesOpeningBoilerplate(t *testing.T) {
 		t.Errorf("excerpt is %d bytes, over the 1500 limit", len(got))
 	}
 }
+
+// A price from a pricing page's durability section reached the model as a
+// price for every engine: the section heading ("Durability") and the sentence
+// under it that names the one engine it applies to were cut away, and the
+// report quoted it as a cost of another engine.
+func TestExcerptKeepsThePassagesSectionScope(t *testing.T) {
+	filler := strings.Repeat("General notes about the service and its console.\n\n", 30)
+	page := filler +
+		"On-demand nodes\n---------------\n\nEngineB nodes are billed per node-hour.\n\n" + filler +
+		"Durability\n----------\n\n" +
+		"Durability is a feature available with EngineA 9.0, allowing you to use the cache as a persistent" +
+		" data store with microsecond read latency, and it is described at length in the guide for" +
+		" operators who plan capacity for write-heavy workloads across several availability zones.\n\n" +
+		"**Pricing**  \nSynchronous writes are priced at 18% on top of the standard node-hour price.\n\n" + filler
+
+	got := Excerpt(page, "EngineB node pricing synchronous writes", 1500)
+	if !strings.Contains(got, "18%") {
+		t.Fatalf("excerpt missed the priced passage:\n%s", got)
+	}
+	if !strings.Contains(got, "Durability is a feature available with EngineA 9.0") {
+		t.Errorf("the 18%% price came without the sentence naming its engine:\n%s", got)
+	}
+	if len(got) > 1500 {
+		t.Errorf("excerpt is %d bytes, over the limit", len(got))
+	}
+}

@@ -97,7 +97,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   documentation page were navigation and a cookie dialog. It now sees the
   passages that match the queries that found the page, and pages are
   scraped up to 40,000 bytes instead of 5,000 so there is text to choose
-  from. A page found by several searches is still one source, but each
+  from. Each passage keeps its section: the nearest heading above it (and
+  the section heading above a bold sub-heading), with the sentence that
+  opens the section, so a figure from one product's or engine's section is
+  not read as applying to another. A page found by several searches is still one source, but each
   search's query now steers its excerpt instead of being discarded.
 - The analysis's open questions never reached the summarizer, which wrote
   conclusions over the gaps the analysis had flagged. They are now passed

@@ -29,7 +29,9 @@ A page that several searches return is one source, counted and cited once;
 the queries that found it are kept on it. Each phase's prompt caps a source at
 1500 characters, and what fills them is the page's passages that match those
 queries (`tools.Excerpt`), not its opening, which on a documentation site is
-navigation and a cookie dialog.
+navigation and a cookie dialog. Each passage carries its section context,
+the heading above it and the section's opening sentence, inside the same
+budget, so its scope survives the cut.
 
 The analysis is a decision, not only prose: its reading of the question,
 atomic claims (each with the option and criterion it is about, its scope and

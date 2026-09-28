@@ -168,7 +168,7 @@ func Excerpt(content, query string, limit int) string {
 	if len(content) <= limit {
 		return content
 	}
-	blocks := blockBreak.Split(content, -1)
+	blocks := splitLeads(blockBreak.Split(content, -1))
 	keep := pickBlocks(blocks, blockScores(blocks, queryWords(query)), limit)
 	if keep == nil {
 		return truncateUTF8Bare(content, limit)
@@ -219,7 +219,9 @@ func queryWords(query string) []string {
 // counting log((n+1)/(df+1)): nothing when every block has it. The sum is
 // divided by the block's length relative to the page's average, as BM25 does:
 // otherwise a long block (a JSON sample, a table) wins by mentioning every
-// word once somewhere in its bulk.
+// word once somewhere in its bulk. Unlike BM25 a block shorter than average is
+// not boosted: a navigation item that is one query word ("*   Memcached")
+// outscored every paragraph that answered the query.
 func blockScores(blocks, words []string) []float64 {
 	folded := make([]string, len(blocks))
 	total := 0
@@ -242,14 +244,15 @@ func blockScores(blocks, words []string) []float64 {
 		}
 	}
 	for i, b := range blocks {
-		scores[i] /= 0.25 + 0.75*float64(len(b))/max(avg, 1)
+		scores[i] /= 0.25 + 0.75*max(float64(len(b)), avg)/max(avg, 1)
 	}
 	return scores
 }
 
-// pickBlocks takes the best-scoring blocks that fit in limit, best first; a
-// best block too long to fit is still taken, and clipped by the caller. It
-// returns nil when no block scores at all.
+// pickBlocks takes the best-scoring blocks that fit in limit, best first,
+// each with its section context (see sectionContext), which counts against
+// the limit like the block itself. A best block too long to fit is still
+// taken, and clipped by the caller. It returns nil when no block scores.
 func pickBlocks(blocks []string, scores []float64, limit int) []bool {
 	order := make([]int, len(blocks))
 	for i := range order {
@@ -262,13 +265,99 @@ func pickBlocks(blocks []string, scores []float64, limit int) []bool {
 	keep := make([]bool, len(blocks))
 	used := 0
 	for _, i := range order {
-		n := len(blocks[i]) + len(elision)
-		if scores[i] <= 0 || (used > 0 && used+n > limit) {
+		if scores[i] <= 0 || keep[i] {
 			continue
 		}
-		keep[i], used = true, used+n
+		add := append([]int{i}, sectionContext(blocks, i)...)
+		n := 0
+		for _, j := range add {
+			if !keep[j] {
+				n += len(blocks[j]) + len(elision)
+			}
+		}
+		if used > 0 && used+n > limit {
+			continue
+		}
+		for _, j := range add {
+			keep[j] = true
+		}
+		used += n
 	}
 	return keep
+}
+
+// sectionContext is what a passage needs from its section to keep its scope:
+// the nearest heading above it and the paragraph that opens that section,
+// when short; and when that heading is only a bold sub-heading ("**Serverless
+// option**"), the section heading above it too ("### Example 3: ... a
+// Memcached cache"). A price quoted from a pricing page's durability section
+// read as a price for any engine, because the heading ("Durability") and the
+// sentence under it ("a feature available with Valkey 9.0") were cut away.
+func sectionContext(blocks []string, i int) []int {
+	var ctx []int
+	for h := i - 1; h >= 0; h-- {
+		kind := headingKind(blocks[h])
+		if kind == notHeading || (len(ctx) > 0 && kind == subHeading) {
+			continue
+		}
+		ctx = append(ctx, h)
+		if lead := h + 1; lead < i && headingKind(blocks[lead]) == notHeading && len(blocks[lead]) <= maxLeadBytes {
+			ctx = append(ctx, lead)
+		}
+		if kind == sectionHeading {
+			return ctx
+		}
+		i = h
+	}
+	return ctx
+}
+
+// maxLeadBytes bounds the opening paragraph kept as a section's context: a
+// sentence or two that scope the section, not a second passage.
+const maxLeadBytes = 300
+
+// splitLeads splits a section's opening paragraph that is too long to be its
+// context after its first sentence, which is where a section says what it is
+// about ("Durability is a feature available with Valkey 9.0, ..."). Both
+// halves stay verbatim text of the page, so a quote from either is located.
+func splitLeads(blocks []string) []string {
+	out := make([]string, 0, len(blocks))
+	for i, b := range blocks {
+		if i > 0 && headingKind(blocks[i-1]) != notHeading && headingKind(b) == notHeading && len(b) > maxLeadBytes {
+			if cut := strings.Index(b, ". "); cut > 0 && cut < maxLeadBytes {
+				out = append(out, b[:cut+1], strings.TrimLeft(b[cut+1:], " "))
+				continue
+			}
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+var (
+	setextRule = regexp.MustCompile(`^[-=]{3,}\s*$`)
+	boldLine   = regexp.MustCompile(`^\*\*[^*]+\*\*:?$`)
+)
+
+// Heading kinds: a section heading is an ATX "#" line or a setext heading (a
+// line underlined with --- or ===); a sub-heading is a line that is bold and
+// nothing else, which scraped pages use under a section.
+const (
+	notHeading = iota
+	sectionHeading
+	subHeading
+)
+
+func headingKind(block string) int {
+	lines := strings.Split(strings.TrimSpace(block), "\n")
+	switch {
+	case strings.HasPrefix(lines[0], "#"),
+		len(lines) == 2 && setextRule.MatchString(strings.TrimSpace(lines[1])):
+		return sectionHeading
+	case len(lines) == 1 && boldLine.MatchString(strings.TrimSpace(lines[0])):
+		return subHeading
+	}
+	return notHeading
 }
 
 // truncateUTF8Bare cuts s to at most limit bytes on a rune boundary, with no
