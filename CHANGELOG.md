@@ -144,6 +144,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- An analysis that came back malformed (no claims, nothing to govern, only
+  JSON: a model returned `{"/": "placeholder"}`) sent the report to the
+  unchecked-prose path; it is asked for once more. A re-analysis after the
+  follow-up round that comes back with no claims no longer replaces a first
+  analysis that had them.
 - Every web source was labelled "high" confidence, a snippet-only one
   included, and the report printed it by each citation. Sources now carry
   only how they were obtained.

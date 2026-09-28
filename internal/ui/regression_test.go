@@ -1752,3 +1752,51 @@ func TestRepairPassRestoresAnOptionTheClaimsSupport(t *testing.T) {
 		t.Errorf("report does not answer with the checked revision:\n%s", r)
 	}
 }
+
+// scriptedAnalyzer answers Analyze from a list, in order.
+type scriptedAnalyzer struct {
+	*fakeAssistant
+	answers []*agent.Analysis
+	calls   int
+}
+
+func (s *scriptedAnalyzer) Analyze(context.Context, string) (*agent.Analysis, error) {
+	a := s.answers[min(s.calls, len(s.answers)-1)]
+	s.calls++
+	return a, nil
+}
+
+var (
+	placeholder = &agent.Analysis{Answer: `{"/": "placeholder"}`}
+	structured  = &agent.Analysis{Answer: "a", Claims: []agent.Claim{{ID: "c1", Text: "t"}},
+		Conclusions: []agent.Recommendation{{Statement: "s", Claims: []string{"c1"}}}}
+)
+
+// A history question's analysis came back as {"/": "placeholder"} and the
+// report fell back to prose no check had seen. A malformed analysis is
+// asked for once more.
+func TestMalformedAnalysisIsAskedAgain(t *testing.T) {
+	sa := &scriptedAnalyzer{fakeAssistant: &fakeAssistant{}, answers: []*agent.Analysis{placeholder, structured}}
+	res, err := NewDriver(sa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sa.calls != 2 || len(res.Analysis.Claims) != 1 {
+		t.Errorf("analyze ran %d times and kept %d claims, want 2 and the second answer", sa.calls, len(res.Analysis.Claims))
+	}
+}
+
+// It was the re-analysis after the follow-up round that returned the
+// placeholder there, and it replaced a first analysis that had claims.
+func TestMalformedReanalysisKeepsTheFirst(t *testing.T) {
+	first := *structured
+	first.FollowUp = []string{"more on the crisis"}
+	sa := &scriptedAnalyzer{fakeAssistant: &fakeAssistant{}, answers: []*agent.Analysis{&first, placeholder, placeholder}}
+	res, err := NewDriver(sa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Analysis.Claims) != 1 {
+		t.Errorf("the report was built on the malformed re-analysis: %+v", res.Analysis)
+	}
+}

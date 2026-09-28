@@ -241,7 +241,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
-	analysis, err := d.Agent.Analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
+	analysis, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
 	if err != nil {
 		return d.partial(ctx, plan, findings, nil, nil, "analysis failed", err)
 	}
@@ -356,6 +356,30 @@ func btoi(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// analyze runs the analysis, asking once more when the output is malformed:
+// no claims, nothing to govern and no prose answer either, only JSON (a
+// model returned {"/": "placeholder"}). Taken as it is, the report falls
+// back to prose no check has seen. A model that answers in prose without
+// the structure is not asked again, since it would pay a call on every run
+// for the same prose; a second malformed answer is kept.
+func (d *Driver) analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
+	a, err := d.Agent.Analyze(ctx, prompt)
+	if err != nil || !malformed(a) {
+		return a, err
+	}
+	d.emit(Event{Type: Info, Phase: "Analyze", Detail: "the analysis returned no claims; asking once more"})
+	if again, err2 := d.Agent.Analyze(ctx, prompt); err2 == nil && !malformed(again) {
+		return again, nil
+	}
+	return a, nil
+}
+
+// malformed reports an analysis with no structure and no prose answer.
+func malformed(a *agent.Analysis) bool {
+	answer := strings.TrimSpace(a.Answer)
+	return len(a.Claims) == 0 && len(units(a)) == 0 && (answer == "" || strings.HasPrefix(answer, "{"))
 }
 
 // finish stamps a result with the run's final counters and announces it.
@@ -519,9 +543,16 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 	}
 	findings = mergeFindings(append(findings, extra...))
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Re-analyzing with the follow-up evidence"})
-	again, err := d.Agent.Analyze(ctx, analyzePrompt(plan.Question, findings, append(uncovered, unanswered...)))
+	again, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, append(uncovered, unanswered...)))
 	if err != nil {
 		d.emit(Event{Type: Error, Phase: "Analyze", Detail: "re-analysis failed, keeping the first analysis: " + err.Error()})
+		return analysis, findings
+	}
+	// A re-analysis that came back with no structure would replace one that
+	// had it, and send the report to the unchecked-prose path: a history
+	// question's re-analysis returned {"/": "placeholder"} and did.
+	if len(again.Claims) == 0 && len(analysis.Claims) > 0 {
+		d.emit(Event{Type: Error, Phase: "Analyze", Detail: "re-analysis returned no claims, keeping the first analysis"})
 		return analysis, findings
 	}
 	checkAnalysis(again, findings)
