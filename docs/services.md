@@ -148,6 +148,22 @@ services:
 YAML
 ```
 
+Under rootless Podman (Fedora, RHEL) RabbitMQ exits at start with
+`Error when reading /var/lib/rabbitmq/.erlang.cookie: eacces` and the `api`
+container never starts: the image's entrypoint writes the cookie as root and
+then runs RabbitMQ as uid 999, which cannot read it. Run the service as 999
+from the start by adding it to the override file, then recreate it with its
+volume:
+
+```sh
+cat >> docker-compose.override.yaml <<'YAML'
+  rabbitmq:
+    user: "999:999"
+YAML
+docker compose rm -sfv rabbitmq
+docker compose up -d
+```
+
 ### Check it works
 
 Give the API about a minute to finish starting, then:
