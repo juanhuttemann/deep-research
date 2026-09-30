@@ -98,9 +98,10 @@ func (f *fakeAssistant) Research(ctx context.Context, query string) ([]agent.Fin
 	return det.Findings, nil
 }
 
-func (f *fakeAssistant) SetSourceBudget(int)      {}
-func (f *fakeAssistant) SetProgress(func(string)) {}
-func (f *fakeAssistant) TokensUsed() int          { return int(f.tokens.Load()) }
+func (f *fakeAssistant) SetSourceBudget(int)           {}
+func (f *fakeAssistant) SkipSources(func(string) bool) {}
+func (f *fakeAssistant) SetProgress(func(string))      {}
+func (f *fakeAssistant) TokensUsed() int               { return int(f.tokens.Load()) }
 
 // call records one model call's worth of reported usage.
 func (f *fakeAssistant) call() { f.tokens.Add(int64(f.tokensPerCall)) }

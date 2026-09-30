@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -526,7 +527,8 @@ type budgetRecorder struct {
 	budget int
 }
 
-func (b *budgetRecorder) SetSourceBudget(n int) { b.budget = n }
+func (b *budgetRecorder) SetSourceBudget(n int)         { b.budget = n }
+func (b *budgetRecorder) SkipSources(func(string) bool) {}
 
 func TestDepthTierReachesTheSearchTool(t *testing.T) {
 	// The search tool has its own fixed per-query URL limit. Unless the plan's
@@ -585,5 +587,59 @@ func TestRendererIgnoresOutputAfterClose(t *testing.T) {
 
 	if buf.Len() > 0 {
 		t.Errorf("renderer wrote %q after Close", buf.String())
+	}
+}
+
+// The sub-agent row said "12 src", an abbreviation nobody reads at a glance.
+func TestProgressBarSpellsOutSources(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	for n, want := range map[int]string{1: "100%  1 source ", 12: "100% 12 sources"} {
+		if got := r.progressBar(&Node{Progress: 100, Sources: n}); !strings.HasSuffix(got, want) {
+			t.Errorf("progressBar with %d sources = %q, want it to end %q", n, got, want)
+		}
+	}
+}
+
+// The reasoning was quoted on the status row, clipped to a fragment too short
+// to read. It is wrapped under the row instead, latest last, in rows the
+// activity tail gives up — the frame still fits the terminal.
+func TestThinkingIsWrappedUnderTheStatusRow(t *testing.T) {
+	words := make([]string, 150)
+	for i := range words {
+		words[i] = "w" + strconv.Itoa(i)
+	}
+	for _, rows := range []int{40, 16} {
+		var buf bytes.Buffer
+		r := liveRenderer(&buf, rows, 60)
+		r.Emit(Event{Type: SubAgent, SubID: "1", SubName: "Specs", SubState: "done"})
+		r.Emit(Event{Type: Phase, Phase: "Fact-Check", Detail: "Verifying claims against sources"})
+		r.Emit(Event{Type: Info, Transient: true, Detail: "fact-checking — thinking · 1:38\n" + strings.Join(words, " ")})
+		r.mu.Lock()
+		frame := r.frameLines()
+		r.mu.Unlock()
+		r.Close()
+
+		at := slices.IndexFunc(frame, func(l string) bool { return strings.Contains(l, "fact-checking — thinking · 1:38") })
+		if at < 0 || strings.Contains(frame[at], "w0") {
+			t.Fatalf("%d rows: no status row holding the status line alone:\n%s", rows, strings.Join(frame, "\n"))
+		}
+		var shown []string
+		for _, l := range frame[at+1:] {
+			if !strings.HasPrefix(l, "    ") {
+				break
+			}
+			shown = append(shown, l)
+		}
+		if len(shown) < 2 || len(shown) > maxThinkingRows || !strings.HasSuffix(shown[len(shown)-1], "w149"+cReset) {
+			t.Errorf("%d rows: reasoning rows %q, want up to %d ending on the latest words", rows, shown, maxThinkingRows)
+		}
+		if len(frame) > rows-1 {
+			t.Errorf("%d rows: frame is %d rows tall", rows, len(frame))
+		}
+		for _, l := range frame {
+			if w := dispWidth(l); w > 60 {
+				t.Errorf("%d rows: row is %d columns wide: %q", rows, w, l)
+			}
+		}
 	}
 }

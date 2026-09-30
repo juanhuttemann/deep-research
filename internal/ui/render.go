@@ -663,6 +663,11 @@ func (r *Renderer) treeLines() []string {
 	// fixed sections leave, so the frame height is constant and the header,
 	// tree and footer never move.
 	budget := r.rows - 1 - len(head) - len(agents) - len(foot) - 1
+	// The reasoning takes its rows from the tail, never from the fixed
+	// sections, and leaves the tail a few rows of its own.
+	thinking := r.thinkingLines(min(maxThinkingRows, budget-3))
+	agents = append(agents, thinking...)
+	budget -= len(thinking)
 	var tail []string
 	if budget >= 2 {
 		tail = append(tail, r.rule())
@@ -712,15 +717,45 @@ func (r *Renderer) agentLines() []string {
 	// Once research is done every row reads ✓ and the tree stops moving, while
 	// analyze / fact-check / summarize are single model calls that can run for
 	// a minute. This row is what says the run is still working, and on what.
-	if r.detail != "" && !strings.EqualFold(r.phase, "Research") && !r.done {
+	if r.statusShown() {
 		text := r.detail
 		if r.status != "" {
-			text = r.status
+			text, _, _ = strings.Cut(r.status, "\n")
 		}
 		out = append(out, fmt.Sprintf("  %s %s",
 			r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)]), text))
 	}
 	return out
+}
+
+// statusShown reports whether the frame has a status row: only the phases
+// after research, whose single model calls leave the tree still.
+func (r *Renderer) statusShown() bool {
+	return r.detail != "" && !strings.EqualFold(r.phase, "Research") && !r.done
+}
+
+// maxThinkingRows bounds the reasoning shown under the status row.
+const maxThinkingRows = 5
+
+// thinkingLines wraps the reasoning a status carries after its first line into
+// at most n rows under the status row, keeping the latest. Quoted on the
+// status row itself it was clipped to a fragment nobody could read.
+func (r *Renderer) thinkingLines(n int) []string {
+	_, thinking, ok := strings.Cut(r.status, "\n")
+	if !ok || n <= 0 || !r.statusShown() {
+		return nil
+	}
+	const indent = "    "
+	// One column is kept for the ellipsis that marks older text cut off.
+	rows := wrapWords(thinking, r.width-len(indent)-1)
+	if len(rows) > n {
+		rows = rows[len(rows)-n:]
+		rows[0] = "…" + rows[0]
+	}
+	for i, row := range rows {
+		rows[i] = indent + r.T.dim(row)
+	}
+	return rows
 }
 
 func (r *Renderer) stateMark(n *Node) string {
@@ -752,7 +787,12 @@ func (r *Renderer) progressBar(n *Node) string {
 	}
 	label := fmt.Sprintf("%3d%%", p)
 	if n.Sources > 0 {
-		label = fmt.Sprintf("%3d%% %2d src", p, n.Sources)
+		// Padded to the plural so a row with one source lines up with the rest.
+		noun := "sources"
+		if n.Sources == 1 {
+			noun = "source"
+		}
+		label = fmt.Sprintf("%3d%% %2d %-7s", p, n.Sources, noun)
 	}
 	return bar + " " + r.T.dim(label)
 }
@@ -894,7 +934,10 @@ func (r *Renderer) logEvent(e Event) {
 		}
 		line = fmt.Sprintf("  [%s] %s", e.SubID, e.Line)
 	case Info:
-		line = "  " + e.Detail
+		// A plain log has no row to replace, so a status keeps its first
+		// line: the reasoning after it would repeat every five seconds.
+		line, _, _ = strings.Cut(e.Detail, "\n")
+		line = "  " + line
 	case Error:
 		line = "! " + e.Detail
 	default:

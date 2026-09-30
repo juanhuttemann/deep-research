@@ -79,9 +79,10 @@ pressed while the plan is still being made are ignored, and the brief says so.
 
 Then a **live frame**: the pipeline stage, one row per parallel sub-agent,
 the sources as they are read, and one status line for the model call in
-flight — waiting for the first token, then sections, claims or words so far
-with the change since the last update, and "no new text for 10s" if the
-stream stalls.
+flight — waiting for the model to start, the latest of a reasoning model's
+thinking in a few rows under it, then the part of the analysis being written, claims or words so far with the
+change since the last update, and "no new output for 10s" if the stream
+stalls.
 
 The **report** is rendered in the terminal and saved to `reports/` as `.md`,
 `.pdf` and `.json`. Besides the answer it carries:

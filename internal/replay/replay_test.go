@@ -35,9 +35,10 @@ func (l *live) FactCheck(context.Context, string) (*agent.FactCheckResult, error
 func (l *live) Summarize(context.Context, string) (*agent.Summary, error) {
 	return &agent.Summary{Report: "r"}, nil
 }
-func (l *live) SetSourceBudget(int)      {}
-func (l *live) SetProgress(func(string)) {}
-func (l *live) TokensUsed() int          { return 0 }
+func (l *live) SetSourceBudget(int)           {}
+func (l *live) SkipSources(func(string) bool) {}
+func (l *live) SetProgress(func(string))      {}
+func (l *live) TokensUsed() int               { return 0 }
 
 func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	ctx := context.Background()

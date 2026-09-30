@@ -212,6 +212,11 @@ type SearchTools struct {
 	// logf, when set, receives a line per sub-step (the search query and each
 	// scrape) so the runner can show exactly what each tool does.
 	logf func(string)
+	// Skip, when set, names pages the run already has in full. They are not
+	// fetched again and take no slot of the budget: a page another search
+	// already read cost a second download and left this search one new page
+	// short.
+	Skip func(url string) bool
 }
 
 // SetLogger wires the progress logger so each sub-step reports the source
@@ -325,6 +330,9 @@ type SearchResults struct {
 	// quietly throws away most of what it found is indistinguishable from one
 	// that found little, and the difference matters to whoever reads it.
 	Skipped []SkippedSource
+	// Known are relevant results that Skip said the run already has. They
+	// were not fetched, but this query found them, which the run records.
+	Known []SkippedSource
 }
 
 // SkippedSource is a search result rejected before it was fetched.
@@ -411,6 +419,7 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 	// technical question is routinely unrelated to it; the pages that answer
 	// the question are usually present but buried below them.
 	ranked, offTopic := rankByRelevance(dedupeResults(searchResults), terms)
+	ranked, known := s.splitKnown(ranked)
 	if len(ranked) > s.MaxURLsPerQuery {
 		// Results past the budget were not rejected, only not reached, so they
 		// are not reported as off-topic.
@@ -474,7 +483,24 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 		us = append(us, urls[i])
 	}
 
-	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped}, nil
+	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped, Known: known}, nil
+}
+
+// splitKnown separates the results Skip says the run already has, before the
+// budget is applied, so the budget goes to pages the run has not read.
+func (s *SearchTools) splitKnown(ranked []ScoredResult) (fresh []ScoredResult, known []SkippedSource) {
+	if s.Skip == nil {
+		return ranked, nil
+	}
+	for _, r := range ranked {
+		if !s.Skip(r.URL) {
+			fresh = append(fresh, r)
+			continue
+		}
+		known = append(known, SkippedSource{URL: r.URL, Domain: DomainOf(r.URL), Title: r.Title, Score: r.Score})
+		s.log(fmt.Sprintf("    known    %s", DomainOf(r.URL)))
+	}
+	return fresh, known
 }
 
 // fetch scrapes one search result and labels how its content was obtained.
