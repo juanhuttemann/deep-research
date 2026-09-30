@@ -34,7 +34,7 @@ func NewFirecrawlClient(baseURL string, timeout time.Duration) *FirecrawlClient 
 		timeout = 30 * time.Second
 	}
 	return &FirecrawlClient{
-		BaseURL:    baseURL,
+		BaseURL:    strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{Timeout: timeout},
 		// Generous, because the prompts no longer take a page's opening: they
 		// take the passages that match the query (see Excerpt), and the answer
