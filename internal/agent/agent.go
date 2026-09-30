@@ -1400,7 +1400,7 @@ func tryUnmarshalFindings(payload, query string) []Finding {
 // no text. A title and a URL are not evidence: accepting {"title":"T"} counted
 // a source for free and sent a blank entry to every later phase.
 func finalizeFindings(findings []Finding, query string) []Finding {
-	out := findings[:0]
+	out := make([]Finding, 0, len(findings))
 	for _, f := range findings {
 		if strings.TrimSpace(f.Content) == "" {
 			continue
