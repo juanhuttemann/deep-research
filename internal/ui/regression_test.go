@@ -1968,3 +1968,30 @@ func TestRepairDoesNotAcceptTwoReplacementsForOneBlockedStatement(t *testing.T) 
 		t.Fatalf("conclusions = %+v", a.Conclusions)
 	}
 }
+
+func TestPDFExportDoesNotSilentlyDropNonLatinText(t *testing.T) {
+	for _, text := range []string{"Привет мир", "日本語", "Ελληνικά", "עברית", "العربية"} {
+		var warnings bytes.Buffer
+		res := testResult()
+		res.Summary.Report = text
+		o := Options{OutDir: t.TempDir(), Stderr: &warnings}
+		_, pdf, _ := o.writeArtifacts(res, &MultiSink{}, &Driver{}, newTestPlan("quick", nil))
+		if pdf == "" {
+			t.Fatalf("PDF was not written: %s", warnings.String())
+		}
+		if !strings.Contains(warnings.String(), "PDF export replaced unsupported characters") {
+			t.Fatalf("%q silently lost text: %s", text, warnings.String())
+		}
+	}
+}
+
+func TestPDFExportDoesNotWarnForSupportedLatinText(t *testing.T) {
+	var warnings bytes.Buffer
+	res := testResult()
+	res.Summary.Report = "café — €100… “quoted”"
+	o := Options{OutDir: t.TempDir(), Stderr: &warnings}
+	_, pdf, _ := o.writeArtifacts(res, &MultiSink{}, &Driver{}, newTestPlan("quick", nil))
+	if pdf == "" || warnings.Len() != 0 {
+		t.Fatalf("supported PDF text: path=%q warnings=%s", pdf, warnings.String())
+	}
+}

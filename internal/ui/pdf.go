@@ -124,18 +124,38 @@ func escapePDF(s string) string {
 		case r >= 0x20 && r < 0x7f:
 			sb.WriteRune(r)
 		default:
-			b, ok := winAnsi[r]
+			b, ok := pdfByte(r)
 			if !ok {
-				if r > 0xff || r < 0x20 {
-					b = '?'
-				} else {
-					b = byte(r)
-				}
+				b = '?'
 			}
 			fmt.Fprintf(&sb, "\\%03o", b)
 		}
 	}
 	return sb.String()
+}
+
+func pdfByte(r rune) (byte, bool) {
+	if b, ok := winAnsi[r]; ok {
+		return b, true
+	}
+	if r >= 0x20 && r <= 0xff {
+		return byte(r), true
+	}
+	return 0, false
+}
+
+// Check the same encoding used by escapePDF so export warns only when text
+// will be lost, rather than for supported punctuation or accented Latin text.
+func pdfHasUnsupportedText(text string) bool {
+	for _, r := range text {
+		if r == '\n' || r == '\r' || r == '\t' {
+			continue
+		}
+		if _, ok := pdfByte(r); !ok {
+			return true
+		}
+	}
+	return false
 }
 
 // wrapText breaks s onto lines of at most width display columns for the PDF,

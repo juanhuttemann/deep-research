@@ -229,7 +229,11 @@ for a light terminal, or point `GLAMOUR_STYLE` at a Glamour JSON stylesheet.
 
 Each run writes `.md`, `.pdf` and `.json` artifacts into `--reports`.
 Markdown and PDF exports include one executive summary, and PDFs render
-readable text with link URLs preserved. Artifact filenames use a readable
+readable text with link URLs preserved. The PDF uses Helvetica with
+WinAnsi encoding: Latin-1 and supported typographic punctuation render,
+while other scripts (including Cyrillic, Greek and CJK) become `?`. The CLI
+warns on stderr when characters are lost; use `.md` or `.json` for the full
+Unicode text. Artifact filenames use a readable
 question stem plus a 128-bit hash; reports created with the earlier short
 hash keep their old filenames.
 

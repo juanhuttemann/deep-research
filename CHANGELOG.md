@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Warn when PDF export replaces unsupported characters with `?`; Markdown
+  and JSON retain the full Unicode text. Document the PDF font limitation.
+
 - Version bundled prompts and warn when a loaded `agent.yaml` is stale or
   missing phase instructions, while preserving custom prompts.
 

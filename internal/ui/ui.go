@@ -252,6 +252,9 @@ func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, d
 	}
 	md = keep(WriteMarkdown(result, o.OutDir))
 	pdf = keep(WritePDF(result, o.OutDir))
+	if pdf != "" && pdfHasUnsupportedText(markdownText(MarkdownReport(result))) {
+		_, _ = fmt.Fprintln(o.Stderr, "warning: PDF export replaced unsupported characters with ?; use the Markdown or JSON artifact for the full Unicode text")
+	}
 	// The key reader can still be alive here: a `b` pressed between the
 	// driver returning and this write emits a Detach event, which appends to
 	// the same timeline BuildMeta ranges over. Snapshot it under the sink's
