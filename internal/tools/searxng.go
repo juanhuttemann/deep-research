@@ -47,9 +47,9 @@ type SearXNGClient struct {
 
 	mu        sync.Mutex
 	instances []*searxInstance
-	// discover fills instances on first use for "auto"; nil once it has run.
-	discover    func(ctx context.Context) ([]string, error)
-	discoverErr error
+	// Discovery is cached only after success, so a transient failure or a
+	// cancelled query cannot poison every later search in the run.
+	discover func(ctx context.Context) ([]string, error)
 }
 
 type searxInstance struct {
@@ -121,7 +121,10 @@ func (c *SearXNGClient) candidates(ctx context.Context) ([]*searxInstance, error
 	defer c.mu.Unlock()
 	if c.discover != nil {
 		urls, err := c.discover(ctx)
-		c.discover, c.discoverErr = nil, err
+		if err != nil {
+			return nil, fmt.Errorf("discover public SearXNG instances: %w", err)
+		}
+		c.discover = nil
 		for _, u := range urls {
 			// Public instances are read through HTML from the start: measured,
 			// almost none serve JSON, and asking first doubles every query.
@@ -129,9 +132,6 @@ func (c *SearXNGClient) candidates(ctx context.Context) ([]*searxInstance, error
 			in.html.Store(true)
 			c.instances = append(c.instances, in)
 		}
-	}
-	if c.discoverErr != nil {
-		return nil, fmt.Errorf("discover public SearXNG instances: %w", c.discoverErr)
 	}
 	if len(c.instances) == 0 {
 		return nil, errors.New("no SearXNG instance configured")

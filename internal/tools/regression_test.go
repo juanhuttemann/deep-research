@@ -8,6 +8,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -286,5 +287,52 @@ func TestSearchSkipsPagesTheRunHasBeforeTheBudget(t *testing.T) {
 	}
 	if len(res.Known) != 1 || res.Known[0].URL != "https://a.example/1" {
 		t.Errorf("known = %+v, want the skipped page reported", res.Known)
+	}
+}
+
+func TestTransientDiscoveryFailureDoesNotPoisonLaterQueries(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, `{"instances":{"https://search.example":{"network_type":"normal","http":{"status_code":200},"timing":{"search":{"success_percentage":100}}}}}`)
+	}))
+	defer srv.Close()
+	c := NewSearXNGClient("auto", time.Second)
+	c.discover = func(ctx context.Context) ([]string, error) { return DiscoverInstances(ctx, c.HTTPClient, srv.URL) }
+	if _, err := c.candidates(context.Background()); err == nil {
+		t.Fatalf("first discovery should fail")
+	}
+	for range 2 {
+		got, err := c.candidates(context.Background())
+		if err != nil || len(got) != 1 || got[0].url != "https://search.example" {
+			t.Fatalf("later discovery: %v, %v", got, err)
+		}
+	}
+	if attempts != 2 {
+		t.Fatalf("discovery attempts = %d, want 2 with success cached", attempts)
+	}
+}
+
+func TestCancelledDiscoveryDoesNotPoisonLaterQueries(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		c := NewSearXNGClient("auto", time.Second)
+		attempts := 0
+		c.discover = func(context.Context) ([]string, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, cause
+			}
+			return []string{"https://search.example"}, nil
+		}
+		if _, err := c.candidates(context.Background()); !errors.Is(err, cause) {
+			t.Fatalf("lost discovery cancellation: %v", err)
+		}
+		if _, err := c.candidates(context.Background()); err != nil {
+			t.Fatalf("later query still failed: %v", err)
+		}
 	}
 }

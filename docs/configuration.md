@@ -106,7 +106,8 @@ Which mode a run uses is decided by what is configured:
     instances' limiters, so an instance proves itself by answering a real
     query, and the one that answered is asked first next time. Public
     instances rarely enable SearXNG's JSON API, so they are read through
-    their HTML result page.
+    their HTML result page. Successful discovery is cached for the run; a
+    failed or cancelled discovery is retried by the next query.
   - A URL, or a comma-separated list of URLs, pins your own instances. JSON is
     asked for first; an instance that refuses it is read through HTML.
   - A search that every instance refuses fails with its reason —
