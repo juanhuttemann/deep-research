@@ -702,9 +702,17 @@ func (r *Renderer) agentLines() []string {
 		shown, hidden = shown[:cap-1], len(shown)-(cap-1)
 	}
 
-	out := make([]string, 0, len(shown)+1)
+	out := make([]string, 0, len(shown)+2)
+	divided := false
 	for _, id := range shown {
 		n := r.nodes[id]
+		// The follow-up round reuses the tree. Unmarked, its rows read as more
+		// of the plan and its sources pushed the total past the tier's budget
+		// with nothing on screen to say why.
+		if isFollowUp(id) && !divided {
+			divided = true
+			out = append(out, r.T.dim("  follow-up searches for the analysis's open questions"))
+		}
 		out = append(out, fmt.Sprintf("  %s %s %s %s",
 			r.stateMark(n),
 			pad(n.Name, nameCol),
@@ -726,6 +734,17 @@ func (r *Renderer) agentLines() []string {
 			r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)]), text))
 	}
 	return out
+}
+
+// followUpTotal counts the sources the follow-up round cited. Each citation
+// bumps both a row and the run total, so the rest of the total is the plan's.
+func (r *Renderer) followUpTotal() (n int) {
+	for id, node := range r.nodes {
+		if isFollowUp(id) {
+			n += node.Sources
+		}
+	}
+	return n
 }
 
 // statusShown reports whether the frame has a status row: only the phases
@@ -848,8 +867,12 @@ func (r *Renderer) activityLines(n int) []string {
 }
 
 func (r *Renderer) footerLines() []string {
+	total := r.T.bold(fmt.Sprintf("%d sources", r.sources))
+	if f := r.followUpTotal(); f > 0 {
+		total += r.T.dim(fmt.Sprintf(" (%d planned + %d follow-up)", r.sources-f, f))
+	}
 	counters := fmt.Sprintf("  %s   %s",
-		r.T.bold(fmt.Sprintf("%d sources", r.sources)),
+		total,
 		r.T.dim(fmt.Sprintf("%s tokens", formatCount(r.tokens))))
 	out := []string{counters}
 	switch {

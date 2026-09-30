@@ -578,6 +578,12 @@ const MaxFollowUps = 3
 // asks one narrow question; a few pages answer it or nothing will.
 const followUpSources = 3
 
+// followUpPrefix opens every follow-up sub-agent's ID. Planned sub-topics are
+// numbered, so the prefix is what lets the tree tell the two rounds apart.
+const followUpPrefix = "f"
+
+func isFollowUp(id string) bool { return strings.HasPrefix(id, followUpPrefix) }
+
 // followUp searches the analysis's open questions and analyzes again with
 // what they found. The first analysis routinely named the exact search that
 // would have settled its own gap ("does X support Y?") and the pipeline
@@ -596,7 +602,7 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 			// names each one; an unnamed query is still its own name. Either
 			// way the fallback search is the question plus the name.
 			name := cmp.Or(strings.TrimSpace(analysis.FollowUpNames[q]), q)
-			subs = append(subs, SubTopic{ID: "f" + strconv.Itoa(len(subs)+1), Name: name, Query: q})
+			subs = append(subs, SubTopic{ID: followUpPrefix + strconv.Itoa(len(subs)+1), Name: name, Query: q})
 		}
 	}
 	if len(subs) == 0 || ctx.Err() != nil {
