@@ -61,7 +61,8 @@ r2, ...) are governed alike; "recommendation" below means either. The Driver hol
 - The repair pass: when a recommendation is blocked and some claims passed,
   one analyzer call revises the blocked ones from the supported claims only
   (`repairPrompt`); code drops a revision that cites any other claim
-  (`acceptRevisions`); one fact-check call judges whether each revision
+  (`acceptRevisions`) and keeps only the first valid replacement per blocked
+  ID; one fact-check call judges whether each revision
   follows, given only the pages its claims cite. An approved revision takes
   its original's place in the answer; the original stays, blocked.
 - What the fact-check sees: each page excerpted by the claims under check,

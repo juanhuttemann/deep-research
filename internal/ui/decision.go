@@ -904,6 +904,7 @@ func acceptRevisions(a *agent.Analysis, rev *agent.Analysis) []string {
 	var added []string
 	for _, r := range rev.Recommendations {
 		if len(added) < maxRevisions && ok(r, "r") {
+			delete(blocked, r.Revises)
 			r.Blocked, r.Failed, r.Statement = "", nil, ""
 			a.Recommendations = append(a.Recommendations, r)
 			added = append(added, "r"+strconv.Itoa(len(a.Recommendations)))
@@ -911,6 +912,7 @@ func acceptRevisions(a *agent.Analysis, rev *agent.Analysis) []string {
 	}
 	for _, r := range rev.Conclusions {
 		if len(added) < maxRevisions && ok(r, "k") {
+			delete(blocked, r.Revises)
 			r.Blocked, r.Failed, r.Choose, r.When = "", nil, "", ""
 			a.Conclusions = append(a.Conclusions, r)
 			added = append(added, "k"+strconv.Itoa(len(a.Conclusions)))

@@ -1939,3 +1939,32 @@ func TestLaterSearchSkipsOnlyPagesTheRunHasInFull(t *testing.T) {
 		}
 	}
 }
+
+func TestRepairDoesNotAcceptTwoReplacementsForOneBlockedStatement(t *testing.T) {
+	a := &agent.Analysis{
+		Claims:          []agent.Claim{{ID: "c1", Status: statusSupported}},
+		Recommendations: []agent.Recommendation{{Choose: "original", Blocked: "unsupported"}},
+		Conclusions:     []agent.Recommendation{{Statement: "original conclusion", Blocked: "unsupported"}},
+	}
+	rev := &agent.Analysis{
+		Recommendations: []agent.Recommendation{
+			{Revises: "r1", Choose: "invalid", Claims: []string{"missing"}},
+			{Revises: "r1", Choose: "first", Claims: []string{"c1"}},
+			{Revises: "r1", Choose: "second", Claims: []string{"c1"}},
+		},
+		Conclusions: []agent.Recommendation{
+			{Revises: "k1", Statement: "first conclusion", Claims: []string{"c1"}},
+			{Revises: "k1", Statement: "second conclusion", Claims: []string{"c1"}},
+		},
+	}
+	added := acceptRevisions(a, rev)
+	if !slices.Equal(added, []string{"r2", "k2"}) {
+		t.Fatalf("accepted IDs = %v", added)
+	}
+	if len(a.Recommendations) != 2 || a.Recommendations[1].Choose != "first" {
+		t.Fatalf("recommendations = %+v", a.Recommendations)
+	}
+	if len(a.Conclusions) != 2 || a.Conclusions[1].Statement != "first conclusion" {
+		t.Fatalf("conclusions = %+v", a.Conclusions)
+	}
+}
