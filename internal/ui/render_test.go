@@ -565,6 +565,28 @@ func TestFooterShowsTokenCount(t *testing.T) {
 	}
 }
 
+// TestFollowUpSourcesAreLabelled: a deep run over four sub-topics showed 29
+// sources and three extra rows, with nothing saying the follow-up round
+// added them on top of the plan's 20.
+func TestFollowUpSourcesAreLabelled(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{Enabled: false})
+	r.width, r.rows = 100, 40
+
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
+	for i, id := range []string{"1", "1", followUpPrefix + "1"} {
+		r.Emit(Event{Type: Citation, SubID: id, SubName: "topic " + id, Sources: i + 1})
+	}
+
+	rows := r.agentLines()
+	if len(rows) != 3 || !strings.Contains(rows[1], "follow-up") || !strings.Contains(rows[2], "topic f1") {
+		t.Errorf("follow-up row is not set apart from the plan:\n%s", strings.Join(rows, "\n"))
+	}
+	if foot := strings.Join(r.footerLines(), "\n"); !strings.Contains(foot, "3 sources (2 planned + 1 follow-up)") {
+		t.Errorf("footer total does not say where its sources came from:\n%s", foot)
+	}
+}
+
 // TestRendererIgnoresOutputAfterClose: Run closes the input and the renderer,
 // but the key-reader goroutine is still blocked in Next(). A key pressed in
 // that window used to emit an event, repaint a released frame and re-hide the

@@ -17,6 +17,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - "waiting for the first token" is now "waiting for the model to start",
   and "no new text" is "no new output".
 - A sub-agent row counts "12 sources" (or "1 source"), not "12 src".
+- The follow-up round's rows sit under a "follow-up searches for the
+  analysis's open questions" divider, and the footer splits the total
+  ("29 sources (20 planned + 9 follow-up)"). A deep run over four
+  sub-topics showed 29 sources with nothing saying why.
 - The analysis and the fact-check are no longer requested in JSON mode
   (`response_format: json_object`). In that mode the provider held a
   reasoning model's thinking back and sent it in one piece after a minute
