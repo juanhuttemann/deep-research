@@ -134,6 +134,7 @@ func escapePDF(s string) string {
 	return sb.String()
 }
 
+// pdfByte is r's byte in WinAnsiEncoding, and false when it has none.
 func pdfByte(r rune) (byte, bool) {
 	if b, ok := winAnsi[r]; ok {
 		return b, true
@@ -144,8 +145,10 @@ func pdfByte(r rune) (byte, bool) {
 	return 0, false
 }
 
-// Check the same encoding used by escapePDF so export warns only when text
-// will be lost, rather than for supported punctuation or accented Latin text.
+// pdfHasUnsupportedText reports whether escapePDF would write a '?' for any of
+// text. It asks pdfByte, as escapePDF does, so accented Latin and the mapped
+// punctuation never warn. Line breaks and tabs are skipped: wrapText consumes
+// them before a line is encoded.
 func pdfHasUnsupportedText(text string) bool {
 	for _, r := range text {
 		if r == '\n' || r == '\r' || r == '\t' {

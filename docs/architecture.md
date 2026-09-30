@@ -31,7 +31,9 @@ the queries that found it are kept on it. Once a page is cited with its full
 text, later searches do not fetch it again and spend their budget on other
 pages (`tools.SearchTools.Skip`); a page only judged off-topic, cited from its
 snippet, or fetched past a branch's budget is still fetched by a search it
-suits. Each phase's prompt caps a source at
+suits. "The same page" is `tools.CanonicalURL`: scheme and host case, a
+trailing slash, the fragment and a default port (80, 443) do not make a
+second source; any other port does. Each phase's prompt caps a source at
 1500 characters, and what fills them is the page's passages that match those
 queries (`tools.ExcerptFor`), not its opening, which on a documentation site is
 navigation and a cookie dialog. Each passage carries its section context,
@@ -62,8 +64,8 @@ r2, ...) are governed alike; "recommendation" below means either. The Driver hol
   one analyzer call revises the blocked ones from the supported claims only
   (`repairPrompt`); code drops a revision that cites any other claim
   (`acceptRevisions`) and keeps only the first valid replacement per blocked
-  ID; one fact-check call judges whether each revision
-  follows, given only the pages its claims cite. An approved revision takes
+  ID; one fact-check call judges whether each revision follows, given only
+  the pages its claims cite. An approved revision takes
   its original's place in the answer; the original stays, blocked.
 - What the fact-check sees: each page excerpted by the claims under check,
   those citing it first, then the others (`tools.ExcerptFor`), so a
@@ -147,7 +149,3 @@ constant under a `unix` tag is invisible to a local `go build`.
   on purpose for existing scripts; each carries an inline comment saying why.
 - New config keys must work through all three channels: environment,
   `config.yaml`, and the embedded defaults.
-
-Source URL identity normalizes scheme and host case, root/trailing slashes,
-fragments and default HTTP/HTTPS ports (80/443), including IPv6 hosts.
-Non-default ports remain distinct.

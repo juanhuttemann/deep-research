@@ -27,40 +27,30 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
-- Bound each SearXNG query to one minute across discovery and all fallbacks,
-  respecting shorter caller deadlines.
-- Finalizing model findings no longer mutates the caller's input slice.
-
-- Ignore trailing slashes in Firecrawl base URLs so scrape paths contain
-  a single separator.
-
-- `make verify` and `make lint` check formatting without rewriting files;
-  `make fmt` still applies formatting fixes.
-
-- Create `.env` and generated SearXNG secret settings with owner-only
-  permissions (`0600`); preserve existing files.
-
-- Reap desktop notification processes after they finish.
-
-- Treat default HTTP/HTTPS ports as the same source URL when deduplicating.
-- Trim query text before clipping words so leading spaces cannot split a word.
-
-- Warn when PDF export replaces unsupported characters with `?`; Markdown
-  and JSON retain the full Unicode text. Document the PDF font limitation.
-
-- Version bundled prompts and warn when a loaded `agent.yaml` is stale or
-  missing phase instructions, while preserving custom prompts.
-
-- Document doctor's worst-case request budgets, the current excerpt helper,
-  and the heartbeat limits of unstreamed LLM search.
-
-- Repair accepts at most one replacement for each blocked statement.
-
-- A failed or cancelled public SearXNG discovery no longer poisons later searches.
-
-- Cancellation during provider connection setup remains a cancelled run.
-- Provider and doctor errors omit credentials embedded in endpoint URLs.
-
+- Cancelling a run while a model call is still connecting ends it
+  `cancelled`, not `failed` with "cannot reach the model provider".
+- Credentials in `OPENAI_BASE_URL` no longer appear in provider or `doctor`
+  errors, which reach stderr, `--jsonl` and the run history.
+- One failed or cancelled lookup of public SearXNG instances no longer fails
+  every later search in the run; the next query looks again. Each search is
+  bounded to one minute across the lookup and every instance it tries.
+- The repair pass keeps one revision per blocked statement. A second one was
+  also approved, and the answer stated two replacements for one statement.
+- An `agent.yaml` from an older release warns on stderr. Its prompts were
+  used silently; an old fact-check prompt returned no verdicts, and every
+  answer said the evidence did not establish its conclusions.
+- A report with text the PDF font cannot show (Cyrillic, Greek, CJK, ...)
+  warns that the `.pdf` shows it as `?`; the `.md` and `.json` keep it.
+- `http://host:80/x` and `http://host/x` are one source, not two.
+- A finished desktop notification no longer leaves a zombie process.
+- `.env` and the generated `searxng/settings.yml`, which holds a secret key,
+  are created readable by their owner only.
+- A trailing slash on `FIRECRAWL_URL` no longer doubles the slash in the
+  scrape path.
+- `make verify` reports unformatted files instead of rewriting them, so it
+  fails where CI fails; `make fmt` rewrites.
+- `doctor`'s request budgets for LLM search are documented as it prints
+  them (quick 19, standard 21, deep 25).
 - An answer cut off at the model's output limit fails the phase instead of
   being parsed as if complete. A cut-off report is still kept.
 - A page already cited with its full text is not fetched again by later

@@ -173,7 +173,8 @@ func TestStalePromptFilesDoNotSilentlyOverrideCurrentSchemas(t *testing.T) {
 	}{
 		{"missing version", complete, true},
 		{"old version", "prompts_version: -1\n" + complete, true},
-		{"missing phase", "prompts_version: 1\n" + strings.ReplaceAll(complete, "planner_instructions: custom planner\n", ""), true},
+		// A missing phase falls back to the current prompt, so it is not stale.
+		{"missing phase", "prompts_version: 1\n" + strings.ReplaceAll(complete, "planner_instructions: custom planner\n", ""), false},
 		{"current custom prompts", "prompts_version: 1\n" + complete, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

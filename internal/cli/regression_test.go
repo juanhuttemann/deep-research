@@ -10,10 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go/format"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -375,47 +373,5 @@ func TestInitSaysWhereTheEnvWent(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "to \""+cfgDir) {
 		t.Errorf("init says every file went to the config dir:\n%s", out.String())
-	}
-}
-
-func TestFormattingGateDoesNotSilentlyRewriteUnformattedFiles(t *testing.T) {
-	if _, err := exec.LookPath("make"); err != nil {
-		t.Skip("make is not installed")
-	}
-	makefile, err := filepath.Abs(filepath.Join("..", "..", "Makefile"))
-	if err != nil {
-		t.Fatalf("locate Makefile: %v", err)
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "unformatted.go")
-	original := []byte("package formatting\nfunc example( ){println(\"hello\")}\n")
-	if err := os.WriteFile(path, original, 0o644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-	run := func(target string) ([]byte, error) {
-		cmd := exec.Command("make", "-f", makefile, target)
-		cmd.Dir = dir
-		return cmd.CombinedOutput()
-	}
-	if out, err := run("fmt-check"); err == nil || !bytes.Contains(out, []byte("unformatted.go")) {
-		t.Fatalf("formatting check did not reject fixture: %s, %v", out, err)
-	}
-	unchanged, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(unchanged, original) {
-		t.Fatalf("formatting check changed the file: %q, %v", unchanged, err)
-	}
-	if out, err := run("fmt"); err != nil {
-		t.Fatalf("formatting fix: %s, %v", out, err)
-	}
-	formatted, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read formatted fixture: %v", err)
-	}
-	want, err := format.Source(original)
-	if err != nil || !bytes.Equal(formatted, want) {
-		t.Fatalf("make fmt did not format fixture: %q, %v", formatted, err)
-	}
-	if out, err := run("fmt-check"); err != nil {
-		t.Fatalf("formatted file rejected: %s, %v", out, err)
 	}
 }

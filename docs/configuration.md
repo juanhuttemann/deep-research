@@ -48,8 +48,8 @@ when OpenRouter retires it. Two consequences:
   optional reanalysis, repair and revision checking. LLM search adds up to
   2 queries per sub-topic and per follow-up. Worst-case totals are quick 19,
   standard 21 and deep 25 before retries.
-  `deep-research doctor` prints these worst-case budgets (7 with web search) and, for an OpenRouter key,
-  its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
+  `deep-research doctor` prints these worst-case budgets (7 with web
+  search) and, for an OpenRouter key, its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
   it names; the daily cap (`free-models-per-day`) fails at once with a
   message instead of burning the retries on a limit that clears only at
   00:00 UTC.
@@ -91,14 +91,14 @@ stray `DEEP_RESEARCH_*` variable left in a shell changes how runs behave;
 be ignored.
 
 Agent prompts live in `agent.yaml` in the same directory, one block per
-phase, so they can be edited without touching Go code. `prompts_version: 1`
-identifies the current parser schema. Loading a file with a missing or different
-version, or a missing phase block, warns on stderr; existing blocks still win,
-and missing blocks fall back to embedded defaults. Old analyzer and checker
-prompts can produce JSON that the current parsers cannot use. Compare your
-file with this release's `config/agent.yaml`, migrate custom instructions to
-the current output schemas, and only then set the version. `init` writes
-versioned defaults for new files and leaves existing files unchanged.
+phase, so they can be edited without touching Go code. A block left out
+falls back to the built-in prompt. `prompts_version: 1` marks the output
+schema the parsers expect: a file with a missing or different version warns
+on stderr and is still used, because an older analyzer or fact-check prompt
+can return JSON this release cannot read. Compare the file with this
+release's `config/agent.yaml`, bring your prompts to its output schemas, and
+only then set the version. `init` writes the current version into new files
+and leaves existing ones alone.
 
 ## Research modes
 

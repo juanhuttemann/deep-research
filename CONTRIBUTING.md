@@ -6,8 +6,8 @@
 make verify
 ```
 
-`verify` checks formatting without rewriting files, then runs vet, gocyclo (<15), ineffassign, golangci-lint, deadcode,
-`go test -race ./...`, and a check that no `.go` file is gitignored. Run it
+`verify` checks formatting without rewriting files, then runs vet, gocyclo
+(<15), ineffassign, golangci-lint, deadcode, `go test -race ./...`, and a check that no `.go` file is gitignored. Run it
 before considering a change done. Use `make fmt` to apply formatting fixes.
 
 A lint binary that is not installed is reported and skipped rather than

@@ -401,7 +401,7 @@ func headingKind(block string) int {
 }
 
 // truncateUTF8Bare cuts s to at most limit bytes on a rune boundary, with no
-// marker: the prompt builder that calls Excerpt marks the cut itself.
+// marker: the prompt builder that calls ExcerptFor marks the cut itself.
 func truncateUTF8Bare(s string, limit int) string {
 	if len(s) <= limit {
 		return s
