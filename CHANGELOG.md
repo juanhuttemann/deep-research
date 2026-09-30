@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Create `.env` and generated SearXNG secret settings with owner-only
+  permissions (`0600`); preserve existing files.
+
 - Reap desktop notification processes after they finish.
 
 - Treat default HTTP/HTTPS ports as the same source URL when deduplicating.

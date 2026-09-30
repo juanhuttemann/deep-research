@@ -10,7 +10,8 @@ Settings resolve in one order, highest first:
 
 The config directory is the first of these that exists:
 `$DEEP_RESEARCH_CONFIG_DIR`, `./config/`, `~/.config/deep-research/`.
-`deep-research init` writes the defaults there.
+`deep-research init` writes the defaults there. Newly created `.env` files
+use owner-only permissions (`0600`) on Unix; existing files are left alone.
 
 `.env` is looked up from the working directory upwards, stopping at the first
 one found and never climbing past the project root (a directory holding

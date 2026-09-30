@@ -17,7 +17,10 @@ search snippet, marked `snippet only`
 For SearXNG alone, `deep-research init --docker` writes a ready
 `docker-compose.yml` and settings file (JSON enabled, bound to localhost):
 `docker compose up -d`, then set `SEARXNG_URL=http://localhost:8888`. The
-sections below do the same by hand and add Firecrawl.
+generated `searxng/settings.yml` contains a secret and is created with
+owner-only permissions (`0600`) on Unix; the compose file remains `0644`.
+Existing files are left alone. The sections below do the same by hand and
+add Firecrawl.
 
 Follow the three sections in order. Each ends with a command that tells you
 whether that piece works, so you find a problem at the step that caused it.

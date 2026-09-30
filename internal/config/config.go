@@ -114,7 +114,7 @@ func Init() (dir string, created []string, err error) {
 		// existing .env left as-is
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return "", nil, statErr
-	} else if werr := os.WriteFile(envPath, []byte(EnvTemplate), 0o644); werr != nil {
+	} else if werr := os.WriteFile(envPath, []byte(EnvTemplate), 0o600); werr != nil {
 		return "", nil, werr
 	} else {
 		created = append(created, envPath)
@@ -166,9 +166,12 @@ func InitDocker(dir string) ([]string, error) {
 		return nil, err
 	}
 	var created []string
-	for _, f := range []struct{ path, content string }{
-		{filepath.Join(dir, "docker-compose.yml"), dockerCompose},
-		{filepath.Join(dir, "searxng", "settings.yml"), fmt.Sprintf(searxngSettings, hex.EncodeToString(secret))},
+	for _, f := range []struct {
+		path, content string
+		mode          fs.FileMode
+	}{
+		{filepath.Join(dir, "docker-compose.yml"), dockerCompose, 0o644},
+		{filepath.Join(dir, "searxng", "settings.yml"), fmt.Sprintf(searxngSettings, hex.EncodeToString(secret)), 0o600},
 	} {
 		if _, err := os.Stat(f.path); err == nil {
 			continue
@@ -178,7 +181,7 @@ func InitDocker(dir string) ([]string, error) {
 		if err := os.MkdirAll(filepath.Dir(f.path), 0o755); err != nil {
 			return created, err
 		}
-		if err := os.WriteFile(f.path, []byte(f.content), 0o644); err != nil {
+		if err := os.WriteFile(f.path, []byte(f.content), f.mode); err != nil {
 			return created, err
 		}
 		created = append(created, f.path)

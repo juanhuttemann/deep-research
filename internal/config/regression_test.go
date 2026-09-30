@@ -8,6 +8,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -228,5 +229,37 @@ func TestInitWritesCurrentPromptVersion(t *testing.T) {
 	_, warning := loadWithPromptWarning(t, string(raw))
 	if warning != "" {
 		t.Fatalf("new defaults warned: %s", warning)
+	}
+}
+
+func TestInitDoesNotCreateWorldReadableSecrets(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not supported on Windows")
+	}
+	dir := chdirTemp(t)
+	if _, _, err := Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	dockerDir := t.TempDir()
+	if _, err := InitDocker(dockerDir); err != nil {
+		t.Fatalf("InitDocker: %v", err)
+	}
+	for _, tc := range []struct {
+		path string
+		mode os.FileMode
+	}{
+		{".env", 0o600},
+		{filepath.Join(dockerDir, "searxng", "settings.yml"), 0o600},
+		{filepath.Join(dir, "config.yaml"), 0o644},
+		{filepath.Join(dir, "agent.yaml"), 0o644},
+		{filepath.Join(dockerDir, "docker-compose.yml"), 0o644},
+	} {
+		fi, err := os.Stat(tc.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", tc.path, err)
+		}
+		if fi.Mode().Perm() != tc.mode {
+			t.Errorf("%s permissions = %o, want %o", tc.path, fi.Mode().Perm(), tc.mode)
+		}
 	}
 }
