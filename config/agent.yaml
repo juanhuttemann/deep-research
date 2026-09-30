@@ -1,5 +1,7 @@
 # Agent prompts for deep research
 # One responsibility per agent, prompts here not in code.
+# Bump this version when the parsers require a new prompt schema.
+prompts_version: 1
 
 analyzer_instructions: |
   You are an analyzer agent. Given a research question and the findings

@@ -88,7 +88,14 @@ stray `DEEP_RESEARCH_*` variable left in a shell changes how runs behave;
 be ignored.
 
 Agent prompts live in `agent.yaml` in the same directory, one block per
-phase, so they can be edited without touching Go code.
+phase, so they can be edited without touching Go code. `prompts_version: 1`
+identifies the current parser schema. Loading a file with a missing or different
+version, or a missing phase block, warns on stderr; existing blocks still win,
+and missing blocks fall back to embedded defaults. Old analyzer and checker
+prompts can produce JSON that the current parsers cannot use. Compare your
+file with this release's `config/agent.yaml`, migrate custom instructions to
+the current output schemas, and only then set the version. `init` writes
+versioned defaults for new files and leaves existing files unchanged.
 
 ## Research modes
 

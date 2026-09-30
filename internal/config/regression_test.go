@@ -163,3 +163,70 @@ func TestInitDockerWritesALocalSearXNG(t *testing.T) {
 		t.Error("settings changed on a second run")
 	}
 }
+
+func TestStalePromptFilesDoNotSilentlyOverrideCurrentSchemas(t *testing.T) {
+	complete := "analyzer_instructions: custom analysis\nfact_checker_instructions: legacy checker\nsummarizer_instructions: custom summary\nsearch_instructions: custom search\nplanner_instructions: custom planner\n"
+	for _, tc := range []struct {
+		name, yaml string
+		warn       bool
+	}{
+		{"missing version", complete, true},
+		{"old version", "prompts_version: -1\n" + complete, true},
+		{"missing phase", "prompts_version: 1\n" + strings.ReplaceAll(complete, "planner_instructions: custom planner\n", ""), true},
+		{"current custom prompts", "prompts_version: 1\n" + complete, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, warning := loadWithPromptWarning(t, tc.yaml)
+			if strings.Contains(warning, "warning: agent.yaml") != tc.warn {
+				t.Fatalf("warning = %q, expected warning %v", warning, tc.warn)
+			}
+			if cfg.FactCheckerInstructions != "legacy checker" {
+				t.Fatalf("custom prompt overwritten: %q", cfg.FactCheckerInstructions)
+			}
+			if cfg.PlanningInstructions == "" {
+				t.Fatalf("missing phase did not fall back")
+			}
+		})
+	}
+}
+
+func loadWithPromptWarning(t *testing.T, yaml string) (Config, string) {
+	t.Helper()
+	dir := chdirTemp(t)
+	writeFile(t, filepath.Join(dir, "agent.yaml"), yaml)
+	out, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatalf("create stderr capture: %v", err)
+	}
+	defer out.Close()
+	previous := os.Stderr
+	os.Stderr = out
+	defer func() { os.Stderr = previous }()
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	warning, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return cfg, string(warning)
+}
+
+func TestInitWritesCurrentPromptVersion(t *testing.T) {
+	dir := chdirTemp(t)
+	if _, _, err := Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatalf("read agent.yaml: %v", err)
+	}
+	if !strings.Contains(string(raw), "prompts_version: 1\n") {
+		t.Fatalf("new prompt file lacks schema version")
+	}
+	_, warning := loadWithPromptWarning(t, string(raw))
+	if warning != "" {
+		t.Fatalf("new defaults warned: %s", warning)
+	}
+}
