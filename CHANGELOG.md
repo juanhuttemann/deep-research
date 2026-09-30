@@ -27,6 +27,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Reap desktop notification processes after they finish.
+
 - Treat default HTTP/HTTPS ports as the same source URL when deduplicating.
 - Trim query text before clipping words so leading spaces cannot split a word.
 

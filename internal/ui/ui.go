@@ -458,9 +458,21 @@ func cycleDepth(d DepthMode) DepthMode {
 // notify emits an OS notification when possible and always rings the bell.
 func notify(msg string) {
 	if path, err := exec.LookPath("notify-send"); err == nil {
-		_ = exec.Command(path, "Deep Research", msg).Start()
+		startNotification(exec.Command(path, "Deep Research", msg))
 	}
 	_, _ = os.Stderr.Write([]byte{0x07})
+}
+
+// Reap the child asynchronously so desktop notification latency does not
+// delay completion or leave a zombie behind while the CLI stays alive.
+func startNotification(cmd *exec.Cmd) <-chan struct{} {
+	done := make(chan struct{})
+	if err := cmd.Start(); err != nil {
+		close(done)
+		return done
+	}
+	go func() { _ = cmd.Wait(); close(done) }()
+	return done
 }
 
 // reportFiles lists the artifacts that were actually written. Printing the
