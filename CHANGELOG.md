@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Cancellation during provider connection setup remains a cancelled run.
+- Provider and doctor errors omit credentials embedded in endpoint URLs.
+
 - An answer cut off at the model's output limit fails the phase instead of
   being parsed as if complete. A cut-off report is still kept.
 - A page already cited with its full text is not fetched again by later

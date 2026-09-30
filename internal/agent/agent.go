@@ -516,7 +516,7 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 			}
 			return out.String(), nil
 		}
-		err = callErr
+		err = endpointError(a.baseURL, callErr)
 		// A request that never reached a server is not a request that needed
 		// more time, and the retry budget here buys time: each attempt doubles
 		// the deadline. Re-dialling a host that is not there just multiplies
@@ -639,8 +639,11 @@ func providerUnreachable(baseURL string, err error) error {
 	if baseURL == "" {
 		baseURL = "the configured provider"
 	}
-	return fmt.Errorf("cannot reach the model provider at %s (%s) — "+
-		"check OPENAI_BASE_URL and that the server is running", baseURL, reason)
+	return &endpointFailure{
+		detail: fmt.Sprintf("cannot reach the model provider at %s (%s) — "+
+			"check OPENAI_BASE_URL and that the server is running", safeEndpoint(baseURL), reason),
+		cause: err,
+	}
 }
 
 // progressInterval throttles streamed progress. The first update always

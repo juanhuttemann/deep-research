@@ -100,20 +100,20 @@ func getJSON(ctx context.Context, u, key string) ([]byte, error) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
-		return nil, err
+		return nil, endpointError(u, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	resp, err := providerHTTPClient().Do(req)
 	if err != nil {
-		return nil, err
+		return nil, endpointError(u, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: %d %s", u, resp.StatusCode, http.StatusText(resp.StatusCode))
+		return nil, fmt.Errorf("GET %s: %d %s", safeEndpoint(u), resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 	var raw json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("GET %s: %w", u, err)
+		return nil, fmt.Errorf("GET %s: %w", safeEndpoint(u), endpointError(u, err))
 	}
 	return raw, nil
 }
