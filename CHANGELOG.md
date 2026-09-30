@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Version bundled prompts and warn when a loaded `agent.yaml` is stale or
+  missing phase instructions, while preserving custom prompts.
+
 - Document doctor's worst-case request budgets, the current excerpt helper,
   and the heartbeat limits of unstreamed LLM search.
 
