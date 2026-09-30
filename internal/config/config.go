@@ -341,8 +341,12 @@ func loadAgentConfig(cfg *Config, a *viper.Viper) error {
 	if err := embedded.ReadConfig(strings.NewReader(embeddedConfig("agent.yaml"))); err != nil {
 		return fmt.Errorf("read embedded agent.yaml: %w", err)
 	}
-	if warning := promptSchemaWarning(a, embedded); warning != "" {
-		_, _ = fmt.Fprintln(os.Stderr, warning)
+	// The per-key fallback cannot catch a stale file: its old prompts are all
+	// present, and they win. Only the version says they predate the parsers.
+	// A missing key is not stale — it falls back to the current prompt.
+	if v := embedded.GetInt("prompts_version"); a.GetInt("prompts_version") != v {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: agent.yaml is not prompts_version %d; its prompts may not"+
+			" produce what this release parses — compare it with this release's config/agent.yaml\n", v)
 	}
 	for _, in := range []struct {
 		key string
@@ -364,20 +368,6 @@ func loadAgentConfig(cfg *Config, a *viper.Viper) error {
 		*in.dst = s
 	}
 	return nil
-}
-
-// Existing custom prompts remain authoritative, but their schema can be too
-// old for current parsers even when every legacy key is present.
-func promptSchemaWarning(a, defaults *viper.Viper) string {
-	current := defaults.GetInt("prompts_version")
-	stale := a.GetInt("prompts_version") != current
-	for _, key := range []string{"analyzer_instructions", "fact_checker_instructions", "summarizer_instructions", "search_instructions", "planner_instructions"} {
-		stale = stale || strings.TrimSpace(a.GetString(key)) == ""
-	}
-	if !stale {
-		return ""
-	}
-	return fmt.Sprintf("warning: agent.yaml prompts are out of date or incomplete (expected prompts_version: %d and all five phase instructions); existing prompts remain in use. Compare with this release's config/agent.yaml and update the schemas before setting prompts_version. init leaves existing files unchanged.", current)
 }
 
 func readFile(dirs []string, name, embedded string) (string, error) {

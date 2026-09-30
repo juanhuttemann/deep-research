@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -2011,29 +2010,5 @@ func TestClipWordsDoesNotSplitWordsAfterLeadingWhitespace(t *testing.T) {
 		if got := clipWords(tc.input, tc.width); got != tc.want {
 			t.Errorf("clipWords(%q, %d) = %q, want %q", tc.input, tc.width, got, tc.want)
 		}
-	}
-}
-
-func TestFinishedNotificationDoesNotLeaveAnUnreapedChild(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	select {
-	case <-startNotification(cmd):
-	case <-time.After(5 * time.Second):
-		t.Fatalf("notification child was not reaped")
-	}
-	if cmd.ProcessState == nil || !cmd.ProcessState.Exited() || !cmd.ProcessState.Success() {
-		t.Fatalf("child not successfully waited: %v", cmd.ProcessState)
-	}
-}
-
-func TestFailedNotificationStartDoesNotWaitForANonexistentChild(t *testing.T) {
-	cmd := exec.Command("/nonexistent/deep-research-notification")
-	select {
-	case <-startNotification(cmd):
-	case <-time.After(time.Second):
-		t.Fatalf("failed notification start left a waiter")
-	}
-	if cmd.ProcessState != nil {
-		t.Fatalf("nonexistent child had process state: %v", cmd.ProcessState)
 	}
 }

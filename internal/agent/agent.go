@@ -636,12 +636,15 @@ func providerUnreachable(baseURL string, err error) error {
 		// "connect: no route to host" -> "no route to host".
 		reason = strings.TrimPrefix(opErr.Err.Error(), "connect: ")
 	}
-	if baseURL == "" {
-		baseURL = "the configured provider"
+	// Redact before the fallback: the fallback is a label, not a URL, and
+	// parsing it as one escapes its spaces.
+	endpoint := safeEndpoint(baseURL)
+	if endpoint == "" {
+		endpoint = "the configured provider"
 	}
 	return &endpointFailure{
 		detail: fmt.Sprintf("cannot reach the model provider at %s (%s) — "+
-			"check OPENAI_BASE_URL and that the server is running", safeEndpoint(baseURL), reason),
+			"check OPENAI_BASE_URL and that the server is running", endpoint, reason),
 		cause: err,
 	}
 }

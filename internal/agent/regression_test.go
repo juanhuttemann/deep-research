@@ -934,6 +934,10 @@ func TestProviderFailuresDoNotExposeURLCredentials(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("redaction lost cause: %v", err)
 	}
+	// The fallback label once went through the redactor and came out escaped.
+	if err := providerUnreachable("", cause); !strings.Contains(err.Error(), "at the configured provider (") {
+		t.Fatalf("empty base URL: %v", err)
+	}
 }
 
 func TestDoctorFailuresDoNotExposeURLCredentials(t *testing.T) {

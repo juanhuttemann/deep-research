@@ -37,7 +37,7 @@ func NewFirecrawlClient(baseURL string, timeout time.Duration) *FirecrawlClient 
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{Timeout: timeout},
 		// Generous, because the prompts no longer take a page's opening: they
-		// take the passages that match the query (see Excerpt), and the answer
+		// take the passages that match the query (see ExcerptFor), and the answer
 		// to a query sits anywhere in the page. At 5000 bytes a documentation
 		// page was cut before its first section.
 		ContentLimit: 40000,
@@ -392,11 +392,10 @@ func CanonicalURL(raw string) string {
 		return strings.TrimRight(strings.TrimSpace(raw), "/")
 	}
 	u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+	// A default port names the same page as no port; trimming the suffix
+	// keeps an IPv6 host's brackets.
 	if (u.Scheme == "http" && u.Port() == "80") || (u.Scheme == "https" && u.Port() == "443") {
-		u.Host = u.Hostname()
-		if strings.Contains(u.Host, ":") {
-			u.Host = "[" + u.Host + "]"
-		}
+		u.Host = strings.TrimSuffix(u.Host, ":"+u.Port())
 	}
 	u.Fragment = ""
 	u.Path = strings.TrimRight(u.Path, "/")

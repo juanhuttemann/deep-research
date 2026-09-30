@@ -112,8 +112,8 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   Validation errors (an empty question, a bad `--mode`, no key) end on it
   too. A stream that stops without one means the process was killed.
 - During streamed planning, analysis, fact-check and summarization calls,
-  a `transient` `info` line arrives at least every five seconds — waiting for the model to start,
-  thinking, the count so far, or "no new output for Ns". While a reasoning
+  a `transient` `info` line arrives at least every five seconds — waiting
+  for the model to start, thinking, the count so far, or "no new output for Ns". While a reasoning
   model thinks, `detail` holds the status line, a newline, and the latest
   of its reasoning. Retries and which model is asked are `info` lines too,
   planning included. LLM-search calls are unstreamed: they emit a start line
