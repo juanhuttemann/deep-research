@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -912,5 +913,45 @@ func TestModelInfoRecordsTheServedModel(t *testing.T) {
 	}
 	if got := a.(*impl).ServedModels(); strings.Join(got, ",") != "google/gemma:free,meta/llama:free" {
 		t.Errorf("served models = %q", got)
+	}
+}
+
+func TestCancelledProviderDialPreservesCancellation(t *testing.T) {
+	cause := &net.OpError{Op: "dial", Err: context.Canceled}
+	if err := providerUnreachable("http://example.com", cause); !errors.Is(err, context.Canceled) {
+		t.Fatalf("dial cancellation lost: %v", err)
+	}
+}
+
+func TestProviderFailuresDoNotExposeURLCredentials(t *testing.T) {
+	endpoint := "https://user:sekret@example.com/v1"
+	cause := &url.Error{Op: "Post", URL: endpoint + "/chat/completions", Err: &net.OpError{Op: "dial", Err: context.Canceled}}
+	err := providerUnreachable(endpoint, cause)
+	if strings.Contains(err.Error(), "user:") || strings.Contains(err.Error(), "sekret") {
+		t.Fatalf("credentials exposed: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("redaction lost cause: %v", err)
+	}
+}
+
+func TestDoctorFailuresDoNotExposeURLCredentials(t *testing.T) {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusOK} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(code)
+			fmt.Fprint(w, "invalid JSON")
+		}))
+		endpoint := strings.Replace(srv.URL, "://", "://user:sekret@", 1)
+		_, err := getJSON(context.Background(), endpoint, "key")
+		srv.Close()
+		if err == nil || strings.Contains(err.Error(), "user:") || strings.Contains(err.Error(), "sekret") {
+			t.Fatalf("doctor error not redacted: %v", err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := getJSON(ctx, "http://user:sekret@example.com", "key")
+	if err == nil || strings.Contains(err.Error(), "sekret") || !errors.Is(err, context.Canceled) {
+		t.Fatalf("doctor transport error: %v", err)
 	}
 }

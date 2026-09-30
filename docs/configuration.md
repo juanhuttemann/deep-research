@@ -57,6 +57,8 @@ when OpenRouter retires it. Two consequences:
   `:free` ids in a run's `served_by` and the "free-model requests today"
   line in `doctor` show it for a real key.
 
+Provider errors omit URL userinfo from their messages, including doctor output.
+
 The legacy `OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL`
 names are still read as a fallback, so existing `.env` files keep working.
 

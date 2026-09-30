@@ -117,6 +117,7 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   model thinks, `detail` holds the status line, a newline, and the latest
   of its reasoning. Retries and which model is asked are `info` lines too,
   planning included.
+- Cancelling during provider connection setup also ends with `cancelled`.
 - The exit status is non-zero for `incomplete` and `failed`.
 - Use a fresh `--reports` directory per run: artifact names come from the
   question, so the same question asked twice into one directory overwrites
