@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- `make verify` and `make lint` check formatting without rewriting files;
+  `make fmt` still applies formatting fixes.
+
 - Create `.env` and generated SearXNG secret settings with owner-only
   permissions (`0600`); preserve existing files.
 
