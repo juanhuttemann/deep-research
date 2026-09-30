@@ -27,6 +27,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Bound each SearXNG query to one minute across discovery and all fallbacks,
+  respecting shorter caller deadlines.
+- Finalizing model findings no longer mutates the caller's input slice.
+
 - Ignore trailing slashes in Firecrawl base URLs so scrape paths contain
   a single separator.
 

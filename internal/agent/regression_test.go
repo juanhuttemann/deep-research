@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -953,5 +954,21 @@ func TestDoctorFailuresDoNotExposeURLCredentials(t *testing.T) {
 	_, err := getJSON(ctx, "http://user:sekret@example.com", "key")
 	if err == nil || strings.Contains(err.Error(), "sekret") || !errors.Is(err, context.Canceled) {
 		t.Fatalf("doctor transport error: %v", err)
+	}
+}
+
+func TestFinalizingFindingsDoesNotMutateTheCallerSlice(t *testing.T) {
+	input := []Finding{{Title: "empty"}, {Title: "kept", Content: "page text"}}
+	before := slices.Clone(input)
+	got := finalizeFindings(input, "query")
+	if len(got) != 1 || got[0].Query != "query" || got[0].Confidence != "medium" {
+		t.Fatalf("finalized findings: %+v", got)
+	}
+	if !reflect.DeepEqual(input, before) {
+		t.Fatalf("caller findings changed: %+v, want %+v", input, before)
+	}
+	got[0].Title = "changed output"
+	if !reflect.DeepEqual(input, before) {
+		t.Fatalf("output aliases caller findings: %+v", input)
 	}
 }

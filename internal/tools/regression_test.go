@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -369,5 +370,52 @@ func TestFirecrawlTrailingSlashDoesNotProduceADoubledAPIPath(t *testing.T) {
 		if err != nil || got.Content != "page text" {
 			t.Fatalf("suffix %q scrape: %+v, %v", suffix, got, err)
 		}
+	}
+}
+
+type queryDeadlineTransport func(*http.Request) (*http.Response, error)
+
+func (f queryDeadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSearchFallbackDoesNotResetTheWholeQueryDeadline(t *testing.T) {
+	c := NewSearXNGClient("https://first.example,https://second.example", time.Second)
+	var deadlines []time.Time
+	c.HTTPClient = &http.Client{Transport: queryDeadlineTransport(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		if !ok {
+			t.Fatalf("search request has no whole-query deadline")
+		}
+		deadlines = append(deadlines, deadline)
+		status, body := http.StatusServiceUnavailable, "unavailable"
+		if len(deadlines) == 2 {
+			status, body = http.StatusOK, `{"results":[{"title":"Result","url":"https://source.example","content":"text"}]}`
+		}
+		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	got, err := c.Search(context.Background(), "q")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("fallback search: %v, %v", got, err)
+	}
+	if len(deadlines) != 2 || !deadlines[0].Equal(deadlines[1]) {
+		t.Fatalf("fallback reset query deadline: %v", deadlines)
+	}
+	if time.Until(deadlines[0]) > maxQueryTimeout {
+		t.Fatalf("query exceeded its total budget: %v", deadlines[0])
+	}
+}
+
+func TestSearchDiscoveryUsesTheShorterCallerDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	want, _ := ctx.Deadline()
+	c := NewSearXNGClient("auto", time.Second)
+	c.discover = func(ctx context.Context) ([]string, error) {
+		if got, ok := ctx.Deadline(); !ok || !got.Equal(want) {
+			t.Fatalf("discovery deadline = %v, want caller deadline %v", got, want)
+		}
+		return nil, context.DeadlineExceeded
+	}
+	if _, err := c.Search(ctx, "q"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("discovery lost timeout: %v", err)
 	}
 }

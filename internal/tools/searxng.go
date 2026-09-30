@@ -31,6 +31,11 @@ const maxAutoInstances = 10
 // dead one must not hold a query for the model call's two minutes.
 const maxSearchTimeout = 30 * time.Second
 
+// A query may try multiple instances, but slow ones must not multiply its
+// wall time by the full candidate count. One minute allows two full request
+// timeouts and covers discovery and JSON/HTML fallback under one deadline.
+const maxQueryTimeout = 2 * maxSearchTimeout
+
 // errChallenge marks an instance that answered with a bot challenge instead
 // of results.
 var errChallenge = errors.New("bot challenge instead of results")
@@ -92,6 +97,8 @@ func NewSearXNGClient(baseURL string, timeout time.Duration) *SearXNGClient {
 
 // Search runs query on the first instance that answers.
 func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearXNGResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, maxQueryTimeout)
+	defer cancel()
 	insts, err := c.candidates(ctx)
 	if err != nil {
 		return nil, err
