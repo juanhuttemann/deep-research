@@ -27,6 +27,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Repair accepts at most one replacement for each blocked statement.
+
 - A failed or cancelled public SearXNG discovery no longer poisons later searches.
 
 - Cancellation during provider connection setup remains a cancelled run.

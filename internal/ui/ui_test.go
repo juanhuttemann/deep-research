@@ -1695,7 +1695,8 @@ func TestAcceptRevisionsOnlyOnSupportedClaims(t *testing.T) {
 	}}, nil, findings)
 	var many []agent.Recommendation
 	for range 10 {
-		many = append(many, agent.Recommendation{Revises: "r3", Choose: "x", When: "y", Claims: []string{"c1"}})
+		fresh.Recommendations = append(fresh.Recommendations, agent.Recommendation{Choose: "x", Blocked: "unsupported"})
+		many = append(many, agent.Recommendation{Revises: fmt.Sprintf("r%d", len(fresh.Recommendations)), Choose: "x", When: "y", Claims: []string{"c1"}})
 	}
 	if got := acceptRevisions(fresh, &agent.Analysis{Recommendations: many}); len(got) != maxRevisions {
 		t.Errorf("accepted %d revisions, want the cap of %d", len(got), maxRevisions)
