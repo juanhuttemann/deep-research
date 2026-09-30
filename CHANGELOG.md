@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Treat default HTTP/HTTPS ports as the same source URL when deduplicating.
+- Trim query text before clipping words so leading spaces cannot split a word.
+
 - Warn when PDF export replaces unsupported characters with `?`; Markdown
   and JSON retain the full Unicode text. Document the PDF font limitation.
 

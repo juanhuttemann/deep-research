@@ -1995,3 +1995,20 @@ func TestPDFExportDoesNotWarnForSupportedLatinText(t *testing.T) {
 		t.Fatalf("supported PDF text: path=%q warnings=%s", pdf, warnings.String())
 	}
 }
+
+func TestClipWordsDoesNotSplitWordsAfterLeadingWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		width int
+		want  string
+	}{
+		{"  ab cd ef", 6, "ab cd"},
+		{"  ab cd ef", 4, "ab"},
+		{"\t  ab cd ef  \n", 20, "ab cd ef"},
+		{"  café monde encore", 8, "café"},
+	} {
+		if got := clipWords(tc.input, tc.width); got != tc.want {
+			t.Errorf("clipWords(%q, %d) = %q, want %q", tc.input, tc.width, got, tc.want)
+		}
+	}
+}
