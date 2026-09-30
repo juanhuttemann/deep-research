@@ -137,7 +137,9 @@ so runs are not reproducible model-for-model — which is why every report
 records what served it. Free models are capped per minute and per UTC day; a
 run is 4 to 7 model requests with search (plan, analyze, a second analyze
 when follow-up searches found evidence, fact-check, a revision and its
-check when a recommendation was blocked, summarize), more with search off. Hitting the daily cap fails at once with a message
+check when a recommendation was blocked, summarize). With search off, the
+worst-case budgets before retries are quick 19, standard 21 and deep 25,
+as printed by `doctor`. Hitting the daily cap fails at once with a message
 instead of burning retries; a per-minute limit waits for the provider's
 `Retry-After`.
 

@@ -111,12 +111,15 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote.
   Validation errors (an empty question, a bad `--mode`, no key) end on it
   too. A stream that stops without one means the process was killed.
-- **Silence means stuck.** While a model call runs, a `transient` `info` line
-  arrives at least every five seconds — waiting for the model to start,
+- During streamed planning, analysis, fact-check and summarization calls,
+  a `transient` `info` line arrives at least every five seconds — waiting for the model to start,
   thinking, the count so far, or "no new output for Ns". While a reasoning
   model thinks, `detail` holds the status line, a newline, and the latest
   of its reasoning. Retries and which model is asked are `info` lines too,
-  planning included.
+  planning included. LLM-search calls are unstreamed: they emit a start line
+  and can stay silent until the per-call timeout (doubled on retry). Search
+  and scraping also have no periodic heartbeat; silence alone does not
+  establish that the process is stuck.
 - Cancelling during provider connection setup also ends with `cancelled`.
 - The exit status is non-zero for `incomplete` and `failed`.
 - Use a fresh `--reports` directory per run: artifact names come from the
