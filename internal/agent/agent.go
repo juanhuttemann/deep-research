@@ -509,9 +509,11 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		}
 		// An expired or revoked key stays rejected; retrying it sat through
 		// every doubled deadline — minutes — before reporting a certain 401.
+		// Only the provider's reason is kept: the SDK's error text is the
+		// request URL and the raw JSON body, which buried the one actionable
+		// line under a header dump.
 		if apiErr := (*openai.Error)(nil); errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
-			return "", fmt.Errorf("the provider rejected the API key — set a valid OPENAI_API_KEY"+
-				" (free keys: https://openrouter.ai/keys): %w", err)
+			return "", rejectedKey(apiErr.Message)
 		}
 		// The caller gave up (reader cancelled, or the whole run timed out):
 		// retrying would only stall a run nobody is waiting for.
@@ -579,6 +581,15 @@ func unreachable(err error) bool {
 	// without naming platform-specific errno values.
 	var opErr *net.OpError
 	return errors.As(err, &opErr) && opErr.Op == "dial"
+}
+
+// rejectedKey reports a 401 with the provider's reason, when it gave one.
+func rejectedKey(reason string) error {
+	if reason = strings.TrimSuffix(strings.TrimSpace(reason), "."); reason != "" {
+		reason = " (" + reason + ")"
+	}
+	return fmt.Errorf("the provider rejected the API key%s — set a valid OPENAI_API_KEY"+
+		" (free keys: https://openrouter.ai/keys)", reason)
 }
 
 // providerUnreachable turns a transport failure into something the reader can

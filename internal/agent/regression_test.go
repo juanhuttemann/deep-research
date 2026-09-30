@@ -681,6 +681,11 @@ func TestRejectedKeyFailsFast(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") || !strings.Contains(err.Error(), "API key expired") {
 		t.Errorf("err = %v, want the key named and the provider's reason kept", err)
 	}
+	// The SDK's text is the request line and the raw JSON body, which buried
+	// the one actionable line.
+	if err != nil && (strings.Contains(err.Error(), srv.URL) || strings.Contains(err.Error(), `"code"`)) {
+		t.Errorf("err = %v, want the provider's HTTP dump left out", err)
+	}
 	if n := calls.Load(); n != 1 {
 		t.Errorf("%d requests with a rejected key, want 1", n)
 	}

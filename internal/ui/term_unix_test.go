@@ -124,6 +124,37 @@ func TestSpinPaintsAFrameAndErasesOnStop(t *testing.T) {
 	}
 }
 
+// A planning status wider than the terminal wrapped, and \r only returned to
+// the wrapped row, so each repaint left a copy of the first row behind.
+func TestSpinFitsTheTerminalWidth(t *testing.T) {
+	master, slave := openPTY(t)
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 40}); err != nil {
+		t.Skipf("TIOCSWINSZ: %v", err)
+	}
+	set, stop := spin(slave, "Planning research")
+	set("asking deepseek/deepseek-v4.1-flash for sub-topics (up to 2m0s)")
+	time.Sleep(2 * tickInterval)
+	stop()
+
+	if err := master.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Skipf("SetReadDeadline: %v", err)
+	}
+	var out []byte
+	buf := make([]byte, 4096)
+	for !bytes.HasSuffix(out, []byte("\r"+eraseLine)) {
+		n, err := master.Read(buf)
+		if err != nil {
+			t.Fatalf("read %q: %v", out, err)
+		}
+		out = append(out, buf[:n]...)
+	}
+	for frame := range strings.SplitSeq(string(out), "\r") {
+		if w := dispWidth(strings.TrimPrefix(frame, eraseLine)); w >= 40 {
+			t.Errorf("frame is %d columns on a 40-column terminal: %q", w, frame)
+		}
+	}
+}
+
 // Keys typed while the plan was still being made were flushed silently when
 // raw mode began, so an Enter pressed during planning vanished and the brief
 // sat waiting with nothing to say why. They are still not acted on — no one

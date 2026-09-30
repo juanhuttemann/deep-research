@@ -115,8 +115,16 @@ func spin(w io.Writer, msg string) (set func(string), stop func()) {
 			mu.Unlock()
 			// The row is erased before each repaint, so a status that shrinks
 			// cannot leave the tail of a longer one behind it.
-			_, _ = fmt.Fprintf(w, "\r%s%s %s (%s)", eraseLine,
-				spinnerFrames[i%len(spinnerFrames)], line, formatDuration(time.Since(start)))
+			line = fmt.Sprintf("%s %s (%s)", spinnerFrames[i%len(spinnerFrames)], line, formatDuration(time.Since(start)))
+			// A frame wider than the terminal wraps, and \r only returns to
+			// the wrapped row: every repaint left a stale copy of the first
+			// row behind. The width is re-read each tick to follow a resize.
+			if f, ok := w.(*os.File); ok {
+				if _, cols := termSize(f); cols > 0 {
+					line = clip(line, cols-1)
+				}
+			}
+			_, _ = fmt.Fprintf(w, "\r%s%s", eraseLine, line)
 			select {
 			case <-done:
 				_, _ = fmt.Fprintf(w, "\r%s", eraseLine)

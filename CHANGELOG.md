@@ -5,6 +5,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- A rejected API key is reported as one line with the provider's reason
+  ("API key expired"), not followed by the request URL and raw JSON body.
+- The planning spinner is clipped to the terminal width. A status wider
+  than the terminal wrapped, and every repaint left a stale copy behind.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added
