@@ -6,9 +6,9 @@
 make verify
 ```
 
-`verify` is fmt, vet, gocyclo (<15), ineffassign, golangci-lint, deadcode,
+`verify` checks formatting without rewriting files, then runs vet, gocyclo (<15), ineffassign, golangci-lint, deadcode,
 `go test -race ./...`, and a check that no `.go` file is gitignored. Run it
-before considering a change done.
+before considering a change done. Use `make fmt` to apply formatting fixes.
 
 A lint binary that is not installed is reported and skipped rather than
 failing the build with `command not found`; `make tools` installs all four
@@ -20,7 +20,8 @@ Other targets:
 make build                  # stamps the version into the deep-research binary
 make test                   # go test -race ./...
 go test -race ./internal/ui # a single package
-make lint                   # fmt vet cyclo ineffassign golangci deadcode
+make fmt                    # apply gofmt fixes
+make lint                   # fmt-check vet cyclo ineffassign golangci deadcode
 make e2e                    # the built binary against the real provider and search
 ```
 

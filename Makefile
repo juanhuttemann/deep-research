@@ -1,4 +1,4 @@
-.PHONY: test e2e eval-replay build run fmt vet cyclo ineffassign golangci deadcode lint verify tools
+.PHONY: test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -34,6 +34,10 @@ run:
 
 fmt:
 	gofmt -l -w .
+
+fmt-check:
+	@files=$$(gofmt -l .) || exit 1; \
+	if [ -n "$$files" ]; then echo "$$files"; exit 1; fi
 
 vet:
 	go vet ./...
@@ -87,6 +91,6 @@ ignored-go:
 		echo "gitignored .go files:"; echo "$$ignored"; \
 		echo "anchor the .gitignore pattern (e.g. /deep-research, not deep-research)"; exit 1; fi
 
-lint: fmt vet cyclo ineffassign golangci deadcode
+lint: fmt-check vet cyclo ineffassign golangci deadcode
 
 verify: lint test ignored-go
