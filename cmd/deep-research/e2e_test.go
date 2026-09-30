@@ -72,6 +72,7 @@ func TestE2EResearchRun(t *testing.T) {
 	events, stderr, code := runCLI(t, dir, nil,
 		"-p", "What is SearXNG?", "--mode", "quick", "--jsonl", "--reports", filepath.Join(dir, "reports"))
 	done := events[len(events)-1]
+	t.Logf("final done: status=%s artifacts=%v", done.Status, done.Artifacts)
 	if done.Type != "done" {
 		t.Fatalf("last event is %q, not done\nstderr:\n%s", done.Type, stderr)
 	}
@@ -107,6 +108,7 @@ func TestE2ERejectedKey(t *testing.T) {
 		[]string{"OPENAI_BASE_URL=https://openrouter.ai/api/v1", "OPENAI_API_KEY=sk-or-v1-invalid"},
 		"-p", "q", "--mode", "quick", "--jsonl", "--reports", dir)
 	done := events[len(events)-1]
+	t.Logf("final done: status=%s artifacts=%v", done.Status, done.Artifacts)
 	if done.Type != "done" || done.Status != "failed" || !strings.Contains(done.Detail, "OPENAI_API_KEY") {
 		t.Errorf("last event = %+v, want done/failed naming OPENAI_API_KEY\nstderr:\n%s", done, stderr)
 	}

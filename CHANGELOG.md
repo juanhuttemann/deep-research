@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Ignore trailing slashes in Firecrawl base URLs so scrape paths contain
+  a single separator.
+
 - `make verify` and `make lint` check formatting without rewriting files;
   `make fmt` still applies formatting fixes.
 

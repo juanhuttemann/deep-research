@@ -352,3 +352,22 @@ func TestCanonicalURLDoesNotCountDefaultPortsAsDifferentSources(t *testing.T) {
 		}
 	}
 }
+
+func TestFirecrawlTrailingSlashDoesNotProduceADoubledAPIPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/scrape" {
+			t.Errorf("scrape path = %q, want /v2/scrape", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		fmt.Fprint(w, `{"success":true,"data":{"markdown":"page text","metadata":{"statusCode":200}}}`)
+	}))
+	defer srv.Close()
+	for _, suffix := range []string{"", "/", "///"} {
+		c := NewFirecrawlClient(srv.URL+suffix, time.Second)
+		got, err := c.ScrapeURL(context.Background(), "https://example.com")
+		if err != nil || got.Content != "page text" {
+			t.Fatalf("suffix %q scrape: %+v, %v", suffix, got, err)
+		}
+	}
+}

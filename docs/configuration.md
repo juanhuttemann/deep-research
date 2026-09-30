@@ -28,6 +28,8 @@ one found and never climbing past the project root (a directory holding
 | `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: search snippets only) |
 | `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none) | — |
 
+A trailing slash on `FIRECRAWL_URL` is ignored when building API paths.
+
 To run SearXNG and Firecrawl yourself, see [services.md](services.md).
 
 ### The default model
