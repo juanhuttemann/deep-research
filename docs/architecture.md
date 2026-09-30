@@ -147,3 +147,7 @@ constant under a `unix` tag is invisible to a local `go build`.
   on purpose for existing scripts; each carries an inline comment saying why.
 - New config keys must work through all three channels: environment,
   `config.yaml`, and the embedded defaults.
+
+Source URL identity normalizes scheme and host case, root/trailing slashes,
+fragments and default HTTP/HTTPS ports (80/443), including IPv6 hosts.
+Non-default ports remain distinct.

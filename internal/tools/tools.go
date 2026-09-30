@@ -392,6 +392,12 @@ func CanonicalURL(raw string) string {
 		return strings.TrimRight(strings.TrimSpace(raw), "/")
 	}
 	u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+	if (u.Scheme == "http" && u.Port() == "80") || (u.Scheme == "https" && u.Port() == "443") {
+		u.Host = u.Hostname()
+		if strings.Contains(u.Host, ":") {
+			u.Host = "[" + u.Host + "]"
+		}
+	}
 	u.Fragment = ""
 	u.Path = strings.TrimRight(u.Path, "/")
 	return u.String()

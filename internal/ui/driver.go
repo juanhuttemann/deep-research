@@ -899,6 +899,7 @@ func anchoredQuery(question, facet string) string {
 // it has to cut at all. A single word wider than the budget is cut mid-word:
 // some prefix of the subject beats none.
 func clipWords(s string, width int) string {
+	s = strings.TrimSpace(s)
 	if dispWidth(s) <= width {
 		return s
 	}

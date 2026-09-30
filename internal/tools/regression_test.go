@@ -336,3 +336,19 @@ func TestCancelledDiscoveryDoesNotPoisonLaterQueries(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalURLDoesNotCountDefaultPortsAsDifferentSources(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"HTTP://EXAMPLE.COM:80/x", "http://example.com/x"},
+		{"HTTPS://EXAMPLE.COM:443/x", "https://example.com/x"},
+		{"http://example.com:443/x", "http://example.com:443/x"},
+		{"https://example.com:8443/x", "https://example.com:8443/x"},
+		{"http://[2001:db8::1]:80/x", "http://[2001:db8::1]/x"},
+		{"https://[2001:db8::1]:443/x", "https://[2001:db8::1]/x"},
+		{"https://[2001:db8::1]:8443/x", "https://[2001:db8::1]:8443/x"},
+	} {
+		if got := CanonicalURL(tc.raw); got != tc.want {
+			t.Errorf("CanonicalURL(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
