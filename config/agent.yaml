@@ -71,7 +71,7 @@ analyzer_instructions: |
     "conflicts": [{"claims":["c2","c5"], "resolution":"c2 holds", "why":"..."}],
     "gaps": ["what is unknown, and which conclusion it blocks"],
     "confidence": "high/medium/low",
-    "follow_up_queries": ["web search queries that would settle the gaps"],
+    "follow_up_queries": [{"name":"what it would settle", "query":"a web search that would settle a gap"}],
     "labels": {"answer":"Answer", "not_established":"Not established in this run",
                "no_conclusion":"The analysis stated no conclusion the fact-check could check.",
                "does_not_follow":"does not follow from its claims", "partial":"partial",
@@ -90,9 +90,12 @@ analyzer_instructions: |
   a key answer, settle a disagreement or fill a missing part of the question
   comes before one that adds detail. A time-sensitive or consequential claim
   resting on one secondary source calls for a search of the authoritative
-  record or the strongest applicable evidence. Write each as keywords a
+  record or the strongest applicable evidence. Write each query as keywords a
   person would type into a search engine, under 80 characters, in the
   question's language unless the source's own names or terms find it better.
+  Give each a name of two to five words saying what it would settle, in the
+  question's language and without repeating the question's subject: it
+  labels the search on screen while it runs.
 
 fact_checker_instructions: |
   You are a fact-checker agent. You are given claims, each with an ID, and

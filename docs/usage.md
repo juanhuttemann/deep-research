@@ -70,12 +70,15 @@ one. The command then exits non-zero, so a script does not mistake it for a
 complete report.
 
 While a model call streams, the live frame shows one status line for it,
-replaced in place: how long it has waited for the first token, then the
-count so far in a unit that fits the phase — sections for the analysis,
-claims for the fact-check, words for the report — with the change since the
-last line, and "no new text for Ns" once the stream stops growing. These
-lines are not added to the activity tail, so they cannot push the source
-lines out of it; `--jsonl` still carries every one (`"transient": true`).
+replaced in place: how long it has waited for the model to start, then, for
+a reasoning model, how long it has been thinking with the latest of its
+reasoning wrapped in a few rows under the line, then progress in a unit that
+fits the phase — the part of the analysis being written and its claims so
+far, claims for the fact-check, words for the report — with the change since
+the last line, and "no new output for Ns" once the stream stops growing.
+These lines are not added to the activity tail, so they cannot push the
+source lines out of it; `--jsonl` still carries every one
+(`"transient": true`).
 See [Driving it from another program](#driving-it-from-another-program).
 
 ### Examples
@@ -109,9 +112,11 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   Validation errors (an empty question, a bad `--mode`, no key) end on it
   too. A stream that stops without one means the process was killed.
 - **Silence means stuck.** While a model call runs, a `transient` `info` line
-  arrives at least every five seconds — waiting for the first token, the
-  count so far, or "no new text for Ns". Retries and which model is asked
-  are `info` lines too, planning included.
+  arrives at least every five seconds — waiting for the model to start,
+  thinking, the count so far, or "no new output for Ns". While a reasoning
+  model thinks, `detail` holds the status line, a newline, and the latest
+  of its reasoning. Retries and which model is asked are `info` lines too,
+  planning included.
 - The exit status is non-zero for `incomplete` and `failed`.
 - Use a fresh `--reports` directory per run: artifact names come from the
   question, so the same question asked twice into one directory overwrites

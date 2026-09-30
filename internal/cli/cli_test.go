@@ -124,7 +124,8 @@ func newRecording(sources *int) *recordingAssistant {
 	return &recordingAssistant{Assistant: stub{}, sources: sources}
 }
 
-func (r *recordingAssistant) SetSourceBudget(n int) { *r.sources = n }
+func (r *recordingAssistant) SetSourceBudget(n int)         { *r.sources = n }
+func (r *recordingAssistant) SkipSources(func(string) bool) {}
 
 // A typo in --mode used to be accepted silently: anything that was not quick
 // or deep mapped to standard, so "--mode deeep" ran a standard-depth study
@@ -231,9 +232,10 @@ func (stub) ResearchDetail(_ context.Context, query string, _ []string) (*agent.
 	return &agent.ResearchDetail{Findings: []agent.Finding{{Query: query, Title: "stub", Content: "stub", Confidence: "low"}}}, nil
 }
 
-func (stub) SetSourceBudget(int)      {}
-func (stub) SetProgress(func(string)) {}
-func (stub) TokensUsed() int          { return 0 }
+func (stub) SetSourceBudget(int)           {}
+func (stub) SkipSources(func(string) bool) {}
+func (stub) SetProgress(func(string))      {}
+func (stub) TokensUsed() int               { return 0 }
 
 func always(a agent.Assistant) func() (agent.Assistant, error) {
 	return func() (agent.Assistant, error) { return a, nil }

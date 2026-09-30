@@ -11,7 +11,8 @@ research → analyze → [follow-up research → analyze] → fact-check → [re
 
 Each assistant phase is a single model call. There are no multi-turn loops
 inside an agent method. The follow-up round is the Driver's: it searches the
-first three of the analysis's follow-up queries as extra sub-agents, and
+first three of the analysis's follow-up queries as extra sub-agents, each
+named by the analysis (a query given without a name is its own name), and
 analyzes once more only if they found evidence. It never repeats.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
@@ -26,7 +27,11 @@ query or terms (the planner's fallback) searches the anchored question and
 keeps the engines' order.
 
 A page that several searches return is one source, counted and cited once;
-the queries that found it are kept on it. Each phase's prompt caps a source at
+the queries that found it are kept on it. Once a page is cited with its full
+text, later searches do not fetch it again and spend their budget on other
+pages (`tools.SearchTools.Skip`); a page only judged off-topic, cited from its
+snippet, or fetched past a branch's budget is still fetched by a search it
+suits. Each phase's prompt caps a source at
 1500 characters, and what fills them is the page's passages that match those
 queries (`tools.Excerpt`), not its opening, which on a documentation site is
 navigation and a cookie dialog. Each passage carries its section context,

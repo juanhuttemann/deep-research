@@ -7,11 +7,15 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // Live Firecrawl returned HTTP 200 and success:true for a target page that
@@ -244,5 +248,43 @@ func TestExcerptKeepsThePassagesSectionScope(t *testing.T) {
 	}
 	if len(got) > 1500 {
 		t.Errorf("excerpt is %d bytes, over the limit", len(got))
+	}
+}
+
+// A page another search had already read was scraped again and took one of
+// this search's slots, so the search came back one new page short.
+func TestSearchSkipsPagesTheRunHasBeforeTheBudget(t *testing.T) {
+	sx := newSearXNGServer(t, []map[string]any{
+		{"url": "https://a.example/1", "title": "A", "content": "a"},
+		{"url": "https://b.example/2", "title": "B", "content": "b"},
+		{"url": "https://c.example/3", "title": "C", "content": "c"},
+	})
+	var mu sync.Mutex
+	var scraped []string
+	fc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			URL string `json:"url"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		scraped = append(scraped, req.URL)
+		mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"markdown": "body", "title": "T"}})
+	}))
+	defer fc.Close()
+
+	st := NewSearchTools(sx.URL, fc.URL, 5*time.Second)
+	st.MaxURLsPerQuery = 2
+	st.Skip = func(url string) bool { return url == "https://a.example/1" }
+	res, err := st.Search(context.Background(), "q", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(scraped)
+	if !slices.Equal(scraped, []string{"https://b.example/2", "https://c.example/3"}) {
+		t.Errorf("scraped %v, want the two pages the run does not have", scraped)
+	}
+	if len(res.Known) != 1 || res.Known[0].URL != "https://a.example/1" {
+		t.Errorf("known = %+v, want the skipped page reported", res.Known)
 	}
 }

@@ -3,6 +3,9 @@ package ui
 import (
 	"context"
 	"errors"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 )
@@ -115,6 +118,7 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	if n := pl.Depth.SubTopics; n > 0 && len(topics) > n {
 		topics = topics[:n]
 	}
+	trimSharedSubject(question, topics)
 	return &Plan{
 		Question:   question,
 		Depth:      pl.Depth,
@@ -124,6 +128,62 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 }
 
 func (pl *Planner) MaxSourcesFor(n int) int { return maxSourcesFor(pl.Depth, n) }
+
+// trimSharedSubject drops the words every sub-topic name opens with while they
+// only restate the question. A planner that titled each sub-topic "Intel Arc
+// Pro B70 vs AMD Radeon AI Pro R9700 …" left rows that all read the same,
+// cut off before the part that differs, and anchored searches that sent the
+// subject twice and clipped the facet off the end.
+//
+// ponytail: a word prefix only; a subject restated at the end of each name,
+// or a shared prefix that leaves a stray connector ("vs AMD …"), stays as is.
+func trimSharedSubject(question string, topics []SubTopic) {
+	if len(topics) < 2 {
+		return
+	}
+	names := make([][]string, len(topics))
+	for i, t := range topics {
+		names[i] = strings.Fields(t.Name)
+	}
+	n := sharedSubjectWords(question, names)
+	if n == 0 {
+		return
+	}
+	for i := range topics {
+		rest := names[i][n:]
+		for len(rest) > 1 && bareWord(rest[0]) == "" {
+			rest = rest[1:] // a separator left behind: "… R9700 — Pricing"
+		}
+		topics[i].Name = upperFirst(strings.Join(rest, " "))
+	}
+}
+
+// sharedSubjectWords counts the leading words that every name shares and the
+// question contains. Every name keeps at least one word of its own.
+func sharedSubjectWords(question string, names [][]string) int {
+	asked := map[string]bool{}
+	for _, w := range strings.Fields(question) {
+		asked[bareWord(w)] = true
+	}
+	for n := 0; ; n++ {
+		for _, ws := range names {
+			if n >= len(ws)-1 || bareWord(ws[n]) != bareWord(names[0][n]) || !asked[bareWord(ws[n])] {
+				return n
+			}
+		}
+	}
+}
+
+// bareWord is w lowercased without the punctuation around it, so "R9700:"
+// and "r9700" are the same word.
+func bareWord(w string) string {
+	return strings.ToLower(strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }))
+}
+
+func upperFirst(s string) string {
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[size:]
+}
 
 // maxSourcesFor is the whole-run source budget for depth d across n
 // sub-agents. DepthMode.MaxSources is a per-sub-agent number, so the tiers

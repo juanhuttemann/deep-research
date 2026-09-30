@@ -5,8 +5,44 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- A reasoning model's thinking is shown while it runs: the latest of it,
+  wrapped in up to five rows under the status line. The status read
+  "waiting for the first token" for the whole of it, often minutes,
+  because the reasoning streams separately from the answer and was
+  dropped. Logs and plain output keep the status line alone.
+- The analysis status names the part being written ("drawing
+  conclusions · 12 claims") instead of counting "sections".
+- "waiting for the first token" is now "waiting for the model to start",
+  and "no new text" is "no new output".
+- A sub-agent row counts "12 sources" (or "1 source"), not "12 src".
+- The analysis and the fact-check are no longer requested in JSON mode
+  (`response_format: json_object`). In that mode the provider held a
+  reasoning model's thinking back and sent it in one piece after a minute
+  of silence, so the wait showed nothing; without it the thinking streams
+  from the first second. Output that comes back as broken JSON (a
+  trailing comma, an unescaped quote) is repaired with
+  `github.com/kaptinlin/jsonrepair` before it is given up on.
+
 ### Fixed
 
+- An answer cut off at the model's output limit fails the phase instead of
+  being parsed as if complete. A cut-off report is still kept.
+- A page already cited with its full text is not fetched again by later
+  searches, and its slot goes to a page the run has not read. A run
+  fetched 35 pages to cite 20. The later query is still recorded on the
+  page, and a page judged off-topic for one sub-topic, or cited from its
+  snippet alone, is still fetched by another.
+- Follow-up searches are named by the analysis ("LLM inference
+  benchmarks"), not after their query, which was cut off at the name
+  column beside the same query in full. A query given without a name, as
+  older analyses and custom instructions do, is still its own name.
+- Sub-topic names that all open with the question's subject ("Intel Arc
+  Pro B70 vs AMD Radeon AI Pro R9700 …") lose it. The live rows were cut
+  off before the part that differs and all read the same, and the search
+  anchored on each name sent the subject twice and lost the facet to the
+  query length limit.
 - A rejected API key is reported as one line with the provider's reason
   ("API key expired"), not followed by the request URL and raw JSON body.
 - The planning spinner is clipped to the terminal width. A status wider

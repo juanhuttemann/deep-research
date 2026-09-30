@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kaptinlin/jsonrepair"
 	"github.com/microsoft/agent-framework-go/agent"
 	"github.com/microsoft/agent-framework-go/provider/openaiprovider"
 	"github.com/openai/openai-go/v3"
@@ -88,6 +91,10 @@ type Analysis struct {
 	Gaps       []string `json:"gaps"`
 	Confidence string   `json:"confidence"`
 	FollowUp   []string `json:"follow_up"`
+	// FollowUpNames titles each follow-up query, keyed by the query, for the
+	// sub-agent that searches it. A follow-up named after its query showed a
+	// row cut off at the name column; a query with no name keeps that.
+	FollowUpNames map[string]string `json:"follow_up_names,omitempty"`
 	// The decision the analysis reached, as data the later phases can check
 	// and render. An answer string alone let the analysis list facts, name
 	// disagreements and stop: nothing asked it to resolve them into an answer,
@@ -243,6 +250,10 @@ type Assistant interface {
 	// fixed per-query limit bounds every run identically, and picking a deeper
 	// tier changes the estimates but never the research.
 	SetSourceBudget(perQuery int)
+	// SkipSources names the pages the run already has in full, so a search
+	// does not fetch them again or spend its budget on them. See
+	// tools.SearchTools.Skip.
+	SkipSources(skip func(url string) bool)
 	// SetProgress wires the progress logger so each sub-step (the model call
 	// and, when configured, each search/scrape) reports where and what it
 	// is doing. A nil logger disables sub-step logging.
@@ -268,6 +279,9 @@ type ResearchDetail struct {
 	// Skipped are results the search tools judged off-topic and never
 	// fetched, carried so the run can report what it ignored.
 	Skipped []SkippedSource `json:"skipped,omitempty"`
+	// Known are relevant results the run already had in full, not fetched
+	// again (see SkipSources).
+	Known []SkippedSource `json:"known,omitempty"`
 }
 
 // SkippedSource is a search result rejected as off-topic before any fetch.
@@ -340,9 +354,9 @@ func New(cfg Config) (Assistant, error) {
 	}
 
 	// newRunJSON constrains the model to emit a JSON object
-	// (response_format=json_object). Search/analysis/fact-check/planner all
-	// parse JSON back out, so forcing structured output stops freeform models
-	// from emitting prose that the parser cannot recover.
+	// (response_format=json_object). Search and the planner parse JSON back
+	// out, so forcing structured output stops freeform models from emitting
+	// prose that the parser cannot recover.
 	newRunJSON := func(a *agent.Agent) runFunc {
 		return func(ctx context.Context, prompt string) (string, error) {
 			return impl.call(ctx, a, prompt,
@@ -360,16 +374,19 @@ func New(cfg Config) (Assistant, error) {
 			return impl.callStreaming(ctx, a, prompt, impl.streamProgress(label, unit), opts...)
 		}
 	}
-	jsonFormat := agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"})
-
 	if cfg.PlanningInstructions == "" {
 		cfg.PlanningInstructions = defaultPlanningInstructions
 	}
 	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions))
-	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions), "analyzing",
-		entriesUnit("section so far", "sections so far", "answer", "name", "claim", "choose", "gaps", "follow_up", "follow_up_queries"), jsonFormat)
+	// The analysis and the fact-check are not sent in JSON mode, though both
+	// are parsed as JSON. In that mode the provider held back a reasoning
+	// model's thinking and sent it in one piece after a minute of silence;
+	// without it the same request streamed its thinking from the first second.
+	// Their prompts ask for JSON only, and jsonPayloads repairs what comes back
+	// broken.
+	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions), "analyzing", analysisUnit)
 	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions), "fact-checking",
-		entriesUnit("claim checked", "claims checked", "claim"), jsonFormat)
+		entriesUnit("claim checked", "claims checked", "claim"))
 	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions), "writing the report", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
 	// it, so the wait is dead air unless the run can say how much of the plan
@@ -377,7 +394,7 @@ func New(cfg Config) (Assistant, error) {
 	planner := newAgent("planner", cfg.PlanningInstructions)
 	impl.plan = func(ctx context.Context, prompt string) (string, error) {
 		reported := 0
-		return impl.callStreaming(ctx, planner, prompt, func(partial string) {
+		return impl.callStreaming(ctx, planner, prompt, func(partial, _ string) {
 			// Report on whole sub-topics, not on every chunk: a counter that
 			// moves once per token is noise, and the name key is the first
 			// thing complete enough to count.
@@ -435,16 +452,17 @@ type impl struct {
 // Usage is the catch: an OpenAI-compatible API reports tokens for a streamed
 // call only when stream_options.include_usage is set, so streaming without it
 // would quietly drop the planner's tokens from the run total.
-func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string, progress func(partial string), opts ...agent.Option) (string, error) {
+func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string, progress func(partial, thinking string), opts ...agent.Option) (string, error) {
 	streamOpts := append([]agent.Option{
 		agent.Stream(true),
 		openaiprovider.ChatCompletionNewParams(openai.ChatCompletionNewParams{
 			StreamOptions: openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)},
 		}),
 	}, opts...)
-	report, stop := tickProgress(progress, progressTick)
+	var th thoughts
+	report, stop := tickProgress(func(p string) { progress(p, th.String()) }, progressTick)
 	report("") // the wait starts now, before the first byte arrives
-	out, err := a.callWith(ctx, ag, prompt, report, streamOpts...)
+	out, err := a.callWith(context.WithValue(ctx, reasoningKey{}, th.add), ag, prompt, report, streamOpts...)
 	stop()
 	// Not every OpenAI-compatible server honours stream:true — proxies and
 	// older local servers answer with a whole JSON body, the stream yields
@@ -490,6 +508,12 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		cancel()
 		if callErr == nil {
 			a.addUsage(out)
+			// A retry would stop at the same limit, so this is not retried.
+			// The text goes back with the error for a caller that can use a
+			// cut-off answer.
+			if out.FinishReason == "length" {
+				return out.String(), fmt.Errorf("%s: %w", ag.Name(), errCutOff)
+			}
 			return out.String(), nil
 		}
 		err = callErr
@@ -522,6 +546,12 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		}
 	}
 }
+
+// errCutOff is a model answer that stopped at the provider's output limit. For
+// the phases parsed as JSON it is a failure: jsonPayloads would repair the
+// cut-off text into a complete-looking object, and the claims and conclusions
+// after the cut would be missing without a trace.
+var errCutOff = errors.New("the model's answer was cut off at its output limit")
 
 // dialTimeout bounds establishing the connection to the provider. Left to the
 // operating system, a host that is simply not there is retried at the TCP
@@ -627,14 +657,16 @@ const progressTick = time.Second
 // Characters were the old unit: comparable across nothing, and for the JSON
 // phases mostly braces and keys.
 //
+// n is compared between lines for the delta; text is what the line shows.
+//
 // ponytail: words and entry counts are proxies. Real token counts arrive only
 // in the final chunk (stream_options.include_usage), so none is invented here.
-type progressUnit func(partial string) (n int, noun string)
+type progressUnit func(partial string) (n int, text string)
 
 // wordsUnit counts the words of prose — the report.
 func wordsUnit(p string) (int, string) {
 	n := len(strings.Fields(p))
-	return n, pick(n, "word", "words")
+	return n, fmt.Sprintf("%d %s", n, pick(n, "word", "words"))
 }
 
 // entriesUnit counts completed JSON entries by the keys that open them.
@@ -644,8 +676,42 @@ func entriesUnit(one, many string, keys ...string) progressUnit {
 		for _, k := range keys {
 			n += strings.Count(p, `"`+k+`"`)
 		}
-		return n, pick(n, one, many)
+		return n, fmt.Sprintf("%d %s", n, pick(n, one, many))
 	}
+}
+
+// analysisStages are the analysis's top-level keys in the order its schema
+// lists them, each with what the model is doing while it writes that part.
+var analysisStages = []struct{ key, doing string }{
+	{"interpretation", "reading the question"},
+	{"answer", "drafting the answer"},
+	{"claims", "listing what the sources show"},
+	{"conclusions", "drawing conclusions"},
+	{"recommendations", "writing recommendations"},
+	{"conflicts", "weighing conflicting sources"},
+	{"gaps", "noting what is still unknown"},
+	{"follow_up_queries", "planning follow-up searches"},
+	{"labels", "finishing"},
+}
+
+// analysisUnit says which part of the analysis is being written, and how many
+// claims it holds. It used to count "sections": a sum of unrelated keys that
+// told the reader nothing about what the model was doing.
+//
+// ponytail: the stage is the furthest schema key seen, so a model that writes
+// the keys out of order shows a stage that jumps; a JSON tokenizer would fix it.
+func analysisUnit(p string) (int, string) {
+	doing := analysisStages[0].doing
+	for _, s := range analysisStages {
+		if strings.Contains(p, `"`+s.key+`"`) {
+			doing = s.doing
+		}
+	}
+	n := strings.Count(p, `"claim"`)
+	if n == 0 {
+		return 0, doing
+	}
+	return n, fmt.Sprintf("%s · %d %s", doing, n, pick(n, "claim", "claims"))
 }
 
 // pick is the singular or plural noun for n.
@@ -657,26 +723,31 @@ func pick(n int, one, many string) string {
 }
 
 // streamProgress reports a streamed phase on the status channel.
-func (a *impl) streamProgress(label string, unit progressUnit) func(string) {
+func (a *impl) streamProgress(label string, unit progressUnit) func(partial, thinking string) {
 	return newStreamReporter(label, unit, time.Now, a.status)
 }
 
 // newStreamReporter turns partial responses into progress lines: a ticking
-// wait for the first token, the count in the phase's unit with the delta
-// since the last line, and a stall notice once the text stops growing. The
-// stall line is the one that matters: without it a dead stream looked exactly
-// like a slow one until the call deadline gave up minutes later.
+// wait for the model to start, what it is thinking while it reasons, the
+// count in the phase's unit with the delta since the last line, and a stall
+// notice once nothing grows. The stall line is the one that matters: without
+// it a dead stream looked exactly like a slow one until the call deadline gave
+// up minutes later.
+//
+// Thinking is the long part on a reasoning model, and it used to read
+// "waiting for the first token" for minutes: the reasoning was streaming the
+// whole time, but not as answer text.
 //
 // It is safe for concurrent use; tickProgress calls it from a ticker.
-func newStreamReporter(label string, unit progressUnit, now func() time.Time, log func(string)) func(string) {
+func newStreamReporter(label string, unit progressUnit, now func() time.Time, log func(string)) func(partial, thinking string) {
 	var (
-		mu                  sync.Mutex
-		start               = now()
-		lastLog, lastGrowth time.Time
-		logged, texted      bool
-		size, shown         int
+		mu                      sync.Mutex
+		start                   = now()
+		lastLog, lastGrowth     time.Time
+		logged, thought, texted bool
+		size, shown             int
 	)
-	return func(partial string) {
+	return func(partial, thinking string) {
 		mu.Lock()
 		defer mu.Unlock()
 		t := now()
@@ -686,13 +757,20 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 			lastLog, logged = t, true
 		}
 		switch {
-		case strings.TrimSpace(partial) == "":
+		case strings.TrimSpace(partial+thinking) == "":
 			if due {
-				say(fmt.Sprintf("waiting for the first token (%ds)", int(t.Sub(start).Seconds())))
+				say(fmt.Sprintf("waiting for the model to start (%ds)", int(t.Sub(start).Seconds())))
 			}
-		case len(partial) > size:
-			size, lastGrowth = len(partial), t
-			n, noun := unit(partial)
+		case len(partial)+len(thinking) > size:
+			size, lastGrowth = len(partial)+len(thinking), t
+			if strings.TrimSpace(partial) == "" {
+				if !thought || due {
+					thought = true
+					say(thinkingStatus(thinking, t.Sub(start)))
+				}
+				return
+			}
+			n, text := unit(partial)
 			if texted && !due {
 				return
 			}
@@ -701,12 +779,25 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 				delta = fmt.Sprintf(" (+%d in %ds)", n-shown, int(t.Sub(lastLog).Seconds()))
 			}
 			texted, shown = true, n
-			say(fmt.Sprintf("%d %s%s · %s", n, noun, delta, clockTime(t.Sub(start))))
+			say(fmt.Sprintf("%s%s · %s", text, delta, clockTime(t.Sub(start))))
 		case due && t.Sub(lastGrowth) >= 2*progressInterval:
-			say(fmt.Sprintf("no new text for %ds · %s", int(t.Sub(lastGrowth).Seconds()), clockTime(t.Sub(start))))
+			say(fmt.Sprintf("no new output for %ds · %s", int(t.Sub(lastGrowth).Seconds()), clockTime(t.Sub(start))))
 		}
 	}
 }
+
+// thinkingStatus is the status while the model reasons: one status line, then
+// the latest of the reasoning after a newline, for the live frame to wrap
+// under it. Quoted on the status row itself, it was cut to a fragment too
+// short to read.
+func thinkingStatus(thinking string, elapsed time.Duration) string {
+	words := strings.Fields(thinking)
+	return "thinking · " + clockTime(elapsed) + "\n" + strings.Join(words[max(0, len(words)-thinkingTailWords):], " ")
+}
+
+// thinkingTailWords is how much reasoning a status carries: more than the
+// few rows a frame shows under the status, whatever the terminal's width.
+const thinkingTailWords = 150
 
 // clockTime renders elapsed time as m:ss.
 func clockTime(d time.Duration) string {
@@ -807,8 +898,82 @@ func (a *impl) sniffServedModel(req *http.Request, next option.MiddlewareNext) (
 	resp, err := next(req)
 	if err == nil && resp != nil && resp.StatusCode == http.StatusOK && resp.Body != nil {
 		resp.Body = &modelSniffer{ReadCloser: resp.Body, record: a.addServed}
+		if think, ok := req.Context().Value(reasoningKey{}).(func(string)); ok {
+			resp.Body = &reasoningSniffer{ReadCloser: resp.Body, think: think}
+		}
 	}
 	return resp, err
+}
+
+// reasoningKey carries, in a streamed call's context, where the reasoning the
+// provider streams alongside the answer goes.
+type reasoningKey struct{}
+
+// reasoningSniffer passes a streamed body through, handing the reasoning delta
+// of each event to think. The agent framework keeps only the content delta,
+// so without this a reasoning model's thinking — most of the wait on the
+// long phases — never reached the status line at all.
+type reasoningSniffer struct {
+	io.ReadCloser
+	pending []byte
+	think   func(string)
+}
+
+func (s *reasoningSniffer) Read(p []byte) (int, error) {
+	n, err := s.ReadCloser.Read(p)
+	s.pending = append(s.pending, p[:n]...)
+	for {
+		line, rest, ok := bytes.Cut(s.pending, []byte("\n"))
+		if !ok {
+			break
+		}
+		s.pending = rest
+		if t := streamedReasoning(line); t != "" {
+			s.think(t)
+		}
+	}
+	return n, err
+}
+
+// streamedReasoning is the reasoning text in one server-sent event line.
+// OpenRouter names the field reasoning; DeepSeek and older vLLM name it
+// reasoning_content.
+func streamedReasoning(line []byte) string {
+	data, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
+	if !ok || !bytes.Contains(data, []byte(`"reasoning`)) {
+		return ""
+	}
+	var event struct {
+		Choices []struct {
+			Delta struct {
+				Reasoning        string `json:"reasoning"`
+				ReasoningContent string `json:"reasoning_content"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal(data, &event) != nil || len(event.Choices) == 0 {
+		return ""
+	}
+	return cmp.Or(event.Choices[0].Delta.Reasoning, event.Choices[0].Delta.ReasoningContent)
+}
+
+// thoughts collects a streamed call's reasoning: the response body writes it
+// while the progress ticker reads it.
+type thoughts struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (t *thoughts) add(s string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.b.WriteString(s)
+}
+
+func (t *thoughts) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.b.String()
 }
 
 func (a *impl) addServed(model string) {
@@ -861,6 +1026,12 @@ func (a *impl) SetSourceBudget(perQuery int) {
 	}
 }
 
+func (a *impl) SkipSources(skip func(url string) bool) {
+	if a.searchTools != nil {
+		a.searchTools.Skip = skip
+	}
+}
+
 func (a *impl) SetProgress(logf func(string)) {
 	a.logf = logf
 	if a.searchTools != nil {
@@ -884,7 +1055,10 @@ func (a *impl) status(msg string) {
 		a.statusf(msg)
 		return
 	}
-	a.log(msg)
+	// Only a frame that replaces the status in place can show the reasoning
+	// after its first line; a log would repeat most of it every five seconds.
+	line, _, _ := strings.Cut(msg, "\n")
+	a.log(line)
 }
 
 // ResearchDetail performs a web search and enriches results with scrape
@@ -907,6 +1081,7 @@ func (a *impl) ResearchDetail(ctx context.Context, query string, terms []string)
 			Findings: make([]Finding, len(res.Findings)),
 			Signals:  res.Signals,
 			Skipped:  res.Skipped,
+			Known:    res.Known,
 		}
 		for i, f := range res.Findings {
 			det.Findings[i] = Finding{Query: query, Title: f.Title, Content: f.Content, URL: f.URL, Confidence: f.Confidence}
@@ -952,7 +1127,9 @@ func (a *impl) FactCheck(ctx context.Context, claims string) (*FactCheckResult, 
 func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	a.log(fmt.Sprintf("%-10s  %s", "summarize", a.model))
 	out, err := a.summarizer(ctx, prompt)
-	if err != nil {
+	// A report cut off at the output limit is still most of a report, and it
+	// is prose: nothing repairs it into something it is not.
+	if err != nil && !errors.Is(err, errCutOff) {
 		return nil, err
 	}
 	out = stripCodeFence(strings.TrimSpace(out))
@@ -1168,7 +1345,8 @@ func parseSearchResults(out string, query string) []Finding {
 }
 
 // jsonPayloads returns the whole output plus its outermost JSON array and
-// object substrings, so a payload wrapped in prose is still found.
+// object substrings, so a payload wrapped in prose is still found, and then
+// repaired copies of each.
 func jsonPayloads(out string) []string {
 	payloads := []string{out}
 	if i := strings.Index(out, "["); i >= 0 {
@@ -1179,6 +1357,15 @@ func jsonPayloads(out string) []string {
 	if i := strings.Index(out, "{"); i >= 0 {
 		if j := strings.LastIndex(out, "}"); j > i {
 			payloads = append(payloads, out[i:j+1])
+		}
+	}
+	// Repaired copies come last, tried only once every candidate as written
+	// has failed. The analysis and the fact-check are not sent in JSON mode,
+	// so a trailing comma or an unescaped quote in a claim no longer costs the
+	// whole answer. A cut-off answer never gets here: errCutOff stops it first.
+	for _, p := range payloads {
+		if fixed, err := jsonrepair.Repair(p); err == nil && fixed != p {
+			payloads = append(payloads, fixed)
 		}
 	}
 	return payloads
@@ -1235,6 +1422,7 @@ func parseAnalysis(out string) *Analysis {
 		Gaps:            getStringSlice(m, "gaps", []string{}),
 		Confidence:      getString(m, "confidence", "medium"),
 		FollowUp:        followUps(m),
+		FollowUpNames:   followUpNames(m),
 		Topics:          parseTopics(m["topics"]),
 		Interpretation:  getString(m, "interpretation", ""),
 		Claims:          parseClaims(m["claims"]),
@@ -1362,11 +1550,41 @@ func parseJSONObject(out string) (map[string]any, bool) {
 // "follow_up_queries" and the struct is tagged "follow_up", so both spellings
 // are accepted rather than silently yielding an empty list for the one the
 // model was actually told to use.
+//
+// Each entry is a query, or an object with the query and a short name.
 func followUps(m map[string]any) []string {
-	if v := getStringSlice(m, "follow_up", nil); len(v) > 0 {
+	entries := followUpEntries(m)
+	queries := make([]string, len(entries))
+	for i, e := range entries {
+		queries[i], _ = e.(string)
+		if o, ok := e.(map[string]any); ok {
+			queries[i] = getString(o, "query", "")
+		}
+	}
+	return queries
+}
+
+// followUpNames are the names given with follow-up queries, by query.
+func followUpNames(m map[string]any) map[string]string {
+	var names map[string]string
+	for _, e := range followUpEntries(m) {
+		o, ok := e.(map[string]any)
+		if q, n := getString(o, "query", ""), getString(o, "name", ""); ok && q != "" && n != "" {
+			if names == nil {
+				names = map[string]string{}
+			}
+			names[q] = n
+		}
+	}
+	return names
+}
+
+func followUpEntries(m map[string]any) []any {
+	if v, ok := m["follow_up"].([]any); ok && len(v) > 0 {
 		return v
 	}
-	return getStringSlice(m, "follow_up_queries", []string{})
+	v, _ := m["follow_up_queries"].([]any)
+	return v
 }
 
 // stripCodeFence removes a markdown code fence (```lang ... ```) when a

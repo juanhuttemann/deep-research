@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -366,11 +367,12 @@ func TestStreamedPlanReportsProgressAndKeepsUsage(t *testing.T) {
 func TestPostResearchPhasesStreamProgress(t *testing.T) {
 	for _, phase := range []string{"analyze", "fact-check", "summarize"} {
 		t.Run(phase, func(t *testing.T) {
-			var streamed, askedForUsage atomic.Bool
+			var streamed, askedForUsage, jsonMode atomic.Bool
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				streamed.Store(strings.Contains(string(body), `"stream":true`))
 				askedForUsage.Store(strings.Contains(string(body), `"include_usage":true`))
+				jsonMode.Store(strings.Contains(string(body), `"response_format"`))
 				w.Header().Set("Content-Type", "text/event-stream")
 				flusher, _ := w.(http.Flusher)
 				for _, c := range []string{`{"answer":"an ans`, `wer","gaps":[],"confidence":"high"}`} {
@@ -393,26 +395,21 @@ func TestPostResearchPhasesStreamProgress(t *testing.T) {
 			var progress []string
 			a.SetProgress(func(msg string) { mu.Lock(); progress = append(progress, msg); mu.Unlock() })
 
-			switch phase {
-			case "analyze":
-				_, err = a.Analyze(context.Background(), "prompt")
-			case "fact-check":
-				_, err = a.FactCheck(context.Background(), "claims")
-			case "summarize":
-				_, err = a.Summarize(context.Background(), "prompt")
-			}
-			if err != nil {
+			if err := runPhase(a, phase); err != nil {
 				t.Fatal(err)
 			}
-			if !streamed.Load() || !askedForUsage.Load() {
-				t.Errorf("streamed=%v usageRequested=%v, want both", streamed.Load(), askedForUsage.Load())
+			// In JSON mode the provider held a reasoning model's thinking back
+			// and sent it in one piece after a minute of silence.
+			if !streamed.Load() || !askedForUsage.Load() || jsonMode.Load() {
+				t.Errorf("streamed=%v usageRequested=%v jsonMode=%v, want streamed with usage and without JSON mode",
+					streamed.Load(), askedForUsage.Load(), jsonMode.Load())
 			}
 			if got := a.TokensUsed(); got != 12 {
 				t.Errorf("reported %d tokens, want the provider's 12", got)
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			unit := map[string]string{"analyze": "section", "fact-check": "checked", "summarize": "word"}[phase]
+			unit := map[string]string{"analyze": "drafting the answer", "fact-check": "checked", "summarize": "word"}[phase]
 			var sawProgress bool
 			for _, msg := range progress {
 				if strings.Contains(msg, unit) {
@@ -424,6 +421,20 @@ func TestPostResearchPhasesStreamProgress(t *testing.T) {
 			}
 		})
 	}
+}
+
+// runPhase makes one post-research phase's model call.
+func runPhase(a Assistant, phase string) error {
+	var err error
+	switch phase {
+	case "analyze":
+		_, err = a.Analyze(context.Background(), "prompt")
+	case "fact-check":
+		_, err = a.FactCheck(context.Background(), "claims")
+	case "summarize":
+		_, err = a.Summarize(context.Background(), "prompt")
+	}
+	return err
 }
 
 // Not every OpenAI-compatible server honours stream:true — proxies and older
@@ -476,7 +487,7 @@ func TestStreamProgressSpeaksInUnitsWithDeltaAndStall(t *testing.T) {
 	report := newStreamReporter("writing the report", wordsUnit, func() time.Time { return now }, func(m string) { got = append(got, m) })
 	step := func(d time.Duration, partial string) {
 		now = t0.Add(d)
-		report(partial)
+		report(partial, "")
 	}
 	step(0, "")
 	step(3*time.Second, "")
@@ -489,11 +500,11 @@ func TestStreamProgressSpeaksInUnitsWithDeltaAndStall(t *testing.T) {
 	step(23*time.Second, "one two three four five six seven eight nine ten")
 
 	want := []string{
-		"writing the report — waiting for the first token (0s)",
-		"writing the report — waiting for the first token (6s)",
+		"writing the report — waiting for the model to start (0s)",
+		"writing the report — waiting for the model to start (6s)",
 		"writing the report — 3 words · 0:07",
 		"writing the report — 10 words (+7 in 5s) · 0:12",
-		"writing the report — no new text for 10s · 0:22",
+		"writing the report — no new output for 10s · 0:22",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("progress lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -503,8 +514,146 @@ func TestStreamProgressSpeaksInUnitsWithDeltaAndStall(t *testing.T) {
 // The JSON phases count completed entries, not the braces and keys around them.
 func TestEntriesUnitCountsJSONEntries(t *testing.T) {
 	n, noun := entriesUnit("claim checked", "claims checked", "claim")(`{"verified":[{"claim":"a","verified":true},{"claim":"b"`)
-	if n != 2 || noun != "claims checked" {
+	if n != 2 || noun != "2 claims checked" {
 		t.Errorf("entriesUnit = %d %q, want 2 claims checked", n, noun)
+	}
+}
+
+// A reasoning model streams its thinking before any answer text, and the
+// framework drops it: the analysis read "waiting for the first token" for
+// minutes while the model was working the whole time.
+func TestStreamProgressShowsThinking(t *testing.T) {
+	var got []string
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := t0
+	report := newStreamReporter("analyzing", analysisUnit, func() time.Time { return now }, func(m string) { got = append(got, m) })
+	step := func(d time.Duration, partial, thinking string) {
+		now = t0.Add(d)
+		report(partial, thinking)
+	}
+	const thought = "Check c3 against the spec sheet; the B70 lists 32 GB but the review says 24 GB so c3 and c5 conflict"
+	step(0, "", "")
+	step(2*time.Second, "", "Check c3")
+	step(4*time.Second, "", "Check c3 against the spec")
+	step(7*time.Second, "", thought)
+	step(9*time.Second, `{"interpretation":"x","answer":"y","claims":[{"id":"c1","claim":"z"`, thought)
+
+	want := []string{
+		"analyzing — waiting for the model to start (0s)",
+		"analyzing — thinking · 0:02\nCheck c3",
+		"analyzing — thinking · 0:07\n" + thought,
+		"analyzing — listing what the sources show · 1 claim · 0:09",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("progress lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The framework keeps only the content delta of a streamed event, so the
+// reasoning has to be read off the body on its way through.
+func TestStreamedReasoningReachesTheStatusLine(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning\":\"Weigh c3 against c5\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"The report.\"},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m", ModelCallTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var lines []string
+	a.(interface{ SetStatus(func(string)) }).SetStatus(func(msg string) { mu.Lock(); lines = append(lines, msg); mu.Unlock() })
+
+	sum, err := a.Summarize(context.Background(), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Report != "The report." {
+		t.Errorf("report = %q, want the content alone", sum.Report)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Contains(lines, "writing the report — thinking · 0:00\nWeigh c3 against c5") {
+		t.Errorf("no status carried the reasoning:\n%s", strings.Join(lines, "\n"))
+	}
+	if got := streamedReasoning([]byte(`data: {"choices":[{"delta":{"reasoning_content":"x"}}]}`)); got != "x" {
+		t.Errorf("reasoning_content = %q, want x", got)
+	}
+	// A log has no row to replace, so it keeps the status line alone.
+	var logged string
+	(&impl{logf: func(m string) { logged = m }}).status("writing the report — thinking · 0:00\nWeigh c3")
+	if logged != "writing the report — thinking · 0:00" {
+		t.Errorf("logged %q, want the status line without the reasoning", logged)
+	}
+}
+
+// Without JSON mode the model's syntax is its own. A trailing comma or an
+// unescaped quote inside a claim used to fail the parse and turn the whole
+// analysis into prose with no claims.
+func TestBrokenAnalysisJSONIsRepaired(t *testing.T) {
+	a := parseAnalysis(`Here it is: {"answer":"the B70","claims":[{"id":"c1","claim":"the "B70" has 32 GB","sources":["https://a.example"]},],}`)
+	if len(a.Claims) != 1 || a.Claims[0].Text != `the "B70" has 32 GB` {
+		t.Errorf("claims = %+v, want the one claim with its quotes", a.Claims)
+	}
+}
+
+// Repair would complete an answer cut off at the output limit into a valid
+// object, and the claims and conclusions after the cut would vanish without a
+// trace. The limit fails the JSON phases instead; the report keeps its text.
+func TestCutOffAnswerFailsTheJSONPhases(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"{\\\"answer\\\":\\\"x\\\",\\\"claims\\\":[{\\\"id\\\":\\\"c1\\\"}\"},\"finish_reason\":\"length\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+		ModelCallTimeout: 5 * time.Second, ModelCallRetries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Analyze(context.Background(), "p"); !errors.Is(err, errCutOff) {
+		t.Errorf("Analyze err = %v, want the cut-off reported", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("%d requests for an answer that stops at the same limit, want 1", n)
+	}
+	sum, err := a.Summarize(context.Background(), "p")
+	if err != nil || !strings.Contains(sum.Report, `"answer"`) {
+		t.Errorf("Summarize = %+v, %v; want the cut-off text kept", sum, err)
+	}
+}
+
+// A follow-up had only its query, so the row searching it was named after the
+// query and cut off. Each can now come with a name; a plain query still works.
+func TestFollowUpsCarryTheirNames(t *testing.T) {
+	a := parseAnalysis(`{"answer":"A","follow_up_queries":[{"name":"LLM inference","query":"b70 r9700 llama benchmark"},"plain query"]}`)
+	if len(a.FollowUp) != 2 || a.FollowUp[0] != "b70 r9700 llama benchmark" || a.FollowUp[1] != "plain query" {
+		t.Errorf("follow-ups = %q", a.FollowUp)
+	}
+	if len(a.FollowUpNames) != 1 || a.FollowUpNames["b70 r9700 llama benchmark"] != "LLM inference" {
+		t.Errorf("names = %v, want the one name given", a.FollowUpNames)
+	}
+}
+
+// The analysis progress counted "sections": a sum of unrelated keys that said
+// nothing about what the model was writing.
+func TestAnalysisUnitNamesTheStage(t *testing.T) {
+	for _, tc := range []struct{ partial, want string }{
+		{`{"interpretation":"`, "reading the question"},
+		{`{"interpretation":"x","answer":"`, "drafting the answer"},
+		{`{"claims":[{"id":"c1","claim":"a"},{"id":"c2","claim":"b"`, "listing what the sources show · 2 claims"},
+		{`{"claims":[{"claim":"a"}],"conclusions":[{"statement":"s","claims":["c1"]`, "drawing conclusions · 1 claim"},
+		{`{"claims":[{"claim":"a"}],"gaps":["`, "noting what is still unknown · 1 claim"},
+	} {
+		if _, got := analysisUnit(tc.partial); got != tc.want {
+			t.Errorf("analysisUnit(%s) = %q, want %q", tc.partial, got, tc.want)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
+	github.com/kaptinlin/jsonrepair v0.4.9
 	github.com/microsoft/agent-framework-go v0.0.0-20260814094849-726b03baa4f8
 	github.com/openai/openai-go/v3 v3.50.0
 	github.com/spf13/cobra v1.10.2
@@ -32,6 +33,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260601182631-00ed12fed2a6 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/gorilla/css v1.0.1 // indirect

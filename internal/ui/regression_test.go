@@ -1596,6 +1596,7 @@ func findEvent(t *testing.T, stream string, match func(Event) bool) (Event, bool
 type followUpAnalyzer struct {
 	*fakeAssistant
 	followUp []string
+	names    map[string]string
 	failNext bool
 	prompts  []string
 }
@@ -1603,7 +1604,7 @@ type followUpAnalyzer struct {
 func (f *followUpAnalyzer) Analyze(ctx context.Context, p string) (*agent.Analysis, error) {
 	f.prompts = append(f.prompts, p)
 	if len(f.prompts) == 1 {
-		return &agent.Analysis{Answer: "first", Confidence: "low", FollowUp: f.followUp}, nil
+		return &agent.Analysis{Answer: "first", Confidence: "low", FollowUp: f.followUp, FollowUpNames: f.names}, nil
 	}
 	if f.failNext {
 		return nil, errors.New("provider unavailable")
@@ -1669,6 +1670,35 @@ func TestFollowUpOnAKnownPageSteersItsExcerptWithoutCountingIt(t *testing.T) {
 	}
 	if last := sink.Timeline[len(sink.Timeline)-1]; last.Sources != 1 {
 		t.Errorf("sources = %d, want 1: a page found twice is one source", last.Sources)
+	}
+}
+
+// Follow-up rows were named after their search query, up to 80 characters,
+// and cut off at the 40-column name column beside the same query in full.
+func TestFollowUpRowsTakeTheAnalysisName(t *testing.T) {
+	named, unnamed := "Intel Arc Pro B70 vs AMD Radeon AI PRO R9700 benchmark LLM inference", "widgetdb limits"
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: []string{named, unnamed},
+		names: map[string]string{named: "LLM inference benchmarks"}}
+	sink := &MultiSink{}
+	plan := newTestPlan("quick", nil)
+	if _, err := NewDriver(fa, sink, nil, 1).Run(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]string{}
+	var searched []string
+	for _, e := range sink.Timeline {
+		if e.Type == SubAgent && strings.HasPrefix(e.SubID, "f") {
+			rows[e.SubID] = e.SubName
+		}
+		if e.Type == Search {
+			searched = append(searched, e.Query)
+		}
+	}
+	if rows["f1"] != "LLM inference benchmarks" || rows["f2"] != unnamed {
+		t.Errorf("follow-up rows = %v, want the analysis's name, or the query when it gave none", rows)
+	}
+	if !slices.Contains(searched, named) || !slices.Contains(searched, anchoredQuery(plan.Question, "LLM inference benchmarks")) {
+		t.Errorf("searched %q, want the query itself and the question plus the name", searched)
 	}
 }
 
@@ -1798,5 +1828,114 @@ func TestMalformedReanalysisKeepsTheFirst(t *testing.T) {
 	}
 	if len(res.Analysis.Claims) != 1 {
 		t.Errorf("the report was built on the malformed re-analysis: %+v", res.Analysis)
+	}
+}
+
+// Every sub-topic of "intel arc pro b70 vs amd radeon ai pro r9700" was named
+// "Intel Arc Pro B70 vs AMD Radeon AI Pro R9700 …": the rows read the same,
+// cut off before the part that differs, and the anchored search sent the
+// subject twice and lost the facet to the length limit.
+func TestSharedSubjectIsTrimmedFromSubTopicNames(t *testing.T) {
+	const question = "intel arc pro b70 vs amd radeon ai pro r9700"
+	for _, tc := range []struct{ names, want []string }{
+		{
+			[]string{"Intel Arc Pro B70 vs AMD Radeon AI Pro R9700: gaming benchmarks", "Intel Arc Pro B70 vs AMD Radeon AI Pro R9700 — Pricing", "Intel Arc Pro B70 vs AMD Radeon AI Pro R9700 AI inference"},
+			[]string{"Gaming benchmarks", "Pricing", "AI inference"},
+		},
+		// Each card named on its own: nothing is shared, nothing is dropped.
+		{[]string{"Intel Arc Pro B70 architecture", "AMD Radeon AI Pro R9700 architecture"}, []string{"Intel Arc Pro B70 architecture", "AMD Radeon AI Pro R9700 architecture"}},
+		// Shared, but not the question's words: it says something.
+		{[]string{"Pricing in Europe", "Pricing in the US"}, []string{"Pricing in Europe", "Pricing in the US"}},
+		// A name that is only the subject keeps a word of its own.
+		{[]string{"Intel Arc Pro B70", "Intel Arc Pro B70 drivers"}, []string{"B70", "B70 drivers"}},
+	} {
+		topics := make([]SubTopic, len(tc.names))
+		for i, n := range tc.names {
+			topics[i] = SubTopic{Name: n}
+		}
+		trimSharedSubject(question, topics)
+		for i, want := range tc.want {
+			if topics[i].Name != want {
+				t.Errorf("%q -> %q, want %q", tc.names[i], topics[i].Name, want)
+			}
+		}
+	}
+	if q := anchoredQuery(question, "Gaming benchmarks"); q != question+" Gaming benchmarks" {
+		t.Errorf("anchored query = %q, want the question and the facet once each", q)
+	}
+}
+
+// skippingSearch answers every query with the pages of its round, and asks
+// the run's skip check first, as the search tool does.
+type skippingSearch struct {
+	*fakeAssistant
+	skip    func(string) bool
+	pages   []agent.Finding
+	signals []agent.SourceSignal
+	offTop  []agent.SkippedSource
+	fetched []string
+}
+
+func (s *skippingSearch) SkipSources(skip func(string) bool) { s.skip = skip }
+
+func (s *skippingSearch) ResearchDetail(_ context.Context, query string, _ []string) (*agent.ResearchDetail, error) {
+	det := &agent.ResearchDetail{Skipped: s.offTop}
+	for i, f := range s.pages {
+		if s.skip != nil && s.skip(f.URL) {
+			det.Known = append(det.Known, agent.SkippedSource{URL: f.URL, Domain: s.signals[i].Domain})
+			continue
+		}
+		s.fetched = append(s.fetched, f.URL)
+		f.Query = query
+		det.Findings = append(det.Findings, f)
+		det.Signals = append(det.Signals, s.signals[i])
+	}
+	return det, nil
+}
+
+// A page already cited was downloaded again by every later search that found
+// it and took one of that search's slots. Only a page the run has in full is
+// skipped: one another sub-agent judged off-topic, or cited from its snippet
+// alone, is still fetched by a search it suits.
+func TestLaterSearchSkipsOnlyPagesTheRunHasInFull(t *testing.T) {
+	a := agent.Finding{Title: "A", Content: "full text", URL: "https://a.example/1"}
+	b := agent.Finding{Title: "B", Content: "snippet", URL: "https://b.example/2"}
+	c := agent.Finding{Title: "C", Content: "full text", URL: "https://c.example/3"}
+	search := &skippingSearch{fakeAssistant: &fakeAssistant{},
+		pages: []agent.Finding{a, b}, offTop: []agent.SkippedSource{{URL: c.URL, Domain: "c.example"}},
+		signals: []agent.SourceSignal{{URL: a.URL, Domain: "a.example", Status: "ok"}, {URL: b.URL, Domain: "b.example", Status: "degraded"}}}
+	sink := &MultiSink{}
+	d := NewDriver(search, sink, nil, 1)
+	round := func(name string) []agent.Finding {
+		plan, _ := newTestPlan("quick", []agent.SubTopic{{ID: name, Name: name, Query: name}}).WithSourcesPerTopic(3)
+		found, _ := d.research(context.Background(), plan)
+		return found
+	}
+	finance := round("finance")
+
+	fullB := b
+	fullB.Content = "full text"
+	search.pages, search.offTop, search.fetched = []agent.Finding{a, fullB, c}, nil, nil
+	search.signals = []agent.SourceSignal{{URL: a.URL, Domain: "a.example", Status: "ok"},
+		{URL: b.URL, Domain: "b.example", Status: "ok"}, {URL: c.URL, Domain: "c.example", Status: "ok"}}
+	gaming := round("gaming")
+
+	if !slices.Contains(search.fetched, b.URL) || !slices.Contains(search.fetched, c.URL) || slices.Contains(search.fetched, a.URL) {
+		t.Errorf("second round fetched %v, want the snippet-only and the off-topic page, not the one read in full", search.fetched)
+	}
+	if !slices.ContainsFunc(gaming, func(f agent.Finding) bool { return f.URL == c.URL }) {
+		t.Errorf("the page finance judged off-topic was not cited for gaming: %+v", gaming)
+	}
+	if !slices.ContainsFunc(sink.Timeline, func(e Event) bool { return e.URL == a.URL && e.Status == "duplicate" && e.SubID == "gaming" }) {
+		t.Error("the skipped page was not reported as already cited")
+	}
+	all := d.withFoundAgain(mergeFindings(append(finance, gaming...)))
+	for _, f := range all {
+		if f.URL == a.URL && !slices.Contains(f.AlsoFoundBy, "gaming") {
+			t.Errorf("page A lost the query that found it again: %+v", f)
+		}
+		if f.URL == b.URL && (f.Content != "full text" || f.Status != "ok") {
+			t.Errorf("page B = %+v, want the full text the second fetch got", f)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -43,6 +44,13 @@ type Driver struct {
 	// backend hands most of them the same pages; without this the run counts
 	// one page once per sub-agent and reports far more sources than it read.
 	citedURLs map[string]bool
+	// inFull is every cited page read in full, which a later search skips
+	// instead of fetching again. A page cited from its snippet alone is not in
+	// it: fetching it again is how it can still get its text.
+	inFull map[string]bool
+	// foundAgain is, per page, the queries that found it after it was read.
+	// The page is one source, but its excerpt covers what each asked of it.
+	foundAgain map[string][]string
 	// searchesOK and searchErr tell a run that found nothing apart from a run
 	// whose every search was refused: only the second is a failure.
 	searchesOK int
@@ -177,6 +185,56 @@ func (d *Driver) claimSource(url string) bool {
 	}
 	d.citedURLs[key] = true
 	return true
+}
+
+// noteInFull records a page read in full, for haveInFull.
+func (d *Driver) noteInFull(url string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.inFull == nil {
+		d.inFull = map[string]bool{}
+	}
+	d.inFull[tools.CanonicalURL(url)] = true
+}
+
+// haveInFull reports whether the run already read url in full. The search
+// tool asks it from its own goroutines.
+func (d *Driver) haveInFull(url string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.inFull[tools.CanonicalURL(url)]
+}
+
+// noteKnown reports the pages a search found that the run already had, as
+// the duplicates they are, and records the query on each. It returns how many.
+func (d *Driver) noteKnown(id, query string, known []agent.SkippedSource) int {
+	for _, k := range known {
+		d.emit(Event{Type: Verify, URL: k.URL, Domain: k.Domain, Status: "duplicate", SubID: id,
+			Line: "= " + k.Domain + " already cited"})
+		d.mu.Lock()
+		if d.foundAgain == nil {
+			d.foundAgain = map[string][]string{}
+		}
+		key := tools.CanonicalURL(k.URL)
+		d.foundAgain[key] = append(d.foundAgain[key], query)
+		d.mu.Unlock()
+	}
+	return len(known)
+}
+
+// withFoundAgain carries the queries noteKnown recorded onto their pages.
+func (d *Driver) withFoundAgain(findings []agent.Finding) []agent.Finding {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range findings {
+		f := &findings[i]
+		for _, q := range d.foundAgain[tools.CanonicalURL(f.URL)] {
+			if q != f.Query && !slices.Contains(f.AlsoFoundBy, q) {
+				f.AlsoFoundBy = append(f.AlsoFoundBy, q)
+			}
+		}
+	}
+	return findings
 }
 
 // detach stops the live display and hands the terminal back.
@@ -460,6 +518,11 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 	// allowance. Without this the search tool keeps its own fixed limit and
 	// the depth tier cannot widen a run, only narrow it.
 	d.Agent.SetSourceBudget(perSource)
+	// A page another sub-agent already read in full is not fetched again: it
+	// cost a second download and took a slot a new page could have had. Only
+	// cited pages count; one another sub-agent judged off-topic, or never
+	// reached within its budget, is still fetched by a search it suits.
+	d.Agent.SkipSources(d.haveInFull)
 
 	// Parallelism bounds how many sub-agents search at once. Without the
 	// semaphore a wide plan opens one connection per sub-topic to SearXNG and
@@ -503,7 +566,7 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 			uncovered = append(uncovered, sub.Name)
 		}
 	}
-	return mergeFindings(all), uncovered
+	return d.withFoundAgain(mergeFindings(all)), uncovered
 }
 
 // MaxFollowUps bounds the follow-up round to the analyzer's first few open
@@ -528,9 +591,12 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 	var subs []SubTopic
 	for _, q := range analysis.FollowUp {
 		if q = strings.TrimSpace(q); q != "" && len(subs) < MaxFollowUps {
-			// The query is the name too, so the fallback query a sub-agent
-			// anchors on the question is the question plus this query.
-			subs = append(subs, SubTopic{ID: "f" + strconv.Itoa(len(subs)+1), Name: q, Query: q})
+			// A follow-up named after its query showed a row cut off at the
+			// name column, the query repeated in full beside it. The analysis
+			// names each one; an unnamed query is still its own name. Either
+			// way the fallback search is the question plus the name.
+			name := cmp.Or(strings.TrimSpace(analysis.FollowUpNames[q]), q)
+			subs = append(subs, SubTopic{ID: "f" + strconv.Itoa(len(subs)+1), Name: name, Query: q})
 		}
 	}
 	if len(subs) == 0 || ctx.Err() != nil {
@@ -541,7 +607,7 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 	if len(extra) == 0 || ctx.Err() != nil {
 		return analysis, findings
 	}
-	findings = mergeFindings(append(findings, extra...))
+	findings = d.withFoundAgain(mergeFindings(append(findings, extra...)))
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Re-analyzing with the follow-up evidence"})
 	again, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, append(uncovered, unanswered...)))
 	if err != nil {
@@ -626,6 +692,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 			d.emit(Event{Type: Verify, URL: s.URL, Domain: s.Domain, Status: "offtopic", SubID: id,
 				Line: verifyLabel(agent.SourceSignal{URL: s.URL, Domain: s.Domain, Status: "offtopic"})})
 		}
+		duplicates += d.noteKnown(id, q, det.Known)
 		for si, f := range det.Findings {
 			// The depth tier's whole effect is this budget: stop once the
 			// sub-agent has taken its share of sources.
@@ -655,6 +722,9 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 			// duplication is visible, and neither counted nor cited again; it is
 			// still collected, so mergeFindings can carry this query onto the
 			// page and the model sees the passage this search was after.
+			if f.Status == "ok" {
+				d.noteInFull(f.URL)
+			}
 			if !d.claimSource(f.URL) {
 				duplicates++
 				d.emit(Event{Type: Verify, URL: f.URL, Domain: signal.Domain,
