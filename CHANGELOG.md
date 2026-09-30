@@ -27,6 +27,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- A failed or cancelled public SearXNG discovery no longer poisons later searches.
+
 - Cancellation during provider connection setup remains a cancelled run.
 - Provider and doctor errors omit credentials embedded in endpoint URLs.
 
