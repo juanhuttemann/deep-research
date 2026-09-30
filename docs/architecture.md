@@ -33,7 +33,7 @@ pages (`tools.SearchTools.Skip`); a page only judged off-topic, cited from its
 snippet, or fetched past a branch's budget is still fetched by a search it
 suits. Each phase's prompt caps a source at
 1500 characters, and what fills them is the page's passages that match those
-queries (`tools.Excerpt`), not its opening, which on a documentation site is
+queries (`tools.ExcerptFor`), not its opening, which on a documentation site is
 navigation and a cookie dialog. Each passage carries its section context,
 the heading above it and the section's opening sentence, inside the same
 budget, so its scope survives the cut.

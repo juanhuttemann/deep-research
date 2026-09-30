@@ -27,6 +27,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Document doctor's worst-case request budgets, the current excerpt helper,
+  and the heartbeat limits of unstreamed LLM search.
+
 - Repair accepts at most one replacement for each blocked statement.
 
 - A failed or cancelled public SearXNG discovery no longer poisons later searches.
