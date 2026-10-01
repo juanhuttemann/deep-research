@@ -31,6 +31,7 @@ progress meter, a rolling activity tail, and running source/token counters.
 | `--replay TRACE` | — | re-run analyze, fact-check and summarize on a trace's recorded plan and search results, without searching; see below |
 | `--plan-only` | off | make the plan, print it as JSON (under `--jsonl`, as the `plan` event) and stop before searching; see below |
 | `--plan FILE` | — | run a plan `--plan-only` wrote, edited or not, without planning again; `-` reads stdin |
+| `--resume CHECKPOINT` | — | continue an interrupted run from its `<reports>/*.partial.json`, without searching again what it searched; see below |
 | `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
@@ -56,6 +57,35 @@ read from the file. When you rename a sub-topic, clear its `query` and
 `terms`: they were written for the old name, and the run searches them as
 written. A plan-only run writes no report and no history record; `-o FILE`
 writes its plan to FILE instead of stdout.
+
+### Resuming an interrupted run
+
+A run that is killed, cancelled, or stopped by an error (a search server
+that was down, a timeout) keeps what it did. From the moment its plan is
+confirmed it saves a checkpoint after each step, beside its reports:
+`<reports>/<name>.<id>.partial.json`, rewritten whole so a kill mid-save
+leaves the previous one. It holds the question, the confirmed plan with its
+tier and budget, and every search that finished, with its page text. A run
+that completes in full removes it; one that is cancelled, fails or ends
+incomplete keeps it.
+
+```bash
+deep-research --resume reports/<name>.<id>.partial.json
+```
+
+A resume runs the saved plan, without planning again or showing the brief.
+It does not search again what finished: those searches are served from the
+checkpoint. It searches live what did not finish, and what failed, often the
+failure being recovered from. The model phases (analyze, fact-check,
+summarize) always run again, and the run gets a fresh `run_timeout`. It
+keeps saving to the same checkpoint, so it can be stopped and resumed again.
+Its sub-agents may take saved results in another order than the first run
+did, so its evidence is close to, not always identical with, what that run
+would have reached. `--resume` cannot be combined with `-p`, `--plan`,
+`--replay`, `--mode` or `--sources`: the checkpoint carries all of them.
+
+A run killed before its plan was confirmed has nothing saved beyond the
+question; run it again.
 
 ### Replaying a run
 
@@ -172,7 +202,10 @@ as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
 add and remove sub-topics, or change the depth. A renamed sub-topic drops
 the query the planner wrote for its old name. Start research runs the
 edited plan (the same as `--plan`, history record included). While it runs
-the page shows the live frame. When it
+the page shows the live frame. Interrupted runs are listed on the start
+screen with Resume (the same as `--resume`) and Discard, which deletes the
+checkpoint. A tab left open while the server was killed and started again
+offers to resume the run it was showing. When it
 ends it reads the run's `.json` artifact and shows the answer, the
 statements the fact-check blocked with the claim that failed, every claim
 with its verdict, and each quote inside the page text the check located it

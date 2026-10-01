@@ -158,6 +158,7 @@ vLLM, llama.cpp or LM Studio server, which needs no key: set
 ./deep-research -p "question" --silent             # just the report
 ./deep-research -p "question" --jsonl              # machine-readable events
 ./deep-research serve                               # launch and audit runs in the browser
+./deep-research --resume reports/<run>.partial.json # continue an interrupted run
 ./deep-research list                                # past runs
 ./deep-research doctor                              # check model, key, search
 ./deep-research init --docker                       # local SearXNG setup

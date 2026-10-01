@@ -103,7 +103,9 @@ internal/
   cli       cobra commands (run / serve / list / init / doctor)
   config    config resolution (env > config dir > embedded defaults) + .env
   replay    --trace recorder and --replay player: wraps the assistant to
-            record, or serve back, the plan and every search result
+            record, or serve back, the plan and every search result; the
+            same recorder saves each run's checkpoint as it goes, and
+            Resume serves a checkpoint's finished searches to --resume
   store     append-only JSONL run history
   tools     SearXNG search (JSON or HTML, one or many instances, searx.space
             discovery) + Firecrawl scrape HTTP clients

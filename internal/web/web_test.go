@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -291,4 +292,110 @@ func TestLaunchPassesThePlanThrough(t *testing.T) {
 	if r := post(`{"question":"q","plan_only":true}`); !r.PlanOnly {
 		t.Error("plan_only was not read from the request")
 	}
+}
+
+// listRuns is the start screen's list of runs.
+func listRuns(t *testing.T, url string) []run {
+	t.Helper()
+	resp, err := http.Get(url + "/api/runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out []run
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out
+}
+
+// discardRun asks to discard name and returns the status.
+func discardRun(t *testing.T, url, name string) int {
+	t.Helper()
+	req, _ := http.NewRequest("DELETE", url+"/api/runs/"+name, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// checkpointServer serves a report and an interrupted run's checkpoint; its
+// runs wait for release.
+func checkpointServer(t *testing.T) (srv *httptest.Server, reports fstest.MapFS, got chan Request, release chan struct{}) {
+	reports = fstest.MapFS{
+		"q-1.json":              {ModTime: time.Now()},
+		"q-1.ab12.partial.json": {ModTime: time.Now()},
+	}
+	got, release = make(chan Request, 1), make(chan struct{})
+	s := New(context.Background(), reports, func(_ context.Context, r Request, w io.Writer) {
+		got <- r
+		<-release
+		_, _ = io.WriteString(w, `{"type":"done","status":"complete"}`+"\n")
+	})
+	s.remove = func(name string) error { delete(reports, name); return nil }
+	srv = httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return srv, reports, got, release
+}
+
+// An interrupted run's checkpoint is listed apart from finished runs, so the
+// start screen can offer to resume it, and not while a run is active, which
+// may be the one writing it. Resume takes only a checkpoint's bare name in
+// the reports directory.
+func TestInterruptedRunsAreOfferedForResume(t *testing.T) {
+	srv, _, got, release := checkpointServer(t)
+	defer close(release)
+	if l := listRuns(t, srv.URL); len(l) != 2 || !slices.ContainsFunc(l, func(r run) bool { return r.Interrupted && r.Name == "q-1.ab12.partial.json" }) {
+		t.Errorf("runs = %+v, want the report and the checkpoint marked interrupted", l)
+	}
+	for _, bad := range []string{"../q-1.ab12.partial.json", "sub/q.partial.json", "q-1.json"} {
+		if code := post(t, srv.URL, `{"resume":"`+bad+`"}`); code != http.StatusBadRequest {
+			t.Errorf("resume %q = %d, want 400", bad, code)
+		}
+	}
+	if code := post(t, srv.URL, `{"resume":"q-1.ab12.partial.json"}`); code != http.StatusAccepted {
+		t.Fatalf("resume = %d", code)
+	}
+	if r := <-got; r.Resume != "q-1.ab12.partial.json" {
+		t.Errorf("the run got resume %q", r.Resume)
+	}
+	if l := listRuns(t, srv.URL); len(l) != 1 || l[0].Interrupted {
+		t.Errorf("runs while one is active = %+v, want no checkpoint offered", l)
+	}
+}
+
+// Discard gives up an interrupted run's saved work: only a checkpoint, and
+// not while a run is active.
+func TestDiscardRemovesOnlyACheckpoint(t *testing.T) {
+	srv, reports, got, release := checkpointServer(t)
+	if code := post(t, srv.URL, `{"question":"q"}`); code != http.StatusAccepted {
+		t.Fatalf("launch = %d", code)
+	}
+	<-got
+	if code := discardRun(t, srv.URL, "q-1.ab12.partial.json"); code != http.StatusConflict {
+		t.Errorf("discard during a run = %d, want 409", code)
+	}
+	close(release)
+	for range 200 {
+		if discardRun(t, srv.URL, "q-1.ab12.partial.json") == http.StatusNoContent {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, ok := reports["q-1.ab12.partial.json"]; ok {
+		t.Error("discard left the checkpoint")
+	}
+	if code := discardRun(t, srv.URL, "q-1.json"); code != http.StatusBadRequest {
+		t.Errorf("discard of a report = %d, want 400", code)
+	}
+}
+
+func post(t *testing.T, url, body string) int {
+	t.Helper()
+	resp, err := http.Post(url+"/api/run", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
 }

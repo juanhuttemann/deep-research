@@ -505,3 +505,68 @@ func TestWebRunPlansThenRunsTheEditedPlan(t *testing.T) {
 		t.Errorf("the sub-topic added in the page was never searched: %q", queries)
 	}
 }
+
+// stopsAt plans three sub-topics and stops the run at its nth search, as a
+// kill or the Cancel button would.
+type stopsAt struct {
+	stub
+	n, at  int
+	cancel context.CancelFunc
+}
+
+func (s *stopsAt) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
+	return []agent.SubTopic{{ID: "1", Name: "Alpha"}, {ID: "2", Name: "Beta"}, {ID: "3", Name: "Gamma"}}, nil
+}
+
+func (s *stopsAt) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
+	if s.n++; s.n == s.at {
+		s.cancel()
+		return nil, context.Canceled
+	}
+	return s.stub.ResearchDetail(ctx, q, terms)
+}
+
+// A run stopped part-way lost every search it had made: there was nothing
+// to continue from. It leaves a checkpoint; --resume runs the same plan,
+// searches only what was not finished, and removes the checkpoint once the
+// run completes.
+func TestInterruptedRunResumes(t *testing.T) {
+	dir := t.TempDir()
+	// One sub-agent at a time, so the stop falls on a known search.
+	cfg := config.Config{DataFile: filepath.Join(dir, "r.jsonl"), Parallelism: 1,
+		Config: agent.Config{ModelCallTimeout: time.Second}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopping := &stopsAt{at: 2, cancel: cancel}
+	cmd := New(func() (Deps, error) { return Deps{Assistant: always(stopping), Config: cfg}, nil })
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"-p", "q", "--silent", "--reports", dir})
+	if err := cmd.ExecuteContext(ctx); err != nil {
+		t.Fatalf("the stopped run: %v", err)
+	}
+	checkpoints, _ := filepath.Glob(filepath.Join(dir, "*.partial.json"))
+	if len(checkpoints) != 1 {
+		t.Fatalf("checkpoints = %v, want the stopped run's", checkpoints)
+	}
+	tr, err := replay.Load(checkpoints[0])
+	if err != nil || len(tr.Plan) != 3 || len(tr.Searches) < 2 || tr.Searches[0].Error != "" {
+		t.Fatalf("checkpoint = %v, %+v; want the plan and the first search finished", err, tr)
+	}
+	done := tr.Searches[0].Query
+
+	var queries []string
+	if _, err := runCLI(t, dir, handedPlan{mu: &sync.Mutex{}, queries: &queries}, "--resume", checkpoints[0], "--silent", "--reports", dir); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if slices.Contains(queries, done) || len(queries) == 0 {
+		t.Errorf("resumed searches = %q; want the unfinished ones, not %q again", queries, done)
+	}
+	if _, err := os.Stat(checkpoints[0]); err == nil {
+		t.Error("the completed resume left its checkpoint")
+	}
+	if mds, _ := filepath.Glob(filepath.Join(dir, "*.md")); len(mds) != 1 {
+		t.Errorf("reports = %v, want the resumed run's", mds)
+	}
+}
