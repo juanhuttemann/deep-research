@@ -2050,3 +2050,36 @@ func TestSearchFailureSaysWhatToCheck(t *testing.T) {
 		t.Errorf("run error still carries the raw transport error: %q", got)
 	}
 }
+
+// A plan handed back with --plan was written or edited by hand. It cannot
+// ask for a tier that does not exist, run with no sub-topics, or claim a
+// budget larger than its tier and sub-topic count allow.
+func TestReadPlanMakesAnEditedPlanSafeToRun(t *testing.T) {
+	for name, in := range map[string]string{
+		"not json":      "{",
+		"no question":   `{"depth":{"key":"quick"},"sub_topics":[{"name":"a"}]}`,
+		"unknown tier":  `{"question":"q","depth":{"key":"deeep"},"sub_topics":[{"name":"a"}]}`,
+		"no sub-topics": `{"question":"q","sub_topics":[{"name":"  "}]}`,
+	} {
+		if _, err := ReadPlan(strings.NewReader(in)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	long := strings.Repeat("long sub-topic name ", 4)
+	p, err := ReadPlan(strings.NewReader(`{"question":"q","depth":{"key":"standard","max_sources":99},
+		"max_sources":999,"sub_topics":[{"id":"x","name":"a","query":"qa"},{"id":"x","name":"` + long + `"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A planner name runs past the brief's cap, and the fallback search
+	// sends it: it must come back whole.
+	if p.SubTopics[1].Name != strings.TrimSpace(long) {
+		t.Errorf("name = %q, want it whole", p.SubTopics[1].Name)
+	}
+	if p.SubTopics[0].ID != "1" || p.SubTopics[1].ID != "2" || p.SubTopics[0].Query != "qa" {
+		t.Errorf("sub-topics = %+v, want renumbered 1, 2 with their queries kept", p.SubTopics)
+	}
+	if p.Depth.MaxSources != 4 || p.MaxSources != 8 {
+		t.Errorf("budget = tier %d, run %d; want the standard tier's 4 per sub-topic, 8 in all", p.Depth.MaxSources, p.MaxSources)
+	}
+}

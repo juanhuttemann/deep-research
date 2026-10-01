@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,7 +39,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 
 	// A question is a flag on the root, not a subcommand: `deep-research -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("prompt") && !cmd.Flags().Changed("replay") {
+		if !cmd.Flags().Changed("prompt") && !cmd.Flags().Changed("replay") && !cmd.Flags().Changed("plan") {
 			return cmd.Help()
 		}
 		res, err := research(cmd, load)
@@ -71,6 +72,15 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A replay's question is the recorded one; a second question would be
 	// answered from evidence gathered for another.
 	root.MarkFlagsMutuallyExclusive("prompt", "replay")
+	root.Flags().Bool("plan-only", false, "make the plan, print it (as the plan event under --jsonl) and stop before searching")
+	root.Flags().String("plan", "", "run a plan written by --plan-only, edited or not, instead of planning (- reads stdin)")
+	// A plan carries its own question, depth and budget. Taking them from
+	// flags as well would leave two answers to each, and a replay carries
+	// its recorded plan.
+	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only"} {
+		root.MarkFlagsMutuallyExclusive("plan", other)
+	}
+	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
 
 	initCmd := &cobra.Command{
 		Use:   "init",
@@ -288,6 +298,10 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if err != nil {
 		return ui.RunResult{}, err
 	}
+	plan, question, err := givenPlan(cmd, d, tr, question)
+	if err != nil {
+		return ui.RunResult{}, err
+	}
 	// Sub-agents running at once race for the pages several searches return:
 	// whichever claims a page first counts it, which decides whether another
 	// falls short of its budget and runs its fallback query. A replay served
@@ -313,6 +327,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		return ui.RunResult{}, err
 	}
 	assistant, rec := wrapAssistant(cmd, assistant, tr, question, mode, sourceBudget(cmd, d))
+	planOnly, _ := cmd.Flags().GetBool("plan-only")
 
 	silent, _ := cmd.Flags().GetBool("silent")
 	jsonl, _ := cmd.Flags().GetBool("jsonl")
@@ -351,6 +366,8 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		Input:           cmd.InOrStdin(),
 		Stdout:          cmd.OutOrStdout(),
 		Stderr:          cmd.ErrOrStderr(),
+		Plan:            plan,
+		PlanOnly:        planOnly,
 	})
 	if err != nil {
 		return res, fmt.Errorf("research failed: %w", err)
@@ -358,6 +375,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if res.Cancelled {
 		fmt.Fprintln(cmd.ErrOrStderr(), "cancelled")
 		return res, nil
+	}
+	if planOnly {
+		return res, printPlan(cmd, res.Plan, jsonl)
 	}
 	writeTrace(cmd, rec, &res)
 	return res, deliver(cmd, d, res.Report, tr == nil, silent || jsonl)
@@ -411,6 +431,58 @@ func replayTrace(cmd *cobra.Command, question string) (*replay.Trace, string, er
 	return t, t.Question, nil
 }
 
+// givenPlan is the plan the run is handed instead of planning, with the
+// question it answers; nil plans afresh for question. A replay runs its
+// recorded plan as recorded, at the depth and budget replayTrace put in the
+// flags: through the planner it was cut to the tier's sub-topic count,
+// dropping any the brief had added.
+func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*ui.Plan, string, error) {
+	if tr != nil {
+		mode, _ := cmd.Flags().GetString("mode")
+		depth, err := ui.ParseDepthMode(mode)
+		if err != nil {
+			return nil, "", err
+		}
+		return ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d)), tr.Question, nil
+	}
+	path, _ := cmd.Flags().GetString("plan")
+	if path == "" {
+		return nil, question, nil
+	}
+	plan, err := readPlanFile(cmd, path)
+	if err != nil {
+		return nil, "", err
+	}
+	return plan, plan.Question, nil
+}
+
+// readPlanFile reads the plan at path, or stdin for "-".
+func readPlanFile(cmd *cobra.Command, path string) (*ui.Plan, error) {
+	if path == "-" {
+		return ui.ReadPlan(cmd.InOrStdin())
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return ui.ReadPlan(f)
+}
+
+// printPlan writes a plan-only run's plan to stdout as JSON, the input
+// --plan reads back. Under --jsonl the plan event already carried it.
+func printPlan(cmd *cobra.Command, plan *ui.Plan, jsonl bool) error {
+	if jsonl || plan == nil {
+		return nil
+	}
+	b, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", b)
+	return err
+}
+
 // wrapAssistant puts the replay player and the trace recorder the flags ask
 // for around the assistant. rec is nil without --trace.
 func wrapAssistant(cmd *cobra.Command, a agent.Assistant, tr *replay.Trace, question, mode string, sources int) (agent.Assistant, *replay.Recorder) {
@@ -428,6 +500,9 @@ func wrapAssistant(cmd *cobra.Command, a agent.Assistant, tr *replay.Trace, ques
 func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
 	if rec == nil || res.MDPath == "" {
 		return
+	}
+	if res.Plan != nil {
+		rec.SetPlan(res.Plan.SubTopics)
 	}
 	path := strings.TrimSuffix(res.MDPath, ".md") + ".trace.json"
 	if err := rec.Write(path); err != nil {

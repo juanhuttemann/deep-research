@@ -29,9 +29,32 @@ progress meter, a rolling activity tail, and running source/token counters.
 | `--no-color` | off | disable ANSI colour (`NO_COLOR=1` does the same) |
 | `--trace` | off | also write `<report>.trace.json`: the plan, every search result with its full page text, and each model phase's prompt and output |
 | `--replay TRACE` | — | re-run analyze, fact-check and summarize on a trace's recorded plan and search results, without searching; see below |
+| `--plan-only` | off | make the plan, print it as JSON (under `--jsonl`, as the `plan` event) and stop before searching; see below |
+| `--plan FILE` | — | run a plan `--plan-only` wrote, edited or not, without planning again; `-` reads stdin |
 | `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
+
+### Editing the plan
+
+The interactive brief lets you rename, add and delete sub-topics before a
+run starts. `--plan-only` and `--plan` do the same from a file, for a
+script, an editor or a terminal without the live UI:
+
+```bash
+deep-research -p "question" --plan-only > plan.json   # one model request
+$EDITOR plan.json                                     # sub_topics: add, delete, rename
+deep-research --plan plan.json
+```
+
+A plan carries its question, depth tier (`depth.key`) and any pinned
+`pinned_per_topic` budget, so `--plan` cannot be combined with `-p`,
+`--mode` or `--sources`. It is checked before it runs: the tier must exist,
+at least one sub-topic must have a name, sub-topics are renumbered in
+order, and the source budget is worked out again from the tier rather than
+read from the file. When you rename a sub-topic, clear its `query` and
+`terms`: they were written for the old name, and the run searches them as
+written. A plan-only run writes no report and no history record.
 
 ### Replaying a run
 
@@ -47,7 +70,9 @@ OPENAI_MODEL=other/model deep-research --replay reports/<name>.trace.json
 ```
 
 A replay takes its question, `--mode` and `--sources` from the trace (the
-flags override them), writes its report under `<reports>/replay/` so the
+flags override them) and runs the recorded plan whole: the plan the run
+used, with the sub-topics the brief added, not the planner's first answer.
+It writes its report under `<reports>/replay/` so the
 original is not overwritten, and is not saved to the history. It spends
 model requests on analyze, fact-check and summarize only. Its follow-up
 round searches the recorded run's follow-up queries, not the ones the
@@ -126,6 +151,8 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   question, so the same question asked twice into one directory overwrites
   the first run's files.
 
+The `plan` event arrives once, before the first search, and carries the
+plan the run is about to execute in `plan`: the input `--plan` reads.
 The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
 `citation`, `token`, `report`, `detach` and `error`; their fields are the
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the

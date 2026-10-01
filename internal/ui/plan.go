@@ -2,7 +2,10 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -86,6 +89,46 @@ func (p *Plan) WithDepth(d DepthMode) *Plan {
 	np.PinnedPerTopic = 0
 	np.MaxSources = maxSourcesFor(d, len(p.SubTopics))
 	return &np
+}
+
+// ReadPlan decodes a plan a caller wrote or edited (the --plan-only output)
+// and makes it safe to run: the depth tier is looked up by its key rather
+// than trusted from the file, IDs are renumbered in order, and the source
+// budget is re-derived from the tier or the pinned --sources request, so a
+// hand edit cannot ask for more than the run budget allows.
+func ReadPlan(r io.Reader) (*Plan, error) {
+	var p Plan
+	if err := json.NewDecoder(r).Decode(&p); err != nil {
+		return nil, fmt.Errorf("read plan: %w", err)
+	}
+	if p.Question = strings.TrimSpace(p.Question); p.Question == "" {
+		return nil, errors.New("read plan: no question")
+	}
+	depth, err := ParseDepthMode(p.Depth.Key)
+	if err != nil {
+		return nil, fmt.Errorf("read plan: %w", err)
+	}
+	topics := p.SubTopics[:0]
+	for _, t := range p.SubTopics {
+		// Not cut to the brief's 60 runes: the planner writes longer names,
+		// and a fallback search sends the name, so a cut one would search for
+		// a word ending in "…".
+		if t.Name = strings.TrimSpace(t.Name); t.Name != "" {
+			topics = append(topics, t)
+		}
+	}
+	if len(topics) == 0 {
+		return nil, errors.New("read plan: no sub-topics to research")
+	}
+	return PlanFor(p.Question, depth, topics, p.PinnedPerTopic), nil
+}
+
+// PlanFor builds a runnable plan from parts kept elsewhere (an edited plan,
+// a trace): numbered in order, and budgeted from the pinned per-sub-agent
+// request when there is one, else from the tier.
+func PlanFor(question string, depth DepthMode, topics []SubTopic, pin int) *Plan {
+	p := &Plan{Question: question, Depth: depth, SubTopics: topics, PinnedPerTopic: max(pin, 0)}
+	return renumbered(p, (*Plan).WithDepth)
 }
 
 // Planner produces a research plan from a question using the assistant's Plan
