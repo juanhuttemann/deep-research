@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
+	"github.com/juanhuttemann/deep-research/internal/web"
 )
 
 // TestInitReportsCreatedFiles checks that `init` reports every artifact it
@@ -292,5 +294,50 @@ func TestTracedRunReplaysWithoutSearching(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(history); len(after) != len(saved) {
 		t.Error("the replay was saved to the history")
+	}
+}
+
+// blockingPlan holds the plan call until the run is cancelled.
+type blockingPlan struct {
+	stub
+	started chan struct{}
+}
+
+func (b blockingPlan) Plan(ctx context.Context, _ string, _ int) ([]agent.SubTopic, error) {
+	close(b.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A launch from the page must end on a done line like any --jsonl run, and
+// the page's cancel button can press while the plan call is still out: that
+// is a cancellation, which ui.Run reported as a failed plan.
+func TestWebRunEndsOnDone(t *testing.T) {
+	for _, status := range []string{"complete", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var a agent.Assistant = stub{}
+			if status == "cancelled" {
+				started := make(chan struct{})
+				a = blockingPlan{started: started}
+				go func() { <-started; cancel() }()
+			}
+			dir := t.TempDir()
+			deps := Deps{Assistant: always(a), Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
+				Config: agent.Config{ModelCallTimeout: time.Second}}}
+			var out bytes.Buffer
+			// A question that starts with a dash is still the question.
+			run := webRun(func() (Deps, error) { return deps, nil }, dir, io.Discard)
+			run(ctx, web.Request{Question: "-why is the sky blue", Mode: "quick"}, &out)
+			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+			var done struct{ Type, Status, Detail string }
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &done); err != nil || done.Type != "done" {
+				t.Fatalf("last line is not a done event: %q", lines[len(lines)-1])
+			}
+			if done.Status != status {
+				t.Errorf("done = %+v, want %s", done, status)
+			}
+		})
 	}
 }

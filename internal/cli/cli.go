@@ -19,11 +19,12 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/replay"
 	"github.com/juanhuttemann/deep-research/internal/store"
 	"github.com/juanhuttemann/deep-research/internal/ui"
+	"github.com/juanhuttemann/deep-research/internal/web"
 )
 
 // Deps carries everything a command needs.
 type Deps struct {
-	Assistant func() (agent.Assistant, error) // built lazily
+	Assistant func() (agent.Assistant, error) // built lazily, one per run
 	Config    config.Config
 }
 
@@ -90,6 +91,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 				return runDoctor(cmd, d)
 			},
 		},
+		serveCmd(load),
 		&cobra.Command{
 			Use:   "list",
 			Short: "list past research runs",
@@ -151,6 +153,69 @@ func initDocker(out io.Writer) error {
 	fmt.Fprintln(out, "  echo 'SEARXNG_URL=http://localhost:8888' >> .env")
 	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: docs/services.md")
 	return nil
+}
+
+// serveCmd runs the browser UI on this machine.
+func serveCmd(load func() (Deps, error)) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "launch and audit runs from a page on localhost",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// A config that does not load fails here, not as every launch's
+			// done line.
+			if _, err := load(); err != nil {
+				return err
+			}
+			addr, _ := cmd.Flags().GetString("addr")
+			reports, _ := cmd.Flags().GetString("reports")
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), cmd.ErrOrStderr())
+		},
+	}
+	cmd.Flags().String("addr", "127.0.0.1:7777", "address to listen on")
+	cmd.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts, served read-only")
+	return cmd
+}
+
+// webRun is a launch from the page: the same command as
+// `deep-research --jsonl -p ...`, run in-process with the stream going to the
+// page. Reusing the command keeps one path for validation, the run deadline,
+// the history record and the done line on every outcome.
+func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.RunFunc {
+	return func(ctx context.Context, r web.Request, w io.Writer) {
+		// --flag=value: a question that starts with "-" is still the value.
+		args := []string{"--jsonl", "--prompt=" + r.Question, "--reports=" + reports}
+		if r.Mode != "" {
+			args = append(args, "--mode="+r.Mode)
+		}
+		if r.Sources > 0 {
+			args = append(args, "--sources="+strconv.Itoa(r.Sources))
+		}
+		out := &wroteTo{Writer: w}
+		cmd := New(load)
+		cmd.SetArgs(args)
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetOut(out)
+		cmd.SetErr(stderr)
+		// RunE ends every run it starts on a done line, which carries the
+		// error to the page. A failure before RunE (a flag that does not
+		// parse) writes nothing, and the page would wait on a run that never
+		// began.
+		cmd.SilenceErrors = true
+		if err := cmd.ExecuteContext(ctx); err != nil && !out.wrote {
+			ui.JSONL{W: w}.Emit(doneEvent(ui.RunResult{}, err))
+		}
+	}
+}
+
+// wroteTo records whether anything was written through it.
+type wroteTo struct {
+	io.Writer
+	wrote bool
+}
+
+func (w *wroteTo) Write(p []byte) (int, error) {
+	w.wrote = true
+	return w.Writer.Write(p)
 }
 
 // keyURL is where a first-time user gets a free OpenRouter key.

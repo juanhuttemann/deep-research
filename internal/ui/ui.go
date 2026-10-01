@@ -85,6 +85,11 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 
 	plan, err := o.buildPlan(ctx)
 	if err != nil {
+		// A cancel can arrive while the plan call is still out (the browser's
+		// cancel button can press it there); it is the same stop as Esc later.
+		if stopped(ctx, err) {
+			return RunResult{Cancelled: true}, nil
+		}
 		return RunResult{}, err
 	}
 
@@ -117,7 +122,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 		// Esc cancels the run. That is a deliberate stop, so it reports as a
 		// cancellation rather than a failure; a timeout still fails, because
 		// a deadline that expired is not something the reader asked for.
-		if errors.Is(err, context.Canceled) && ctx.Err() != context.DeadlineExceeded {
+		if stopped(ctx, err) {
 			res.Cancelled = true
 			return res, nil
 		}
@@ -135,6 +140,11 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	res.MDPath, res.PDFPath, res.JSONPath = o.writeArtifacts(result, sink, driver, plan)
 	o.announce(result, res)
 	return res, nil
+}
+
+// stopped reports whether err is a deliberate stop rather than a failure.
+func stopped(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) && ctx.Err() != context.DeadlineExceeded
 }
 
 // buildPlan runs the planning phase and applies the configured source budget.

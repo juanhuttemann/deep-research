@@ -25,11 +25,11 @@ func main() {
 		if err != nil {
 			return cli.Deps{}, err
 		}
+		// A fresh assistant per call: it accumulates token usage and served
+		// models, and `serve` launches one run after another in one process.
 		return cli.Deps{
-			Assistant: sync.OnceValues(func() (agent.Assistant, error) {
-				return agent.New(cfg.Config)
-			}),
-			Config: cfg,
+			Assistant: func() (agent.Assistant, error) { return agent.New(cfg.Config) },
+			Config:    cfg,
 		}, nil
 	})
 	root := cli.New(load)

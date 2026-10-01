@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
 // ---- test doubles ---------------------------------------------------------
@@ -1268,10 +1270,12 @@ func TestCheckAnalysisHoldsReferencesToWhatWasRetrieved(t *testing.T) {
 		{URL: "https://a.example/doc", Status: "ok"},
 		{URL: "https://b.example/pricing", Status: "degraded"},
 		{URL: "https://model.example/recalled", Status: "unverified"},
+		{URL: "/", Status: "ok"},
 	}
 	a := &agent.Analysis{
 		Claims: []agent.Claim{
-			{ID: "c1", Text: "t", Sources: []string{"https://a.example/doc/", "https://invented.example"}},
+			// "//" names no page; neither does the hostless result above.
+			{ID: "c1", Text: "t", Sources: []string{"https://a.example/doc/", "https://invented.example", "1", "//"}},
 			{ID: "c2", Text: "t", Sources: []string{"2", "#9"}},
 			{ID: "c3", Text: "t", Sources: []string{"https://model.example/recalled"}},
 			{ID: "c1", Text: "a second claim reusing an ID"},
@@ -1279,8 +1283,10 @@ func TestCheckAnalysisHoldsReferencesToWhatWasRetrieved(t *testing.T) {
 		Conflicts: []agent.Conflict{{Claims: []string{"c2", "c8"}, Resolution: "c2 holds"}},
 	}
 	checkAnalysis(a, findings)
-	if got := a.Claims[0].Sources; len(got) != 1 || got[0] != "https://a.example/doc/" {
-		t.Errorf("c1 sources = %v, want only the retrieved page", got)
+	// Once, under the URL it was fetched as: the model's spelling and the
+	// entry number name the same page, which the citations list as fetched.
+	if got := a.Claims[0].Sources; len(got) != 1 || got[0] != "https://a.example/doc" {
+		t.Errorf("c1 sources = %v, want only the retrieved page, as it was fetched", got)
 	}
 	if got := a.Claims[1].Sources; len(got) != 1 || got[0] != "https://b.example/pricing" {
 		t.Errorf("c2 sources = %v, want entry 2 resolved and entry 9 dropped", got)
@@ -1921,5 +1927,126 @@ func TestAnswerStatementsCarryNoClaimIDs(t *testing.T) {
 		if got := readerText(in); got != want {
 			t.Errorf("readerText(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// The page shows a claim's quote inside the page text the check located it
+// in, so the sidecar carries that text and resolves each quote's source the
+// way governance does: "#1" is the first finding, a URL matches canonically,
+// and a page the run only saw in a search result has no stored text.
+func TestMetaResolvesQuotesToStoredPages(t *testing.T) {
+	res := testResult()
+	res.Findings = []agent.Finding{
+		{Title: "A", URL: "https://example.com/a", Content: "The cell reached 400 Wh/kg in tests.", Status: "ok"},
+		{Title: "B", URL: "https://example.com/b", Content: "snippet", Status: "unverified"},
+		// Hostless: its canonical URL is "", the key a source naming no page
+		// looks up, so it must back nothing.
+		{Title: "C", URL: "/", Content: "hostless text", Status: "ok"},
+	}
+	res.FactCheck = &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		{ID: "c1", Status: "supported", Evidence: []agent.Evidence{
+			{Source: "#1", Quote: "reached 400 Wh/kg"},
+			{Source: "https://EXAMPLE.com/a/", Quote: "an invented sentence"},
+		}},
+		{ID: "c2", Status: "supported", Evidence: []agent.Evidence{{Source: "https://example.com/b", Quote: "snippet"}}},
+		{ID: "c3", Status: "supported", Evidence: []agent.Evidence{{Source: "//", Quote: "hostless text"}}},
+	}}
+	m := BuildMeta(res, nil, "quick", 0, 0)
+	if m.Pages["https://example.com/a"] != res.Findings[0].Content || len(m.Pages) != 1 {
+		t.Errorf("pages = %v, want only the fetched page's text", m.Pages)
+	}
+	want := []MetaPassage{
+		{Verdict: 0, Page: "https://example.com/a", Quote: "reached 400 Wh/kg", Located: true},
+		{Verdict: 0, Page: "https://example.com/a", Quote: "an invented sentence"},
+		{Verdict: 1, Quote: "snippet"},
+		{Verdict: 2, Quote: "hostless text"},
+	}
+	if !slices.Equal(m.Passages, want) {
+		t.Errorf("passages =\n%+v\nwant\n%+v", m.Passages, want)
+	}
+	// The sidecar reports what governance concluded, so governance must not
+	// locate the quote either.
+	if quotesLocated(res.FactCheck.Verdicts[2].Evidence, res.Findings, fetchedPages(res.Findings)) {
+		t.Error("governance located a quote whose source names no page in a hostless page")
+	}
+}
+
+// The browser page reads the sidecar by its JSON keys: a renamed struct tag
+// would blank a panel with no test failing. Every key the page reads is here.
+func TestMetaKeepsTheKeysTheAuditPageReads(t *testing.T) {
+	res := testResult()
+	res.Findings = []agent.Finding{{Title: "A", URL: "https://example.com/a", Content: "The cell reached 400 Wh/kg.", Status: "ok"}}
+	unit := agent.Recommendation{Choose: "x", When: "y", Statement: "s", Claims: []string{"c1"}, Blocked: "b", Failed: []string{"c1"}, Revises: "r1"}
+	res.Analysis = &agent.Analysis{
+		Interpretation:  "i",
+		Claims:          []agent.Claim{{ID: "c1", Text: "t", Option: "o", Criterion: "c", Scope: "s", Sources: []string{"https://example.com/a"}, Status: "supported", Note: "n"}},
+		Conclusions:     []agent.Recommendation{unit},
+		Recommendations: []agent.Recommendation{unit},
+	}
+	res.FactCheck = &agent.FactCheckResult{Verdicts: []agent.Verdict{
+		{ID: "c1", Status: "supported", Reason: "r", Evidence: []agent.Evidence{{Source: "#1", Quote: "reached 400 Wh/kg"}}},
+	}}
+	res.Error = "e"
+	b, err := json.Marshal(BuildMeta(res, nil, "quick", 10, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	unitKeys := []string{"statement", "choose", "when", "claims", "blocked", "failed", "revises"}
+	paths := []string{"question", "sources", "tokens", "depth", "timestamp", "error", "pages",
+		"analysis.interpretation", "fact_check.verdicts.0.id", "fact_check.verdicts.0.status", "fact_check.verdicts.0.reason",
+		"passages.0.verdict", "passages.0.page", "passages.0.quote", "passages.0.located",
+		"citations.0.url", "citations.0.title", "citations.0.status", "citations.0.cited"}
+	for _, k := range []string{"id", "claim", "status", "note", "option", "criterion", "scope", "sources"} {
+		paths = append(paths, "analysis.claims.0."+k)
+	}
+	for _, k := range unitKeys {
+		paths = append(paths, "analysis.conclusions.0."+k, "analysis.recommendations.0."+k)
+	}
+	for _, p := range paths {
+		var v any = doc
+		for _, k := range strings.Split(p, ".") {
+			switch n := v.(type) {
+			case map[string]any:
+				v = n[k]
+			case []any:
+				i, _ := strconv.Atoi(k)
+				if i >= len(n) {
+					v = nil
+					break
+				}
+				v = n[i]
+			default:
+				v = nil
+			}
+		}
+		if v == nil {
+			t.Errorf("sidecar has no %s, which the audit page reads", p)
+		}
+	}
+}
+
+// A run whose search server is down said only "every search failed
+// (unavailable)" and a transport error; it now says what to check.
+func TestSearchFailureSaysWhatToCheck(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := "http://" + ln.Addr().String()
+	_ = ln.Close()
+	_, searchErr := tools.NewSearXNGClient(addr, time.Second).Search(context.Background(), "q")
+	d := &Driver{searchErr: searchErr}
+	got := d.searchFailure(nil).Error()
+	for _, want := range []string{"no search answered", "cannot reach SearXNG at " + addr, "SEARXNG_URL", "doctor"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("run error %q does not mention %q", got, want)
+		}
+	}
+	if strings.Contains(got, "dial tcp") {
+		t.Errorf("run error still carries the raw transport error: %q", got)
 	}
 }

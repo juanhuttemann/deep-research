@@ -601,16 +601,8 @@ func providerHTTPClient() *http.Client {
 // that did answer — a 500, a reset mid-response, a deadline the model blew —
 // are not included: those can genuinely succeed on a second attempt.
 func unreachable(err error) bool {
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return true
-	}
-	// Op is "dial" only while the connection is being established, which is
-	// exactly the window where no server was reached. This covers connection
-	// refused, no route to host and network unreachable on every platform,
-	// without naming platform-specific errno values.
-	var opErr *net.OpError
-	return errors.As(err, &opErr) && opErr.Op == "dial"
+	_, ok := tools.DialFailure(err)
+	return ok
 }
 
 // rejectedKey reports a 401 with the provider's reason, when it gave one.
@@ -626,15 +618,9 @@ func rejectedKey(reason string) error {
 // act on. The raw error names a URL and a syscall; what matters is which
 // endpoint was tried and that the setting pointing at it is the thing to fix.
 func providerUnreachable(baseURL string, err error) error {
-	reason := "connection failed"
-	var opErr *net.OpError
-	var dnsErr *net.DNSError
-	switch {
-	case errors.As(err, &dnsErr):
-		reason = "host not found"
-	case errors.As(err, &opErr) && opErr.Err != nil:
-		// "connect: no route to host" -> "no route to host".
-		reason = strings.TrimPrefix(opErr.Err.Error(), "connect: ")
+	reason, ok := tools.DialFailure(err)
+	if !ok {
+		reason = "connection failed"
 	}
 	// Redact before the fallback: the fallback is a label, not a URL, and
 	// parsing it as one escapes its spaces.

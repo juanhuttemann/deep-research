@@ -69,7 +69,7 @@ func NewID() string { return uuid.NewString() }
 // keeps. The history is the run index `list` reads — every run appended the
 // full text of every source it read to a single file that is read back whole,
 // so a few hundred runs turn `list` into a multi-hundred-megabyte read. The
-// complete text stays in that run's .md / .json artifacts under reports/,
+// complete text stays in that run's .json artifact under reports/ (pages),
 // which is where a reader goes for the sources themselves.
 const maxStoredContentChars = 4000
 

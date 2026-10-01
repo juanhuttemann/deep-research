@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -110,7 +111,12 @@ func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearXNGResu
 			c.prefer(in)
 			return res, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", in.url, err))
+		// An unreachable instance already names itself.
+		if _, named := errors.AsType[*unreachableError](err); named {
+			errs = append(errs, err)
+		} else {
+			errs = append(errs, fmt.Errorf("%s: %w", in.url, err))
+		}
 		if ctx.Err() != nil {
 			break
 		}
@@ -209,6 +215,9 @@ func (c *SearXNGClient) get(ctx context.Context, base, query string, asJSON bool
 	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		if reason, ok := DialFailure(err); ok {
+			return nil, &unreachableError{url: base, reason: reason, err: err}
+		}
 		return nil, fmt.Errorf("search request failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -327,6 +336,41 @@ func text(n *html.Node) string {
 	return strings.Join(strings.Fields(sb.String()), " ")
 }
 
+// DialFailure reports whether err failed before any server answered, and why
+// in a few words. A dial error's Op is "dial" only while the connection is
+// being established, exactly the window where no server was reached: that
+// covers connection refused, no route to host and network unreachable on
+// every platform, without naming platform-specific errno values.
+func DialFailure(err error) (reason string, ok bool) {
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
+		return "host not found", true
+	}
+	opErr, ok := errors.AsType[*net.OpError](err)
+	if !ok || opErr.Op != "dial" {
+		return "", false
+	}
+	if opErr.Err == nil {
+		return "connection failed", true
+	}
+	// "connect: connection refused" -> "connection refused".
+	return strings.TrimPrefix(opErr.Err.Error(), "connect: "), true
+}
+
+// unreachableError is an instance nothing answered at. The raw error is a
+// URL-escaped query and a syscall ("Get \"…&format=json\": dial tcp [::1]:8888:
+// connect: connection refused"); what the reader acts on is which server and
+// why.
+type unreachableError struct {
+	url, reason string
+	err         error
+}
+
+func (e *unreachableError) Error() string {
+	return fmt.Sprintf("cannot reach SearXNG at %s (%s)", e.url, e.reason)
+}
+
+func (e *unreachableError) Unwrap() error { return e.err }
+
 // SearchStatus names how a search failed, for the run's events: a limiter or
 // a challenge is a state to report, not an info line.
 func SearchStatus(err error) string {
@@ -346,6 +390,9 @@ func SearchStatus(err error) string {
 		case http.StatusTeapot, http.StatusAccepted:
 			return "challenge"
 		}
+	}
+	if _, ok := errors.AsType[*unreachableError](err); ok {
+		return "unreachable"
 	}
 	return "unavailable"
 }

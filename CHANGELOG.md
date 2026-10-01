@@ -5,6 +5,23 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `deep-research serve` runs a page on localhost that launches a run,
+  streams its live frame (phase, sub-agent rows, the status line, source
+  and token counters) and then shows what the fact-check decided: the
+  answer, the statements it blocked and the claim that failed, each claim
+  with its verdict and quotes, and the page text the check located each
+  quote in, with every source marked fetched, snippet only or never
+  fetched. The start screen lists past runs from the reports directory.
+  The stream is the `--jsonl` one over SSE; a dropped connection resumes
+  where it left off, a reload replays the run, and closing the tab does
+  not cancel the run.
+- The `.json` artifact carries `pages`, the stored text of every fetched
+  page, and `passages`, each fact-check quote resolved to its page and
+  whether the check found it there. A quote could be read before, but
+  not checked against the text it claims to come from.
+
 ### Changed
 
 - A reasoning model's thinking is shown while it runs: the latest of it,
@@ -30,6 +47,21 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   `github.com/kaptinlin/jsonrepair` before it is given up on.
 
 ### Fixed
+
+- A claim's sources are recorded as the URL the page was fetched as. The
+  model's spelling was kept, so `https://x/a/` beside `#1` for the page
+  fetched as `https://x/a` listed one page twice and matched none of the
+  citations.
+- A search server that is not running failed the run with the raw
+  transport error, a URL-escaped query and `dial tcp [::1]:8888: connect:
+  connection refused`. It now says `no search answered: cannot reach
+  SearXNG at http://localhost:8888 (connection refused)` and to check
+  `SEARXNG_URL` and that SearXNG is running, with the new search status
+  `unreachable`. Each failed search no longer reads "search failed: search
+  failed:".
+- A run cancelled while its plan call was still out ended as `failed`
+  with "plan: context canceled"; it ends as `cancelled`, like a cancel at
+  any later point.
 
 - Cancelling a run while a model call is still connecting ends it
   `cancelled`, not `failed` with "cannot reach the model provider".

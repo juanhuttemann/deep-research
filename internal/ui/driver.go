@@ -785,7 +785,14 @@ func (d *Driver) searchFailure(findings []agent.Finding) error {
 	if len(findings) > 0 || d.searchesOK > 0 || d.searchErr == nil {
 		return nil
 	}
-	return fmt.Errorf("every search failed (%s): %w", tools.SearchStatus(d.searchErr), d.searchErr)
+	status := tools.SearchStatus(d.searchErr)
+	if status == "unreachable" {
+		// Nothing answered at the configured address: the server is down or
+		// the setting points at the wrong place, and both are the reader's to
+		// fix.
+		return fmt.Errorf("no search answered: %w. Check SEARXNG_URL and that SearXNG is running (deep-research doctor checks it)", d.searchErr)
+	}
+	return fmt.Errorf("no search answered (%s): %w", status, d.searchErr)
 }
 
 // contributionLine says what a finished sub-agent actually added to the run.

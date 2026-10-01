@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // htmlResultsPage is SearXNG's own result markup (simple theme), trimmed.
@@ -160,5 +162,36 @@ func TestSearchWithoutAScraperKeepsSnippets(t *testing.T) {
 	}
 	if got.Signals[1].Status != "dropped" {
 		t.Errorf("a result with no snippet and no scraper = %+v, want dropped", got.Signals[1])
+	}
+}
+
+// closedURL is an address nothing listens on: connecting to it is refused.
+func closedURL(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	url := "http://" + ln.Addr().String()
+	_ = ln.Close()
+	return url
+}
+
+// A SearXNG that is not running failed every run with the raw transport
+// error: a URL-escaped query and "dial tcp [::1]:8888: connect: connection
+// refused". The reader needs which server and why, and the status says it
+// is not a limiter or a challenge.
+func TestUnreachableSearchSaysWhereAndWhy(t *testing.T) {
+	url := closedURL(t)
+	_, err := NewSearXNGClient(url, time.Second).Search(context.Background(), "q")
+	if err == nil {
+		t.Fatal("a search against a closed port succeeded")
+	}
+	want := "cannot reach SearXNG at " + url + " (connection refused)"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+	if got := SearchStatus(err); got != "unreachable" {
+		t.Errorf("status = %q, want unreachable", got)
 	}
 }

@@ -43,8 +43,16 @@ type Meta struct {
 	// which claims were checked rather than inferring it from the prose.
 	FactCheck *agent.FactCheckResult `json:"fact_check,omitempty"`
 	Citations []MetaCitation         `json:"citations"`
-	Notes     []MetaNote             `json:"sub_agent_notes"`
-	Timeline  []TimelineEntry        `json:"timeline"`
+	// Pages are the stored texts of the pages the run fetched, keyed by the
+	// citation URL: the text each fact-check quote was located in. Without
+	// them a quote could be read but never checked against its page. A page
+	// is at most tools.ContentLimit (40000 bytes) of scraped text, and a run
+	// at most 50 sources (maxRunSources), so this stays under about 2 MB.
+	Pages map[string]string `json:"pages,omitempty"`
+	// Passages are the fact-check's quotes, one per piece of evidence.
+	Passages []MetaPassage   `json:"passages,omitempty"`
+	Notes    []MetaNote      `json:"sub_agent_notes"`
+	Timeline []TimelineEntry `json:"timeline"`
 }
 
 // MetaCitation is one cited source with its verification status.
@@ -59,6 +67,22 @@ type MetaCitation struct {
 	// Retrieving a page and citing it are different claims: a run can gather
 	// twenty sources and build its answer on three.
 	Cited bool `json:"cited"`
+}
+
+// MetaPassage is one quote the fact-check gave as evidence, resolved to the
+// page it names the way governance resolves it ("#3" is the third finding,
+// and URLs match by tools.CanonicalURL), so a reader of the sidecar does not
+// reimplement either. Located is locate's answer, the same check that let the
+// verdict stand or not; whether the quote supports the claim is the claim's
+// status, not this.
+type MetaPassage struct {
+	// Verdict indexes fact_check.verdicts: a claim with two verdicts keeps
+	// each one's quotes apart.
+	Verdict int `json:"verdict"`
+	// Page keys Pages; empty when the run fetched no page the source names.
+	Page    string `json:"page,omitempty"`
+	Quote   string `json:"quote"`
+	Located bool   `json:"located"`
 }
 
 // MetaNote records a sub-agent's final state and last status line.
@@ -361,6 +385,7 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 	// export draws, so a consumer of the trace can tell which sources the
 	// answer actually rests on.
 	m.Citations = citations(res, condStr(res.Summary, "report"))
+	m.Pages, m.Passages = passages(res)
 
 	notes := map[string]MetaNote{}
 	var order []string
@@ -410,6 +435,30 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 		m.Notes = append(m.Notes, notes[id])
 	}
 	return m
+}
+
+// passages collects the fetched pages and resolves every fact-check quote to
+// one of them, keeping exactly the pages fetchedPages keeps: like it, the
+// last finding for a canonical URL wins and a hostless URL is left out.
+func passages(res *agent.ResearchResult) (map[string]string, []MetaPassage) {
+	pages, byCanon := map[string]string{}, map[string]string{}
+	for _, f := range res.Findings {
+		if c := tools.CanonicalURL(f.URL); c != "" && fetched(f) {
+			pages[f.URL] = f.Content
+			byCanon[c] = f.URL
+		}
+	}
+	if res.FactCheck == nil {
+		return pages, nil
+	}
+	var out []MetaPassage
+	for i, v := range res.FactCheck.Verdicts {
+		for _, e := range v.Evidence {
+			page := byCanon[tools.CanonicalURL(resolveSource(e.Source, res.Findings))]
+			out = append(out, MetaPassage{Verdict: i, Page: page, Quote: e.Quote, Located: page != "" && locate(pages[page], e.Quote)})
+		}
+	}
+	return pages, out
 }
 
 // WriteMetadata marshals the trace metadata to JSON and writes it.
