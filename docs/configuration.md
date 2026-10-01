@@ -126,8 +126,8 @@ Which mode a run uses is decided by what is configured:
   - A URL, or a comma-separated list of URLs, pins your own instances. JSON is
     asked for first; an instance that refuses it is read through HTML.
   - A search that every instance refuses fails with its reason —
-    `rate-limited`, `challenge`, `blocked` or `unavailable` — on the event
-    and in the error. It is never replaced by the model inventing findings,
+    `rate-limited`, `challenge`, `blocked`, `unreachable` (nothing answers at
+    the address) or `unavailable` — on the event and in the error. It is never replaced by the model inventing findings,
     and a run whose every search failed stops before analysing nothing.
 - **LLM search** — `searxng_url: off`. The model itself proposes the findings
   and their URLs. Nothing is fetched, so every source is labelled

@@ -55,27 +55,32 @@ func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 	}
 }
 
-// evidenceURLs are the pages a claim may cite: the ones the run fetched. A
-// run that fetched nothing (search off) has only the model's own findings,
-// which the report already presents as unverified, so they all count.
-func evidenceURLs(findings []agent.Finding) map[string]bool {
+// evidenceURLs are the pages a claim may cite: the ones the run fetched,
+// keyed by canonical URL. A run that fetched nothing (search off) has only
+// the model's own findings, which the report already presents as
+// unverified, so they all count.
+func evidenceURLs(findings []agent.Finding) map[string]string {
 	retrieved := sourcesRetrieved(findings)
-	out := map[string]bool{}
+	out := map[string]string{}
 	for _, f := range findings {
-		if f.URL != "" && (fetched(f) || !retrieved) {
-			out[tools.CanonicalURL(f.URL)] = true
+		// A URL with no host ("/", " ") canonicalises to "", the key every
+		// unresolvable source looks up: keyed, it would back them all.
+		if c := tools.CanonicalURL(f.URL); c != "" && (fetched(f) || !retrieved) {
+			out[c] = f.URL
 		}
 	}
 	return out
 }
 
-// claimSources keeps the sources that are evidence, in order and once each.
-func claimSources(srcs []string, findings []agent.Finding, evidence map[string]bool) []string {
+// claimSources keeps the sources that are evidence, in order and once each,
+// as the finding's own URL: the model's "https://x/a/" for the page fetched as
+// "https://x/a" listed one page twice, and matched no citation, so the audit
+// page badged a fetched page as never fetched.
+func claimSources(srcs []string, findings []agent.Finding, evidence map[string]string) []string {
 	var out []string
 	for _, s := range srcs {
-		s = resolveSource(s, findings)
-		if s != "" && evidence[tools.CanonicalURL(s)] && !slices.Contains(out, s) {
-			out = append(out, s)
+		if u := evidence[tools.CanonicalURL(resolveSource(s, findings))]; u != "" && !slices.Contains(out, u) {
+			out = append(out, u)
 		}
 	}
 	return out
@@ -187,8 +192,10 @@ func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Findin
 func fetchedPages(findings []agent.Finding) map[string]string {
 	pages := map[string]string{}
 	for _, f := range findings {
-		if f.URL != "" && fetched(f) {
-			pages[tools.CanonicalURL(f.URL)] = f.Content
+		// Not under "": a hostless URL ("/") canonicalises to it, and so does
+		// every quote source that names no page, which it would then back.
+		if c := tools.CanonicalURL(f.URL); c != "" && fetched(f) {
+			pages[c] = f.Content
 		}
 	}
 	return pages

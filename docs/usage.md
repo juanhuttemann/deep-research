@@ -1,7 +1,7 @@
 # Usage
 
-A research run is `deep-research -p "question"`; `init`, `doctor` and
-`list` are subcommands of the same binary, built by `make build`. `deep-research --version` reports the version stamped in at
+A research run is `deep-research -p "question"`; `serve`, `init`, `doctor`
+and `list` are subcommands of the same binary, built by `make build`. `deep-research --version` reports the version stamped in at
 build time (`dev` for a plain `go build`).
 
 ## `-p` / `--prompt`
@@ -131,6 +131,49 @@ The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
 structured result: analysis, fact-check, sources and the whole timeline.
 
+## `serve`
+
+```bash
+deep-research serve                      # http://localhost:7777
+deep-research serve --addr 127.0.0.1:0   # any free port
+```
+
+A page for launching a run and auditing what it decided. The form takes the
+question, `--mode` and `--sources`; a launch is the same run as
+`deep-research --jsonl -p ...`, history record included, and like `--jsonl`
+it skips the brief. While it runs the page shows the live frame. When it
+ends it reads the run's `.json` artifact and shows the answer, the
+statements the fact-check blocked with the claim that failed, every claim
+with its verdict, and each quote inside the page text the check located it
+in. Every source is badged `fetched`, `snippet only` or `never fetched`. A
+quote is highlighted where it appears verbatim; one the check located only
+after normalising markup and whitespace is marked located but not
+highlighted. The start screen lists the 50 most recent runs in the reports
+directory, and `/?run=<name>.json` opens any of them.
+It needs no terminal, so it is also the live view where the terminal UI is
+not available (Windows).
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--addr HOST:PORT` | `127.0.0.1:7777` | address to listen on |
+| `--reports DIR` | `reports` | where runs write their artifacts; served read-only at `/reports/`, with a directory listing |
+
+- One run at a time: a second launch is refused until the first ends.
+- Closing or reloading the tab does not cancel the run; the Cancel button
+  does. A dropped connection resumes from the last event it saw
+  (`Last-Event-ID`); a reloaded tab replays the run from the events the
+  server kept, which are the current run's last 10000. A tab that needs
+  events no longer kept gets a `gap` event and a frame marked incomplete,
+  not a stream that silently starts mid-run. Event ids keep counting across runs and
+  restarts, and each run begins with a `start` line carrying its request. A
+  server that has not run anything yet sends `idle` on connect, so a tab
+  left open across a restart stops showing the old run as live.
+- It is a tool for this machine, with no authentication. It answers only
+  requests addressed to `localhost`, `127.0.0.1` or `[::1]`, whatever
+  `--addr` binds, so a page that rebinds its own name to your address is
+  refused. It refuses cross-site POSTs, and a launch must be
+  `application/json`, so another site cannot spend your API credits.
+
 ## `list`
 
 ```bash
@@ -143,7 +186,8 @@ usage, read back from the JSONL history file (`data_file` in
 
 History keeps each source's text bounded — the first 4000 characters, marked
 when cut — because the file is an append-only index that is read back whole.
-The full text of every source is in that run's `.md` and `.json` artifacts.
+The stored text of every fetched source is in that run's `.json` artifact,
+under `pages`.
 
 New history records contain the full research result plus a run `id`:
 structured `analysis`, `fact_check`, `summary`, source statuses and `tokens`.
@@ -246,6 +290,12 @@ marked `no URL`. The `.json` sidecar carries the same `model`, `provider`,
 `served_by`, the whole `analysis` (its reading of the question, claims with
 sources, recommendations, resolved conflicts, gaps and follow-ups), `topics`
 and every `fact_check` verdict, plus `error` for an incomplete run, and each
-`citation` event in its timeline names its source.
+`citation` event in its timeline names its source. `pages` maps each fetched
+source's URL to its stored text, the text the fact-check located quotes in.
+`passages` lists every quote the fact-check gave, with `verdict` (its index
+in `fact_check.verdicts`), `page` (its key in `pages`, empty when the run
+fetched no page the quote names) and `located`, whether the check found it
+in that text. `located` proves only that the words are the page's; the
+claim's `status` is what the check concluded.
 
 Token counts come from the usage the provider reports.

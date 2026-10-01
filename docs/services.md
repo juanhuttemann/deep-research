@@ -240,7 +240,8 @@ shows up as every source being `snippet only`.
 | `permission denied` when editing `settings.yml` | The container took ownership. Edit with `sudo`, or recreate the container with `-e FORCE_OWNERSHIP=false` |
 | Firecrawl API container exits; logs show `EAI_AGAIN nuq-postgres` | It was started without its database. Run `docker compose up -d` for the whole stack |
 | Every source is `unverified` | The run used LLM search: `SEARXNG_URL` is `off` |
-| `every search failed (rate-limited)` | Every instance refused. With `auto`, public instances limit bursts; retry later, or run your own SearXNG |
+| `no search answered: cannot reach SearXNG at …` | Nothing is listening at `SEARXNG_URL`. Start it (`docker compose up -d`, or `docker start searxng`) or fix the URL; `deep-research doctor` checks it |
+| `no search answered (rate-limited)` | Every instance refused. With `auto`, public instances limit bursts; retry later, or run your own SearXNG |
 | Every source is `snippet only` | Search works, scraping does not. Check Firecrawl with the curl in section 2; if hosted, check `FIRECRAWL_API_KEY` |
 | Sources reported as `blocked` | The target resolved to a private or loopback address and was refused before the request. See [the trust boundary](configuration.md#scraping-trust-boundary) |
 | Settings in `.env` appear to be ignored | Variables already exported in your shell take precedence — `.env` does not overwrite them. Run `env \| grep -E 'OPENAI\|SEARXNG\|FIRECRAWL'` and unset what you do not want |

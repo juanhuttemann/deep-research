@@ -100,7 +100,7 @@ internal/
   agent     one LLM phase per method (ResearchDetail / Analyze / FactCheck /
             Summarize / Plan); real search via internal/tools when SearXNG
             is configured; Diagnose for `doctor`
-  cli       cobra commands (run / list / init / doctor)
+  cli       cobra commands (run / serve / list / init / doctor)
   config    config resolution (env > config dir > embedded defaults) + .env
   replay    --trace recorder and --replay player: wraps the assistant to
             record, or serve back, the plan and every search result
@@ -108,6 +108,9 @@ internal/
   tools     SearXNG search (JSON or HTML, one or many instances, searx.space
             discovery) + Firecrawl scrape HTTP clients
   ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export
+  web       `serve`: one embedded page, the run's JSONL over SSE with
+            Last-Event-ID replay, launch / cancel, the reports directory
+            read-only; the run itself is a function cli injects
 config/     embedded default config.yaml and agent.yaml
 ```
 
@@ -117,14 +120,22 @@ degrades to one log line per event.
 ## Layering
 
 ```
-cli → { agent, config, replay, store, ui }
+cli → { agent, config, replay, store, ui, web }
 replay → agent
 agent → tools
 tools → (standalone HTTP clients)
+web → (nothing in this module)
 ```
 
 Imports go one way only. In particular `tools` must not import `agent`, and
 sequencing must not move into `agent`.
+
+`web` passes the run's `--jsonl` lines through unparsed, and the page, not
+the server, reads the result from the `.json` artifact, so `web` needs
+nothing from `ui`; a launch is the cli's own `--jsonl` command run
+in-process. Nothing in the driver exists
+for the page's sake: what the page needs and lacks belongs in the event
+stream or the artifact.
 
 ## Platform split
 

@@ -409,9 +409,11 @@ func CanonicalURL(raw string) string {
 // never drops an otherwise good result. terms rank the results; see
 // rankByRelevance.
 func (s *SearchTools) Search(ctx context.Context, query string, terms []string) (*SearchResults, error) {
+	// Returned as it is: every caller says "search failed" itself, and the
+	// prefix here printed it twice in every error line.
 	searchResults, err := s.SearXNG.Search(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		return nil, err
 	}
 	s.log(fmt.Sprintf("  searxng   %d results", len(searchResults)))
 
