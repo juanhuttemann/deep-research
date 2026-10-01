@@ -21,8 +21,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   not cancel the run.
 - `--plan-only` makes the plan, prints it as JSON and stops before any
   search; `--plan FILE` runs such a plan, edited or not, without planning
-  again. Renaming, adding and deleting sub-topics was only possible in the
-  interactive brief. Every `--jsonl` run now emits the plan it executes as
+  again; `-o FILE` writes the plan there. Renaming, adding and deleting
+  sub-topics was only possible in the interactive brief. Every `--jsonl` run now emits the plan it executes as
   a `plan` event before the first search.
 - The `.json` artifact carries `pages`, the stored text of every fetched
   page, and `passages`, each fact-check quote resolved to its page and
@@ -58,7 +58,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - A trace recorded the planner's first answer, which the brief then edited
   in place, so it could hold a half-edited plan, and a replay sent it back
   through the planner, which cut it to the tier's sub-topic count. A trace
-  now records the plan the run used and a replay runs it whole.
+  now records the plan the run used, with its tier and budget rather than
+  the flags' (which a `--plan` run or a tier changed in the brief made
+  wrong), and a replay runs it whole.
 
 - A claim's sources are recorded as the URL the page was fetched as. The
   model's spelling was kept, so `https://x/a/` beside `#1` for the page

@@ -365,49 +365,68 @@ func (h handedPlan) ResearchDetail(ctx context.Context, q string, terms []string
 	return h.stub.ResearchDetail(ctx, q, terms)
 }
 
-// The plan is the reader's to shape, and in the CLI only the interactive
-// brief could do it. A plan-only run prints the plan and stops; edited and
-// handed back with --plan, it runs as written, without planning again, and a
-// trace of that run keeps the plan it ran.
-func TestPlanOnlyThenPlanRunsTheEditedPlan(t *testing.T) {
-	dir := t.TempDir()
-	history := filepath.Join(dir, "r.jsonl")
-	cfg := config.Config{DataFile: history, Config: agent.Config{ModelCallTimeout: time.Second}}
-	exec := func(a agent.Assistant, args ...string) string {
-		t.Helper()
-		cmd := New(func() (Deps, error) { return Deps{Assistant: always(a), Config: cfg}, nil })
-		var out bytes.Buffer
-		cmd.SetOut(&out)
-		cmd.SetErr(io.Discard)
-		cmd.SetIn(strings.NewReader(""))
-		cmd.SetArgs(args)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("%v: %v", args, err)
-		}
-		return out.String()
-	}
+// runCLI runs the command with a, against a history in dir, and returns
+// stdout; err is the command's.
+func runCLI(t *testing.T, dir string, a agent.Assistant, args ...string) (string, error) {
+	t.Helper()
+	cfg := config.Config{DataFile: filepath.Join(dir, "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}}
+	cmd := New(func() (Deps, error) { return Deps{Assistant: always(a), Config: cfg}, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
 
-	lines := strings.Split(strings.TrimSpace(exec(stub{}, "-p", "q", "--plan-only", "--jsonl", "--reports", dir)), "\n")
+// The plan is the reader's to shape, and in the CLI only the interactive
+// brief could do it. A plan-only run prints the plan and stops: no search,
+// no report, no history record. -o takes the plan as it takes a report, and
+// without a question it asks for one rather than showing the help.
+func TestPlanOnlyStopsAtThePlan(t *testing.T) {
+	dir := t.TempDir()
+	var searches int
+	out, err := runCLI(t, dir, searchCounter{searches: &searches}, "-p", "q", "--plan-only", "--jsonl", "--reports", dir)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	var ev struct {
 		Type, Status string
 		Plan         *ui.Plan
 		Artifacts    []string
 	}
-	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil || ev.Type != "plan" || ev.Plan == nil {
-		t.Fatalf("plan-only --jsonl did not open with the plan event: %q", lines[0])
+	if json.Unmarshal([]byte(lines[0]), &ev) != nil || ev.Type != "plan" || ev.Plan == nil {
+		t.Fatalf("plan-only --jsonl did not open with the plan event: %q (%v)", lines[0], err)
 	}
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || ev.Status != "complete" || len(ev.Artifacts) != 0 {
-		t.Errorf("plan-only --jsonl ended on %q, want done/complete with no artifacts", lines[len(lines)-1])
+	if json.Unmarshal([]byte(lines[len(lines)-1]), &ev) != nil || ev.Status != "complete" || len(ev.Artifacts) != 0 || searches != 0 {
+		t.Errorf("plan-only ended on %q after %d searches, want done/complete, no artifacts, no search", lines[len(lines)-1], searches)
 	}
-
-	var plan ui.Plan
-	if err := json.Unmarshal([]byte(exec(stub{}, "-p", "q", "--plan-only", "--reports", dir)), &plan); err != nil {
-		t.Fatalf("plan-only did not print a plan: %v", err)
-	}
-	if _, err := os.Stat(history); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "r.jsonl")); err == nil {
 		t.Error("a plan-only run was saved to the history")
 	}
+	plan := filepath.Join(dir, "plan.json")
+	if _, err := runCLI(t, dir, stub{}, "-p", "q", "--plan-only", "-o", plan, "--reports", dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(plan); err != nil || json.Unmarshal(b, &ui.Plan{}) != nil {
+		t.Errorf("--plan-only -o wrote no plan: %v", err)
+	}
+	if _, err := runCLI(t, dir, stub{}, "--plan-only"); err == nil || !strings.Contains(err.Error(), "question is empty") {
+		t.Errorf("--plan-only alone = %v, want the empty question", err)
+	}
+}
+
+// Edited and handed back with --plan, a plan runs as written, without
+// planning again, and a trace of that run keeps the plan it ran with the
+// plan's own tier and budget, not the flags' defaults.
+func TestPlanRunsTheEditedPlan(t *testing.T) {
+	dir := t.TempDir()
+	out, err := runCLI(t, dir, stub{}, "-p", "q", "--plan-only", "--reports", dir)
+	var plan ui.Plan
+	if err != nil || json.Unmarshal([]byte(out), &plan) != nil {
+		t.Fatalf("plan-only did not print a plan: %v", err)
+	}
 	plan.SubTopics = append(plan.SubTopics, agent.SubTopic{Name: "Added by hand"})
+	plan.Depth, plan.PinnedPerTopic = ui.DepthMode{Key: "deep"}, 5
 	edited, _ := json.Marshal(plan)
 	path := filepath.Join(dir, "plan.json")
 	if err := os.WriteFile(path, edited, 0o644); err != nil {
@@ -415,7 +434,9 @@ func TestPlanOnlyThenPlanRunsTheEditedPlan(t *testing.T) {
 	}
 
 	var queries []string
-	exec(handedPlan{mu: &sync.Mutex{}, queries: &queries}, "--plan", path, "--silent", "--trace", "--reports", dir)
+	if _, err := runCLI(t, dir, handedPlan{mu: &sync.Mutex{}, queries: &queries}, "--plan", path, "--silent", "--trace", "--reports", dir); err != nil {
+		t.Fatal(err)
+	}
 	if !slices.ContainsFunc(queries, func(q string) bool { return strings.Contains(q, "Added by hand") }) {
 		t.Errorf("the added sub-topic was never searched: %q", queries)
 	}
@@ -424,8 +445,8 @@ func TestPlanOnlyThenPlanRunsTheEditedPlan(t *testing.T) {
 		t.Fatalf("traces = %v", traces)
 	}
 	tr, err := replay.Load(traces[0])
-	if err != nil || len(tr.Plan) != 2 {
-		t.Errorf("the trace of a --plan run does not hold its plan: %v, %+v", err, tr)
+	if err != nil || len(tr.Plan) != 2 || tr.Mode != "deep" || tr.Sources != 5 {
+		t.Errorf("trace = %v, %+v; want the two sub-topics at deep with 5 sources", err, tr)
 	}
 }
 
@@ -456,7 +477,10 @@ func TestWebRunPlansThenRunsTheEditedPlan(t *testing.T) {
 		return strings.Split(strings.TrimSpace(out.String()), "\n")
 	}
 	var plan ui.Plan
-	for _, ln := range launch(stub{}, web.Request{Question: "q", Mode: "quick", PlanOnly: true}) {
+	// The plan-only launch is the page's first half: it must not research.
+	// Run in full, it bills a whole run before the reader saw the plan.
+	var searches int
+	for _, ln := range launch(searchCounter{searches: &searches}, web.Request{Question: "q", Mode: "quick", PlanOnly: true}) {
 		var e struct {
 			Type string
 			Plan *ui.Plan
@@ -465,8 +489,8 @@ func TestWebRunPlansThenRunsTheEditedPlan(t *testing.T) {
 			plan = *e.Plan
 		}
 	}
-	if len(plan.SubTopics) == 0 {
-		t.Fatal("the plan-only launch emitted no plan")
+	if len(plan.SubTopics) == 0 || searches != 0 {
+		t.Fatalf("the plan-only launch emitted %d sub-topics after %d searches, want a plan and none", len(plan.SubTopics), searches)
 	}
 	plan.SubTopics = append(plan.SubTopics, agent.SubTopic{Name: "Added in the page"})
 	edited, _ := json.Marshal(plan)

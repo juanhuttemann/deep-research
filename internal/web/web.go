@@ -43,8 +43,9 @@ type Request struct {
 // done line on every outcome.
 type RunFunc func(ctx context.Context, r Request, w io.Writer)
 
-// maxLines bounds the replay buffer. Events are short (a status line, a URL),
-// so the line count bounds the memory too.
+// maxLines bounds the replay buffer by line count, not bytes. Events are
+// short (a status line, a URL); the longest is the plan event, a few KB, so
+// the count bounds the memory too.
 const maxLines = 10000
 
 // Server holds one run at a time and the lines it has written so far.
@@ -199,12 +200,16 @@ func (s *Server) begin(req Request) bool {
 	s.start = s.base + int64(len(s.lines))
 	s.base, s.lines, s.partial = s.start, nil, nil
 	// The first line of every run, so a tab showing the last one knows to
-	// clear it; it carries what was asked, which no ui event repeats.
+	// clear it; it carries what was asked, which no ui event repeats. Not an
+	// edited plan: the run's plan event carries that, and a 64 KB request
+	// body would make this the longest line the buffer keeps.
+	shown := req
+	shown.Plan = nil
 	start, _ := json.Marshal(struct {
 		Type string    `json:"type"`
 		Time time.Time `json:"time"`
 		Request
-	}{"start", time.Now(), req})
+	}{"start", time.Now(), shown})
 	s.appendLocked(start)
 	go func() {
 		s.run(ctx, req, s)

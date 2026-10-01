@@ -127,13 +127,17 @@ func (r *Recorder) phase(name, prompt string, out any, err error) {
 	r.mu.Unlock()
 }
 
-// SetPlan records the plan the run actually used. The planner's answer is
-// not it: the brief can rename, add and delete sub-topics, and a plan handed
-// in with --plan never calls the planner at all, which left a trace with no
-// plan that Load refused.
-func (r *Recorder) SetPlan(subs []agent.SubTopic) {
+// SetPlan records the plan the run actually used, with its tier and pinned
+// per-sub-agent budget. The planner's answer is not it: the brief can rename,
+// add and delete sub-topics and change the tier, and a plan handed in with
+// --plan never calls the planner at all, which left a trace with no plan that
+// Load refused. The flags are not it either: --plan carries its own tier and
+// budget, and a replay at the flags' tier cut the recorded results
+// differently from the run it reproduces.
+func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int) {
 	r.mu.Lock()
 	r.trace.Plan = slices.Clone(subs)
+	r.trace.Mode, r.trace.Sources = mode, sources
 	r.mu.Unlock()
 }
 

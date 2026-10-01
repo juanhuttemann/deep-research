@@ -40,7 +40,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 
 	// A question is a flag on the root, not a subcommand: `deep-research -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
-		if !cmd.Flags().Changed("prompt") && !cmd.Flags().Changed("replay") && !cmd.Flags().Changed("plan") {
+		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only"}, cmd.Flags().Changed) {
 			return cmd.Help()
 		}
 		res, err := research(cmd, load)
@@ -483,15 +483,22 @@ func readPlanFile(cmd *cobra.Command, path string) (*ui.Plan, error) {
 	return ui.ReadPlan(f)
 }
 
-// printPlan writes a plan-only run's plan to stdout as JSON, the input
-// --plan reads back. Under --jsonl the plan event already carried it.
+// printPlan writes a plan-only run's plan as JSON, the input --plan reads
+// back: to -o when given, as it does a report, else to stdout. Under --jsonl
+// the plan event already carried it to stdout.
 func printPlan(cmd *cobra.Command, plan *ui.Plan, jsonl bool) error {
-	if jsonl || plan == nil {
+	if plan == nil {
 		return nil
 	}
 	b, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		return err
+	}
+	if out, _ := cmd.Flags().GetString("output"); out != "" {
+		return os.WriteFile(out, append(b, '\n'), 0o644)
+	}
+	if jsonl {
+		return nil
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", b)
 	return err
@@ -515,8 +522,8 @@ func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
 	if rec == nil || res.MDPath == "" {
 		return
 	}
-	if res.Plan != nil {
-		rec.SetPlan(res.Plan.SubTopics)
+	if p := res.Plan; p != nil {
+		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic)
 	}
 	path := strings.TrimSuffix(res.MDPath, ".md") + ".trace.json"
 	if err := rec.Write(path); err != nil {

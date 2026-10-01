@@ -54,7 +54,8 @@ at least one sub-topic must have a name, sub-topics are renumbered in
 order, and the source budget is worked out again from the tier rather than
 read from the file. When you rename a sub-topic, clear its `query` and
 `terms`: they were written for the old name, and the run searches them as
-written. A plan-only run writes no report and no history record.
+written. A plan-only run writes no report and no history record; `-o FILE`
+writes its plan to FILE instead of stdout.
 
 ### Replaying a run
 

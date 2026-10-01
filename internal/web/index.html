@@ -451,7 +451,10 @@ const loadedAt = Date.now();
 let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, agents = new Map(), events = 0;
 // A plan-only run (the first half of Research) ends in the plan review, not
 // in an outcome; its plan arrives as the plan event before its done line.
-let planning = false, madePlan = null;
+let planning = false, madePlan = null, planStamp = "";
+// The plan this tab discarded, by its run's start time, so a reload does not
+// bring it back. Per tab and best effort: storage can be unavailable.
+function discardedPlan() { try { return sessionStorage.getItem("discarded-plan") || ""; } catch { return ""; } }
 
 function setRunning(on) {
   running = on;
@@ -521,17 +524,20 @@ function handle(e) {
   switch (e.type) {
   case "start":
     reset(); setRunning(true);
-    planning = !!e.plan_only; madePlan = null;
+    planning = !!e.plan_only; madePlan = null; planStamp = e.time;
     startedAt = Date.parse(e.time) || Date.now();
-    // A run launched from an edited plan carries its question in the plan.
-    $("question").textContent = e.question || (e.plan && e.plan.question) || "";
-    $("mode-label").textContent = (e.mode || (e.plan && e.plan.depth && e.plan.depth.key) || "standard") + " mode";
+    // A run launched from an edited plan names its question in the plan
+    // event, which follows.
+    $("question").textContent = e.question || "";
+    $("mode-label").textContent = (e.mode || "standard") + " mode";
     phase = "Plan"; stepper();
     // The model's own status replaces this once the plan call streams.
     if (planning) status("Planning the sub-topics…");
     break;
   case "plan":
     if (planning) madePlan = e.plan;
+    $("question").textContent = e.plan.question;
+    $("mode-label").textContent = e.plan.depth.key + " mode";
     break;
   case "phase":
     phase = e.phase; stepper();
@@ -564,10 +570,15 @@ function done(e) {
   finished = e.status === "complete" || e.status === "incomplete";
   endedAt = Date.parse(e.time) || Date.now();
   setRunning(false);
+  // A made plan is a step, not a result: a reload while it waits for review
+  // opens the review again, unless this tab discarded it.
+  if (planning && e.status === "complete" && madePlan) {
+    if (planStamp === discardedPlan()) { show("home"); return; }
+    showBrief(madePlan); return;
+  }
   // A run that ended before this page opened is history: it is in Recent
   // runs, and the page opens on the start screen rather than on it.
   if (endedAt < loadedAt) { show("home"); return; }
-  if (planning && e.status === "complete" && madePlan) { showBrief(madePlan); return; }
   stepper(); status("");
   $("outcome").hidden = false;
   $("outcome-tag").replaceChildren(tag(OUTCOME[e.status] || ["off", e.status]));
@@ -673,7 +684,10 @@ $("add-topic").onsubmit = ev => {
   $("new-topic").value = "";
   renderTopics();
 };
-$("discard").onclick = () => { brief = null; show("home"); };
+$("discard").onclick = () => {
+  try { sessionStorage.setItem("discarded-plan", planStamp); } catch {}
+  brief = null; show("home");
+};
 $("start").onclick = async () => {
   const plan = editedPlan();
   if (!plan.sub_topics.length) { $("brief-msg").textContent = "Keep at least one named sub-topic."; return; }
