@@ -493,6 +493,10 @@ func condStr(s *agent.Summary, field string) string {
 	return ""
 }
 
+// Stem is the file name a question's artifacts share, without extension,
+// for files written beside them.
+func Stem(question string) string { return slug(question) }
+
 // slug turns a question into an artifact filename: a readable stem plus a
 // short digest of the full question.
 //

@@ -24,6 +24,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   again; `-o FILE` writes the plan there. Renaming, adding and deleting
   sub-topics was only possible in the interactive brief. Every `--jsonl` run now emits the plan it executes as
   a `plan` event before the first search.
+- An interrupted run can be resumed. From its confirmed plan on, every
+  run saves a checkpoint after each step, `<reports>/<name>.<id>.partial.json`,
+  removed only when it completes in full. `--resume` runs the saved plan
+  again, serves the searches that finished from the checkpoint and
+  searches live only what did not finish or failed; the model phases run
+  again. `serve` lists interrupted runs with Resume and Discard, and a tab
+  left open across a server restart offers to resume the run it showed.
+  A killed run used to lose every search it had made.
 - The `.json` artifact carries `pages`, the stored text of every fetched
   page, and `passages`, each fact-check quote resolved to its page and
   whether the check found it there. A quote could be read before, but

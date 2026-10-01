@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,7 +41,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 
 	// A question is a flag on the root, not a subcommand: `deep-research -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
-		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only"}, cmd.Flags().Changed) {
+		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only", "resume"}, cmd.Flags().Changed) {
 			return cmd.Help()
 		}
 		res, err := research(cmd, load)
@@ -82,6 +83,12 @@ func New(load func() (Deps, error)) *cobra.Command {
 		root.MarkFlagsMutuallyExclusive("plan", other)
 	}
 	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
+	root.Flags().String("resume", "", "continue an interrupted run from its checkpoint (<reports>/*.partial.json), without searching again what it searched")
+	// A checkpoint carries the question, the confirmed plan, its tier and
+	// budget, and the searches already made.
+	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth"} {
+		root.MarkFlagsMutuallyExclusive("resume", other)
+	}
 
 	initCmd := &cobra.Command{
 		Use:   "init",
@@ -214,6 +221,10 @@ func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.Run
 // webArgs is the command line for a page's request. An edited plan goes in
 // on stdin (--plan=-): it carries its own question, depth and budget.
 func webArgs(r web.Request, reports string) ([]string, io.Reader) {
+	if r.Resume != "" {
+		// web accepts only a checkpoint's bare name in the reports directory.
+		return []string{"--jsonl", "--resume=" + filepath.Join(reports, r.Resume), "--reports=" + reports}, strings.NewReader("")
+	}
 	if len(r.Plan) > 0 {
 		return []string{"--jsonl", "--plan=-", "--reports=" + reports}, bytes.NewReader(r.Plan)
 	}
@@ -308,20 +319,17 @@ func doneEvent(res ui.RunResult, err error) ui.Event {
 }
 
 func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, error) {
-	tr, question, err := replayTrace(cmd, question)
+	st, err := runStart(cmd, d, question)
 	if err != nil {
 		return ui.RunResult{}, err
 	}
-	plan, question, err := givenPlan(cmd, d, tr, question)
-	if err != nil {
-		return ui.RunResult{}, err
-	}
+	question = st.question
 	// Sub-agents running at once race for the pages several searches return:
 	// whichever claims a page first counts it, which decides whether another
 	// falls short of its budget and runs its fallback query. A replay served
 	// from memory loses nothing by running them one at a time, in plan order,
 	// and two replays of one trace then see exactly the same evidence.
-	if tr != nil {
+	if st.replay {
 		d.Config.Parallelism = 1
 	}
 	// An empty question plans nothing, and the run would still spend its
@@ -340,8 +348,8 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if err != nil {
 		return ui.RunResult{}, err
 	}
-	assistant, rec := wrapAssistant(cmd, assistant, tr, question, mode, sourceBudget(cmd, d))
 	planOnly, _ := cmd.Flags().GetBool("plan-only")
+	assistant, rec := instrument(cmd, assistant, st, planOnly, mode, sourceBudget(cmd, d))
 
 	silent, _ := cmd.Flags().GetBool("silent")
 	jsonl, _ := cmd.Flags().GetBool("jsonl")
@@ -380,8 +388,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		Input:           cmd.InOrStdin(),
 		Stdout:          cmd.OutOrStdout(),
 		Stderr:          cmd.ErrOrStderr(),
-		Plan:            plan,
+		Plan:            st.plan,
 		PlanOnly:        planOnly,
+		OnPlan:          recordPlan(rec),
 	})
 	if err != nil {
 		return res, fmt.Errorf("research failed: %w", err)
@@ -394,7 +403,20 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		return res, printPlan(cmd, res.Plan, jsonl)
 	}
 	writeTrace(cmd, rec, &res)
-	return res, deliver(cmd, d, res.Report, tr == nil, silent || jsonl)
+	return res, finish(cmd, d, rec, res.Report, !st.replay, silent || jsonl)
+}
+
+// finish delivers a run that ended and, once it finished in full, removes its
+// checkpoint: nothing is left to resume. A cancelled, failed or incomplete
+// run keeps it.
+func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, result *agent.ResearchResult, save, printed bool) error {
+	if err := deliver(cmd, d, result, save, printed); err != nil {
+		return err
+	}
+	if err := rec.Discard(); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not remove the checkpoint: %v\n", err)
+	}
+	return nil
 }
 
 // deliver warns about an empty run, saves it to the history and prints it.
@@ -420,29 +442,45 @@ func deliver(cmd *cobra.Command, d Deps, result *agent.ResearchResult, save, pri
 	return nil
 }
 
-// replayTrace loads the trace --replay names and gives the run its question
-// and, unless the flags override them, its depth tier and source budget: the
-// recorded results were cut at that budget, and a replay at another one would
-// not see the same evidence. A replay writes to <reports>/replay: its report
-// is named after the same question, and in the reports directory itself it
-// would overwrite the report it is meant to be compared against.
-func replayTrace(cmd *cobra.Command, question string) (*replay.Trace, string, error) {
-	path, _ := cmd.Flags().GetString("replay")
-	if path == "" {
-		return nil, question, nil
-	}
-	t, err := replay.Load(path)
-	if err != nil {
-		return nil, "", err
-	}
-	for name, v := range map[string]string{"mode": t.Mode, "sources": strconv.Itoa(t.Sources)} {
-		if !cmd.Flags().Changed(name) && v != "" {
-			_ = cmd.Flags().Set(name, v)
+// start is where a run comes from: a question, a --plan, a --replay trace
+// or a --resume checkpoint.
+type start struct {
+	question string
+	plan     *ui.Plan
+	trace    *replay.Trace
+	replay   bool   // trace is replayed: its searches only, nothing live
+	resume   string // the checkpoint being resumed
+}
+
+// runStart loads what the run starts from. A trace gives the run its
+// question and, unless the flags override them, its depth tier and source
+// budget: the recorded results were cut at that budget, and a run at another
+// one would not see the same evidence. A replay writes to <reports>/replay:
+// its report is named after the same question, and in the reports directory
+// itself it would overwrite the report it is meant to be compared against.
+func runStart(cmd *cobra.Command, d Deps, question string) (start, error) {
+	st := start{question: question}
+	replayPath, _ := cmd.Flags().GetString("replay")
+	st.resume, _ = cmd.Flags().GetString("resume")
+	if path := cmp.Or(replayPath, st.resume); path != "" {
+		t, err := replay.Load(path)
+		if err != nil {
+			return st, err
+		}
+		st.trace, st.replay = t, replayPath != ""
+		for name, v := range map[string]string{"mode": t.Mode, "sources": strconv.Itoa(t.Sources)} {
+			if !cmd.Flags().Changed(name) && v != "" {
+				_ = cmd.Flags().Set(name, v)
+			}
 		}
 	}
-	reports, _ := cmd.Flags().GetString("reports")
-	_ = cmd.Flags().Set("reports", filepath.Join(reports, "replay"))
-	return t, t.Question, nil
+	if st.replay {
+		reports, _ := cmd.Flags().GetString("reports")
+		_ = cmd.Flags().Set("reports", filepath.Join(reports, "replay"))
+	}
+	var err error
+	st.plan, st.question, err = givenPlan(cmd, d, st.trace, question)
+	return st, err
 }
 
 // givenPlan is the plan the run is handed instead of planning, with the
@@ -504,22 +542,64 @@ func printPlan(cmd *cobra.Command, plan *ui.Plan, jsonl bool) error {
 	return err
 }
 
-// wrapAssistant puts the replay player and the trace recorder the flags ask
-// for around the assistant. rec is nil without --trace.
-func wrapAssistant(cmd *cobra.Command, a agent.Assistant, tr *replay.Trace, question, mode string, sources int) (agent.Assistant, *replay.Recorder) {
-	if tr != nil {
-		a = replay.Play(a, tr)
+// instrument wraps the assistant for the run: the replay player or the
+// resume wrapper over the live one, and the recorder that saves the run's
+// checkpoint as it goes and writes --trace. A run that will search is
+// checkpointed; a replay searches nothing and a plan-only run stops before
+// searching. rec is nil when nothing records.
+func instrument(cmd *cobra.Command, a agent.Assistant, st start, planOnly bool, mode string, sources int) (agent.Assistant, *replay.Recorder) {
+	switch {
+	case st.replay:
+		a = replay.Play(a, st.trace)
+	case st.resume != "":
+		a = replay.Resume(a, st.trace)
 	}
-	if on, _ := cmd.Flags().GetBool("trace"); !on {
+	trace, _ := cmd.Flags().GetBool("trace")
+	checkpoint := !st.replay && !planOnly
+	if !trace && !checkpoint {
 		return a, nil
 	}
-	rec := replay.Record(a, question, mode, sources)
+	rec := replay.Record(a, st.question, mode, sources)
+	if st.resume != "" {
+		rec.Seed(st.trace)
+	}
+	if checkpoint {
+		rec.Checkpoint(checkpointPath(cmd, st), func(err error) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not save the checkpoint, so this run cannot be resumed: %v\n", err)
+		})
+	}
 	return rec, rec
+}
+
+// checkpointPath is the resumed checkpoint, or a new one beside the run's
+// artifacts. The run ID keeps two runs of one question, at once or one
+// after another, from writing over each other's progress.
+func checkpointPath(cmd *cobra.Command, st start) string {
+	if st.resume != "" {
+		return st.resume
+	}
+	reports, _ := cmd.Flags().GetString("reports")
+	if err := os.MkdirAll(reports, 0o755); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", err)
+	}
+	id, _, _ := strings.Cut(store.NewID(), "-")
+	return filepath.Join(reports, ui.Stem(st.question)+"."+id+".partial.json")
+}
+
+// recordPlan saves the confirmed plan into the recorder: the plan a resumed
+// run runs again, with its tier and pinned budget.
+func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
+	if rec == nil {
+		return nil
+	}
+	return func(p *ui.Plan) { rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic) }
 }
 
 // writeTrace saves a recorded run next to its report, named after it.
 func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
-	if rec == nil || res.MDPath == "" {
+	// Every run that searches records, for its checkpoint; only --trace
+	// writes the trace.
+	if on, _ := cmd.Flags().GetBool("trace"); !on || rec == nil || res.MDPath == "" {
 		return
 	}
 	if p := res.Plan; p != nil {

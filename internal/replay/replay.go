@@ -12,8 +12,11 @@ package replay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -71,6 +74,16 @@ type Recorder struct {
 	agent.Assistant
 	mu    sync.Mutex
 	trace Trace
+	// checkpoint, when set, is where the trace is saved after each step, so
+	// a run that is killed can resume from it (see Resume). saveMu keeps one
+	// save at a time: sub-agents record searches in parallel.
+	checkpoint string
+	saveMu     sync.Mutex
+	warn       func(error)
+	warned     bool
+	// finished are the queries already recorded whole, so a search a resume
+	// serves again from them is not recorded twice.
+	finished map[string]bool
 }
 
 // Record starts recording a run of question at the given depth and budget.
@@ -89,13 +102,46 @@ func (r *Recorder) Plan(ctx context.Context, question string, n int) ([]agent.Su
 func (r *Recorder) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
 	det, err := r.Assistant.ResearchDetail(ctx, query, terms)
 	s := Search{Query: query, Terms: terms, Result: det}
-	if err != nil {
+	switch {
+	case err != nil:
 		s.Error = err.Error()
+	case ctx.Err() != nil:
+		// A cancel mid-search returns the pages fetched so far and no error.
+		// Recorded as a whole search, a resume would never finish it.
+		s.Error = "cancelled before the search finished"
 	}
 	r.mu.Lock()
-	r.trace.Searches = append(r.trace.Searches, s)
+	if s.Error != "" || !r.finished[query] {
+		r.trace.Searches = append(r.trace.Searches, s)
+	}
+	if s.Error == "" {
+		if r.finished == nil {
+			r.finished = map[string]bool{}
+		}
+		r.finished[query] = true
+	}
 	r.mu.Unlock()
+	r.save()
 	return det, err
+}
+
+// Seed starts the recording from what an interrupted run saved: its plan and
+// finished searches. A resumed run that recorded from nothing saved over its
+// checkpoint with the plan alone, and a second stop lost every search the
+// first run had made.
+func (r *Recorder) Seed(t *Trace) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
+	if r.finished == nil {
+		r.finished = map[string]bool{}
+	}
+	for _, s := range t.Searches {
+		if s.Error == "" && s.Result != nil && !r.finished[s.Query] {
+			r.trace.Searches = append(r.trace.Searches, s)
+			r.finished[s.Query] = true
+		}
+	}
 }
 
 func (r *Recorder) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
@@ -139,6 +185,53 @@ func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int) {
 	r.trace.Plan = slices.Clone(subs)
 	r.trace.Mode, r.trace.Sources = mode, sources
 	r.mu.Unlock()
+	r.save()
+}
+
+// Checkpoint saves the trace to path after each step from the plan on, and
+// reports a save that fails to warn once: a run is not stopped because its
+// checkpoint could not be written.
+func (r *Recorder) Checkpoint(path string, warn func(error)) {
+	r.saveMu.Lock()
+	r.checkpoint, r.warn = path, warn
+	r.saveMu.Unlock()
+}
+
+// Discard removes the checkpoint of a run that finished, and stops saving.
+// A run that records nothing has a nil recorder and nothing to remove.
+func (r *Recorder) Discard() error {
+	if r == nil {
+		return nil
+	}
+	r.saveMu.Lock()
+	defer r.saveMu.Unlock()
+	path := r.checkpoint
+	r.checkpoint = ""
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// save writes the checkpoint once there is a plan to resume.
+func (r *Recorder) save() {
+	r.saveMu.Lock()
+	defer r.saveMu.Unlock()
+	r.mu.Lock()
+	planned := len(r.trace.Plan) > 0
+	r.mu.Unlock()
+	if r.checkpoint == "" || !planned {
+		return
+	}
+	if err := r.Write(r.checkpoint); err != nil && !r.warned {
+		r.warned = true
+		if r.warn != nil {
+			r.warn(err)
+		}
+	}
 }
 
 // Write saves the trace to path.
@@ -168,7 +261,31 @@ func (r *Recorder) Write(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return writeAtomic(path, b)
+}
+
+// writeAtomic replaces path with b whole: a checkpoint is rewritten while the
+// run goes, and a kill mid-write must leave the previous one, not half of it.
+func writeAtomic(path string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 // Load reads a trace written by Recorder.Write.
@@ -284,6 +401,38 @@ func (p *Player) ResearchDetail(_ context.Context, query string, _ []string) (*a
 	}
 	return s.Result, nil
 }
+
+// Resumer serves the searches a checkpoint recorded and goes live for the
+// rest: a search the interrupted run never finished, or one that failed,
+// often the failure being recovered from (a search server that was down).
+// The model phases always run live: governance edits what they return, and
+// the analysis retry depends on asking again.
+type Resumer struct {
+	agent.Assistant
+	byQuery map[string]Search
+}
+
+// Resume continues t on live.
+func Resume(live agent.Assistant, t *Trace) *Resumer {
+	r := &Resumer{Assistant: live, byQuery: map[string]Search{}}
+	for _, s := range t.Searches {
+		if s.Error == "" && s.Result != nil {
+			r.byQuery[s.Query] = s
+		}
+	}
+	return r
+}
+
+func (r *Resumer) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
+	if s, ok := r.byQuery[query]; ok {
+		return s.Result, nil
+	}
+	return r.Assistant.ResearchDetail(ctx, query, terms)
+}
+
+func (r *Resumer) ModelInfo() (string, string) { return modelInfo(r.Assistant) }
+func (r *Resumer) ServedModels() []string      { return servedModels(r.Assistant) }
+func (r *Resumer) SetStatus(f func(string))    { setStatus(r.Assistant, f) }
 
 // The driver and UI look for these optional methods on the assistant. An
 // embedded interface does not promote them, so each wrapper forwards them.

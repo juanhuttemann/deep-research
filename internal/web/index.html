@@ -117,6 +117,9 @@ select { font: inherit; font-size: 13.5px; color: var(--text); background: var(-
 .runs .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runs .when { color: var(--text-3); font-size: 13px; white-space: nowrap; }
 .empty { padding: 20px 16px; color: var(--text-3); text-align: center; list-style: none; }
+.runs .stopped { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; }
+.runs .stopped .t { color: var(--text); }
+.runs .stopped .btn { flex-shrink: 0; }
 
 /* ---- plan review ---- */
 .brief { max-width: 780px; margin: 4vh auto 0; }
@@ -314,6 +317,10 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
       </div>
     </form>
     <p id="msg" class="form-msg" role="alert"></p>
+    <div id="stopped-wrap" hidden>
+      <div class="section-title">Interrupted runs</div>
+      <ul id="stopped" class="runs"></ul>
+    </div>
     <div class="section-title">Recent runs</div>
     <ul id="runs" class="runs"><li class="empty">Loading…</li></ul>
   </section>
@@ -528,7 +535,7 @@ function handle(e) {
     startedAt = Date.parse(e.time) || Date.now();
     // A run launched from an edited plan names its question in the plan
     // event, which follows.
-    $("question").textContent = e.question || "";
+    $("question").textContent = e.question || (e.resume ? runTitle(e.resume) : "");
     $("mode-label").textContent = (e.mode || "standard") + " mode";
     phase = "Plan"; stepper();
     // The model's own status replaces this once the plan call streams.
@@ -700,8 +707,9 @@ $("start").onclick = async () => {
 
 function runTitle(name) {
   // The artifact name is the question with every other character a dash and
-  // a hash appended: close enough to read, and exact enough to open.
-  const t = name.replace(/\.json$/, "").replace(/-[0-9a-f]{32}$/, "").replace(/-+/g, " ").replace(/(\w) s\b/g, "$1's").trim();
+  // a hash appended: close enough to read, and exact enough to open. A
+  // checkpoint adds the run's ID before ".partial.json".
+  const t = name.replace(/\.[0-9a-f]+\.partial\.json$/, "").replace(/\.json$/, "").replace(/-[0-9a-f]{32}$/, "").replace(/-+/g, " ").replace(/(\w) s\b/g, "$1's").trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 function ago(iso) {
@@ -715,7 +723,9 @@ function ago(iso) {
 async function loadRuns() {
   const ul = $("runs");
   try {
-    const runs = await (await fetch("/api/runs")).json();
+    const all = await (await fetch("/api/runs")).json();
+    const runs = all.filter(r => !r.interrupted);
+    stoppedRuns(all.filter(r => r.interrupted));
     ul.replaceChildren();
     if (!runs.length) { ul.append(el("li", "empty", "No runs yet. Your reports will appear here.")); return; }
     for (const r of runs) {
@@ -724,6 +734,27 @@ async function loadRuns() {
       const li = el("li"); li.append(a); ul.append(li);
     }
   } catch { ul.replaceChildren(el("li", "empty", "Could not list the reports directory.")); }
+}
+
+// Interrupted runs left a checkpoint: Resume continues one without searching
+// again what it searched; Discard gives that work up.
+function stoppedRuns(list) {
+  $("stopped-wrap").hidden = !list.length;
+  $("stopped").replaceChildren(...list.map(r => {
+    const li = el("li", "stopped");
+    const resume = el("button", "btn sm primary", "Resume"), drop = el("button", "btn sm ghost", "Discard");
+    resume.onclick = async () => {
+      const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resume: r.name }) });
+      if (!res.ok) $("msg").textContent = (await res.text()).trim();
+    };
+    drop.onclick = async () => {
+      const res = await fetch("/api/runs/" + encodeURIComponent(r.name), { method: "DELETE" });
+      if (!res.ok) $("msg").textContent = (await res.text()).trim();
+      loadRuns();
+    };
+    li.append(el("span", "t", runTitle(r.name)), el("span", "when", "stopped " + ago(r.modified)), resume, drop);
+    return li;
+  }));
 }
 
 // ---- audit: the sidecar's decision, claims, verdicts and pages --------------
@@ -939,11 +970,23 @@ if (permalink) {
   // reads "running" must not look live.
   es.onerror = () => setState("reconnecting…", false);
   es.onopen = () => setState(running ? "researching" : "idle", running);
-  es.addEventListener("idle", () => {
+  es.addEventListener("idle", async () => {
     if (!running) return;
     setRunning(false);
     $("note").hidden = false;
-    $("note").textContent = "The server restarted; this run ended with it.";
+    $("note").textContent = "The server restarted, and this run stopped with it.";
+    // Its checkpoint survived: offer the newest interrupted run right here.
+    try {
+      const stopped = (await (await fetch("/api/runs")).json()).filter(r => r.interrupted);
+      if (!stopped.length) return;
+      const b = el("button", "btn sm primary", "Resume");
+      b.style.marginLeft = "10px";
+      b.onclick = async () => {
+        const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resume: stopped[0].name }) });
+        if (!res.ok) $("note").textContent = (await res.text()).trim();
+      };
+      $("note").append(" What it searched is saved.", b);
+    } catch {}
   });
   es.addEventListener("gap", () => {
     reset(); setRunning(true);

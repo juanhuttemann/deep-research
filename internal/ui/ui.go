@@ -45,6 +45,9 @@ type Options struct {
 	Plan *Plan
 	// PlanOnly stops once the plan is made and emitted, before any search.
 	PlanOnly bool
+	// OnPlan, when set, is given the plan once it is confirmed, before the
+	// first search: the plan a resumed run must run again.
+	OnPlan func(*Plan)
 }
 
 // RunResult carries the artifacts produced by a run.
@@ -105,6 +108,9 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	var cancelled bool
 	if plan, cancelled = o.confirmBrief(input, renderer, plan, interactive); cancelled {
 		return RunResult{Cancelled: true}, nil
+	}
+	if o.OnPlan != nil {
+		o.OnPlan(plan)
 	}
 	sink.Emit(Event{Type: PlanReady, Plan: plan})
 	res := RunResult{Plan: plan}

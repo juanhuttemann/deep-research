@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,6 +38,19 @@ type Request struct {
 	Sources  int             `json:"sources,omitempty"`
 	PlanOnly bool            `json:"plan_only,omitempty"`
 	Plan     json.RawMessage `json:"plan,omitempty"`
+	// Resume names an interrupted run's checkpoint in the reports
+	// directory (--resume).
+	Resume string `json:"resume,omitempty"`
+}
+
+// checkpointSuffix ends the file an interrupted run left in the reports
+// directory, the one Resume names.
+const checkpointSuffix = ".partial.json"
+
+// isCheckpoint reports whether name is a checkpoint directly in the reports
+// directory: a bare file name, so a request cannot name a path elsewhere.
+func isCheckpoint(name string) bool {
+	return strings.HasSuffix(name, checkpointSuffix) && path.Base(name) == name && !strings.ContainsAny(name, `/\`)
 }
 
 // RunFunc runs one request and writes its JSONL events to w, ending with the
@@ -55,8 +69,11 @@ const maxLines = 10000
 type Server struct {
 	run     RunFunc
 	reports fs.FS
-	ctx     context.Context
-	max     int
+	// remove deletes a file in the reports directory: a discarded
+	// checkpoint. Nil refuses every discard.
+	remove func(name string) error
+	ctx    context.Context
+	max    int
 
 	mu     sync.Mutex
 	cancel context.CancelFunc // nil when no run is active
@@ -91,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/runs", s.runs)
+	mux.HandleFunc("DELETE /api/runs/{name}", s.discard)
 	mux.HandleFunc("POST /api/run", s.launch)
 	mux.HandleFunc("POST /api/cancel", s.stop)
 	mux.Handle("GET /reports/", http.StripPrefix("/reports/", http.FileServerFS(s.reports)))
@@ -119,7 +137,9 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, log io.Writer
 	}
 	// localhost, whatever the bind: the Host check refuses any other name.
 	_, _ = fmt.Fprintf(log, "serving on http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
-	srv := &http.Server{Handler: New(ctx, root.FS(), run).Handler(), ReadHeaderTimeout: 10 * time.Second}
+	s := New(ctx, root.FS(), run)
+	s.remove = root.Remove
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	return srv.Serve(ln)
 }
 
@@ -137,10 +157,12 @@ func localOnly(next http.Handler) http.Handler {
 	})
 }
 
-// run is one past run's .json artifact, as the start screen lists it.
+// run is one past run's .json artifact, or an interrupted run's checkpoint,
+// as the start screen lists it.
 type run struct {
-	Name     string    `json:"name"`
-	Modified time.Time `json:"modified"`
+	Name        string    `json:"name"`
+	Modified    time.Time `json:"modified"`
+	Interrupted bool      `json:"interrupted,omitempty"`
 }
 
 // runs lists the .json artifacts in the reports directory, newest first: the
@@ -151,14 +173,20 @@ func (s *Server) runs(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// While a run is active its checkpoint is not an interrupted run, and
+	// no other can be resumed until it ends.
+	s.mu.Lock()
+	active := s.cancel != nil
+	s.mu.Unlock()
 	out := []run{}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".trace.json") {
+		interrupted := isCheckpoint(name)
+		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".trace.json") || (interrupted && active) {
 			continue
 		}
 		if info, err := e.Info(); err == nil {
-			out = append(out, run{name, info.ModTime()})
+			out = append(out, run{name, info.ModTime(), interrupted})
 		}
 	}
 	slices.SortFunc(out, func(a, b run) int { return b.Modified.Compare(a.Modified) })
@@ -177,6 +205,10 @@ func (s *Server) launch(w http.ResponseWriter, r *http.Request) {
 	var req Request
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Resume != "" && !isCheckpoint(req.Resume) {
+		http.Error(w, "resume takes a checkpoint name from the reports directory", http.StatusBadRequest)
 		return
 	}
 	if !s.begin(req) {
@@ -219,6 +251,29 @@ func (s *Server) begin(req Request) bool {
 		cancel()
 	}()
 	return true
+}
+
+// discard deletes an interrupted run's checkpoint: the work it saved is given
+// up. Only a checkpoint, and not while a run is active, which may be the one
+// writing it.
+func (s *Server) discard(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !isCheckpoint(name) || s.remove == nil {
+		http.Error(w, "only an interrupted run's checkpoint can be discarded", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	active := s.cancel != nil
+	s.mu.Unlock()
+	if active {
+		http.Error(w, "a run is active", http.StatusConflict)
+		return
+	}
+	if err := s.remove(name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) stop(w http.ResponseWriter, _ *http.Request) {
