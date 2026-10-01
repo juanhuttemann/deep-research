@@ -253,3 +253,24 @@ func TestPageCallsTheServedEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// The page hands back the plan it edited; the server passes it to the run as
+// the page wrote it, and the run checks it.
+func TestLaunchPassesThePlanThrough(t *testing.T) {
+	got := make(chan Request, 1)
+	run := func(_ context.Context, r Request, w io.Writer) {
+		got <- r
+		_, _ = io.WriteString(w, `{"type":"done","status":"complete"}`+"\n")
+	}
+	srv := httptest.NewServer(New(context.Background(), fstest.MapFS{}, run).Handler())
+	defer srv.Close()
+	plan := `{"question":"q","sub_topics":[{"name":"a"}]}`
+	resp, err := http.Post(srv.URL+"/api/run", "application/json", strings.NewReader(`{"plan":`+plan+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if r := <-got; string(r.Plan) != plan {
+		t.Errorf("the run got plan %s, want %s", r.Plan, plan)
+	}
+}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -192,18 +193,11 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 // the history record and the done line on every outcome.
 func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.RunFunc {
 	return func(ctx context.Context, r web.Request, w io.Writer) {
-		// --flag=value: a question that starts with "-" is still the value.
-		args := []string{"--jsonl", "--prompt=" + r.Question, "--reports=" + reports}
-		if r.Mode != "" {
-			args = append(args, "--mode="+r.Mode)
-		}
-		if r.Sources > 0 {
-			args = append(args, "--sources="+strconv.Itoa(r.Sources))
-		}
+		args, in := webArgs(r, reports)
 		out := &wroteTo{Writer: w}
 		cmd := New(load)
 		cmd.SetArgs(args)
-		cmd.SetIn(strings.NewReader(""))
+		cmd.SetIn(in)
 		cmd.SetOut(out)
 		cmd.SetErr(stderr)
 		// RunE ends every run it starts on a done line, which carries the
@@ -215,6 +209,26 @@ func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.Run
 			ui.JSONL{W: w}.Emit(doneEvent(ui.RunResult{}, err))
 		}
 	}
+}
+
+// webArgs is the command line for a page's request. An edited plan goes in
+// on stdin (--plan=-): it carries its own question, depth and budget.
+func webArgs(r web.Request, reports string) ([]string, io.Reader) {
+	if len(r.Plan) > 0 {
+		return []string{"--jsonl", "--plan=-", "--reports=" + reports}, bytes.NewReader(r.Plan)
+	}
+	// --flag=value: a question that starts with "-" is still the value.
+	args := []string{"--jsonl", "--prompt=" + r.Question, "--reports=" + reports}
+	if r.Mode != "" {
+		args = append(args, "--mode="+r.Mode)
+	}
+	if r.Sources > 0 {
+		args = append(args, "--sources="+strconv.Itoa(r.Sources))
+	}
+	if r.PlanOnly {
+		args = append(args, "--plan-only")
+	}
+	return args, strings.NewReader("")
 }
 
 // wroteTo records whether anything was written through it.

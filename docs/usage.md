@@ -166,9 +166,12 @@ deep-research serve --addr 127.0.0.1:0   # any free port
 ```
 
 A page for launching a run and auditing what it decided. The form takes the
-question, `--mode` and `--sources`; a launch is the same run as
-`deep-research --jsonl -p ...`, history record included, and like `--jsonl`
-it skips the brief. While it runs the page shows the live frame. When it
+question, `--mode` and `--sources`. Research makes the plan first (the same
+as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
+add and remove sub-topics, or change the depth. A renamed sub-topic drops
+the query the planner wrote for its old name. Start research runs the
+edited plan (the same as `--plan`, history record included). While it runs
+the page shows the live frame. When it
 ends it reads the run's `.json` artifact and shows the answer, the
 statements the fact-check blocked with the claim that failed, every claim
 with its verdict, and each quote inside the page text the check located it

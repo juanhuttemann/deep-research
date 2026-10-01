@@ -443,3 +443,41 @@ func TestReplayRunsTheRecordedPlanWhole(t *testing.T) {
 		t.Errorf("replay plan = %+v, %v; want all four sub-topics", plan, err)
 	}
 }
+
+// The page edits the plan as the CLI's brief does: it asks for the plan
+// alone, then hands the edited plan back, and that run plans nothing and
+// researches what the page left in it.
+func TestWebRunPlansThenRunsTheEditedPlan(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{DataFile: filepath.Join(dir, "r.jsonl"), Config: agent.Config{ModelCallTimeout: time.Second}}
+	launch := func(a agent.Assistant, r web.Request) []string {
+		var out bytes.Buffer
+		webRun(func() (Deps, error) { return Deps{Assistant: always(a), Config: cfg}, nil }, dir, io.Discard)(context.Background(), r, &out)
+		return strings.Split(strings.TrimSpace(out.String()), "\n")
+	}
+	var plan ui.Plan
+	for _, ln := range launch(stub{}, web.Request{Question: "q", Mode: "quick", PlanOnly: true}) {
+		var e struct {
+			Type string
+			Plan *ui.Plan
+		}
+		if json.Unmarshal([]byte(ln), &e) == nil && e.Type == "plan" {
+			plan = *e.Plan
+		}
+	}
+	if len(plan.SubTopics) == 0 {
+		t.Fatal("the plan-only launch emitted no plan")
+	}
+	plan.SubTopics = append(plan.SubTopics, agent.SubTopic{Name: "Added in the page"})
+	edited, _ := json.Marshal(plan)
+
+	var queries []string
+	lines := launch(handedPlan{mu: &sync.Mutex{}, queries: &queries}, web.Request{Plan: edited})
+	var done struct{ Type, Status, Detail string }
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &done); err != nil || done.Status != "complete" {
+		t.Fatalf("the edited plan's run ended on %q", lines[len(lines)-1])
+	}
+	if !slices.ContainsFunc(queries, func(q string) bool { return strings.Contains(q, "Added in the page") }) {
+		t.Errorf("the sub-topic added in the page was never searched: %q", queries)
+	}
+}

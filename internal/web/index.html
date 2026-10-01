@@ -118,6 +118,36 @@ select { font: inherit; font-size: 13.5px; color: var(--text); background: var(-
 .runs .when { color: var(--text-3); font-size: 13px; white-space: nowrap; }
 .empty { padding: 20px 16px; color: var(--text-3); text-align: center; list-style: none; }
 
+/* ---- plan review ---- */
+.brief { max-width: 780px; margin: 4vh auto 0; }
+.brief-head { padding: 24px 24px 8px; }
+.eyebrow { font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.brief-head h1 { font-size: 22px; line-height: 1.3; letter-spacing: -.015em; margin: 6px 0; overflow-wrap: anywhere; }
+.brief-head p { margin: 0; color: var(--text-2); font-size: 14px; }
+.brief-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 24px 16px; }
+.brief-bar .segmented label { padding: 5px 14px; }
+.topics { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.topic { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 2px 12px; align-items: start; padding: 12px 20px 12px 24px; }
+.topic + .topic { border-top: 1px solid var(--border); }
+.topic .num { width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center;
+  font-size: 12px; font-weight: 650; color: var(--text-2); margin-top: 5px; }
+.topic-name { width: 100%; font: inherit; font-weight: 550; color: var(--text); background: transparent; border: 1px solid transparent;
+  border-radius: 6px; padding: 5px 8px; margin-left: -8px; }
+.topic-name:hover { border-color: var(--border); }
+.topic-name:focus { outline: none; border-color: var(--accent); background: var(--surface-2); }
+.topic-meta { font-size: 12.5px; color: var(--text-3); margin-top: 1px; overflow-wrap: anywhere; }
+.topic-meta.renamed { color: var(--warn); }
+.icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 0; background: none; color: var(--text-3); cursor: pointer; font-size: 14px; }
+.icon-btn:hover:not(:disabled) { background: var(--bad-soft); color: var(--bad); }
+.icon-btn:disabled { opacity: .3; cursor: default; }
+.add-topic { display: flex; gap: 8px; padding: 12px 20px 12px 24px; border-top: 1px solid var(--border); }
+.add-topic input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid transparent;
+  border-radius: 8px; padding: 7px 10px; }
+.add-topic input:focus { outline: none; border-color: var(--accent); }
+.brief-foot { display: flex; align-items: center; gap: 8px; padding: 14px 20px 14px 24px; border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); border-radius: 0 0 var(--radius) var(--radius); }
+.brief-foot .btn.primary { margin-left: auto; padding: 9px 18px; }
+
 /* ---- run view ---- */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 .run-head { padding: 20px 24px; display: flex; gap: 16px; align-items: flex-start; }
@@ -288,6 +318,35 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
     <ul id="runs" class="runs"><li class="empty">Loading…</li></ul>
   </section>
 
+  <!-- plan review: the plan, editable before research starts -->
+  <section id="brief" class="brief" hidden>
+    <div class="card">
+      <div class="brief-head">
+        <div class="eyebrow">Review the plan</div>
+        <h1 id="brief-question"></h1>
+        <p>Each sub-topic is researched by its own agent. Rename, add or remove them before research starts.</p>
+      </div>
+      <div class="brief-bar">
+        <div class="segmented" role="radiogroup" aria-label="Depth">
+          <input type="radio" name="bdepth" id="b-quick" value="quick"><label for="b-quick">Quick</label>
+          <input type="radio" name="bdepth" id="b-standard" value="standard"><label for="b-standard">Standard</label>
+          <input type="radio" name="bdepth" id="b-deep" value="deep"><label for="b-deep">Deep</label>
+        </div>
+        <span id="brief-budget" class="muted"></span>
+      </div>
+      <ol id="topics" class="topics"></ol>
+      <form id="add-topic" class="add-topic">
+        <input id="new-topic" placeholder="Add a sub-topic…" aria-label="New sub-topic" maxlength="200">
+        <button class="btn sm" type="submit">Add</button>
+      </form>
+      <div class="brief-foot">
+        <button id="discard" class="btn ghost" type="button">Discard</button>
+        <button id="start" class="btn primary" type="button">Start research</button>
+      </div>
+    </div>
+    <p id="brief-msg" class="form-msg" role="alert"></p>
+  </section>
+
   <!-- run: live frame, outcome, audit -->
   <section id="run" hidden>
     <div class="card">
@@ -375,6 +434,7 @@ function provenanceTag(s) { return tag(PROVENANCE[s || "unverified"] || ["off", 
 
 function show(view) {
   $("home").hidden = view !== "home";
+  $("brief").hidden = view !== "brief";
   $("run").hidden = view !== "run";
   $("new").hidden = view !== "run" || running;
   if (view === "home") { loadRuns(); $("q").focus(); }
@@ -389,12 +449,15 @@ function setState(text, live) {
 const PIPELINE = ["Plan", "Research", "Analyze", "Fact-Check", "Summarize"];
 const loadedAt = Date.now();
 let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, agents = new Map(), events = 0;
+// A plan-only run (the first half of Research) ends in the plan review, not
+// in an outcome; its plan arrives as the plan event before its done line.
+let planning = false, madePlan = null;
 
 function setRunning(on) {
   running = on;
   $("cancel").hidden = !on;
   $("new").hidden = on || $("run").hidden;
-  $("go").disabled = on;
+  $("go").disabled = $("start").disabled = on;
   setState(on ? "researching" : "idle", on);
   if (!on && !endedAt) endedAt = Date.now();
 }
@@ -429,7 +492,10 @@ function agent(e) {
   if (!a) {
     a = { row: el("div", "agent"), progress: 0 };
     agents.set(e.sub_id, a);
-    $("agents").append(a.row);
+    // In plan order, follow-ups ("f1", "f2") after: sub-agents report in
+    // parallel, and in arrival order the rows came out shuffled.
+    const rank = id => id.startsWith("f") ? 1e6 + (+id.slice(1) || 0) : +id || 0;
+    $("agents").append(...[...agents].sort((x, y) => rank(x[0]) - rank(y[0])).map(([, v]) => v.row));
   }
   for (const k of ["sub_name", "sub_state", "line"]) if (e[k]) a[k] = e[k];
   if (e.progress > a.progress) a.progress = e.progress;
@@ -455,9 +521,17 @@ function handle(e) {
   switch (e.type) {
   case "start":
     reset(); setRunning(true);
+    planning = !!e.plan_only; madePlan = null;
     startedAt = Date.parse(e.time) || Date.now();
-    $("question").textContent = e.question;
-    $("mode-label").textContent = (e.mode || "standard") + " mode";
+    // A run launched from an edited plan carries its question in the plan.
+    $("question").textContent = e.question || (e.plan && e.plan.question) || "";
+    $("mode-label").textContent = (e.mode || (e.plan && e.plan.depth && e.plan.depth.key) || "standard") + " mode";
+    phase = "Plan"; stepper();
+    // The model's own status replaces this once the plan call streams.
+    if (planning) status("Planning the sub-topics…");
+    break;
+  case "plan":
+    if (planning) madePlan = e.plan;
     break;
   case "phase":
     phase = e.phase; stepper();
@@ -493,6 +567,7 @@ function done(e) {
   // A run that ended before this page opened is history: it is in Recent
   // runs, and the page opens on the start screen rather than on it.
   if (endedAt < loadedAt) { show("home"); return; }
+  if (planning && e.status === "complete" && madePlan) { showBrief(madePlan); return; }
   stepper(); status("");
   $("outcome").hidden = false;
   $("outcome-tag").replaceChildren(tag(OUTCOME[e.status] || ["off", e.status]));
@@ -520,6 +595,92 @@ function done(e) {
     }
   }
 }
+
+// ---- plan review ----------------------------------------------------------
+
+// Sources per sub-topic for each tier, and the whole-run cap: ui.DepthModes
+// and maxRunSources. Shown only; the run derives the budget again.
+const TIER_SOURCES = { quick: 3, standard: 4, deep: 5 }, RUN_SOURCES = 50;
+let brief = null;
+
+function showBrief(plan) {
+  brief = structuredClone(plan);
+  // The planner wrote each query and its terms for the name it gave; a
+  // renamed sub-topic drops them, as the CLI brief does.
+  for (const t of brief.sub_topics) t.planned = t.name;
+  $("brief-question").textContent = brief.question;
+  const depth = $("b-" + brief.depth.key) || $("b-standard");
+  depth.checked = true;
+  $("brief-msg").textContent = "";
+  renderTopics();
+  show("brief");
+}
+function perTopic() {
+  const n = brief.sub_topics.length, per = brief.pinned_per_topic || TIER_SOURCES[brief.depth.key] || 4;
+  return Math.max(1, Math.floor(Math.min(per * n, RUN_SOURCES) / n));
+}
+function topicMeta(t, meta) {
+  const renamed = t.planned !== undefined && t.name.trim() !== t.planned;
+  meta.className = "topic-meta" + (renamed ? " renamed" : "");
+  meta.textContent = renamed ? "Renamed: searched by its new name"
+    : [t.notes, t.query ? "searches “" + t.query + "”" : ""].filter(Boolean).join(" · ");
+}
+function renderTopics() {
+  const n = brief.sub_topics.length;
+  $("topics").replaceChildren(...brief.sub_topics.map((t, i) => {
+    const li = el("li", "topic"), body = el("div"), meta = el("div");
+    const name = el("input", "topic-name");
+    name.value = t.name; name.maxLength = 200;
+    name.setAttribute("aria-label", "Sub-topic " + (i + 1));
+    name.oninput = () => { t.name = name.value; topicMeta(t, meta); };
+    topicMeta(t, meta);
+    body.append(name, meta);
+    const rm = el("button", "icon-btn", "✕");
+    rm.type = "button"; rm.title = "Remove"; rm.setAttribute("aria-label", "Remove sub-topic " + (i + 1));
+    // A plan with no sub-topics has nothing to research.
+    rm.disabled = n < 2;
+    rm.onclick = () => { brief.sub_topics.splice(i, 1); renderTopics(); };
+    li.append(el("span", "num", String(i + 1)), body, rm);
+    return li;
+  }));
+  $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + " · up to " + perTopic() + " sources each";
+}
+function editedPlan() {
+  return {
+    question: brief.question,
+    depth: { key: brief.depth.key },
+    pinned_per_topic: brief.pinned_per_topic || 0,
+    sub_topics: brief.sub_topics.filter(t => t.name.trim()).map(t => {
+      const name = t.name.trim();
+      return t.planned === undefined || name !== t.planned
+        ? { name, notes: t.notes || "" }
+        : { name, notes: t.notes || "", query: t.query, terms: t.terms };
+    }),
+  };
+}
+for (const r of document.querySelectorAll("input[name=bdepth]")) {
+  r.onchange = () => {
+    // Choosing a tier replaces a pinned --sources budget, as in the CLI brief.
+    brief.depth = { key: r.value }; brief.pinned_per_topic = 0;
+    renderTopics();
+  };
+}
+$("add-topic").onsubmit = ev => {
+  ev.preventDefault();
+  const name = $("new-topic").value.trim();
+  if (!name) return;
+  brief.sub_topics.push({ name, notes: "added by you" });
+  $("new-topic").value = "";
+  renderTopics();
+};
+$("discard").onclick = () => { brief = null; show("home"); };
+$("start").onclick = async () => {
+  const plan = editedPlan();
+  if (!plan.sub_topics.length) { $("brief-msg").textContent = "Keep at least one named sub-topic."; return; }
+  $("brief-msg").textContent = "";
+  const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
+  if (!r.ok) $("brief-msg").textContent = (await r.text()).trim();
+};
 
 // ---- recent runs ----------------------------------------------------------
 
@@ -721,6 +882,8 @@ $("launch").onsubmit = async ev => {
     question: $("q").value.trim(),
     mode: document.querySelector("input[name=mode]:checked").value,
     sources: Number($("sources").value) || 0,
+    // The plan first, for review; Start research in the review runs it.
+    plan_only: true,
   };
   if (!body.question) return;
   const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
