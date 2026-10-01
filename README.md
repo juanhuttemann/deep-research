@@ -16,6 +16,8 @@ sub-topics, researches them in parallel on the web, then runs
 **research → analyze → fact-check → summarize** and writes a cited report as
 Markdown, PDF and JSON.
 
+![deep-research planning, researching, fact-checking and reporting on a question about mixture-of-experts LLMs](demo.gif)
+
 The first run is free and needs no setup beyond one key: the default model is
 OpenRouter's free router and search goes through public SearXNG instances.
 Every source says how it was obtained, and nothing the model invents is ever
