@@ -54,16 +54,20 @@ type Config struct {
 
 // SubTopic is one branch of a research plan produced during the planning
 // phase. A set of sub-topics seeds the parallel sub-agent tree.
+//
+// The JSON keys are lowercase for the plan a caller edits and hands back
+// (--plan-only, --plan). Traces written before the tags spelled them "ID",
+// "Name": encoding/json matches keys case-insensitively, so those still load.
 type SubTopic struct {
-	ID    string
-	Name  string
-	Notes string
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Notes string `json:"notes,omitempty"`
 	// Query and Terms are written by the planner in the question's language:
 	// the search it would type and the words a page answering it must show.
 	// Deriving either from prose took English stopword lists that grew with
 	// every noisy run and broke on any other language.
-	Query string
-	Terms []string
+	Query string   `json:"query,omitempty"`
+	Terms []string `json:"terms,omitempty"`
 }
 
 // Finding is one unit of research evidence.

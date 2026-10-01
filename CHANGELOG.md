@@ -17,6 +17,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   The stream is the `--jsonl` one over SSE; a dropped connection resumes
   where it left off, a reload replays the run, and closing the tab does
   not cancel the run.
+- `--plan-only` makes the plan, prints it as JSON and stops before any
+  search; `--plan FILE` runs such a plan, edited or not, without planning
+  again. Renaming, adding and deleting sub-topics was only possible in the
+  interactive brief. Every `--jsonl` run now emits the plan it executes as
+  a `plan` event before the first search.
 - The `.json` artifact carries `pages`, the stored text of every fetched
   page, and `passages`, each fact-check quote resolved to its page and
   whether the check found it there. A quote could be read before, but
@@ -47,6 +52,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   `github.com/kaptinlin/jsonrepair` before it is given up on.
 
 ### Fixed
+
+- A trace recorded the planner's first answer, which the brief then edited
+  in place, so it could hold a half-edited plan, and a replay sent it back
+  through the planner, which cut it to the tier's sub-topic count. A trace
+  now records the plan the run used and a replay runs it whole.
 
 - A claim's sources are recorded as the URL the page was fetched as. The
   model's spelling was kept, so `https://x/a/` beside `#1` for the page

@@ -39,10 +39,18 @@ type Options struct {
 	Bell            func(string)     // OS/notification hook
 	Now             func() time.Time // clock (test seam)
 	KeyScript       string           // scripted key sequence for tests (non-TTY)
+	// Plan, when set, is run as it is: no planning call and no brief, since
+	// it was confirmed where it was edited. DepthMode and SourcesPerTopic do
+	// not apply to it.
+	Plan *Plan
+	// PlanOnly stops once the plan is made and emitted, before any search.
+	PlanOnly bool
 }
 
 // RunResult carries the artifacts produced by a run.
 type RunResult struct {
+	// Plan is the plan the run used, set once planning succeeds.
+	Plan     *Plan
 	Report   *agent.ResearchResult
 	MDPath   string
 	PDFPath  string
@@ -83,17 +91,12 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 		wireProgress(o.Assistant, func(e Event) { e.Phase = "Plan"; sink.Emit(e) })
 	}
 
-	plan, err := o.buildPlan(ctx)
+	plan, err := o.plan(ctx)
 	if err != nil {
 		// A cancel can arrive while the plan call is still out (the browser's
 		// cancel button can press it there); it is the same stop as Esc later.
-		if stopped(ctx, err) {
-			return RunResult{Cancelled: true}, nil
-		}
-		return RunResult{}, err
+		return ended(ctx, RunResult{}, err)
 	}
-
-	res := RunResult{}
 
 	input := o.openInput(interactive)
 	defer input.Close()
@@ -101,7 +104,11 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	// Phase 1: brief confirmation.
 	var cancelled bool
 	if plan, cancelled = o.confirmBrief(input, renderer, plan, interactive); cancelled {
-		res.Cancelled = true
+		return RunResult{Cancelled: true}, nil
+	}
+	sink.Emit(Event{Type: PlanReady, Plan: plan})
+	res := RunResult{Plan: plan}
+	if o.PlanOnly {
 		return res, nil
 	}
 
@@ -119,14 +126,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 
 	result, err := driver.Run(ctx, plan)
 	if err != nil {
-		// Esc cancels the run. That is a deliberate stop, so it reports as a
-		// cancellation rather than a failure; a timeout still fails, because
-		// a deadline that expired is not something the reader asked for.
-		if stopped(ctx, err) {
-			res.Cancelled = true
-			return res, nil
-		}
-		return RunResult{}, err
+		return ended(ctx, res, err)
 	}
 	res.Report = result
 	res.Cancelled = false
@@ -142,9 +142,24 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	return res, nil
 }
 
-// stopped reports whether err is a deliberate stop rather than a failure.
-func stopped(ctx context.Context, err error) bool {
-	return errors.Is(err, context.Canceled) && ctx.Err() != context.DeadlineExceeded
+// ended reports a run that stopped on err. Esc or the cancel button is a
+// deliberate stop, so it reports as a cancellation rather than a failure; a
+// timeout still fails, because a deadline that expired is not something the
+// reader asked for.
+func ended(ctx context.Context, res RunResult, err error) (RunResult, error) {
+	if errors.Is(err, context.Canceled) && ctx.Err() != context.DeadlineExceeded {
+		res.Cancelled = true
+		return res, nil
+	}
+	return RunResult{}, err
+}
+
+// plan is the plan to run: the one handed in, or the planner's.
+func (o Options) plan(ctx context.Context) (*Plan, error) {
+	if o.Plan != nil {
+		return o.Plan, nil
+	}
+	return o.buildPlan(ctx)
 }
 
 // buildPlan runs the planning phase and applies the configured source budget.
@@ -188,8 +203,11 @@ func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
 // cancelled. It is skipped under --jsonl: stdout is the machine stream there,
 // so drawing a brief would corrupt it, and there is no human present to
 // confirm a plan.
+//
+// A plan handed in was confirmed where it was edited, and a plan-only run
+// stops before anyone could act on a confirmation.
 func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive bool) (*Plan, bool) {
-	if !interactive && (o.KeyScript == "" || o.JSONL) {
+	if o.Plan != nil || o.PlanOnly || (!interactive && (o.KeyScript == "" || o.JSONL)) {
 		return plan, false
 	}
 	// --depth / max_depth set the starting budget; pressing "d" is a later,

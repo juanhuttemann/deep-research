@@ -151,3 +151,20 @@ func TestTraceRecordsThePhaseOutputAsReturned(t *testing.T) {
 		t.Errorf("recorded answer = %q (%v), want the model's", got.Answer, err)
 	}
 }
+
+// Sub-topics had no JSON tags, so traces spell their keys "ID" and "Name".
+// The tags made them lowercase; a trace written before must still load.
+func TestTraceWithCapitalizedSubTopicKeysLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.trace.json")
+	old := `{"version":1,"question":"q","plan":[{"ID":"1","Name":"Alpha","Query":"alpha q","Terms":["a"]}]}`
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.Plan[0]; got.ID != "1" || got.Name != "Alpha" || got.Query != "alpha q" || len(got.Terms) != 1 {
+		t.Errorf("plan = %+v, want the capitalized keys read", got)
+	}
+}

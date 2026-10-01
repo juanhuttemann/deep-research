@@ -127,6 +127,16 @@ func (r *Recorder) phase(name, prompt string, out any, err error) {
 	r.mu.Unlock()
 }
 
+// SetPlan records the plan the run actually used. The planner's answer is
+// not it: the brief can rename, add and delete sub-topics, and a plan handed
+// in with --plan never calls the planner at all, which left a trace with no
+// plan that Load refused.
+func (r *Recorder) SetPlan(subs []agent.SubTopic) {
+	r.mu.Lock()
+	r.trace.Plan = slices.Clone(subs)
+	r.mu.Unlock()
+}
+
 // Write saves the trace to path.
 func (r *Recorder) Write(path string) error {
 	r.mu.Lock()

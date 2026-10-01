@@ -39,6 +39,10 @@ const (
 	Info EventType = "info"
 	// Error surfaces a fatal or non-fatal failure.
 	Error EventType = "error"
+	// PlanReady carries the plan the driver is about to run, whole: what was
+	// confirmed in the brief, or handed in with --plan. A caller can keep it,
+	// edit it and hand it back.
+	PlanReady EventType = "plan"
 	// Done is the last line of every --jsonl run, sent once the report files
 	// and the history record are written. Status is complete, incomplete,
 	// failed or cancelled; Detail is the error; Artifacts are the files. A
@@ -92,6 +96,8 @@ type Event struct {
 	Transient bool `json:"transient,omitempty"`
 	// Artifacts are the report files a finished run wrote (Done only).
 	Artifacts []string `json:"artifacts,omitempty"`
+	// Plan is the plan about to run (PlanReady only).
+	Plan *Plan `json:"plan,omitempty"`
 }
 
 func (e Event) withTime() Event {

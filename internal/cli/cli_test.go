@@ -8,12 +8,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
+	"github.com/juanhuttemann/deep-research/internal/replay"
+	"github.com/juanhuttemann/deep-research/internal/ui"
 	"github.com/juanhuttemann/deep-research/internal/web"
 )
 
@@ -339,5 +343,103 @@ func TestWebRunEndsOnDone(t *testing.T) {
 				t.Errorf("done = %+v, want %s", done, status)
 			}
 		})
+	}
+}
+
+// handedPlan is the stub assistant for a run handed its plan: it notes what
+// it searched, and any planning call fails, since the plan was already made.
+type handedPlan struct {
+	stub
+	mu      *sync.Mutex
+	queries *[]string
+}
+
+func (h handedPlan) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
+	return nil, errors.New("planned again")
+}
+
+func (h handedPlan) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
+	h.mu.Lock()
+	*h.queries = append(*h.queries, q)
+	h.mu.Unlock()
+	return h.stub.ResearchDetail(ctx, q, terms)
+}
+
+// The plan is the reader's to shape, and in the CLI only the interactive
+// brief could do it. A plan-only run prints the plan and stops; edited and
+// handed back with --plan, it runs as written, without planning again, and a
+// trace of that run keeps the plan it ran.
+func TestPlanOnlyThenPlanRunsTheEditedPlan(t *testing.T) {
+	dir := t.TempDir()
+	history := filepath.Join(dir, "r.jsonl")
+	cfg := config.Config{DataFile: history, Config: agent.Config{ModelCallTimeout: time.Second}}
+	exec := func(a agent.Assistant, args ...string) string {
+		t.Helper()
+		cmd := New(func() (Deps, error) { return Deps{Assistant: always(a), Config: cfg}, nil })
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(io.Discard)
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out.String()
+	}
+
+	lines := strings.Split(strings.TrimSpace(exec(stub{}, "-p", "q", "--plan-only", "--jsonl", "--reports", dir)), "\n")
+	var ev struct {
+		Type, Status string
+		Plan         *ui.Plan
+		Artifacts    []string
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil || ev.Type != "plan" || ev.Plan == nil {
+		t.Fatalf("plan-only --jsonl did not open with the plan event: %q", lines[0])
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || ev.Status != "complete" || len(ev.Artifacts) != 0 {
+		t.Errorf("plan-only --jsonl ended on %q, want done/complete with no artifacts", lines[len(lines)-1])
+	}
+
+	var plan ui.Plan
+	if err := json.Unmarshal([]byte(exec(stub{}, "-p", "q", "--plan-only", "--reports", dir)), &plan); err != nil {
+		t.Fatalf("plan-only did not print a plan: %v", err)
+	}
+	if _, err := os.Stat(history); err == nil {
+		t.Error("a plan-only run was saved to the history")
+	}
+	plan.SubTopics = append(plan.SubTopics, agent.SubTopic{Name: "Added by hand"})
+	edited, _ := json.Marshal(plan)
+	path := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(path, edited, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var queries []string
+	exec(handedPlan{mu: &sync.Mutex{}, queries: &queries}, "--plan", path, "--silent", "--trace", "--reports", dir)
+	if !slices.ContainsFunc(queries, func(q string) bool { return strings.Contains(q, "Added by hand") }) {
+		t.Errorf("the added sub-topic was never searched: %q", queries)
+	}
+	traces, _ := filepath.Glob(filepath.Join(dir, "*.trace.json"))
+	if len(traces) != 1 {
+		t.Fatalf("traces = %v", traces)
+	}
+	tr, err := replay.Load(traces[0])
+	if err != nil || len(tr.Plan) != 2 {
+		t.Errorf("the trace of a --plan run does not hold its plan: %v, %+v", err, tr)
+	}
+}
+
+// A replay ran its recorded plan through the planner, which cuts a plan to
+// the tier's sub-topic count: a sub-topic added in the brief was dropped, and
+// the replay answered from less evidence than the run it reproduces.
+func TestReplayRunsTheRecordedPlanWhole(t *testing.T) {
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	if err := cmd.ParseFlags([]string{"--mode=quick"}); err != nil {
+		t.Fatal(err)
+	}
+	four := []agent.SubTopic{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "added"}}
+	plan, _, err := givenPlan(cmd, Deps{}, &replay.Trace{Question: "q", Plan: four}, "")
+	if err != nil || len(plan.SubTopics) != 4 {
+		t.Errorf("replay plan = %+v, %v; want all four sub-topics", plan, err)
 	}
 }
