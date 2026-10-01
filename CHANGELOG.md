@@ -13,7 +13,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   answer, the statements it blocked and the claim that failed, each claim
   with its verdict and quotes, and the page text the check located each
   quote in, with every source marked fetched, snippet only or never
-  fetched. The start screen lists past runs from the reports directory.
+  fetched. Research opens the plan for review first, as the CLI's brief
+  does: rename, add and remove sub-topics, or change the depth. The start
+  screen lists past runs from the reports directory.
   The stream is the `--jsonl` one over SSE; a dropped connection resumes
   where it left off, a reload replays the run, and closing the tab does
   not cancel the run.

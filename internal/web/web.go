@@ -27,12 +27,16 @@ import (
 //go:embed index.html
 var page []byte
 
-// Request is what the page's form launches: the same question, --mode and
-// --sources a --jsonl run takes.
+// Request is what the page launches: the question, --mode and --sources a
+// --jsonl run takes, with --plan-only to make the plan the page then edits,
+// or the edited plan itself (--plan). The plan passes through as the page
+// wrote it; the run checks it.
 type Request struct {
-	Question string `json:"question"`
-	Mode     string `json:"mode,omitempty"`
-	Sources  int    `json:"sources,omitempty"`
+	Question string          `json:"question,omitempty"`
+	Mode     string          `json:"mode,omitempty"`
+	Sources  int             `json:"sources,omitempty"`
+	PlanOnly bool            `json:"plan_only,omitempty"`
+	Plan     json.RawMessage `json:"plan,omitempty"`
 }
 
 // RunFunc runs one request and writes its JSONL events to w, ending with the
