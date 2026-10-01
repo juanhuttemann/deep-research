@@ -264,13 +264,31 @@ func TestLaunchPassesThePlanThrough(t *testing.T) {
 	}
 	srv := httptest.NewServer(New(context.Background(), fstest.MapFS{}, run).Handler())
 	defer srv.Close()
-	plan := `{"question":"q","sub_topics":[{"name":"a"}]}`
-	resp, err := http.Post(srv.URL+"/api/run", "application/json", strings.NewReader(`{"plan":`+plan+`}`))
-	if err != nil {
-		t.Fatal(err)
+	// A launch made before the last run released its slot is refused; the
+	// page would try again, and so does this.
+	post := func(body string) Request {
+		t.Helper()
+		for range 200 {
+			resp, err := http.Post(srv.URL+"/api/run", "application/json", strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusConflict {
+				return <-got
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("the server never took the launch")
+		return Request{}
 	}
-	_ = resp.Body.Close()
-	if r := <-got; string(r.Plan) != plan {
+	plan := `{"question":"q","sub_topics":[{"name":"a"}]}`
+	if r := post(`{"plan":` + plan + `}`); string(r.Plan) != plan {
 		t.Errorf("the run got plan %s, want %s", r.Plan, plan)
+	}
+	// The page's Research sends plan_only; misread, every launch would run
+	// in full before the reader saw the plan.
+	if r := post(`{"question":"q","plan_only":true}`); !r.PlanOnly {
+		t.Error("plan_only was not read from the request")
 	}
 }

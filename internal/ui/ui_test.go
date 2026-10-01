@@ -2083,3 +2083,25 @@ func TestReadPlanMakesAnEditedPlanSafeToRun(t *testing.T) {
 		t.Errorf("budget = tier %d, run %d; want the standard tier's 4 per sub-topic, 8 in all", p.Depth.MaxSources, p.MaxSources)
 	}
 }
+
+// The browser's plan review shows the per-topic budget from copies of the
+// tiers and the run cap, and orders follow-up rows by their ID prefix. The
+// page cannot import them, so a change here must fail until the page follows.
+func TestBrowserPageCopiesMatch(t *testing.T) {
+	page, err := os.ReadFile("../web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tiers := make([]string, len(DepthModes))
+	for i, m := range DepthModes {
+		tiers[i] = fmt.Sprintf("%s: %d", m.Key, m.MaxSources)
+	}
+	for _, want := range []string{
+		"const TIER_SOURCES = { " + strings.Join(tiers, ", ") + " }, RUN_SOURCES = " + strconv.Itoa(maxRunSources) + ";",
+		`id.startsWith("` + followUpPrefix + `")`,
+	} {
+		if !bytes.Contains(page, []byte(want)) {
+			t.Errorf("index.html does not have %s", want)
+		}
+	}
+}
