@@ -880,7 +880,7 @@ function renderAudit() {
   const srcs = $("srcs"); srcs.replaceChildren();
   for (const c of meta.citations || []) {
     const b = el("button", "row"); b.dataset.page = c.url;
-    const txt = el("span", "txt"); txt.append(c.title || c.url, el("span", "sub", domain(c.url) + (c.cited ? "" : " · not cited in the report")));
+    const txt = el("span", "txt"); txt.append(c.title || c.url, el("span", "sub", [domain(c.url), c.cited ? "" : "not cited in the report"].filter(Boolean).join(" · ")));
     b.append(provenanceTag(c.status), txt);
     b.onclick = () => showPage(c.url);
     const li = el("li"); li.append(b); srcs.append(li);

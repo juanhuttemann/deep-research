@@ -95,7 +95,9 @@ func newTTYInput(f *os.File) (Input, error) {
 func (t *ttyReader) NextWithin(d time.Duration) (byte, error) {
 	fd := int(t.f.Fd())
 	var set unix.FdSet
-	set.Bits[fd/64] |= 1 << (uint(fd) % 64)
+	// Set, not hand-rolled bit arithmetic: the word size of an FdSet is 64
+	// bits on linux/amd64 but 32 on darwin and 32-bit unix.
+	set.Set(fd)
 	tv := unix.NsecToTimeval(int64(d))
 	n, err := unix.Select(fd+1, &set, nil, nil, &tv)
 	if err != nil || n <= 0 {

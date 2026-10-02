@@ -409,6 +409,28 @@ func TestExportKeepsOneListWhenReportCitesNothing(t *testing.T) {
 	}
 }
 
+// strings.Contains(body, "") is always true, so a finding with no URL was
+// marked cited whatever the report said — and that one "cited" source was
+// enough to defeat the fallback above, demoting every real source.
+func TestURLlessFindingIsNotCited(t *testing.T) {
+	res := &agent.ResearchResult{
+		Question: "Question",
+		Summary:  &agent.Summary{Report: "## Executive Summary\n\nA report with no inline links."},
+		Findings: []agent.Finding{
+			{Title: "One", URL: "https://a.example/1", Status: "ok"},
+			{Title: "Model recollection"},
+		},
+	}
+	for _, c := range citations(res, res.Summary.Report) {
+		if c.Cited {
+			t.Errorf("%q marked cited by a report that links nothing", c.Title)
+		}
+	}
+	if md := MarkdownReport(res); !strings.Contains(md, "## Citations (2)") || strings.Contains(md, "Other Sources Retrieved") {
+		t.Errorf("a URL-less finding split a report that cites nothing:\n%s", md)
+	}
+}
+
 // A branch can finish having contributed nothing — its results were all noise,
 // or all pages another branch had already claimed. Reporting "complete" for
 // those exactly as for a branch that gathered five sources lets a plan lose a
@@ -2009,6 +2031,55 @@ func TestClipWordsDoesNotSplitWordsAfterLeadingWhitespace(t *testing.T) {
 	} {
 		if got := clipWords(tc.input, tc.width); got != tc.want {
 			t.Errorf("clipWords(%q, %d) = %q, want %q", tc.input, tc.width, got, tc.want)
+		}
+	}
+}
+
+// slowSearch delays one query's search, so its sub-agent finishes last.
+type slowSearch struct {
+	*fakeAssistant
+	slow string
+}
+
+func (s *slowSearch) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
+	if query == s.slow {
+		time.Sleep(30 * time.Millisecond)
+	}
+	return s.fakeAssistant.ResearchDetail(ctx, query, terms)
+}
+
+// Parallel sub-agents appended their findings as each finished, so the same
+// evidence reached the analysis prompt in a different order from run to run,
+// renumbering every source.
+func TestFindingsFollowPlanOrder(t *testing.T) {
+	topics := []agent.SubTopic{{ID: "1", Name: "Alpha"}, {ID: "2", Name: "Beta"}}
+	plan := newTestPlan("quick", topics)
+	first := subQueries(plan.Question, topics[0])[0]
+	fa := &slowSearch{fakeAssistant: &fakeAssistant{planTopics: topics}, slow: first}
+	findings, _ := NewDriver(fa, &MultiSink{}, nil, 2).research(context.Background(), plan)
+	if len(findings) == 0 || findings[0].Query != first {
+		t.Errorf("findings open with %+v, want the first sub-topic's %q", findings, first)
+	}
+}
+
+// The renderer was a sink only for an interactive run, which needs a terminal
+// stdout, so its pipe log could never run: a piped run printed the completion
+// card and none of the per-source activity the docs promise.
+func TestPipedRunLogsEachEvent(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if _, err := Run(context.Background(), Options{
+		Question:  "q",
+		Assistant: &fakeAssistant{},
+		DepthMode: "quick",
+		OutDir:    t.TempDir(),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, want := range []string{"Searching: ", "read example.com", "RESEARCH COMPLETE"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("piped output lacks %q:\n%s", want, stdout.String())
 		}
 	}
 }

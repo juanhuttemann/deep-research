@@ -186,7 +186,9 @@ func citations(res *agent.ResearchResult, body string) []MetaCitation {
 		cits = append(cits, MetaCitation{
 			Query: f.Query, Title: f.Title, URL: f.URL,
 			Confidence: f.Confidence, Status: citationStatus(f), Domain: tools.DomainOf(f.URL),
-			Cited: strings.Contains(body, f.URL),
+			// Every body contains the empty string: a URL-less finding was
+			// always "cited", which also defeated the cited-nothing fallback.
+			Cited: f.URL != "" && strings.Contains(body, f.URL),
 		})
 	}
 	sort.Slice(cits, func(i, j int) bool { return cits[i].URL < cits[j].URL })

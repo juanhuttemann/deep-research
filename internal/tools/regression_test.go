@@ -118,6 +118,14 @@ func TestScraperRefusesNonPublicTargets(t *testing.T) {
 		"http://2130706433/",
 		"http://0x7f000001/",
 		"http://jenkins/job/deploy",
+		// Short and octal dotted forms: not an IP to net.ParseIP, but the
+		// scraper's URL parser normalises each to a private address.
+		"http://127.1/",
+		"http://127.0.1/",
+		"http://10.1/",
+		"http://192.168.1/",
+		"http://0177.0.0.1/",
+		"http://127.0.0.0x1/",
 	} {
 		t.Run(target, func(t *testing.T) {
 			_, err := client.ScrapeURL(context.Background(), target)
@@ -417,5 +425,16 @@ func TestSearchDiscoveryUsesTheShorterCallerDeadline(t *testing.T) {
 	}
 	if _, err := c.Search(ctx, "q"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("discovery lost timeout: %v", err)
+	}
+}
+
+// truncateUTF8Bare was the one truncation helper without a guard on its
+// limit, so the exported ExcerptFor sliced with a negative index and panicked
+// instead of returning an empty excerpt.
+func TestExcerptForNonPositiveLimit(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		if got := ExcerptFor("", nil, nil, limit); got != "" {
+			t.Errorf("ExcerptFor(limit %d) = %q, want empty", limit, got)
+		}
 	}
 }

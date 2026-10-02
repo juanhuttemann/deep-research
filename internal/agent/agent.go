@@ -1414,7 +1414,10 @@ func parseAnalysis(out string) *Analysis {
 		return &Analysis{Answer: strings.TrimSpace(out), Gaps: []string{}, Confidence: "medium"}
 	}
 	return &Analysis{
-		Answer:          getString(m, "answer", strings.TrimSpace(out)),
+		// The raw text is the answer only when it was not JSON. Once an
+		// object decoded, a missing answer is empty, so the malformed-analysis
+		// retry sees it, rather than the object itself becoming the report.
+		Answer:          getString(m, "answer", ""),
 		Gaps:            getStringSlice(m, "gaps", []string{}),
 		Confidence:      getString(m, "confidence", "medium"),
 		FollowUp:        followUps(m),
