@@ -233,14 +233,16 @@ func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive 
 	return plan, action == actionCancel
 }
 
-// buildSink sends events to the machine stream or the live UI. --jsonl never
-// draws the UI (interactive excludes it), so the stream always owns stdout.
+// buildSink sends events to the machine stream, the live UI or, on a pipe,
+// the renderer's one-line-per-event log. --jsonl never draws either (the
+// stream owns stdout), and a terminal stdout with a piped stdin gets neither:
+// it is not plain, so it would draw a live frame with no key reader.
 func (o Options) buildSink(renderer *Renderer, interactive bool) *MultiSink {
 	var sinks []Sink
 	if o.JSONL {
 		sinks = append(sinks, JSONL{W: o.Stdout})
 	}
-	if interactive {
+	if interactive || (renderer.plain && !o.Quiet && !o.JSONL) {
 		sinks = append(sinks, renderer)
 	}
 	return &MultiSink{Sinks: sinks}

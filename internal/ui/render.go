@@ -159,8 +159,9 @@ func (r *Renderer) RenderBrief(plan *Plan) {
 }
 
 // RenderReport draws the completion card. The totals are passed in because the
-// renderer is only wired as an event sink when it is drawing the live UI;
-// headless runs would otherwise report zero sources and tokens.
+// renderer is not always wired as an event sink (a terminal stdout with a
+// piped stdin draws nothing live), and that run would report zero sources and
+// tokens.
 func (r *Renderer) RenderReport(res *agent.ResearchResult, sources, tokens int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

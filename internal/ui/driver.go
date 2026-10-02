@@ -503,16 +503,14 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 // A sub-agent that fails reports it as an event and the run continues on what
 // the others found, so there is no run-level error to return here.
 func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Finding, uncovered []string) {
-	var (
-		mu          sync.Mutex
-		all         []agent.Finding
-		contributed = map[string]int{}
-		wg          sync.WaitGroup
-	)
 	n := len(plan.SubTopics)
 	if n == 0 {
 		return nil, nil
 	}
+	// Each sub-agent writes only its own slot, so no lock is needed.
+	found := make([][]agent.Finding, n)
+	kept := make([]int, n)
+	var wg sync.WaitGroup
 	perSource := plan.PerTopic()
 	// A sub-agent issues one query, so its whole budget is that query's URL
 	// allowance. Without this the search tool keeps its own fixed limit and
@@ -533,12 +531,12 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 	}
 	sem := make(chan struct{}, limit)
 
-	for _, sub := range plan.SubTopics {
+	for i, sub := range plan.SubTopics {
 		if ctx.Err() != nil {
 			break
 		}
 		wg.Add(1)
-		go func(sub agent.SubTopic) {
+		go func(i int, sub agent.SubTopic) {
 			defer wg.Done()
 			// Announce the sub-agent before queueing so the tree shows the
 			// whole plan up front, with waiting branches marked queued rather
@@ -551,18 +549,17 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 				return
 			}
 			defer func() { <-sem }()
-			kept := d.runSubAgent(ctx, plan.Question, sub, perSource, &mu, &all)
-			mu.Lock()
-			contributed[sub.ID] = kept
-			mu.Unlock()
-		}(sub)
+			found[i], kept[i] = d.runSubAgent(ctx, plan.Question, sub, perSource)
+		}(i, sub)
 	}
 	wg.Wait()
-	// Reported in plan order rather than completion order: sub-agents finish
+	// Collected in plan order rather than completion order: sub-agents finish
 	// in whatever order they finish, and the analysis prompt should not vary
 	// between two runs that gathered the same evidence.
-	for _, sub := range plan.SubTopics {
-		if contributed[sub.ID] == 0 {
+	var all []agent.Finding
+	for i, sub := range plan.SubTopics {
+		all = append(all, found[i]...)
+		if kept[i] == 0 {
 			uncovered = append(uncovered, sub.Name)
 		}
 	}
@@ -662,17 +659,18 @@ func mergeFindings(in []agent.Finding) []agent.Finding {
 }
 
 // runSubAgent drives a single sub-agent to completion, emitting status,
-// search, read, verify, citation and token events.
-func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.SubTopic, perSource int, mu *sync.Mutex, all *[]agent.Finding) int {
+// search, read, verify, citation and token events. It returns what it
+// collected and how many of those sources it contributed.
+func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.SubTopic, perSource int) (found []agent.Finding, kept int) {
 	id := sub.ID
-	kept, duplicates, offTopic := 0, 0, 0
+	duplicates, offTopic := 0, 0
 	d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "running", Line: "starting"})
 
 	queries := subQueries(question, sub)
 	for qi, q := range queries {
 		if ctx.Err() != nil {
 			d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "done", Line: "aborted"})
-			return kept
+			return found, kept
 		}
 		if kept >= perSource {
 			break
@@ -735,9 +733,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 				duplicates++
 				d.emit(Event{Type: Verify, URL: f.URL, Domain: signal.Domain,
 					Status: "duplicate", SubID: id, Line: "= " + signal.Domain + " already cited"})
-				mu.Lock()
-				*all = append(*all, f)
-				mu.Unlock()
+				found = append(found, f)
 				continue
 			}
 			kept++
@@ -756,14 +752,12 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 			d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name,
 				Progress: queryProgress(qi, len(queries), kept, perSource)})
 
-			mu.Lock()
-			*all = append(*all, f)
-			mu.Unlock()
+			found = append(found, f)
 		}
 	}
 	d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "done", Progress: 100,
 		Line: contributionLine(kept, duplicates, offTopic)})
-	return kept
+	return found, kept
 }
 
 // noteSearch records the outcome of one search.

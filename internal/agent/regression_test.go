@@ -976,3 +976,20 @@ func TestFinalizingFindingsDoesNotMutateTheCallerSlice(t *testing.T) {
 		t.Fatalf("output aliases caller findings: %+v", input)
 	}
 }
+
+// The raw output was the fallback answer even when it decoded as JSON, so an
+// object with no "answer" key became the answer itself — fenced, it slipped
+// past the malformed-analysis retry and reached the summary and the report.
+func TestAnalysisWithoutAnswerKeyHasNoAnswer(t *testing.T) {
+	for _, out := range []string{
+		`{"topics":[{"name":"x"}]}`,
+		"```json\n{\"interpretation\":\"reading\"}\n```",
+	} {
+		if got := parseAnalysis(out).Answer; got != "" {
+			t.Errorf("parseAnalysis(%q).Answer = %q, want empty", out, got)
+		}
+	}
+	if got := parseAnalysis("Some prose answer").Answer; got != "Some prose answer" {
+		t.Errorf("prose output lost as the answer: %q", got)
+	}
+}

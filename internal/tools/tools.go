@@ -103,8 +103,25 @@ func checkScrapeTarget(raw string) error {
 	if !strings.Contains(host, ".") {
 		return fmt.Errorf("%w: host %q is not a public name", errBlockedTarget, host)
 	}
+	// The short and octal dotted forms do not parse as an IP either, yet the
+	// fetcher reads them as one: http://127.1/, http://10.1/ and
+	// http://0177.0.0.1/ all reach a private address. A URL parser takes a
+	// host as IPv4 whenever its last label is a number, and no real TLD is.
+	if numericLabel(host[strings.LastIndex(host, ".")+1:]) {
+		return fmt.Errorf("%w: host %q is a numeric address", errBlockedTarget, host)
+	}
 	// Anything else is a name, left to the scraper's own resolver.
 	return nil
+}
+
+// numericLabel reports whether a host label is a number as a URL parser reads
+// one: decimal, octal with a leading 0, or hex with a leading 0x.
+func numericLabel(s string) bool {
+	digits := "0123456789"
+	if hex, ok := strings.CutPrefix(s, "0x"); ok {
+		s, digits = hex, "0123456789abcdef"
+	}
+	return strings.Trim(s, digits) == ""
 }
 
 // blockedHosts are the names that reach the fetcher's own host or the cloud

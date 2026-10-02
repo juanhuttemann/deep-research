@@ -12,6 +12,24 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   view beside it. A report that is empty, or only citations, shows the audit
   alone.
 
+### Fixed
+
+- The scraper refused `127.0.0.1` but let `127.1`, `10.1`, `192.168.1` and
+  octal `0177.0.0.1` through, and Firecrawl's URL parser reads each as a
+  private address. A host whose last label is a number is now refused.
+- On a pipe the run printed only the completion card, not the one log line
+  per event the docs describe: the renderer's log mode was never wired.
+- An analysis that decoded as JSON with no `answer` key used the raw JSON as
+  the answer, which could reach the summary and the report.
+- Parallel sub-agents' findings were collected in completion order, so the
+  same evidence reached the analysis prompt in a different order each run.
+  They are now in plan order.
+- A source with no URL was always marked cited, which kept a report that
+  cites nothing from listing its sources under one heading.
+- The escape-key timing on a terminal assumed 64-bit `select` bitmasks,
+  which are 32-bit on macOS and 32-bit unix.
+- `tools.ExcerptFor` panicked on a negative limit.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added

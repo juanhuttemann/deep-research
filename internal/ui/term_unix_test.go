@@ -1,4 +1,8 @@
-//go:build unix
+//go:build linux
+
+// openPTY uses Linux's /dev/pts ioctls (TIOCSPTLCK, TIOCGPTN), which darwin
+// and the BSDs do not define: under a unix tag this file stopped every macOS
+// `go test` from compiling.
 
 package ui
 
