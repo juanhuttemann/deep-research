@@ -5,6 +5,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `serve` opens a finished run on a Reading view: the report's text without
+  its inline citations and claim IDs. The fact-check audit moves to an Audit
+  view beside it. A report that is empty, or only citations, shows the audit
+  alone.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added

@@ -205,15 +205,18 @@ edited plan (the same as `--plan`, history record included). While it runs
 the page shows the live frame. Interrupted runs are listed on the start
 screen with Resume (the same as `--resume`) and Discard, which deletes the
 checkpoint. A tab left open while the server was killed and started again
-offers to resume the run it was showing. When it
-ends it reads the run's `.json` artifact and shows the answer, the
-statements the fact-check blocked with the claim that failed, every claim
-with its verdict, and each quote inside the page text the check located it
-in. Every source is badged `fetched`, `snippet only` or `never fetched`. A
-quote is highlighted where it appears verbatim; one the check located only
-after normalising markup and whitespace is marked located but not
-highlighted. The start screen lists the 50 most recent runs in the reports
-directory, and `/?run=<name>.json` opens any of them.
+offers to resume the run it was showing. When it ends it opens on
+the Reading view: the report's text without its inline citations or claim
+IDs. It is not the `.md` or `.pdf` download, which adds the title,
+confidence, the fact-check section and the source lists, and keeps
+the citations. Audit, beside it, reads the run's `.json` artifact and shows
+the answer, the statements the fact-check blocked with the claim that
+failed, every claim with its verdict, and each quote inside the page text
+the check located it in. Every source is badged `fetched`, `snippet only` or
+`never fetched`. A quote is highlighted where it appears verbatim; one
+the check located only after normalising markup and whitespace is marked
+located but not highlighted. The start screen lists the 50 most recent runs
+in the reports directory, and `/?run=<name>.json` opens any of them.
 It needs no terminal, so it is also the live view where the terminal UI is
 not available (Windows).
 

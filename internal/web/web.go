@@ -18,11 +18,15 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
 //go:embed index.html
@@ -111,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/runs/{name}", s.discard)
 	mux.HandleFunc("POST /api/run", s.launch)
 	mux.HandleFunc("POST /api/cancel", s.stop)
+	mux.HandleFunc("GET /api/report/{name}", s.report)
 	mux.Handle("GET /reports/", http.StripPrefix("/reports/", http.FileServerFS(s.reports)))
 	// Cross-origin protection refuses another site's POST (a cancel is a
 	// simple request); the Host check refuses a page that rebound its own
@@ -274,6 +279,82 @@ func (s *Server) discard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// The report view is for reading; the audit beside it keeps every source. So
+// citations come out, and out of the rendered HTML, not the Markdown: there a
+// link's destination is an attribute and "<" and ">" are escaped everywhere
+// else, so a pattern can only match what the reader sees. Rewriting the
+// Markdown cut "(c1)" out of a URL and a code sample.
+var (
+	// citeGroup is parentheses holding only links: "(<a>a</a>, <a>b</a>)",
+	// joined by ",", ";" or "and" as prose joins them, labels with markup or
+	// not. The "<" that opens a link cannot occur in an attribute or in code.
+	// A label is anything but "</a": a lazy .*? ran on to a later link and
+	// took the prose between, "(A argues this, while B)", with it.
+	// ponytail: a group joined by any other word ("or", "see") stays in; add
+	// it here if reports write it.
+	citeGroup = regexp.MustCompile(`\s*\((?:\s*(?:and\s+)?<a\b[^>]*>(?:[^<]|<[^/]|</[^a])*</a>\s*[,;]?)+\s*\)`)
+	// claimIDs are claim IDs the summarizer left in, "[c4, c6]" or "(c1)".
+	claimIDs = regexp.MustCompile(`\s*[\[(]c\d+(?:\s*(?:[,;]|and)\s*c\d+)*[\])]`)
+	// htmlToken is a tag, or the text between two. Every byte is in some
+	// token, an unclosed "<" included, so joining them loses nothing.
+	htmlToken = regexp.MustCompile(`<[^>]*>?|[^<]+`)
+	// markdown is shared by every request: goldmark sets its parsers up once
+	// and keeps each conversion's state to the call.
+	markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
+)
+
+// uncite drops the citations from rendered report HTML: the source groups
+// wherever they are, the claim IDs only in text outside code.
+func uncite(html string) string {
+	var out strings.Builder
+	code := 0
+	for _, tok := range htmlToken.FindAllString(citeGroup.ReplaceAllString(html, ""), -1) {
+		switch {
+		case strings.HasPrefix(tok, "<code") || strings.HasPrefix(tok, "<pre"):
+			code++
+		case tok == "</code>" || tok == "</pre>":
+			code--
+		case tok[0] != '<' && code == 0:
+			tok = claimIDs.ReplaceAllString(tok, "")
+		}
+		out.WriteString(tok)
+	}
+	return out.String()
+}
+
+// report renders a run's report for reading: the .json sidecar's Markdown
+// without its citations. Goldmark's default renderer omits raw HTML and
+// dangerous link schemes; the page applies its own link rule on top.
+func (s *Server) report(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !strings.HasSuffix(name, ".json") || path.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		http.Error(w, "report takes a run's .json name from the reports directory", http.StatusBadRequest)
+		return
+	}
+	data, err := fs.ReadFile(s.reports, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	var sidecar struct {
+		Report string `json:"report"`
+	}
+	// A summarizer that wrote nothing leaves a complete run with an empty
+	// report; the page then shows the audit alone. (A failed run writes no
+	// sidecar, and a partial one writes a placeholder report.)
+	if json.Unmarshal(data, &sidecar) != nil || strings.TrimSpace(sidecar.Report) == "" {
+		http.Error(w, "this run has no report", http.StatusNotFound)
+		return
+	}
+	var out bytes.Buffer
+	if err := markdown.Convert([]byte(sidecar.Report), &out); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, uncite(out.String()))
 }
 
 func (s *Server) stop(w http.ResponseWriter, _ *http.Request) {
