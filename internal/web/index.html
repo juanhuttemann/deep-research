@@ -215,6 +215,19 @@ select { font: inherit; font-size: 13.5px; color: var(--text); background: var(-
 .outcome .msg strong { color: var(--text); }
 .files { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* ---- report: the answer to read, without its citations ---- */
+.view-bar { text-align: center; margin: 24px 0 16px; }
+.prose { max-width: 880px; margin: 0 auto; padding: 28px 40px 32px; font-size: 16px; line-height: 1.7; overflow-wrap: anywhere; }
+.prose > :first-child { margin-top: 0; }
+.prose h1, .prose h2 { font-size: 20px; line-height: 1.3; letter-spacing: -.015em; margin: 32px 0 10px; }
+.prose h3 { font-size: 16.5px; margin: 26px 0 8px; }
+.prose p, .prose ul, .prose ol { margin: 0 0 14px; }
+.prose li + li { margin-top: 6px; }
+.prose table { display: block; overflow-x: auto; border-collapse: collapse; font-size: 14px; line-height: 1.55; margin: 16px 0 20px; overflow-wrap: normal; }
+.prose th, .prose td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top; }
+.prose th { background: var(--surface-2); font-weight: 600; }
+.prose code { font: .9em var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+
 /* ---- audit ---- */
 .summary-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
 .stat { padding: 14px 16px; }
@@ -278,6 +291,7 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
   .stepper .nm { display: none; }
   .stepper .step.current .nm { display: inline; }
   .agent { grid-template-columns: 18px minmax(0, 1fr) 80px; }
+  .prose { padding: 20px 18px; }
 }
 </style>
 </head>
@@ -385,20 +399,29 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
     </div>
 
     <div id="audit" hidden>
-      <div id="stats" class="summary-stats"></div>
-      <div class="audit">
-        <div>
-          <p id="interpretation" class="interp"></p>
-          <h2>Answer <span id="c-answer" class="count"></span></h2>
-          <div id="answer"></div>
-          <h2>Not established <span id="c-blocked" class="count"></span></h2>
-          <div id="blocked"></div>
-          <h2>Claims <span id="c-claims" class="count"></span></h2>
-          <ul id="claims" class="list card"></ul>
-          <h2>Sources <span id="c-srcs" class="count"></span></h2>
-          <ul id="srcs" class="list card"></ul>
+      <div id="view-bar" class="view-bar">
+        <div class="segmented" role="radiogroup" aria-label="View">
+          <input type="radio" name="view" id="v-report" value="report" checked><label for="v-report">Reading view</label>
+          <input type="radio" name="view" id="v-audit" value="audit"><label for="v-audit">Audit</label>
         </div>
-        <aside id="inspector" class="inspector card" aria-live="polite"></aside>
+      </div>
+      <article id="report" class="card prose"></article>
+      <div id="audit-body">
+        <div id="stats" class="summary-stats"></div>
+        <div class="audit">
+          <div>
+            <p id="interpretation" class="interp"></p>
+            <h2>Answer <span id="c-answer" class="count"></span></h2>
+            <div id="answer"></div>
+            <h2>Not established <span id="c-blocked" class="count"></span></h2>
+            <div id="blocked"></div>
+            <h2>Claims <span id="c-claims" class="count"></span></h2>
+            <ul id="claims" class="list card"></ul>
+            <h2>Sources <span id="c-srcs" class="count"></span></h2>
+            <ul id="srcs" class="list card"></ul>
+          </div>
+          <aside id="inspector" class="inspector card" aria-live="polite"></aside>
+        </div>
       </div>
     </div>
   </section>
@@ -596,7 +619,7 @@ function done(e) {
     const d = e.detail.replace(/^research failed: /, "");
     msg.append(el("span", "", d.charAt(0).toUpperCase() + d.slice(1)));
   }
-  else if (e.status === "complete") msg.append(el("strong", "", "The report is ready."), " Inspect what the fact-check decided below.");
+  else if (e.status === "complete") msg.append(el("strong", "", "The report is ready."), " Audit shows what the fact-check decided.");
   const files = $("files");
   for (const p of e.artifacts || []) {
     // Every artifact is written straight into the reports directory, which
@@ -609,7 +632,7 @@ function done(e) {
     if (ext === "json") {
       const perma = el("a", "btn sm ghost", "Permalink"); perma.href = "/?run=" + encodeURIComponent(name);
       files.append(perma);
-      loadAudit("/reports/" + encodeURIComponent(name));
+      loadAudit(name);
     }
   }
 }
@@ -760,11 +783,55 @@ function stoppedRuns(list) {
 // ---- audit: the sidecar's decision, claims, verdicts and pages --------------
 
 let meta = null, selected = null;
-async function loadAudit(url) {
-  const r = await fetch(url);
-  if (!r.ok) { $("outcome").hidden = false; $("outcome-msg").textContent = "Could not load " + url + " (" + r.status + ")."; return; }
-  meta = await r.json();
+// get fetches one file as text: its body, or null and the status that says
+// why not, 0 for a connection that dropped. It never rejects, so each of the
+// two loads below fails alone and says so.
+async function get(url) {
+  try { const r = await fetch(url); return { status: r.status, body: r.ok ? await r.text() : null }; }
+  catch { return { status: 0, body: null }; }
+}
+async function loadAudit(name) {
+  const url = "/reports/" + encodeURIComponent(name);
+  const [audit, report] = await Promise.all([get(url), get("/api/report/" + encodeURIComponent(name))]);
+  try { meta = JSON.parse(audit.body); } catch { meta = null; }
+  if (!meta) {
+    // Not the last run's report and audit under this run's header.
+    $("audit").hidden = true;
+    $("outcome").hidden = false;
+    $("outcome-msg").textContent = "Could not load " + url + (audit.status && audit.body === null ? " (" + audit.status + ")" : "") + ".";
+    return;
+  }
+  // 404 is a complete run whose summarizer wrote nothing. Any other failure
+  // is said in the report's place, not passed off as that.
+  if (report.body !== null) renderReport(report.body);
+  else renderReport("", report.status === 404 ? "" : "Could not load the report" + (report.status ? " (" + report.status + ")" : "") + ". Audit still shows what the fact-check decided.");
   renderAudit();
+}
+// The server renders the report's Markdown; it is still model and web text,
+// so it is parsed inert, images go (a remote one is a beacon), and every link
+// is rebuilt through link()'s http(s)-only rule.
+function renderReport(html, error) {
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  for (const img of t.content.querySelectorAll("img")) img.remove();
+  for (const a of t.content.querySelectorAll("a")) {
+    // The label keeps its markup ("**Qwen**"); only the link is rebuilt.
+    const l = link(a.getAttribute("href"), "");
+    l.replaceChildren(...a.childNodes);
+    a.replaceWith(l);
+  }
+  // A report that was only citations has nothing left to read: like an empty
+  // one, it leaves the audit alone to show. Read before the move below, which
+  // empties t.content.
+  $("view-bar").hidden = !t.content.textContent.trim() && !error;
+  $("report").replaceChildren(t.content);
+  if (error) $("report").append(el("p", "muted", error));
+  showView();
+}
+function showView() {
+  const report = $("v-report").checked && !$("view-bar").hidden;
+  $("report").hidden = !report;
+  $("audit-body").hidden = report;
 }
 function unitText(u) { return u.statement || ("Choose " + u.choose + (u.when ? " when " + u.when : "")); }
 function chip(id, failed) {
@@ -920,6 +987,8 @@ function showPage(url, quote, located) {
 
 // ---- controls -------------------------------------------------------------
 
+for (const r of document.querySelectorAll("input[name=view]")) r.onchange = showView;
+
 $("launch").onsubmit = async ev => {
   ev.preventDefault();
   $("msg").textContent = "";
@@ -954,7 +1023,7 @@ if (permalink) {
   $("live").hidden = true;
   $("question").textContent = runTitle(permalink.split("/").pop());
   $("new").hidden = false;
-  loadAudit("/reports/" + encodeURIComponent(permalink)).then(() => {
+  loadAudit(permalink).then(() => {
     if (!meta) return;
     $("question").textContent = meta.question;
     $("n-sources").textContent = meta.sources || (meta.citations || []).length;

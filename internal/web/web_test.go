@@ -248,11 +248,105 @@ func TestRunsListsReportsNewestFirst(t *testing.T) {
 // The page calls the server by path; a typo in one is invisible until a
 // button does nothing.
 func TestPageCallsTheServedEndpoints(t *testing.T) {
-	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`} {
+	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`} {
 		if !strings.Contains(string(page), path) {
 			t.Errorf("index.html never calls %s", path)
 		}
 	}
+}
+
+// The report view is for reading: citations and claim IDs come out, the
+// Markdown is rendered, and raw HTML a model or a page smuggled in does not.
+// What only looks like a claim ID, in a link's destination or in code, stays:
+// stripping the Markdown source cut it out of both, sending the reader to a
+// different URL.
+func TestReportRendersWithoutCitations(t *testing.T) {
+	sidecar, _ := json.Marshal(map[string]string{"report": "## Answer\n\n" +
+		"Qwen leads ([aireiter](https://a.example/x), [kingy](https://k.example)) on most tests [c4, c6] (c1).\n\n" +
+		"| A | B |\n|---|---|\n| x ([s](https://s.example)) | y |\n\n" +
+		"<script>alert(1)</script>\n\nSee [the docs](https://d.example).\n\n" +
+		"Not citations: [a](https://e.example/a/(c1)), [b](https://e.example/[c4]) and `use [c1] here`.\n"})
+	reports := fstest.MapFS{"r.json": {Data: sidecar}, "failed.json": {Data: []byte(`{"report":""}`)}}
+	srv := httptest.NewServer(New(context.Background(), reports, nil).Handler())
+	defer srv.Close()
+
+	code, body := getReport(t, srv.URL, "r.json")
+	if code != http.StatusOK {
+		t.Fatalf("report = %d, want 200", code)
+	}
+	for _, want := range []string{"<h2>Answer</h2>", "Qwen leads on most tests.", "<td>x</td>", `<a href="https://d.example">the docs</a>`,
+		`<a href="https://e.example/a/(c1)">a</a>`, `<a href="https://e.example/%5Bc4%5D">b</a>`, "<code>use [c1] here</code>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("report lacks %q:\n%s", want, body)
+		}
+	}
+	for _, bad := range []string{"aireiter", "s.example", "[c4, c6]", " (c1).", "<script>"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("report still has %q:\n%s", bad, body)
+		}
+	}
+	for name, want := range map[string]int{"failed.json": http.StatusNotFound, "missing.json": http.StatusNotFound,
+		"..%2Fr.json": http.StatusBadRequest, "r.md": http.StatusBadRequest} {
+		if code, _ := getReport(t, srv.URL, name); code != want {
+			t.Errorf("report %s = %d, want %d", name, code, want)
+		}
+	}
+}
+
+// uncite works on goldmark's HTML. Every shape the summarizer writes a source
+// group in comes out. What stays as written: parentheses with the answer's
+// own prose between two links (a pattern that crossed from one link to the
+// next ate that clause), code, fenced or inline, and a destination or a title
+// that only looks like a claim ID. The title is escaped by goldmark, so its
+// ">" cannot end the tag early and leave "(c1)" looking like text.
+func TestUnciteOnGoldmarkOutput(t *testing.T) {
+	for _, tc := range []struct{ md, want string }{
+		{"x ([a](https://a.example), [b](https://b.example)).", "<p>x.</p>\n"},
+		{"x ([a](https://a.example); [b](https://b.example \"T\")).", "<p>x.</p>\n"},
+		{"x ([a](https://a.example) and [b](https://b.example)).", "<p>x.</p>\n"},
+		{"x ([a](https://a.example), [b](https://b.example), and [c](https://c.example)).", "<p>x.</p>\n"},
+		{"x ([**a**](https://a.example), [b](https://b.example)).", "<p>x.</p>\n"},
+		{"x [c4 and c6] (c1).", "<p>x.</p>\n"},
+		{"([a](https://a.example))", "<p></p>\n"},
+		{"(see [a](https://a.example))", "<p>(see <a href=\"https://a.example\">a</a>)</p>\n"},
+		{"x ([a](https://a.example) argues this, while [b](https://b.example)).",
+			"<p>x (<a href=\"https://a.example\">a</a> argues this, while <a href=\"https://b.example\">b</a>).</p>\n"},
+		{"x ([a](https://a.example), see also [b](https://b.example))",
+			"<p>x (<a href=\"https://a.example\">a</a>, see also <a href=\"https://b.example\">b</a>)</p>\n"},
+		{"[x](https://e.example \"see > (c1)\")", "<p><a href=\"https://e.example\" title=\"see &gt; (c1)\">x</a></p>\n"},
+		{"```go\nf([c1]) (c2)\n```", "<pre><code class=\"language-go\">f([c1]) (c2)\n</code></pre>\n"},
+		{"`use [c1] here`", "<p><code>use [c1] here</code></p>\n"},
+		{"[a](https://e.example/a/(c1))", "<p><a href=\"https://e.example/a/(c1)\">a</a></p>\n"},
+	} {
+		var html strings.Builder
+		if err := markdown.Convert([]byte(tc.md), &html); err != nil {
+			t.Fatal(err)
+		}
+		if got := uncite(html.String()); got != tc.want {
+			t.Errorf("uncite(%q) = %q, want %q", tc.md, got, tc.want)
+		}
+	}
+}
+
+// Splitting into tags and text and joining them again must lose nothing,
+// or HTML with no citation in it would still come out changed.
+func TestUnciteLeavesOtherHTMLWhole(t *testing.T) {
+	for _, html := range []string{"<p>a &lt; b</p>", "<p>a < b", "x <", "<td>[c]</td>", "<!-- raw HTML omitted -->", ""} {
+		if got := uncite(html); got != html {
+			t.Errorf("uncite(%q) = %q, want it unchanged", html, got)
+		}
+	}
+}
+
+func getReport(t *testing.T, url, name string) (int, string) {
+	t.Helper()
+	resp, err := http.Get(url + "/api/report/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
 }
 
 // The page hands back the plan it edited; the server passes it to the run as

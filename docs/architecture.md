@@ -112,7 +112,8 @@ internal/
   ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export
   web       `serve`: one embedded page, the run's JSONL over SSE with
             Last-Event-ID replay, launch / cancel, the reports directory
-            read-only; the run itself is a function cli injects
+            read-only, a run's report rendered without its citations; the
+            run itself is a function cli injects
 config/     embedded default config.yaml and agent.yaml
 ```
 
@@ -133,7 +134,8 @@ Imports go one way only. In particular `tools` must not import `agent`, and
 sequencing must not move into `agent`.
 
 `web` passes the run's `--jsonl` lines through unparsed, and the page, not
-the server, reads the result from the `.json` artifact, so `web` needs
+the server, reads the result from the `.json` artifact; the server only
+renders that artifact's report Markdown for reading. So `web` needs
 nothing from `ui`; a launch is the cli's own `--jsonl` command run
 in-process. Nothing in the driver exists
 for the page's sake: what the page needs and lacks belongs in the event
