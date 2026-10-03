@@ -11,10 +11,12 @@
 
 </div>
 
-An AI-powered deep research agent for the terminal. It plans a question into
-sub-topics, researches them in parallel on the web, then runs
+An AI-powered deep research agent for the terminal and the browser. It plans
+a question into sub-topics, researches them in parallel on the web, then runs
 **research → analyze → fact-check → summarize** and writes a cited report as
-Markdown, PDF and JSON.
+Markdown, PDF and JSON. `deep-research serve` opens the same run on a local
+web page, with the plan to edit, the live progress, and an audit of every
+claim the fact-check passed or blocked.
 
 ![deep-research planning, researching, fact-checking and reporting on a question about mixture-of-experts LLMs](demo.gif)
 
