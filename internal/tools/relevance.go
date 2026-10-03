@@ -51,8 +51,18 @@ const minDistinctiveTerms = 2
 // "Energia" a page title spelled without accents. It is the folding search
 // analyzers apply, and like theirs it runs on both sides of a match: a script
 // it alters (Japanese voiced kana lose their marks too) still matches itself.
-func fold(s string) string {
-	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+func fold(s string) string { return foldWith(newFolder(), s) }
+
+// newFolder is the transformer fold applies. Building one allocates its
+// buffers, which costs more than folding a paragraph, so a caller folding a
+// whole page builds one and passes it to foldWith for every block. It is not
+// safe for concurrent use.
+func newFolder() transform.Transformer {
+	return transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+}
+
+// foldWith is fold with the transformer t, which transform.String resets.
+func foldWith(t transform.Transformer, s string) string {
 	if out, _, err := transform.String(t, strings.ToLower(s)); err == nil {
 		return out
 	}
@@ -179,7 +189,14 @@ func ExcerptFor(content string, first, second []string, limit int) string {
 		return content
 	}
 	blocks := splitLeads(blockBreak.Split(content, -1))
-	keep := pickBlocks(blocks, bestScores(blocks, first, second), limit)
+	// Each block's heading kind is worked out once: every passage looks back
+	// for its section's heading, and on a page with none that walk reached
+	// the first block each time, splitting every block on the way again.
+	kinds := make([]int, len(blocks))
+	for i, b := range blocks {
+		kinds[i] = headingKind(b)
+	}
+	keep := pickBlocks(blocks, kinds, bestScores(blocks, first, second), limit)
 	if keep == nil {
 		return truncateUTF8Bare(content, limit)
 	}
@@ -210,11 +227,12 @@ var blockBreak = regexp.MustCompile(`\n[ \t]*\n`)
 const elision = "\n[…]\n"
 
 // queryWords are the distinct folded words of a query worth matching; under
-// three bytes a word sits inside too many others (see judgeable).
-func queryWords(query string) []string {
+// three bytes a word sits inside too many others (see judgeable). f folds
+// them (see newFolder).
+func queryWords(f transform.Transformer, query string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, w := range strings.FieldsFunc(fold(query), func(r rune) bool {
+	for _, w := range strings.FieldsFunc(foldWith(f, query), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}) {
 		if len(w) >= 3 && !seen[w] {
@@ -231,18 +249,19 @@ func queryWords(query string) []string {
 // otherwise a long block (a JSON sample, a table) wins by mentioning every
 // word once somewhere in its bulk. Unlike BM25 a block shorter than average is
 // not boosted: a navigation item that is one query word ("*   Memcached")
-// outscored every paragraph that answered the query.
-func blockScores(blocks, words []string) []float64 {
-	folded := make([]string, len(blocks))
+// outscored every paragraph that answered the query. folded is blocks
+// already folded: folding is the costly part, and the same page is scored
+// against every claim of a fact-check.
+func blockScores(blocks, folded, words []string) []float64 {
 	total := 0
-	for i, b := range blocks {
-		folded[i] = fold(b)
+	for _, b := range blocks {
 		total += len(b)
 	}
 	avg := float64(total) / float64(max(len(blocks), 1))
 	scores := make([]float64, len(blocks))
+	in := make([]int, 0, len(blocks))
 	for _, w := range words {
-		var in []int
+		in = in[:0]
 		for i, b := range folded {
 			if strings.Contains(b, w) {
 				in = append(in, i)
@@ -265,12 +284,20 @@ func blockScores(blocks, words []string) []float64 {
 // on a page of near-identical paragraphs thirty blocks tied at the top for
 // one query and filled the budget before another query's best block was
 // reached. With one query the order is blockScores's own.
+//
+// The blocks are folded once here, not once per query: a fact-check scores
+// each page against all of its claims, and folding every block again for
+// each of thirty-six claims made one prompt cost twelve seconds of CPU.
 func bestScores(blocks, first, second []string) []float64 {
+	folded, f := make([]string, len(blocks)), newFolder()
+	for i, b := range blocks {
+		folded[i] = foldWith(f, b)
+	}
 	best := make([]float64, len(blocks))
 	for tier, queries := range [][]string{first, second} {
 		lift := 3.0 - float64(tier) // 3 for the first tier, 2 for the second
 		for _, q := range queries {
-			s := blockScores(blocks, queryWords(q))
+			s := blockScores(blocks, folded, queryWords(f, q))
 			top, at := 0.0, -1
 			for i, v := range s {
 				if v > top {
@@ -293,7 +320,7 @@ func bestScores(blocks, first, second []string) []float64 {
 // each with its section context (see sectionContext), which counts against
 // the limit like the block itself. A best block too long to fit is still
 // taken, and clipped by the caller. It returns nil when no block scores.
-func pickBlocks(blocks []string, scores []float64, limit int) []bool {
+func pickBlocks(blocks []string, kinds []int, scores []float64, limit int) []bool {
 	order := make([]int, len(blocks))
 	for i := range order {
 		order[i] = i
@@ -308,7 +335,7 @@ func pickBlocks(blocks []string, scores []float64, limit int) []bool {
 		if scores[i] <= 0 || keep[i] {
 			continue
 		}
-		add := append([]int{i}, sectionContext(blocks, i)...)
+		add := append([]int{i}, sectionContext(blocks, kinds, i)...)
 		n := 0
 		for _, j := range add {
 			if !keep[j] {
@@ -333,15 +360,16 @@ func pickBlocks(blocks []string, scores []float64, limit int) []bool {
 // Memcached cache"). A price quoted from a pricing page's durability section
 // read as a price for any engine, because the heading ("Durability") and the
 // sentence under it ("a feature available with Valkey 9.0") were cut away.
-func sectionContext(blocks []string, i int) []int {
+// kinds is each block's headingKind.
+func sectionContext(blocks []string, kinds []int, i int) []int {
 	var ctx []int
 	for h := i - 1; h >= 0; h-- {
-		kind := headingKind(blocks[h])
+		kind := kinds[h]
 		if kind == notHeading || (len(ctx) > 0 && kind == subHeading) {
 			continue
 		}
 		ctx = append(ctx, h)
-		if lead := h + 1; lead < i && headingKind(blocks[lead]) == notHeading && len(blocks[lead]) <= maxLeadBytes {
+		if lead := h + 1; lead < i && kinds[lead] == notHeading && len(blocks[lead]) <= maxLeadBytes {
 			ctx = append(ctx, lead)
 		}
 		if kind == sectionHeading {

@@ -107,7 +107,9 @@ Which mode a run uses is decided by what is configured:
 - **Web search** — `searxng_url` set, which it is by default (`auto`).
   Findings come from real web search. With `firecrawl_url` set too, each
   result page is scraped for its full text; without it the search snippet is
-  the source. Each source is labelled by how it was obtained: `✓ fetched`,
+  the source. Firecrawl is given 60 seconds per page, and the request gives
+  up at 70 whatever `model_call_timeout` says: a page it cannot fetch in
+  that time falls back to its search snippet, like any failed scrape. Each source is labelled by how it was obtained: `✓ fetched`,
   `! snippet only` (with the reason: `noservice` when no scraper is
   configured, `empty` when the scraper returned a blank page, or the HTTP
   status), `✗ dropped`.
@@ -119,7 +121,9 @@ Which mode a run uses is decided by what is configured:
     query, and the one that answered is asked first next time. Public
     instances rarely enable SearXNG's JSON API, so they are read through
     their HTML result page. Successful discovery is cached for the run; a
-    failed or cancelled discovery is retried by the next query. Each query
+    failed or cancelled discovery is retried by the next query; queries that
+    ask while one discovery runs wait for it rather than starting their own,
+    and share its outcome unless it was cancelled. Each query
     has a one-minute deadline across discovery and all instance/JSON/HTML
     attempts (or an earlier caller deadline); each request is still capped
     at 30 seconds.

@@ -26,7 +26,20 @@ type ttyReader struct {
 	// confirm or cancel a plan they have not seen. Counting them is what lets
 	// the brief say an Enter was ignored rather than appear to hang.
 	ignored int
+	// mu is held from a read's poll to its read(2), and by Close while it
+	// marks done. A restore that slipped between the two (canonical mode, the
+	// pending input flushed) left the read waiting for a whole line, and the
+	// key reader parked in it long after the run had ended.
+	mu   sync.Mutex
+	done bool
 }
+
+// ownsTerminal marks the one Input that changed the terminal's mode.
+func (t *ttyReader) ownsTerminal() {}
+
+// keyPoll is how long one wait for a key lasts before the reader checks
+// whether it was closed: the most a Close waits for a read in progress.
+const keyPoll = 100 * time.Millisecond
 
 // Ignored reports how many keys typed before the brief were discarded.
 func (t *ttyReader) Ignored() int { return t.ignored }
@@ -92,7 +105,13 @@ func newTTYInput(f *os.File) (Input, error) {
 // NextWithin returns the next byte if one arrives within d. It polls the
 // descriptor first so it never blocks past the deadline, which is what lets a
 // lone Esc be told apart from the ESC that opens an arrow key's sequence.
+// It returns io.EOF once the reader is closed.
 func (t *ttyReader) NextWithin(d time.Duration) (byte, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.done {
+		return 0, io.EOF
+	}
 	fd := int(t.f.Fd())
 	var set unix.FdSet
 	// Set, not hand-rolled bit arithmetic: the word size of an FdSet is 64
@@ -100,19 +119,34 @@ func (t *ttyReader) NextWithin(d time.Duration) (byte, error) {
 	set.Set(fd)
 	tv := unix.NsecToTimeval(int64(d))
 	n, err := unix.Select(fd+1, &set, nil, nil, &tv)
-	if err != nil || n <= 0 {
-		if err == nil {
-			err = errNoKeyPending
-		}
+	switch {
+	case errors.Is(err, unix.EINTR):
+		// A signal (a window resize) interrupted the wait: no key came.
+		return 0, errNoKeyPending
+	case err != nil:
 		return 0, err
+	case n <= 0:
+		return 0, errNoKeyPending
 	}
-	return t.Next()
+	return t.read()
 }
 
 // errNoKeyPending reports that nothing arrived inside the escape window.
 var errNoKeyPending = errors.New("no key pending")
 
+// Next waits for a key, in keyPoll steps so that a Close ends the wait: a
+// blocking read(2) on stdin outlived the run it served.
 func (t *ttyReader) Next() (byte, error) {
+	for {
+		b, err := t.NextWithin(keyPoll)
+		if !errors.Is(err, errNoKeyPending) {
+			return b, err
+		}
+	}
+}
+
+// read takes one byte that select reported waiting.
+func (t *ttyReader) read() (byte, error) {
 	var b [1]byte
 	n, err := t.f.Read(b[:])
 	if err != nil {
@@ -145,6 +179,9 @@ func (t *ttyReader) Raw() bool { return true }
 
 func (t *ttyReader) Close() {
 	t.closed.Do(func() {
+		t.mu.Lock()
+		t.done = true
+		t.mu.Unlock()
 		if t.old != nil {
 			// Flushed: keys pressed during the run are not the shell's.
 			_ = setTermios(int(t.f.Fd()), tcSetFlush, t.old)

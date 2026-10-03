@@ -157,7 +157,7 @@ func verdictsByClaim(a *agent.Analysis, fc *agent.FactCheckResult) (map[string][
 }
 
 // judge is a claim's status and why, from the verdicts given for it.
-func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Finding, pages map[string]string) (string, string) {
+func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Finding, pages map[string]*pageText) (string, string) {
 	switch {
 	case notRun:
 		reason := "fact_check_unavailable"
@@ -189,13 +189,13 @@ func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Findin
 // the sources a claim may cite, it has no exception for a run that fetched
 // nothing: text the model wrote itself is not a page to quote from, and a
 // quote located in it verified the model against its own recollection.
-func fetchedPages(findings []agent.Finding) map[string]string {
-	pages := map[string]string{}
+func fetchedPages(findings []agent.Finding) map[string]*pageText {
+	pages := map[string]*pageText{}
 	for _, f := range findings {
 		// Not under "": a hostless URL ("/") canonicalises to it, and so does
 		// every quote source that names no page, which it would then back.
 		if c := tools.CanonicalURL(f.URL); c != "" && fetched(f) {
-			pages[c] = f.Content
+			pages[c] = newPageText(f.Content)
 		}
 	}
 	return pages
@@ -207,47 +207,78 @@ func fetchedPages(findings []agent.Finding) map[string]string {
 // which may be the one that carried the claim. It proves provenance only,
 // that the words are the source's; whether they support the claim is the
 // checker's judgement.
-func quotesLocated(evidence []agent.Evidence, findings []agent.Finding, pages map[string]string) bool {
+func quotesLocated(evidence []agent.Evidence, findings []agent.Finding, pages map[string]*pageText) bool {
 	for _, e := range evidence {
 		page, ok := pages[tools.CanonicalURL(resolveSource(e.Source, findings))]
-		if !ok || !locate(page, e.Quote) {
+		if !ok || !page.locate(e.Quote) {
 			return false
 		}
 	}
 	return len(evidence) > 0
 }
 
-// locate reports whether quote is a contiguous passage of page. An exact
-// match comes first; failing that, both sides are compared as the text a
-// reader sees: link targets, emphasis and code delimiters, backslash escapes
-// and table bars removed, typographic quotes and dashes made plain, and
-// whitespace collapsed. Only markup is removed. An underscore inside a word
-// (cache_size) or a lone asterisk (2*3) is text and stays. Case, numbers,
-// word order and accents are kept: they are what a quote is evidence of. A
-// paraphrase or an elided quote is not located.
-func locate(page, quote string) bool {
+// pageText is a fetched page and the forms of it locate compares quotes
+// against, each worked out the first time a quote needs it. Every claim
+// citing a page used to normalise the whole page again, and twice more for
+// the hyphen-joined variants: 80 ms a quote on a 40 KB scraped page, some six
+// seconds on a wide fact-check, recomputing a pure function of the page.
+// It is not safe for concurrent use.
+type pageText struct {
+	text string // NFC
+	// visible and joined are valid once their flags are set: either can
+	// legitimately be empty.
+	visible    string
+	joined     []string
+	hasVisible bool
+	hasJoined  bool
+}
+
+func newPageText(page string) *pageText {
 	// One accented letter can be written as one code point or two; a quote
 	// copied from a page may use the other form than the stored text.
-	page, quote = norm.NFC.String(page), norm.NFC.String(quote)
-	q := strings.TrimSpace(quote)
+	return &pageText{text: norm.NFC.String(page)}
+}
+
+// locate reports whether quote is a contiguous passage of the page. An
+// exact match comes first; failing that, both sides are compared as the text
+// a reader sees: link targets, emphasis and code delimiters, backslash
+// escapes and table bars removed, typographic quotes and dashes made plain,
+// and whitespace collapsed. Only markup is removed. An underscore inside a
+// word (cache_size) or a lone asterisk (2*3) is text and stays. Case,
+// numbers, word order and accents are kept: they are what a quote is
+// evidence of. A paraphrase or an elided quote is not located.
+func (p *pageText) locate(quote string) bool {
+	q := strings.TrimSpace(norm.NFC.String(quote))
 	if q == "" {
 		return false
 	}
-	if strings.Contains(page, q) {
+	if strings.Contains(p.text, q) {
 		return true
 	}
-	vq, vp := visibleText(q), visibleText(page)
+	vq := visibleText(q)
 	if vq == "" {
 		return false
 	}
-	if strings.Contains(vp, vq) {
+	if !p.hasVisible {
+		p.visible, p.hasVisible = visibleText(p.text), true
+	}
+	if strings.Contains(p.visible, vq) {
 		return true
 	}
 	// PDF text breaks words across lines with a hyphen ("capital re-\nserves"),
 	// and a real hyphen can fall at a line end too ("well-\nknown"): the line
-	// is joined both ways, only as a last attempt.
-	for _, join := range []string{"$1$2", "$1-$2"} {
-		if strings.Contains(visibleText(lineHyphen.ReplaceAllString(page, join)), vq) {
+	// is joined both ways, only as a last attempt. A page with no "-\n" has
+	// nothing to join, and its joined forms are the visible text itself.
+	if !p.hasJoined {
+		if strings.Contains(p.text, "-\n") {
+			for _, join := range []string{"$1$2", "$1-$2"} {
+				p.joined = append(p.joined, visibleText(lineHyphen.ReplaceAllString(p.text, join)))
+			}
+		}
+		p.hasJoined = true
+	}
+	for _, j := range p.joined {
+		if strings.Contains(j, vq) {
 			return true
 		}
 	}
@@ -425,7 +456,7 @@ func claimEntries(claims []agent.Claim) []verdictEntry {
 
 // proseEntries are the claims the checker split out of prose, each held to
 // the same quote check a claim of the analysis is.
-func proseEntries(vs []agent.Verdict, findings []agent.Finding, pages map[string]string) []verdictEntry {
+func proseEntries(vs []agent.Verdict, findings []agent.Finding, pages map[string]*pageText) []verdictEntry {
 	var out []verdictEntry
 	for _, v := range vs {
 		status, note := v.Status, v.Reason

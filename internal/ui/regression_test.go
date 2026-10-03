@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -2082,4 +2083,43 @@ func TestPipedRunLogsEachEvent(t *testing.T) {
 			t.Errorf("piped output lacks %q:\n%s", want, stdout.String())
 		}
 	}
+}
+
+// locate normalised the whole page again for every quote it checked, and
+// twice more for the hyphen-joined variants: a 40 KB scraped page cost
+// 80 ms a quote, some six seconds of CPU on a wide fact-check, all of it
+// recomputing a pure function of the page. A pass over the claims
+// normalises each page once, so forty quotes cost about what one does.
+func TestLocatingQuotesNormalisesEachPageOnce(t *testing.T) {
+	var page strings.Builder
+	for i := range 500 {
+		fmt.Fprintf(&page, "**Node %d** reports [replication lag](https://example.com/%d) of _%d ms_ under load.\n\n", i, i, i*3)
+	}
+	findings := []agent.Finding{{URL: "https://example.com/page", Content: page.String(), Status: "ok"}}
+	pages := fetchedPages(findings)
+	check := func(n int) uint64 {
+		return allocated(func() {
+			for i := range n {
+				ev := []agent.Evidence{{Source: "https://example.com/page", Quote: fmt.Sprintf("a passage the page never had, number %d", i)}}
+				if quotesLocated(ev, findings, pages) {
+					t.Fatal("located a quote the page does not hold")
+				}
+			}
+		})
+	}
+	one := check(1)
+	pages = fetchedPages(findings)
+	if forty := check(40); forty > 3*one {
+		t.Errorf("40 quotes over one page allocated %d bytes, %.1f times one quote's %d", forty, float64(forty)/float64(one), one)
+	}
+}
+
+// allocated is how many bytes f allocates on the heap.
+func allocated(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
 }

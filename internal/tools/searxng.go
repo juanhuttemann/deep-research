@@ -56,6 +56,16 @@ type SearXNGClient struct {
 	// Discovery is cached only after success, so a transient failure or a
 	// cancelled query cannot poison every later search in the run.
 	discover func(ctx context.Context) ([]string, error)
+	// discovering is the discovery under way, if any: the queries that
+	// arrive while it runs wait for it rather than each starting their own.
+	discovering *discovery
+}
+
+// discovery is one attempt at the public instance list, shared by every
+// query that asks while it runs.
+type discovery struct {
+	done chan struct{}
+	err  error
 }
 
 type searxInstance struct {
@@ -129,14 +139,66 @@ func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearXNGResu
 
 // candidates is the instance list in the order to try, discovering it first
 // for "auto".
+//
+// Discovery used to run under c.mu. Concurrent sub-agent queries then queued
+// on a lock no deadline reaches, and when it failed each ran its own attempt
+// in turn: N queries cost N discoveries back to back. Now one query runs it
+// outside the lock and the others wait for its outcome, each until its own
+// context ends. A failure is shared with the queries that waited for it and
+// no further: a query that comes later tries again.
 func (c *SearXNGClient) candidates(ctx context.Context) ([]*searxInstance, error) {
+	for {
+		c.mu.Lock()
+		if c.discover == nil {
+			defer c.mu.Unlock()
+			if len(c.instances) == 0 {
+				return nil, errors.New("no SearXNG instance configured")
+			}
+			return slices.Clone(c.instances), nil
+		}
+		d := c.discovering
+		if d == nil {
+			d = &discovery{done: make(chan struct{})}
+			c.discovering = d
+			c.mu.Unlock()
+			c.runDiscovery(ctx, d)
+		} else {
+			c.mu.Unlock()
+		}
+		select {
+		case <-d.done:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("discover public SearXNG instances: %w", ctx.Err())
+		}
+		// A nil d.err means the list is in place and the loop returns it; an
+		// attempt its own query cancelled is retried by whoever still waits.
+		if d.err != nil && !errors.Is(d.err, errDiscoveryCancelled) {
+			return nil, d.err
+		}
+		if d.err != nil && ctx.Err() != nil {
+			return nil, fmt.Errorf("discover public SearXNG instances: %w", ctx.Err())
+		}
+	}
+}
+
+// errDiscoveryCancelled marks an attempt that ended because the query
+// running it was cancelled or ran out of time: not an answer about
+// searx.space, so the queries waiting on it discover again.
+var errDiscoveryCancelled = errors.New("discovery cancelled")
+
+// runDiscovery runs one attempt for every query waiting on d.
+func (c *SearXNGClient) runDiscovery(ctx context.Context, d *discovery) {
+	urls, err := c.discover(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.discover != nil {
-		urls, err := c.discover(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("discover public SearXNG instances: %w", err)
-		}
+	defer close(d.done)
+	c.discovering = nil
+	switch {
+	case err != nil && ctx.Err() != nil:
+		d.err = fmt.Errorf("discover public SearXNG instances: %w: %w", errDiscoveryCancelled, err)
+	case err != nil:
+		d.err = fmt.Errorf("discover public SearXNG instances: %w", err)
+	default:
 		c.discover = nil
 		for _, u := range urls {
 			// Public instances are read through HTML from the start: measured,
@@ -146,10 +208,6 @@ func (c *SearXNGClient) candidates(ctx context.Context) ([]*searxInstance, error
 			c.instances = append(c.instances, in)
 		}
 	}
-	if len(c.instances) == 0 {
-		return nil, errors.New("no SearXNG instance configured")
-	}
-	return slices.Clone(c.instances), nil
 }
 
 // Preferred is the instance the next query goes to first: after a success,

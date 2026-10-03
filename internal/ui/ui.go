@@ -101,8 +101,10 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 		return ended(ctx, RunResult{}, err)
 	}
 
+	sig := catchSignals(interactive)
 	input := o.openInput(interactive)
 	defer input.Close()
+	defer guardTerminal(sig, input, renderer)()
 
 	// Phase 1: brief confirmation.
 	var cancelled bool

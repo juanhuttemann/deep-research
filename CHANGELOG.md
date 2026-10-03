@@ -29,6 +29,29 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - The escape-key timing on a terminal assumed 64-bit `select` bitmasks,
   which are 32-bit on macOS and 32-bit unix.
 - `tools.ExcerptFor` panicked on a negative limit.
+- Building the fact-check prompt for a wide run (fifty 40 KB pages,
+  thirty-six claims) took about 13 seconds of CPU before the model call
+  started, with the phase line up and Esc unable to interrupt it: every claim
+  re-folded every block of every page, and each passage re-scanned the page
+  for its section heading. It now takes about half a second.
+- Checking that a fact-check quote is in its page normalised the whole page
+  again for every quote, about 80 ms each on a scraped page. Each page is now
+  normalised once per pass.
+- With `auto` search, concurrent queries ran the searx.space discovery one
+  after another under a lock no deadline reached, one attempt each when it
+  failed. They now share one attempt, and a query waiting on it keeps its own
+  deadline.
+- A run's scraper was given the model-call timeout, so a Firecrawl that
+  never answered held each scrape two minutes, or longer with a raised
+  `model_call_timeout`. Firecrawl is now given 60 seconds per page and the
+  request gives up at 70.
+- `planner_instructions` in `agent.yaml` could not change what the planner
+  was told: the built-in planner text was sent again as the user message on
+  every call.
+- A run killed from outside (`kill`, `timeout`, a closed terminal window)
+  left the terminal raw, with no echo and no cursor. The terminal is now
+  restored before the signal ends the process. The key reader also ends with
+  the run instead of waiting on stdin.
 
 ## [0.4.0] - 2026-10-01
 

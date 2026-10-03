@@ -7,6 +7,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -991,5 +992,68 @@ func TestAnalysisWithoutAnswerKeyHasNoAnswer(t *testing.T) {
 	}
 	if got := parseAnalysis("Some prose answer").Answer; got != "Some prose answer" {
 		t.Errorf("prose output lost as the answer: %q", got)
+	}
+}
+
+// planMessages runs one Plan call and returns its messages by role.
+func planMessages(t *testing.T, instructions, question string, subTopics int) map[string]string {
+	t.Helper()
+	got := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		for _, m := range req.Messages {
+			got[m.Role] += string(m.Content)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{\\\"subtopics\\\":[{\\\"name\\\":\\\"A\\\"}]}\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+		ModelCallTimeout: 5 * time.Second, PlanningInstructions: instructions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Plan(context.Background(), question, subTopics); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// planner_instructions became the system message, and the built-in planner
+// text was sent again as the user message, so an edited agent.yaml could
+// not change what the planner was told: the Go copy rode along on every
+// call, contradicting it ("as many as the request asks for" against
+// "exactly %d"). The user message carries only the breadth and the question.
+func TestPlannerInstructionsComeOnlyFromTheConfig(t *testing.T) {
+	msgs := planMessages(t, "CUSTOM_PLANNER_SYSTEM", "Is Valkey faster than Redis?", 3)
+	if !strings.Contains(msgs["system"], "CUSTOM_PLANNER_SYSTEM") {
+		t.Errorf("system message = %s, want the configured instructions", msgs["system"])
+	}
+	user := msgs["user"]
+	if strings.Contains(user, "Decompose the following question") {
+		t.Errorf("the built-in planner instructions still ride in the user message: %s", user)
+	}
+	if !strings.Contains(user, "3") || !strings.Contains(user, "Is Valkey faster than Redis?") {
+		t.Errorf("user message lost the breadth or the question: %s", user)
+	}
+}
+
+// With no planner_instructions configured the fallback system message was
+// the built-in text with its "%d" unformatted.
+func TestPlannerFallbackInstructionsAreComplete(t *testing.T) {
+	for _, n := range []int{0, -1, 5} {
+		msgs := planMessages(t, "", "q", n)
+		if strings.Contains(msgs["system"], "%d") || !strings.Contains(msgs["system"], "Respond ONLY with JSON") {
+			t.Errorf("subTopics %d: fallback system message = %s", n, msgs["system"])
+		}
+		if !strings.ContainsAny(msgs["user"], "0123456789") {
+			t.Errorf("subTopics %d: the user message names no breadth: %s", n, msgs["user"])
+		}
 	}
 }

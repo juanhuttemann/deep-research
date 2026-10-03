@@ -453,11 +453,16 @@ func passages(res *agent.ResearchResult) (map[string]string, []MetaPassage) {
 	if res.FactCheck == nil {
 		return pages, nil
 	}
+	// Each page is normalised once for all the quotes that name it.
+	texts := map[string]*pageText{}
 	var out []MetaPassage
 	for i, v := range res.FactCheck.Verdicts {
 		for _, e := range v.Evidence {
 			page := byCanon[tools.CanonicalURL(resolveSource(e.Source, res.Findings))]
-			out = append(out, MetaPassage{Verdict: i, Page: page, Quote: e.Quote, Located: page != "" && locate(pages[page], e.Quote)})
+			if page != "" && texts[page] == nil {
+				texts[page] = newPageText(pages[page])
+			}
+			out = append(out, MetaPassage{Verdict: i, Page: page, Quote: e.Quote, Located: page != "" && texts[page].locate(e.Quote)})
 		}
 	}
 	return pages, out
