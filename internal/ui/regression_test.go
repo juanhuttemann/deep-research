@@ -2123,3 +2123,33 @@ func allocated(f func()) uint64 {
 	runtime.ReadMemStats(&after)
 	return after.TotalAlloc - before.TotalAlloc
 }
+
+// A run that gave the terminal back, with --detach or by pressing b, must say
+// so: the CLI offers questions about the report on the terminal that watched
+// it, and reading that terminal after a detach sent the lines typed at it
+// since, meant for the shell, to the model as questions.
+func TestRunReportsThatItDetached(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		detach bool
+		keys   string
+		want   bool
+	}{
+		{"watched", false, "\r", false},
+		{"--detach", true, "\r", true},
+		{"pressed b", false, "\rb", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Run(context.Background(), Options{
+				Question: "q", Assistant: &fakeAssistant{summary: "s"}, OutDir: t.TempDir(),
+				Stdout: io.Discard, Stderr: io.Discard, KeyScript: tc.keys, Detach: tc.detach,
+			})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if res.Detached != tc.want {
+				t.Errorf("Detached = %v, want %v", res.Detached, tc.want)
+			}
+		})
+	}
+}

@@ -92,6 +92,23 @@ assert what was not established.
 The `agent` package knows how to talk to one model and how to parse what
 comes back. It never decides what to ask or in what order.
 
+## Asking about a finished run
+
+A finished run's `.json` artifact is everything a follow-up question needs:
+the report, the claims with their status, and the stored text of every
+fetched page. `ask` and the page's follow-up box answer from it alone,
+without searching. This is not a pipeline phase and is held to nothing the
+pipeline is held to: `agent.Chat` is a conversation whose model is given the
+run's overview (`ui.RunOverview`: question, report, claims by status,
+sources) and two tools over the pages (`ui.SourceTools`: `search_sources`
+ranks pages as search results are ranked, `read_source` returns a page's
+passages by `tools.ExcerptFor`). The agent framework runs the tool calls the
+model makes until it answers. The conversation is carried as text in each
+question, so a retried call leaves no half turn behind and the page can hand
+back the conversation it shows; the server keeps none. Answers are not
+fact-checked: the prompt tells the model to state as fact only supported
+claims, and nothing checks that it did.
+
 ## Packages
 
 ```
@@ -99,8 +116,9 @@ cmd/deep-research   entrypoint; version is stamped in at link time
 internal/
   agent     one LLM phase per method (ResearchDetail / Analyze / FactCheck /
             Summarize / Plan); real search via internal/tools when SearXNG
-            is configured; Diagnose for `doctor`
-  cli       cobra commands (run / serve / list / init / doctor)
+            is configured; Diagnose for `doctor`; Chat for questions about
+            a finished run
+  cli       cobra commands (run / ask / serve / list / init / doctor)
   config    config resolution (env > config dir > embedded defaults) + .env
   replay    --trace recorder and --replay player: wraps the assistant to
             record, or serve back, the plan and every search result; the
@@ -109,11 +127,13 @@ internal/
   store     append-only JSONL run history
   tools     SearXNG search (JSON or HTML, one or many instances, searx.space
             discovery) + Firecrawl scrape HTTP clients
-  ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export
+  ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export;
+            the .json read back, with the tools a question reads it by
   web       `serve`: one embedded page, the run's JSONL over SSE with
             Last-Event-ID replay, launch / cancel, the reports directory
-            read-only, a run's report rendered without its citations; the
-            run itself is a function cli injects
+            read-only, a run's report rendered without its citations,
+            questions about a run; the run and the answer are functions cli
+            injects
 config/     embedded default config.yaml and agent.yaml
 ```
 

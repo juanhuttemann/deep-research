@@ -61,6 +61,9 @@ type RunResult struct {
 	// TracePath is the --trace file, written by the CLI after the run.
 	TracePath string
 	Cancelled bool
+	// Detached is set when the run gave the terminal back (--detach, or b
+	// pressed): what is typed at it since is the shell's, not the run's.
+	Detached bool
 }
 
 // Paths lists the artifacts that were actually written; a failed write left
@@ -133,6 +136,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	}
 
 	result, err := driver.Run(ctx, plan)
+	res.Detached = driver.isDetached()
 	if err != nil {
 		return ended(ctx, res, err)
 	}
@@ -177,7 +181,7 @@ func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
 	stopStatus := func() {}
 	if !o.Quiet && !o.JSONL {
 		var setStatus func(string)
-		setStatus, stopStatus = statusSpinner(o.Stderr, "Planning research")
+		setStatus, stopStatus = StatusSpinner(o.Stderr, "Planning research")
 		// The assistant reports which model it is asking and when it retries.
 		// Both happen inside this call, and the progress logger was only wired
 		// after it, so the one phase with nothing on screen behind it was also

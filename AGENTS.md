@@ -62,7 +62,10 @@ invariants:
   `internal/agent` talks to one model and parses its answers; it never
   decides what to ask or in what order. Don't move sequencing into agent.
 - Each assistant phase is a single model call; no multi-turn loops inside an
-  agent method.
+  agent method. `agent.Chat` (`ask`, the page's follow-up questions) is not a
+  phase: it comes after the run, and the framework's tool loop runs its
+  calls to tools that only read the run's saved `.json`. Keep its tools
+  read-only and local; a question that needs new evidence is a new run.
 - Layering: `cli` → {agent, config, replay, store, ui}; `replay` → `agent`;
   `agent` → `tools`; `tools` is standalone HTTP clients. Don't import upward.
 - Config precedence is env > `config/config.yaml` > embedded defaults, and

@@ -40,10 +40,12 @@ type Config struct {
 	SummarizerInstructions  string
 	SearchInstructions      string
 	PlanningInstructions    string
-	OpenAIAPIKey            string
-	OpenAIBaseURL           string
-	OpenAIModel             string
-	ModelCallTimeout        time.Duration
+	// ChatInstructions steer the conversation about a finished run (NewChat).
+	ChatInstructions string
+	OpenAIAPIKey     string
+	OpenAIBaseURL    string
+	OpenAIModel      string
+	ModelCallTimeout time.Duration
 	// ModelCallRetries is how many extra attempts a failed model call gets.
 	// Zero means one attempt and no retry.
 	ModelCallRetries int
@@ -321,33 +323,10 @@ type runFunc func(ctx context.Context, prompt string) (string, error)
 // call, so a keyless online assistant cannot do anything except error at the
 // first one. Reporting it here is what lets the CLI say how to get a key.
 func New(cfg Config) (Assistant, error) {
-	key := strings.TrimSpace(cfg.OpenAIAPIKey)
-	if key == "" {
-		return nil, errors.New("no API key (set OPENAI_API_KEY)")
+	impl, client, err := connect(cfg)
+	if err != nil {
+		return nil, err
 	}
-	timeout := cfg.ModelCallTimeout
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-	impl := &impl{model: cfg.OpenAIModel, baseURL: cfg.OpenAIBaseURL,
-		timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
-
-	// The deadline is applied per call as a context timeout (see impl.call),
-	// not as http.Client.Timeout: that one also caps reading the response
-	// body, so a report the model was still streaming died mid-write with
-	// "error reading response body" and no chance to retry.
-	client := openai.NewClient(
-		option.WithBaseURL(cfg.OpenAIBaseURL),
-		option.WithAPIKey(key),
-		option.WithHTTPClient(providerHTTPClient()),
-		// The SDK retries twice by default, underneath impl.call's own loop.
-		// Nested, the two multiply — up to nine HTTP attempts for one phase —
-		// and the inner loop re-dials hosts the outer one has already judged
-		// unreachable. Retry policy lives in impl.call, which knows the
-		// difference between a server that never answered and one that did.
-		option.WithMaxRetries(0),
-		option.WithMiddleware(impl.sniffServedModel),
-	)
 
 	newAgent := func(name, instructions string) *agent.Agent {
 		return openaiprovider.NewChatCompletionsAgent(client, openaiprovider.AgentConfig{
@@ -413,12 +392,46 @@ func New(cfg Config) (Assistant, error) {
 	// its snippet and is labelled snippet-only. Requiring Firecrawl too sent
 	// every run that lacked it to the model for invented findings.
 	if cfg.SearXNGURL != "" {
-		impl.searchTools = tools.NewSearchTools(cfg.SearXNGURL, cfg.FirecrawlURL, timeout)
+		impl.searchTools = tools.NewSearchTools(cfg.SearXNGURL, cfg.FirecrawlURL, impl.timeout)
 		if impl.searchTools.Firecrawl != nil {
 			impl.searchTools.Firecrawl.APIKey = cfg.FirecrawlAPIKey
 		}
 	}
 	return impl, nil
+}
+
+// connect builds the client every model call goes through: the endpoint and
+// its key, the per-call deadline and retry policy, and the middleware that
+// records which model served each request.
+func connect(cfg Config) (*impl, openai.Client, error) {
+	key := strings.TrimSpace(cfg.OpenAIAPIKey)
+	if key == "" {
+		return nil, openai.Client{}, errors.New("no API key (set OPENAI_API_KEY)")
+	}
+	timeout := cfg.ModelCallTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	impl := &impl{model: cfg.OpenAIModel, baseURL: cfg.OpenAIBaseURL,
+		timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
+
+	// The deadline is applied per call as a context timeout (see impl.call),
+	// not as http.Client.Timeout: that one also caps reading the response
+	// body, so a report the model was still streaming died mid-write with
+	// "error reading response body" and no chance to retry.
+	client := openai.NewClient(
+		option.WithBaseURL(cfg.OpenAIBaseURL),
+		option.WithAPIKey(key),
+		option.WithHTTPClient(providerHTTPClient()),
+		// The SDK retries twice by default, underneath impl.call's own loop.
+		// Nested, the two multiply — up to nine HTTP attempts for one phase —
+		// and the inner loop re-dials hosts the outer one has already judged
+		// unreachable. Retry policy lives in impl.call, which knows the
+		// difference between a server that never answered and one that did.
+		option.WithMaxRetries(0),
+		option.WithMiddleware(impl.sniffServedModel),
+	)
+	return impl, client, nil
 }
 
 type impl struct {

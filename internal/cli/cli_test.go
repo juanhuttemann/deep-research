@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -568,5 +571,119 @@ func TestInterruptedRunResumes(t *testing.T) {
 	}
 	if mds, _ := filepath.Glob(filepath.Join(dir, "*.md")); len(mds) != 1 {
 		t.Errorf("reports = %v, want the resumed run's", mds)
+	}
+}
+
+// fakeProvider is an OpenAI-compatible endpoint that answers every request
+// with answer(n), n counting from 1, and keeps each request body.
+func fakeProvider(t *testing.T, answer func(n int) string) (url string, bodies *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	bodies = &[]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		*bodies = append(*bodies, string(b))
+		n := len(*bodies)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop",
+				"message": map[string]any{"role": "assistant", "content": answer(n)}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, bodies
+}
+
+// askRun writes a finished run's sidecar and returns the command that asks
+// about it, against the provider at url.
+func askRun(t *testing.T, url string, in string, args ...string) (*bytes.Buffer, error) {
+	t.Helper()
+	path, err := ui.WriteMetadata(ui.Meta{Question: "Is Acme worth it?", Report: "Acme is fast.",
+		Pages: map[string]string{"https://a.example/acme": "Acme costs 12 euros."}}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: url,
+		OpenAIModel: "test", ChatInstructions: "answer from the run", ModelCallTimeout: 5 * time.Second}}}
+	cmd := New(func() (Deps, error) { return deps, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(in))
+	cmd.SetArgs(append([]string{"ask", path, "--no-color"}, args...))
+	return &out, cmd.Execute()
+}
+
+// A finished run is asked about without researching again: the answer comes
+// from a model that is given the run's report and reads its pages.
+func TestAskAnswersFromARun(t *testing.T) {
+	url, bodies := fakeProvider(t, func(int) string { return "It costs 12 euros." })
+	out, err := askRun(t, url, "", "-p", "How much is it?")
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if !strings.Contains(out.String(), "It costs 12 euros.") {
+		t.Errorf("output = %q", out)
+	}
+	if len(*bodies) != 1 || !strings.Contains((*bodies)[0], "Is Acme worth it?") || !strings.Contains((*bodies)[0], "How much is it?") {
+		t.Errorf("the request lacks the run or the question: %v", *bodies)
+	}
+}
+
+// Without -p the questions are read one per line, and each carries the
+// conversation so far: "and in dollars?" means nothing on its own.
+func TestAskReadsQuestionsUntilEOF(t *testing.T) {
+	url, bodies := fakeProvider(t, func(n int) string { return "answer " + strconv.Itoa(n) })
+	out, err := askRun(t, url, "How much is it?\nAnd in dollars?\n\nnot asked\n")
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if len(*bodies) != 2 {
+		t.Fatalf("%d requests, want two: an empty line ends the conversation", len(*bodies))
+	}
+	if second := (*bodies)[1]; !strings.Contains(second, "How much is it?") || !strings.Contains(second, "answer 1") {
+		t.Errorf("the second question does not carry the first turn: %s", second)
+	}
+	if !strings.Contains(out.String(), "answer 1") || !strings.Contains(out.String(), "answer 2") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+// A file that is not a run's .json is refused before any model is asked.
+func TestAskRefusesWhatIsNotARun(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "notes.json")
+	if err := os.WriteFile(bad, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"ask", bad, "-p", "q"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "not a run's .json") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// A question from the page is about a run in the serve's reports directory,
+// and carries the conversation the page shows.
+func TestWebAskCarriesTheConversation(t *testing.T) {
+	url, bodies := fakeProvider(t, func(int) string { return "In dollars, 13." })
+	dir := t.TempDir()
+	path, err := ui.WriteMetadata(ui.Meta{Question: "Is Acme worth it?", Report: "Acme is fast."}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: url,
+		OpenAIModel: "test", ModelCallTimeout: 5 * time.Second}}}
+	got, err := webAsk(func() (Deps, error) { return deps, nil }, dir)(context.Background(),
+		filepath.Base(path), []web.Turn{{Question: "How much?", Answer: "12 euros"}}, "And in dollars?")
+	if err != nil || got != "In dollars, 13." {
+		t.Fatalf("webAsk = %q, %v", got, err)
+	}
+	if b := (*bodies)[0]; !strings.Contains(b, "Is Acme worth it?") || !strings.Contains(b, "12 euros") || !strings.Contains(b, "And in dollars?") {
+		t.Errorf("the request lacks the run, the earlier turn or the question: %s", b)
 	}
 }

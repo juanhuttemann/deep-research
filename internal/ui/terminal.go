@@ -70,14 +70,14 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", m, s)
 }
 
-// statusSpinner animates msg on w until the returned stop func is called, so a
+// StatusSpinner animates msg on w until the returned stop func is called, so a
 // slow step — the planning call, which is several seconds of nothing before
 // the brief can be drawn — never looks like a hung process. The returned set
 // func appends a live sub-status ("asking <model> for sub-topics", a retry
 // notice) so the wait says what it is waiting on, not just how long it has
 // been. On a non-terminal writer each distinct status is printed on its own
 // line instead, which is what a log or a piped run wants.
-func statusSpinner(w io.Writer, msg string) (set func(string), stop func()) {
+func StatusSpinner(w io.Writer, msg string) (set func(string), stop func()) {
 	if !isTTYWriter(w) {
 		_, _ = fmt.Fprintf(w, "%s\n", msg)
 		var last string
@@ -91,7 +91,7 @@ func statusSpinner(w io.Writer, msg string) (set func(string), stop func()) {
 	return spin(w, msg)
 }
 
-// spin is statusSpinner's animated half, split out so it can be driven with a
+// spin is StatusSpinner's animated half, split out so it can be driven with a
 // plain writer in a test.
 func spin(w io.Writer, msg string) (set func(string), stop func()) {
 	done := make(chan struct{})

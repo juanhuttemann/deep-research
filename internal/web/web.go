@@ -57,9 +57,28 @@ func isCheckpoint(name string) bool {
 	return strings.HasSuffix(name, checkpointSuffix) && path.Base(name) == name && !strings.ContainsAny(name, `/\`)
 }
 
+// isRunName reports whether name is a finished run's .json directly in the
+// reports directory: a bare file name, and not a checkpoint or a trace,
+// which hold no report.
+func isRunName(name string) bool {
+	return strings.HasSuffix(name, ".json") && path.Base(name) == name && !strings.ContainsAny(name, `/\`) &&
+		!isCheckpoint(name) && !strings.HasSuffix(name, ".trace.json")
+}
+
 // RunFunc runs one request and writes its JSONL events to w, ending with the
 // done line on every outcome.
 type RunFunc func(ctx context.Context, r Request, w io.Writer)
+
+// Turn is one question about a run and the answer it got, as the page shows
+// the conversation.
+type Turn struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// AskFunc answers question about the run whose .json is named run in the
+// reports directory, after the conversation so far. It returns Markdown.
+type AskFunc func(ctx context.Context, run string, turns []Turn, question string) (string, error)
 
 // maxLines bounds the replay buffer by line count, not bytes. Events are
 // short (a status line, a URL); the longest is the plan event, a few KB, so
@@ -73,6 +92,8 @@ const maxLines = 10000
 type Server struct {
 	run     RunFunc
 	reports fs.FS
+	// Ask answers questions about a finished run; nil refuses them.
+	Ask AskFunc
 	// remove deletes a file in the reports directory: a discarded
 	// checkpoint. Nil refuses every discard.
 	remove func(name string) error
@@ -116,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/run", s.launch)
 	mux.HandleFunc("POST /api/cancel", s.stop)
 	mux.HandleFunc("GET /api/report/{name}", s.report)
+	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.Handle("GET /reports/", http.StripPrefix("/reports/", http.FileServerFS(s.reports)))
 	// Cross-origin protection refuses another site's POST (a cancel is a
 	// simple request); the Host check refuses a page that rebound its own
@@ -126,7 +148,7 @@ func (s *Server) Handler() http.Handler {
 // Serve listens on addr and serves the reports directory read-only. It
 // returns only when the listener fails: ctx bounds the runs, not the server,
 // which stops with the process.
-func Serve(ctx context.Context, addr, reports string, run RunFunc, log io.Writer) error {
+func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, log io.Writer) error {
 	if err := os.MkdirAll(reports, 0o755); err != nil {
 		return err
 	}
@@ -144,6 +166,7 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, log io.Writer
 	_, _ = fmt.Fprintf(log, "serving on http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
 	s := New(ctx, root.FS(), run)
 	s.remove = root.Remove
+	s.Ask = ask
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	return srv.Serve(ln)
 }
@@ -329,7 +352,7 @@ func uncite(html string) string {
 // dangerous link schemes; the page applies its own link rule on top.
 func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if !strings.HasSuffix(name, ".json") || path.Base(name) != name || strings.ContainsAny(name, `/\`) {
+	if !isRunName(name) {
 		http.Error(w, "report takes a run's .json name from the reports directory", http.StatusBadRequest)
 		return
 	}
@@ -355,6 +378,62 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, uncite(out.String()))
+}
+
+// maxAskBody bounds a question with the conversation before it, which the
+// page sends whole each time: a long conversation outgrows a launch's limit.
+const maxAskBody = 1 << 20
+
+// ask answers a question about a finished run and returns the answer as
+// written and rendered, its links kept: they are its sources. Like a launch it spends
+// model requests, so it takes JSON only; it does not need the run slot, and
+// a question can be asked while a run is going.
+func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		http.Error(w, "ask takes application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	var req struct {
+		Run      string `json:"run"`
+		Question string `json:"question"`
+		Turns    []Turn `json:"turns"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAskBody)).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	switch {
+	case !isRunName(req.Run):
+		http.Error(w, "ask takes a run's .json name from the reports directory", http.StatusBadRequest)
+		return
+	case strings.TrimSpace(req.Question) == "":
+		http.Error(w, "the question is empty", http.StatusBadRequest)
+		return
+	case s.Ask == nil:
+		http.Error(w, "asking is not available", http.StatusNotImplemented)
+		return
+	}
+	if _, err := fs.Stat(s.reports, req.Run); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	answer, err := s.Ask(r.Context(), req.Run, req.Turns, strings.TrimSpace(req.Question))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	var out bytes.Buffer
+	if err := markdown.Convert([]byte(answer), &out); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// The Markdown goes back too: the page returns it as the next question's
+	// conversation, and the rendered text alone would lose the cited URLs.
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Answer string `json:"answer"`
+		HTML   string `json:"html"`
+	}{answer, out.String()})
 }
 
 func (s *Server) stop(w http.ResponseWriter, _ *http.Request) {

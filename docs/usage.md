@@ -218,7 +218,10 @@ the check located only after normalising markup and whitespace is marked
 located but not highlighted. The start screen lists the 50 most recent runs
 in the reports directory, and `/?run=<name>.json` opens any of them.
 It needs no terminal, so it is also the live view where the terminal UI is
-not available (Windows).
+not available (Windows). Copy report, beside the views, copies the run's
+`.md` report to the clipboard. Below them, Ask about this report takes
+follow-up questions, answered as `ask` answers them; the conversation lives
+in the tab and starts again when another run is opened.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -238,8 +241,40 @@ not available (Windows).
 - It is a tool for this machine, with no authentication. It answers only
   requests addressed to `localhost`, `127.0.0.1` or `[::1]`, whatever
   `--addr` binds, so a page that rebinds its own name to your address is
-  refused. It refuses cross-site POSTs, and a launch must be
+  refused. It refuses cross-site POSTs, and a launch or a question must be
   `application/json`, so another site cannot spend your API credits.
+- A question does not wait for the run slot: you can ask about one run
+  while another runs.
+
+## `ask`
+
+```bash
+deep-research ask reports/<run>.json -p "Which source gives the price?"
+deep-research ask reports/<run>.json        # one question per line; an empty line ends it
+```
+
+Answers follow-up questions about a finished run from what the run saved:
+its report, its claims with the status the fact-check gave each, and the
+stored text of every page it fetched (the `.json` artifact's `pages`). The
+model reads the pages through two tools, `search_sources` (which pages
+mention something) and `read_source` (one page's passages about it), so a
+question can reach a passage the report never quoted. Nothing is searched
+again; a question the run's pages do not answer is answered as such, with
+the suggestion to research it as a new question.
+
+Each question carries the conversation before it, so "and the second one?"
+works. The answers are not fact-checked: the model is told to state as fact
+only what the run established and to give the status of a claim that was
+not, but nothing holds it to that the way the report's answer is held.
+Asking needs a model that supports tool calls.
+
+A run watched in the terminal UI asks "Ask about this report (empty line to
+finish)" once its report is printed; an empty line or Ctrl-D ends it.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-p`, `--prompt` | | one question; without it, questions are read one per line from stdin |
+| `--no-color` | `false` | print the answer's Markdown as is |
 
 ## `list`
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -11,6 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/microsoft/agent-framework-go/tool"
+	"github.com/microsoft/agent-framework-go/tool/functool"
 )
 
 func TestNew(t *testing.T) {
@@ -498,5 +502,69 @@ func TestParseConclusionsAndInferences(t *testing.T) {
 	fc := parseFactCheck(`{"inferences":[{"id":"k1","follows":true}],"recommendations":[{"id":"r1","follows":true}]}`)
 	if len(fc.Inferences) != 2 {
 		t.Errorf("inferences = %+v, want both keys read", fc.Inferences)
+	}
+}
+
+// A follow-up about a finished run is answered from the run's own pages, which
+// the model reads through the tools it is given: the framework runs the call
+// the model asks for and sends the result back. The conversation is carried as
+// text, so a second question can lean on the first ("and the second one?").
+func TestChatRunsToolsAndKeepsTurns(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		msg := map[string]any{"role": "assistant", "content": "It costs 5 dollars (https://a.example)."}
+		reason := "stop"
+		if len(bodies) == 1 {
+			msg = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
+				"id": "call_1", "type": "function",
+				"function": map[string]any{"name": "read_source", "arguments": `{"url":"https://a.example","about":"price"}`},
+			}}}
+			reason = "tool_calls"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": reason, "message": msg}},
+		})
+	}))
+	defer srv.Close()
+
+	type source struct {
+		URL   string `json:"url"`
+		About string `json:"about"`
+	}
+	var got source
+	read := functool.MustNew(functool.Config{Name: "read_source", Description: "read a page"},
+		func(_ context.Context, in source) (string, error) { got = in; return "PAGE SAYS 5 DOLLARS", nil })
+	chat, err := NewChat(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test",
+		ChatInstructions: "answer from the run"}, "Question: what does it cost?", []tool.Tool{read})
+	if err != nil {
+		t.Fatalf("NewChat: %v", err)
+	}
+	answer, err := chat.Ask(context.Background(), "How much is it?")
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if got != (source{"https://a.example", "price"}) {
+		t.Errorf("tool got %+v, want the arguments the model sent", got)
+	}
+	if len(bodies) != 2 || !strings.Contains(bodies[1], "PAGE SAYS 5 DOLLARS") {
+		t.Fatalf("requests = %d; the second must carry the tool's result:\n%s", len(bodies), strings.Join(bodies, "\n"))
+	}
+	if !strings.Contains(bodies[0], "answer from the run") || !strings.Contains(bodies[0], "what does it cost?") {
+		t.Errorf("the instructions and the run overview are not in the request:\n%s", bodies[0])
+	}
+	if !strings.Contains(answer, "5 dollars") {
+		t.Errorf("answer = %q", answer)
+	}
+
+	if _, err := chat.Ask(context.Background(), "And in euros?"); err != nil {
+		t.Fatalf("second Ask: %v", err)
+	}
+	last := bodies[len(bodies)-1]
+	if !strings.Contains(last, "How much is it?") || !strings.Contains(last, "It costs 5 dollars") {
+		t.Errorf("the second question does not carry the first turn:\n%s", last)
 	}
 }

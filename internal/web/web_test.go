@@ -248,7 +248,7 @@ func TestRunsListsReportsNewestFirst(t *testing.T) {
 // The page calls the server by path; a typo in one is invisible until a
 // button does nothing.
 func TestPageCallsTheServedEndpoints(t *testing.T) {
-	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`} {
+	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`, `"/api/ask"`} {
 		if !strings.Contains(string(page), path) {
 			t.Errorf("index.html never calls %s", path)
 		}
@@ -492,4 +492,82 @@ func post(t *testing.T, url, body string) int {
 	}
 	_ = resp.Body.Close()
 	return resp.StatusCode
+}
+
+// ask posts a question about a run and returns the status and body.
+func ask(t *testing.T, url, contentType, body string) (int, string) {
+	t.Helper()
+	resp, err := http.Post(url+"/api/ask", contentType, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+// A question spends model requests, so it is guarded as a launch is, and it
+// names a run's .json in the reports directory and nothing else: not a path
+// out of it, not a checkpoint or a trace, which hold no report.
+func TestAskGuards(t *testing.T) {
+	reports := fstest.MapFS{"r.json": {Data: []byte(`{}`)}, "r.partial.json": {Data: []byte(`{}`)}, "r.trace.json": {Data: []byte(`{}`)}}
+	s := New(context.Background(), reports, nil)
+	asked := 0
+	s.Ask = func(context.Context, string, []Turn, string) (string, error) { asked++; return "ok", nil }
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	if code, _ := ask(t, srv.URL, "text/plain", `{"run":"r.json","question":"q"}`); code != http.StatusUnsupportedMediaType {
+		t.Errorf("text/plain ask = %d, want 415", code)
+	}
+	for run, want := range map[string]int{"../r.json": 400, "r.partial.json": 400, "r.trace.json": 400, "r.md": 400, "missing.json": 404} {
+		if code, _ := ask(t, srv.URL, "application/json", `{"run":"`+run+`","question":"q"}`); code != want {
+			t.Errorf("ask about %s = %d, want %d", run, code, want)
+		}
+	}
+	if code, _ := ask(t, srv.URL, "application/json", `{"run":"r.json","question":"  "}`); code != http.StatusBadRequest {
+		t.Errorf("an empty question = %d, want 400", code)
+	}
+	if asked != 0 {
+		t.Errorf("a refused question reached the model %d times", asked)
+	}
+}
+
+// The page sends the conversation it shows with each question, and gets the
+// answer back as written and rendered, its links kept: they are the answer's sources. Raw
+// HTML a model wrote does not survive, as in the report.
+func TestAskRendersTheAnswer(t *testing.T) {
+	s := New(context.Background(), fstest.MapFS{"r.json": {Data: []byte(`{}`)}}, nil)
+	var gotRun, gotQ string
+	var gotTurns []Turn
+	s.Ask = func(_ context.Context, run string, turns []Turn, q string) (string, error) {
+		gotRun, gotTurns, gotQ = run, turns, q
+		return "It costs **12 euros** ([docs](https://a.example/acme)).\n\n<script>alert(1)</script>", nil
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	code, body := ask(t, srv.URL, "application/json",
+		`{"run":"r.json","question":"And in dollars?","turns":[{"question":"How much?","answer":"12 euros"}]}`)
+	if code != http.StatusOK {
+		t.Fatalf("ask = %d: %s", code, body)
+	}
+	// The page sends the Markdown back as the conversation's next turn: the
+	// rendered text alone would lose the URLs the model cited.
+	var got struct{ Answer, HTML string }
+	if err := json.Unmarshal([]byte(body), &got); err != nil || !strings.Contains(got.Answer, "(https://a.example/acme)") {
+		t.Fatalf("ask returned %q (%v), want JSON with the Markdown answer", body, err)
+	}
+	body = got.HTML
+	if gotRun != "r.json" || gotQ != "And in dollars?" || len(gotTurns) != 1 || gotTurns[0] != (Turn{"How much?", "12 euros"}) {
+		t.Errorf("asked run=%q q=%q turns=%+v", gotRun, gotQ, gotTurns)
+	}
+	for _, want := range []string{"<strong>12 euros</strong>", `<a href="https://a.example/acme">docs</a>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("answer lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<script>") {
+		t.Errorf("raw HTML came through:\n%s", body)
+	}
 }

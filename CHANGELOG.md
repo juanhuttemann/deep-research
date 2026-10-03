@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `ask <run>.json` answers follow-up questions about a finished run from what
+  it saved: the report, the claims with their fact-check status, and the
+  stored page texts, which the model reads through tools. Nothing is
+  searched again. A run watched in the terminal takes questions once its
+  report is printed. The answers are not fact-checked.
+- `serve` asks the same follow-up questions below a finished run's report,
+  and copies the report's Markdown with Copy report.
+
 ## [0.5.0] - 2026-10-03
 
 ### Added
