@@ -255,6 +255,13 @@ func (d *Driver) detach() {
 	d.emit(Event{Type: Detach, Detail: detachDetail})
 }
 
+// isDetached reports whether the run has given the terminal back.
+func (d *Driver) isDetached() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.detached
+}
+
 // detachDetail is what the run says about itself once the display is released.
 // It does not claim the process was backgrounded, because it was not.
 const detachDetail = "display released; the run keeps this terminal until the report is written"

@@ -91,8 +91,10 @@ stray `DEEP_RESEARCH_*` variable left in a shell changes how runs behave;
 be ignored.
 
 Agent prompts live in `agent.yaml` in the same directory, one block per
-phase, so they can be edited without touching Go code. A block left out
-falls back to the built-in prompt. `prompts_version: 1` marks the output
+phase, so they can be edited without touching Go code. `chat_instructions`
+is not a phase: it steers `ask` and the page's follow-up questions. A block
+left out falls back to the built-in prompt, so an `agent.yaml` written
+before a block existed still gets it. `prompts_version: 1` marks the output
 schema the parsers expect: a file with a missing or different version warns
 on stderr and is still used, because an older analyzer or fact-check prompt
 can return JSON this release cannot read. Compare the file with this

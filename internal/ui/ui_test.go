@@ -2105,3 +2105,93 @@ func TestBrowserPageCopiesMatch(t *testing.T) {
 		}
 	}
 }
+
+// askMeta is a finished run's sidecar: one long page whose pricing passage
+// lies past the excerpt a run's prompt showed, and one unrelated page.
+func askMeta() *Meta {
+	filler := strings.Repeat("The project began as a hobby and grew a community over the years. ", 60)
+	return &Meta{
+		Question: "Is Acme worth it?",
+		Report:   "## Answer\n\nAcme is fast.",
+		Analysis: &agent.Analysis{Interpretation: "worth it for a small team", Claims: []agent.Claim{
+			{ID: "c1", Text: "Acme is fast", Status: "supported", Sources: []string{"https://a.example/acme"}},
+			{ID: "c2", Text: "Acme is cheap", Status: "insufficient"},
+		}},
+		Citations: []MetaCitation{
+			{Title: "Acme docs", URL: "https://a.example/acme", Status: "ok"},
+			{Title: "Weather", URL: "https://b.example/", Status: "degraded"},
+		},
+		Pages: map[string]string{
+			"https://a.example/acme": filler + "\n\n## Pricing\n\nAcme costs 12 euros per seat per month.\n\n" + filler,
+			"https://b.example/":     "It will rain tomorrow.",
+		},
+	}
+}
+
+func callTool(t *testing.T, m *Meta, name, args string) string {
+	t.Helper()
+	for _, tl := range SourceTools(m) {
+		if tl.Name() == name {
+			out, err := tl.(interface {
+				Call(context.Context, string) (any, error)
+			}).Call(context.Background(), args)
+			if err != nil {
+				t.Fatalf("%s(%s): %v", name, args, err)
+			}
+			return fmt.Sprint(out)
+		}
+	}
+	t.Fatalf("no tool %q", name)
+	return ""
+}
+
+// A follow-up is answered from the run's pages in full, not from the 1500
+// characters a run's prompt showed of each: the passage it asks about can be
+// anywhere in the page, and the page is named however the model spells it.
+func TestSourceToolsReadTheSidecar(t *testing.T) {
+	m := askMeta()
+	if got := callTool(t, m, "read_source", `{"url":"https://A.example/acme/","about":"pricing per seat"}`); !strings.Contains(got, "12 euros per seat") {
+		t.Errorf("read_source did not return the pricing passage:\n%.300s", got)
+	}
+	if got := callTool(t, m, "read_source", `{"url":"https://elsewhere.example/","about":"x"}`); !strings.Contains(got, "https://a.example/acme") {
+		t.Errorf("an unknown URL should be answered with the run's sources, got %q", got)
+	}
+	// Runs before 0.5 saved no page text: the model is told so, not handed
+	// an empty list of pages to choose from.
+	old := &Meta{Question: "q", Citations: m.Citations}
+	for _, call := range [][2]string{{"read_source", `{"url":"https://a.example/acme","about":"x"}`}, {"search_sources", `{"query":"acme"}`}} {
+		if got := callTool(t, old, call[0], call[1]); !strings.Contains(got, "saved no page text") {
+			t.Errorf("%s on a run without pages = %q", call[0], got)
+		}
+	}
+	got := callTool(t, m, "search_sources", `{"query":"acme pricing seat"}`)
+	if !strings.Contains(got, "https://a.example/acme") || strings.Contains(got, "https://b.example/") {
+		t.Errorf("search_sources should find the Acme page and not the weather:\n%s", got)
+	}
+}
+
+// The model is told up front what the run decided, claim by claim: a claim
+// the fact-check did not pass must not come back as fact in a follow-up.
+func TestRunOverviewCarriesClaimStatus(t *testing.T) {
+	o := RunOverview(askMeta())
+	for _, want := range []string{"Is Acme worth it?", "Acme is fast.", "c2", "Acme is cheap", "insufficient", "Acme docs", "https://a.example/acme", "worth it for a small team"} {
+		if !strings.Contains(o, want) {
+			t.Errorf("overview lacks %q:\n%s", want, o)
+		}
+	}
+}
+
+// LoadMeta reads back the sidecar WriteMetadata wrote.
+func TestLoadMetaReadsTheSidecar(t *testing.T) {
+	path, err := WriteMetadata(*askMeta(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadMeta(path)
+	if err != nil || m.Pages["https://b.example/"] != "It will rain tomorrow." {
+		t.Fatalf("LoadMeta = %v, %v", m, err)
+	}
+	if _, err := LoadMeta(filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Error("a missing sidecar loaded")
+	}
+}

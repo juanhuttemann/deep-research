@@ -110,6 +110,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 			},
 		},
 		serveCmd(load),
+		askCmd(load),
 		&cobra.Command{
 			Use:   "list",
 			Short: "list past research runs",
@@ -186,7 +187,7 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 			}
 			addr, _ := cmd.Flags().GetString("addr")
 			reports, _ := cmd.Flags().GetString("reports")
-			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), cmd.ErrOrStderr())
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().String("addr", "127.0.0.1:7777", "address to listen on")
@@ -261,10 +262,16 @@ const keyURL = "https://openrouter.ai/keys"
 func pickAssistant(d Deps) (agent.Assistant, error) {
 	a, err := d.Assistant()
 	if err != nil {
-		return nil, fmt.Errorf("%w\n  Get a free key (no card): %s\n"+
-			"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research -p \"...\"", err, keyURL)
+		return nil, keyHint(err)
 	}
 	return a, nil
+}
+
+// keyHint says how to get a key, under the error of a model that could not
+// be reached without one.
+func keyHint(err error) error {
+	return fmt.Errorf("%w\n  Get a free key (no card): %s\n"+
+		"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research -p \"...\"", err, keyURL)
 }
 
 // sourceBudget is the per-sub-agent source budget: the config value unless a
@@ -403,20 +410,20 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		return res, printPlan(cmd, res.Plan, jsonl)
 	}
 	writeTrace(cmd, rec, &res)
-	return res, finish(cmd, d, rec, res.Report, !st.replay, silent || jsonl)
+	return res, finish(cmd, d, rec, res, !st.replay, silent, jsonl)
 }
 
 // finish delivers a run that ended and, once it finished in full, removes its
 // checkpoint: nothing is left to resume. A cancelled, failed or incomplete
-// run keeps it.
-func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, result *agent.ResearchResult, save, printed bool) error {
-	if err := deliver(cmd, d, result, save, printed); err != nil {
+// run keeps it. A run watched in the terminal then takes questions about it.
+func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, res ui.RunResult, save, silent, jsonl bool) error {
+	if err := deliver(cmd, d, res.Report, save, silent || jsonl); err != nil {
 		return err
 	}
 	if err := rec.Discard(); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not remove the checkpoint: %v\n", err)
 	}
-	return nil
+	return askAfter(cmd, d, res.JSONPath, drawsUI(cmd, silent, jsonl) && !res.Detached)
 }
 
 // deliver warns about an empty run, saves it to the history and prints it.

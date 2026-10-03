@@ -94,6 +94,12 @@ func relevance(terms []string, title, snippet string) float64 {
 	return float64(matched) / float64(len(terms))
 }
 
+// PageRelevance is the share of query's words that page mentions, judged as
+// a search result is.
+func PageRelevance(query, page string) float64 {
+	return relevance(queryWords(newFolder(), query), "", page)
+}
+
 // mentions reports whether folded text contains the folded term. A phrase
 // counts when every one of its words does, in any order — a search engine's
 // AND query: planners write "ventajas energía nuclear" and pages say

@@ -357,6 +357,7 @@ func loadAgentConfig(cfg *Config, a *viper.Viper) error {
 		{"summarizer_instructions", &cfg.SummarizerInstructions},
 		{"search_instructions", &cfg.SearchInstructions},
 		{"planner_instructions", &cfg.PlanningInstructions},
+		{"chat_instructions", &cfg.ChatInstructions},
 	} {
 		s := strings.TrimRight(a.GetString(in.key), " \t\r\n")
 		if s == "" {

@@ -188,6 +188,10 @@ func TestStalePromptFilesDoNotSilentlyOverrideCurrentSchemas(t *testing.T) {
 			if cfg.PlanningInstructions == "" {
 				t.Fatalf("missing phase did not fall back")
 			}
+			// Every agent.yaml written before the chat existed lacks its prompt.
+			if cfg.ChatInstructions == "" {
+				t.Fatalf("an agent.yaml without chat_instructions left the chat with no prompt")
+			}
 		})
 	}
 }
