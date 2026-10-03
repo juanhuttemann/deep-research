@@ -1132,14 +1132,18 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
 }
 
-const defaultPlanningInstructions = `You are a research planner. Decompose the following question into exactly %d focused, non-overlapping research sub-topics that together answer it. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
+const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
 
-// planPrompt builds the planner prompt for a given plan breadth.
+// planPrompt is the planner's user message: the breadth and the question.
+// How to plan is the system message, planner_instructions, which is only
+// editable if it is the only copy: the built-in text used to be sent here as
+// well, so an edited agent.yaml was contradicted on every call by the
+// instructions it was meant to replace.
 func planPrompt(question string, subTopics int) string {
 	if subTopics < 1 {
 		subTopics = defaultSubTopicCount
 	}
-	return fmt.Sprintf(defaultPlanningInstructions, subTopics) + "\n\nQuestion: " + question
+	return fmt.Sprintf("Plan exactly %d sub-topics.\n\nQuestion: %s", subTopics, question)
 }
 
 // defaultSubTopicCount is the breadth used when a caller names none.

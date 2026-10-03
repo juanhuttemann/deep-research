@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -249,6 +251,61 @@ func NewInput(in io.Reader, warn func(string)) Input {
 }
 
 var _ Input = (*byteReader)(nil)
+
+// terminalOwner is an Input that put the terminal in raw mode and has to give
+// it back however the process ends. Only the unix tty reader is one: a
+// scripted reader reports Raw too, with no terminal behind it.
+type terminalOwner interface{ ownsTerminal() }
+
+// catchSignals starts holding the signals whose default action ends the
+// process, before the terminal goes raw: one arriving between raw mode and
+// guardTerminal would otherwise end the run with the terminal still raw. It
+// holds nothing when no terminal will be taken.
+func catchSignals(interactive bool) chan os.Signal {
+	if !interactive {
+		return nil
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	return sig
+}
+
+// guardTerminal takes over the signals catchSignals holds. Raw mode makes
+// Ctrl-C a key, so a signal here comes from outside (kill, timeout(1), a
+// closed terminal window), and its default action exits without running a
+// single defer: the shell was left with no echo, no line editing and no
+// cursor. So the terminal, and the cursor the renderer hid, are given back
+// first; then the signal is raised again with its default action, and the
+// process still ends by it with an exit status that says so.
+//
+// stop restores as well before it stops listening, so a signal arriving
+// between the two finds the terminal already given back.
+func guardTerminal(sig chan os.Signal, input Input, r *Renderer) (stop func()) {
+	if sig == nil {
+		return func() {}
+	}
+	restore := func() {}
+	if _, ok := input.(terminalOwner); ok {
+		restore = func() { input.Close(); r.Close() }
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case s := <-sig:
+			restore()
+			signal.Reset(s)
+			if p, err := os.FindProcess(os.Getpid()); err != nil || p.Signal(s) != nil {
+				os.Exit(1)
+			}
+		case <-done:
+		}
+	}()
+	return func() {
+		restore()
+		signal.Stop(sig)
+		close(done)
+	}
+}
 
 // readPromptSeeded reads a line of typed input, reporting it to echo after
 // every keystroke. Raw mode disables the terminal's own echo, so a prompt that

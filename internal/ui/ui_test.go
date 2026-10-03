@@ -1428,7 +1428,7 @@ func TestLocateQuoteThroughMarkdownOnly(t *testing.T) {
 		"Reserved nodes can save as much as 55%":                          false,
 		"":                                                                false,
 	} {
-		if got := locate(page, quote); got != want {
+		if got := newPageText(page).locate(quote); got != want {
 			t.Errorf("locate(%q) = %v, want %v", quote, got, want)
 		}
 	}
@@ -1522,7 +1522,7 @@ func TestLocateRemovesOnlyMarkup(t *testing.T) {
 		{"It is _very_ fast and **cheap**.", "It is very fast and cheap.", true},
 		{`A literal \*star\* here.`, "A literal *star* here.", true},
 	} {
-		if got := locate(tc.page, tc.quote); got != tc.want {
+		if got := newPageText(tc.page).locate(tc.quote); got != tc.want {
 			t.Errorf("locate(%q, %q) = %v, want %v", tc.page, tc.quote, got, tc.want)
 		}
 	}
@@ -1581,7 +1581,7 @@ func TestFallbackAfterFailedCheckIsLowConfidence(t *testing.T) {
 // A quote copied with a decomposed accent (e + combining acute) is the same
 // text as the page's precomposed one.
 func TestLocateIgnoresUnicodeNormalForm(t *testing.T) {
-	if !locate("Le caf\u00e9 est ouvert.", "Le cafe\u0301 est ouvert.") {
+	if !newPageText("Le caf\u00e9 est ouvert.").locate("Le cafe\u0301 est ouvert.") {
 		t.Error("a quote differing only in normal form was not located")
 	}
 }
@@ -1600,13 +1600,13 @@ func TestLocateThroughPDFAndWikiArtifacts(t *testing.T) {
 		{"1.  Reply false if term &lt; currentTerm (§5.1)", "1. Reply false if term < currentTerm (§5.1)"},
 		{"| HP Split Systems  <br>(Ducted) | ≥ 8.1 HSPF2 |", "| HP Split Systems \n(Ducted) | ≥ 8.1 HSPF2 |"},
 	} {
-		if !locate(tc.page, tc.quote) {
+		if !newPageText(tc.page).locate(tc.quote) {
 			t.Errorf("locate(%q, %q) = false", tc.page, tc.quote)
 		}
 	}
 	// The number is what the quote is evidence of: text whose digits the PDF
 	// did not encode readably cannot vouch for one.
-	if locate("more than \uf653\uf644 billion", "more than 180 billion") {
+	if newPageText("more than \uf653\uf644 billion").locate("more than 180 billion") {
 		t.Error("a number the page does not show was located")
 	}
 }

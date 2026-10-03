@@ -13,9 +13,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -436,5 +438,180 @@ func TestExcerptForNonPositiveLimit(t *testing.T) {
 		if got := ExcerptFor("", nil, nil, limit); got != "" {
 			t.Errorf("ExcerptFor(limit %d) = %q, want empty", limit, got)
 		}
+	}
+}
+
+// allocated is how many bytes f allocates on the heap.
+func allocated(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// The fact-check excerpts every page by every claim. Each claim re-folded
+// every block of the page, so building one prompt for a wide run (fifty
+// 40 KB pages, thirty-six claims) took twelve seconds of CPU before the
+// model call even started, silent and deaf to Esc. The page is folded once
+// per excerpt, whatever the number of claims.
+func TestExcerptFoldsThePageOncePerCall(t *testing.T) {
+	var page strings.Builder
+	for i := range 400 {
+		fmt.Fprintf(&page, "Paragraph %d about Café latency, throughput and the replication lag of node %d.\n\n", i, i%7)
+	}
+	var claims []string
+	for i := range 36 {
+		claims = append(claims, fmt.Sprintf("Claim %d: replication lag on node %d stays under %d ms", i, i%7, i*10))
+	}
+	content := page.String()
+	one := allocated(func() { ExcerptFor(content, claims[:1], nil, 1500) })
+	all := allocated(func() { ExcerptFor(content, claims[:2], claims[2:], 1500) })
+	// Folding per claim made 36 claims cost 36 times one; folded once per
+	// excerpt, the claims add only their own scores.
+	if all > 4*one {
+		t.Errorf("an excerpt for %d claims allocated %d bytes, %.1f times one claim's %d",
+			len(claims), all, float64(all)/float64(one), one)
+	}
+}
+
+// gatedDiscovery is a discovery that signals started when an attempt
+// begins and ends it with result once release is closed or its context
+// ends. It counts its attempts.
+type gatedDiscovery struct {
+	attempts atomic.Int32
+	started  chan struct{}
+	release  chan struct{}
+	result   func(n int32) ([]string, error)
+}
+
+func newGatedDiscovery(result func(n int32) ([]string, error)) *gatedDiscovery {
+	return &gatedDiscovery{started: make(chan struct{}, 8), release: make(chan struct{}), result: result}
+}
+
+func (g *gatedDiscovery) discover(ctx context.Context) ([]string, error) {
+	n := g.attempts.Add(1)
+	g.started <- struct{}{}
+	select {
+	case <-g.release:
+		return g.result(n)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// waitFor fails the test unless ch delivers within a second.
+func waitFor[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+		var zero T
+		return zero
+	}
+}
+
+// candidates ran the searx.space discovery while holding the client's mutex,
+// so concurrent sub-agent searches queued behind it and, when it failed,
+// each ran its own discovery in turn: N queries cost N discoveries, back to
+// back. Concurrent queries share one attempt and its outcome.
+func TestConcurrentQueriesShareOneDiscovery(t *testing.T) {
+	g := newGatedDiscovery(func(int32) ([]string, error) { return nil, errors.New("searx.space unavailable") })
+	c := NewSearXNGClient("auto", time.Second)
+	c.discover = g.discover
+	errs := make(chan error, 3)
+	search := func() { _, err := c.Search(context.Background(), "q"); errs <- err }
+	go search()
+	waitFor(t, g.started, "the first discovery")
+	go search()
+	go search()
+	// The other two have nothing to do but reach the wait; give them the
+	// time before the attempt they would share ends.
+	time.Sleep(100 * time.Millisecond)
+	close(g.release)
+	for range 3 {
+		if err := waitFor(t, errs, "a query"); err == nil {
+			t.Error("search succeeded with no instance")
+		}
+	}
+	if n := g.attempts.Load(); n != 1 {
+		t.Errorf("3 concurrent queries ran %d discoveries, one after another; want 1 shared", n)
+	}
+}
+
+// Sharing must not hand one query's cancellation to the others: a query
+// whose own deadline ends its discovery leaves the queries waiting on it to
+// discover again.
+func TestACancelledDiscoveryIsNotSharedWithItsWaiters(t *testing.T) {
+	g := newGatedDiscovery(func(int32) ([]string, error) { return []string{"https://search.example"}, nil })
+	c := NewSearXNGClient("auto", time.Second)
+	c.discover = g.discover
+	short, cancel := context.WithCancel(context.Background())
+	go func() { _, _ = c.candidates(short) }()
+	waitFor(t, g.started, "the short query's discovery")
+	got := make(chan error, 1)
+	go func() { _, err := c.candidates(context.Background()); got <- err }()
+	time.Sleep(50 * time.Millisecond) // the waiter reaches the wait
+	cancel()
+	waitFor(t, g.started, "the waiter's own discovery")
+	close(g.release)
+	if err := waitFor(t, got, "the waiting query"); err != nil {
+		t.Errorf("the waiting query inherited another's cancellation: %v", err)
+	}
+}
+
+// A query that waits for another's discovery waited on a sync.Mutex, which
+// no deadline reaches: its own one-minute budget ran out while it was
+// blocked. Waiting ends with the waiter's own context.
+func TestAQueryWaitingOnDiscoveryKeepsItsOwnDeadline(t *testing.T) {
+	g := newGatedDiscovery(func(int32) ([]string, error) { return nil, errors.New("released") })
+	defer close(g.release)
+	c := NewSearXNGClient("auto", time.Second)
+	c.discover = g.discover
+	go func() { _, _ = c.Search(context.Background(), "first") }()
+	waitFor(t, g.started, "the first discovery")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := c.Search(ctx, "second"); done <- err }()
+	if err := waitFor(t, done, "the waiting query to keep its deadline"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("waiting query ended with %v, want its own deadline", err)
+	}
+}
+
+// The scraper was handed the model-call timeout, two minutes by default and
+// more when configured, so a Firecrawl that accepts the connection and never
+// answers held every scrape that long. Firecrawl is told how long it has,
+// and the client gives up a little after it, whatever the model timeout.
+func TestScrapeDeadlineDoesNotFollowTheModelCallTimeout(t *testing.T) {
+	var body struct {
+		Timeout int `json:"timeout"`
+	}
+	fc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		fmt.Fprint(w, `{"success":true,"data":{"markdown":"page text","metadata":{"statusCode":200}}}`)
+	}))
+	defer fc.Close()
+	var client time.Duration
+	for _, model := range []time.Duration{2 * time.Minute, 10 * time.Minute} {
+		got := NewSearchTools("http://searx.invalid", fc.URL, model).Firecrawl.HTTPClient.Timeout
+		if got >= 2*time.Minute || (client != 0 && got != client) {
+			t.Errorf("model timeout %v gave the scraper %v", model, got)
+		}
+		client = got
+	}
+	if _, err := NewFirecrawlClient(fc.URL, time.Hour).ScrapeURL(context.Background(), "https://example.com/page"); err != nil {
+		t.Fatal(err)
+	}
+	// Firecrawl's default proxy mode reads exactly 30000 as "unset" and
+	// raises it to two minutes.
+	if body.Timeout == 30000 {
+		t.Error("Firecrawl rewrites a 30000 ms timeout to 120000 under its default proxy")
+	}
+	if limit := time.Duration(body.Timeout) * time.Millisecond; limit <= 0 || limit >= client {
+		t.Errorf("Firecrawl was given %v to scrape and the client %v: the server must give up first", limit, client)
 	}
 }

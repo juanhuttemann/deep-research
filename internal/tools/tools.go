@@ -28,6 +28,18 @@ type FirecrawlClient struct {
 	ContentLimit int
 }
 
+// scrapeTimeout is how long Firecrawl is given for one page, said in each
+// request so that it gives up first and says so. Not 30 s: Firecrawl's
+// default proxy mode reads exactly 30000 as "unset" and raises it to two
+// minutes. 60 s is what it allows a page when told nothing.
+const scrapeTimeout = 60 * time.Second
+
+// scrapeWait bounds one scrape request from this side, for a Firecrawl that
+// accepts the connection and never answers. A run's scraper used to get the
+// model-call timeout instead, two minutes by default and more when raised
+// for a slow model, and held each stalled scrape that long.
+const scrapeWait = scrapeTimeout + 10*time.Second
+
 // NewFirecrawlClient creates a new Firecrawl client
 func NewFirecrawlClient(baseURL string, timeout time.Duration) *FirecrawlClient {
 	if timeout <= 0 {
@@ -141,6 +153,7 @@ func (c *FirecrawlClient) ScrapeURL(ctx context.Context, fetchURL string) (*Scra
 	body, _ := json.Marshal(map[string]any{
 		"url":     fetchURL,
 		"formats": []string{"markdown"},
+		"timeout": scrapeTimeout.Milliseconds(),
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/v2/scrape", bytes.NewReader(body))
 	if err != nil {
@@ -320,7 +333,7 @@ func NewSearchTools(searxURL, firecrawlURL string, timeout time.Duration) *Searc
 		ScrapeParallelism: 4,
 	}
 	if strings.TrimSpace(firecrawlURL) != "" {
-		t.Firecrawl = NewFirecrawlClient(firecrawlURL, timeout)
+		t.Firecrawl = NewFirecrawlClient(firecrawlURL, scrapeWait)
 	}
 	return t
 }
