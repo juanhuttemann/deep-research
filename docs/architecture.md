@@ -118,7 +118,8 @@ internal/
             Summarize / Plan); real search via internal/tools when SearXNG
             is configured; Diagnose for `doctor`; Chat for questions about
             a finished run
-  cli       cobra commands (run / ask / serve / list / init / doctor)
+  cli       cobra commands (run / ask / serve / list / init / doctor /
+            update)
   config    config resolution (env > config dir > embedded defaults) + .env
   replay    --trace recorder and --replay player: wraps the assistant to
             record, or serve back, the plan and every search result; the
@@ -127,6 +128,8 @@ internal/
   store     append-only JSONL run history
   tools     SearXNG search (JSON or HTML, one or many instances, searx.space
             discovery) + Firecrawl scrape HTTP clients
+  update    `update`: latest release from GitHub, checksum-verified,
+            installed over the running binary
   ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export;
             the .json read back, with the tools a question reads it by
   web       `serve`: one embedded page, the run's JSONL over SSE with
@@ -143,10 +146,11 @@ degrades to one log line per event.
 ## Layering
 
 ```
-cli → { agent, config, replay, store, ui, web }
+cli → { agent, config, replay, store, ui, update, web }
 replay → agent
 agent → tools
 tools → (standalone HTTP clients)
+update → (nothing in this module)
 web → (nothing in this module)
 ```
 

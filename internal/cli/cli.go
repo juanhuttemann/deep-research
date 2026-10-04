@@ -111,6 +111,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 		},
 		serveCmd(load),
 		askCmd(load),
+		updateCmd(),
 		&cobra.Command{
 			Use:   "list",
 			Short: "list past research runs",

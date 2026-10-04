@@ -14,6 +14,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   report is printed. The answers are not fact-checked.
 - `serve` asks the same follow-up questions below a finished run's report,
   and copies the report's Markdown with Copy report.
+- `update` installs the latest release over the running binary, verified
+  against the release's checksums and by running its `--version` before the
+  swap. `update --check` only reports whether a newer release exists.
 
 ## [0.5.0] - 2026-10-03
 
