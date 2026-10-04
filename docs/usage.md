@@ -1,7 +1,7 @@
 # Usage
 
-A research run is `deep-research -p "question"`; `serve`, `init`, `doctor`
-and `list` are subcommands of the same binary, built by `make build`. `deep-research --version` reports the version stamped in at
+A research run is `deep-research -p "question"`; `serve`, `ask`, `list`,
+`init`, `doctor` and `update` are subcommands of the same binary, built by `make build`. `deep-research --version` reports the version stamped in at
 build time (`dev` for a plain `go build`).
 
 ## `-p` / `--prompt`
@@ -328,6 +328,28 @@ today's free-model requests used and left);
 whether the search backend answers a real query, and which instance did;
 whether the scraper can fetch a page; and how many model requests a run at
 each `--mode` tier spends. It exits non-zero when any check fails.
+
+## `update`
+
+```bash
+deep-research update          # install the latest release over this binary
+deep-research update --check  # only say whether one exists
+```
+
+Finds the latest GitHub release and, when it is newer, replaces the running
+binary with it — where it actually lives, if you run it through a symlink.
+The archive is checked against the release's `deep-research_checksums.txt`
+as the install scripts check it, and the new binary must run and report the
+expected `--version` before it replaces the old one; any failure leaves the
+installed binary untouched. It reads no config and needs no API key.
+`--check` changes nothing.
+
+It needs write access to the binary's directory: a root install in
+`/usr/local/bin` needs `sudo deep-research update`. A binary built from
+source (`dev`, or a `git describe` version from `make build`) is refused:
+replacing it with a release could install an older version than it is.
+On Windows the running `.exe` cannot be deleted, so the previous version is
+left beside it as `deep-research.exe.old-*`; the next update removes it.
 
 ## Keys
 

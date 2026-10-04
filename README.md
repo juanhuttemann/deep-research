@@ -41,7 +41,8 @@ iex (irm https://raw.githubusercontent.com/juanhuttemann/deep-research/main/scri
 ```
 
 Both fetch the latest release binary and verify its checksum; see
-[releases](https://github.com/juanhuttemann/deep-research/releases).
+[releases](https://github.com/juanhuttemann/deep-research/releases). After
+that, `deep-research update` replaces it with each new release.
 
 From source (Go 1.26+):
 
@@ -164,6 +165,7 @@ vLLM, llama.cpp or LM Studio server, which needs no key: set
 ./deep-research list                                # past runs
 ./deep-research doctor                              # check model, key, search
 ./deep-research init --docker                       # local SearXNG setup
+./deep-research update                              # install the latest release
 ```
 
 Full flag reference, key bindings and export details: [docs/usage.md](docs/usage.md).
