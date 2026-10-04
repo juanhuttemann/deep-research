@@ -62,7 +62,8 @@ type RunResult struct {
 	TracePath string
 	Cancelled bool
 	// Detached is set when the run gave the terminal back (--detach, or b
-	// pressed): what is typed at it since is the shell's, not the run's.
+	// pressed at any point until it returned), or could not stop reading
+	// keys from it: either way what is typed at it next is not the run's.
 	Detached bool
 }
 
@@ -136,7 +137,6 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	}
 
 	result, err := driver.Run(ctx, plan)
-	res.Detached = driver.isDetached()
 	if err != nil {
 		return ended(ctx, res, err)
 	}
@@ -151,6 +151,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	}
 	res.MDPath, res.PDFPath, res.JSONPath = o.writeArtifacts(result, sink, driver, plan)
 	o.announce(result, res)
+	res.Detached = driver.stopKeys()
 	return res, nil
 }
 
