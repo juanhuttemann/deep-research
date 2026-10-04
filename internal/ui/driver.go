@@ -26,7 +26,9 @@ type Driver struct {
 
 	now func() time.Time
 
-	detached  bool
+	detached bool
+	// keysDone is closed when the key reader ends; nil when none started.
+	keysDone  chan struct{}
 	cancel    context.CancelFunc
 	startTime time.Time
 
@@ -140,7 +142,9 @@ func (d *Driver) syncUsage() (sources int, tokens int) {
 // for the pipeline to notice: a queued cancel cannot interrupt the model call
 // it is meant to abort.
 func (d *Driver) startKeyReader() {
+	d.keysDone = make(chan struct{})
 	go func() {
+		defer close(d.keysDone)
 		if d.Input == nil {
 			return
 		}
@@ -260,6 +264,24 @@ func (d *Driver) isDetached() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.detached
+}
+
+// stopKeys closes the input, which ends the key reader, and reports whether
+// the run gave the terminal back. The reader runs through the report and the
+// exports, so a b pressed there counts, and only once it has stopped is the
+// answer final. One that does not stop (a line reader parked on stdin) still
+// holds the terminal, which is no more free for what is typed next than a
+// detached one.
+func (d *Driver) stopKeys() (detached bool) {
+	d.releaseTerminal()
+	if d.keysDone != nil {
+		select {
+		case <-d.keysDone:
+		case <-time.After(time.Second):
+			return true
+		}
+	}
+	return d.isDetached()
 }
 
 // detachDetail is what the run says about itself once the display is released.

@@ -4,10 +4,12 @@ package ui
 // openPTY, which is Linux-only (see term_unix_test.go).
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -94,4 +96,72 @@ func TestKilledRunGivesTheTerminalBack(t *testing.T) {
 	if rawMode(t, slave) {
 		t.Error("a run killed by SIGTERM left the terminal raw")
 	}
+}
+
+// The key reader runs until the input closes, through the report and the
+// exports, so a b pressed there detaches the run too. The run sampled its
+// detach before them and said it had not, and the CLI then opened the
+// question prompt on a terminal it had just given back, where what is typed
+// next is meant for the shell.
+func TestDetachWhileTheReportIsWrittenIsReported(t *testing.T) {
+	// A watched run must still come back undetached once its reader stops,
+	// or every run would lose the prompt the reader never asked to skip.
+	for name, key := range map[string]string{"pressed b": "b", "watched": ""} {
+		t.Run(name, func(t *testing.T) {
+			if got := runPressingAfterReport(t, key); got != (key == "b") {
+				t.Errorf("Detached = %v after pressing %q while the report was written", got, key)
+			}
+		})
+	}
+}
+
+// runPressingAfterReport runs in a pseudo-terminal, launches at the brief,
+// types key once the report is rendered and its files written, and returns
+// whether the run reported it detached.
+func runPressingAfterReport(t *testing.T, key string) bool {
+	t.Helper()
+	master, slave := openPTY(t)
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 100}); err != nil {
+		t.Skipf("TIOCSWINSZ: %v", err)
+	}
+	var mu sync.Mutex
+	var screen bytes.Buffer
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := master.Read(buf)
+			mu.Lock()
+			screen.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	// Keys typed before the brief are discarded, so Enter waits for it.
+	go func() {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			mu.Lock()
+			shown := bytes.Contains(screen.Bytes(), []byte("[enter] launch"))
+			mu.Unlock()
+			if shown {
+				_, _ = master.Write([]byte("\r"))
+				return
+			}
+		}
+	}()
+	res, err := Run(context.Background(), Options{
+		Question: "q", Assistant: &fakeAssistant{summary: "s"}, OutDir: t.TempDir(),
+		Input: slave, Stdout: slave, Stderr: slave,
+		// The bell rings once the report is rendered and its files written:
+		// the key is typed there, and given time to be read.
+		Bell: func(string) {
+			_, _ = master.Write([]byte(key))
+			time.Sleep(3 * keyPoll)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return res.Detached
 }
