@@ -556,12 +556,30 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		if apiErr := (*openai.Error)(nil); errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
 			return "", rejectedKey(apiErr.Message)
 		}
+		// A model that cannot call tools refuses every request that offers
+		// them, so a retry is a certain failure; and the provider's wording
+		// ("try disabling read_source") names a tool, not the model to change.
+		if refusesTools(err) {
+			return "", fmt.Errorf("%s cannot call tools, which questions about a run need;"+
+				" set OPENAI_MODEL to a model that supports tool calls: %w", a.model, err)
+		}
 		// The caller gave up (reader cancelled, or the whole run timed out):
 		// retrying would only stall a run nobody is waiting for.
 		if attempt >= a.retries || ctx.Err() != nil {
 			return "", fmt.Errorf("agent %s call failed: %w", ag.Name(), err)
 		}
 	}
+}
+
+// noToolsMarkers are how providers refuse tools to a model that has none:
+// OpenRouter when no endpoint of the model takes them, vLLM started without
+// --enable-auto-tool-choice, and Ollama for a model whose template has none.
+var noToolsMarkers = []string{"support tool use", "enable-auto-tool-choice", "does not support tools"}
+
+// refusesTools reports whether err is a provider refusing tools to the model.
+func refusesTools(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return slices.ContainsFunc(noToolsMarkers, func(m string) bool { return strings.Contains(msg, m) })
 }
 
 // errCutOff is a model answer that stopped at the provider's output limit. For

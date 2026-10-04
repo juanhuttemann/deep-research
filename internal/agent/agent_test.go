@@ -568,3 +568,47 @@ func TestChatRunsToolsAndKeepsTurns(t *testing.T) {
 		t.Errorf("the second question does not carry the first turn:\n%s", last)
 	}
 }
+
+// A model that cannot call tools refuses every question about a run, and each
+// provider says so its own way. The refusal was retried, three requests for a
+// certain failure, and reached the reader as a raw 404 telling them to "try
+// disabling read_source": a tool they never chose. It now fails at once and
+// says what to change.
+func TestChatOnAModelWithoutToolsSaysWhatToChange(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		// OpenRouter, for a model none of whose endpoints take tools.
+		"openrouter": {404, `{"error":{"message":"No endpoints found that support tool use. Try disabling \"read_source\".","code":404}}`},
+		// vLLM started without --enable-auto-tool-choice.
+		"vllm": {400, `{"error":{"message":"\"auto\" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set","type":"BadRequestError","code":400}}`},
+		// Ollama, for a model whose template has no tools.
+		"ollama": {400, `{"error":{"message":"registry.ollama.ai/library/gemma:2b does not support tools","type":"api_error"}}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			read := functool.MustNew(functool.Config{Name: "read_source", Description: "read a page"},
+				func(context.Context, struct{}) (string, error) { return "", nil })
+			chat, err := NewChat(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "plain-model",
+				ModelCallRetries: 2}, "overview", []tool.Tool{read})
+			if err != nil {
+				t.Fatalf("NewChat: %v", err)
+			}
+			_, err = chat.Ask(context.Background(), "q")
+			if err == nil || !strings.Contains(err.Error(), "plain-model cannot call tools") || !strings.Contains(err.Error(), "OPENAI_MODEL") {
+				t.Errorf("err = %v; want it to name the model and say to set OPENAI_MODEL", err)
+			}
+			if n := calls.Load(); n != 1 {
+				t.Errorf("%d requests for a refusal no retry can change, want 1", n)
+			}
+		})
+	}
+}
