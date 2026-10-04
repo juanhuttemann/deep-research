@@ -266,7 +266,8 @@ Each question carries the conversation before it, so "and the second one?"
 works. The answers are not fact-checked: the model is told to state as fact
 only what the run established and to give the status of a claim that was
 not, but nothing holds it to that the way the report's answer is held.
-Asking needs a model that supports tool calls.
+Asking needs a model that supports tool calls; with one that does not, the
+first question fails at once and says to set `OPENAI_MODEL` to one that does.
 
 A run watched in the terminal UI asks "Ask about this report (empty line to
 finish)" once its report is printed; an empty line or Ctrl-D ends it.
