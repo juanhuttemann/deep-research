@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	aoption "github.com/anthropics/anthropic-sdk-go/option"
+
 	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
@@ -34,6 +37,9 @@ func Diagnose(ctx context.Context, cfg Config) []Check {
 // answers and, on providers that check keys there, that the key is accepted.
 // OpenRouter lists models for anyone, so there the key endpoint is asked too.
 func checkModel(ctx context.Context, cfg Config) Check {
+	if cfg.Provider == "claude" {
+		return checkClaude(ctx, cfg)
+	}
 	c := Check{Name: "model"}
 	if strings.TrimSpace(cfg.OpenAIAPIKey) == "" {
 		c.Detail = "no API key — get a free one (no card): https://openrouter.ai/keys"
@@ -60,6 +66,41 @@ func checkModel(ctx context.Context, cfg Config) Check {
 		}
 	}
 	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers%s", cfg.OpenAIModel, host, tier)
+	return c
+}
+
+// checkClaude reports the transport a run on provider claude would use: the
+// Claude Code subscription when signed in, else the key, which it checks by
+// looking the model up. That proves the key and the model name together, and
+// is free.
+func checkClaude(ctx context.Context, cfg Config) Check {
+	c := Check{Name: "model"}
+	if _, plan := claudeCodeLogin(ctx); plan != "" {
+		c.OK, c.Detail = true, fmt.Sprintf("%s via Claude Code (%s subscription)", cfg.ClaudeModel, plan)
+		return c
+	}
+	key := strings.TrimSpace(cfg.AnthropicAPIKey)
+	if key == "" {
+		c.Detail = "Claude Code is not signed in to a subscription (run `claude auth login`) and ANTHROPIC_API_KEY is not set"
+		return c
+	}
+	host := cfg.AnthropicBaseURL
+	if u, err := url.Parse(host); err == nil {
+		host = u.Hostname()
+	}
+	ctx, cancel := context.WithTimeout(ctx, diagnoseTimeout)
+	defer cancel()
+	client := anthropic.NewClient(aoption.WithAPIKey(key), aoption.WithBaseURL(cfg.AnthropicBaseURL),
+		aoption.WithHTTPClient(providerHTTPClient()), aoption.WithMaxRetries(0))
+	if _, err := client.Models.Get(ctx, cfg.ClaudeModel, anthropic.ModelGetParams{}); err != nil {
+		// The SDK's error text is the URL and the raw body; the status says it.
+		if status, _ := apiResponse(err); status != 0 {
+			err = fmt.Errorf("%d %s", status, http.StatusText(status))
+		}
+		c.Detail = fmt.Sprintf("%s via %s: %v", cfg.ClaudeModel, host, endpointError(cfg.AnthropicBaseURL, err))
+		return c
+	}
+	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers", cfg.ClaudeModel, host)
 	return c
 }
 

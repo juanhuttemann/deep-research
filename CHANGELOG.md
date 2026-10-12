@@ -5,6 +5,23 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `provider: claude` runs on Claude. With Claude Code signed in to a Claude
+  subscription, each model call runs `claude -p`, with no tools and none of
+  your CLAUDE.md, hooks or MCP servers. Otherwise it uses
+  `ANTHROPIC_API_KEY` through the Messages API, which a run also falls back
+  to when the subscription reaches its usage limit. `ask` and the page's
+  follow-up questions need the key. The model is `claude_model`, by default
+  `claude-opus-5-5`. `doctor` says which way a run would go.
+
+### Changed
+
+- A model that declines to answer fails the phase as "declined", instead of
+  passing on an empty answer.
+- A run watched in the terminal no longer exits non-zero when questions about
+  its report cannot start; it says why and ends.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added

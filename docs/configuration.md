@@ -72,6 +72,61 @@ Each of these can also be written in `config.yaml` under the lower-case key
 `firecrawl_api_key`); the environment variable wins where both are set. Keep
 the API key in `.env`, not in the config file.
 
+### Claude
+
+`provider: claude` (or `DEEP_RESEARCH_PROVIDER=claude`) runs the model on
+Claude instead of the OpenAI-compatible endpoint. The run reaches it one of
+two ways, decided when it starts:
+
+1. **Your Claude subscription, through Claude Code.** When `claude` is on
+   `PATH` and `claude auth status` reports a claude.ai sign-in, each model
+   call runs `claude -p` with no tools, with the phase's prompt as the system
+   prompt, and with none of your CLAUDE.md, hooks, MCP servers or plugins
+   (`--safe-mode`). The usage counts against the plan's limits; a deep run
+   sends every source through the model several times. Anthropic's terms let
+   a tool run the unmodified Claude Code binary under the user's own sign-in,
+   and do not let it read that sign-in's credentials, so deep-research never
+   touches them.
+2. **`ANTHROPIC_API_KEY`, through the Messages API**, when Claude Code is
+   missing, signed out, or signed in to API billing.
+
+With both, a run that reaches the subscription's usage limit says so and
+continues on the key for the rest of the run. Without a key the limit fails
+the call at once, and the error says when it resets.
+
+`ask` and the page's follow-up questions always need the key: they call
+deep-research's own tools, which `claude -p` cannot reach.
+
+Opus can think for more than two minutes before the first word of a large
+analysis or fact-check. Claude Code sends that thinking without its text,
+so the status reads "waiting for the model to start". At the default
+`model_call_timeout` of `120s` such a call is cut off and retried with twice
+the time, and on a subscription the cut-off attempt still counts against the
+plan. Set `model_call_timeout: 300s` to avoid that.
+
+| Key | Env var | Default |
+| --- | ------- | ------- |
+| `provider` | `DEEP_RESEARCH_PROVIDER` | `openai` |
+| `claude_model` | `DEEP_RESEARCH_CLAUDE_MODEL` | `claude-opus-5-5` |
+| `anthropic_api_key` | `ANTHROPIC_API_KEY` | — |
+| `anthropic_base_url` | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` |
+
+The model has no `ANTHROPIC_MODEL` name: Claude Code reads that variable,
+often set to an alias the API does not know. The `ANTHROPIC_*` variables are
+removed from the environment `claude -p` runs in, so a key kept for the
+fallback is never what Claude Code bills.
+
+On the API, the streamed phases (plan, analysis, fact-check, report) allow
+64000 output tokens with adaptive thinking shown on the status line; the
+others allow 16000. JSON is asked for in the prompt only, because the
+Messages API has no JSON mode without a schema. On `api.anthropic.com` with
+Opus 5.5, Opus 5, Sonnet 5.5 or Fable 5.1, a request a safety classifier
+declines is answered by another model within the same call (the server-side
+fallback beta). A refusal that still comes back, from either provider,
+fails the phase as "declined" instead of passing on an empty answer. Models
+older than the 4.6 generation, such as Haiku 4.5, are not supported on the
+API: they reject adaptive thinking.
+
 ## `config.yaml` keys
 
 | Key | Default | Meaning |

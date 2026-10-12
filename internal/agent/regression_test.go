@@ -159,7 +159,7 @@ func TestUnreachableProviderFailsWithoutRetrying(t *testing.T) {
 // The raw Go error names a URL and a syscall and says nothing about what to
 // do. The endpoint is the one thing the reader has to check.
 func TestUnreachableProviderErrorNamesTheEndpoint(t *testing.T) {
-	err := providerUnreachable("http://192.0.2.10:1234",
+	err := providerUnreachable("http://192.0.2.10:1234", "OPENAI_BASE_URL",
 		&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: no route to host")})
 	msg := err.Error()
 	for _, want := range []string{"http://192.0.2.10:1234", "OPENAI_BASE_URL"} {
@@ -920,7 +920,7 @@ func TestModelInfoRecordsTheServedModel(t *testing.T) {
 
 func TestCancelledProviderDialPreservesCancellation(t *testing.T) {
 	cause := &net.OpError{Op: "dial", Err: context.Canceled}
-	if err := providerUnreachable("http://example.com", cause); !errors.Is(err, context.Canceled) {
+	if err := providerUnreachable("http://example.com", "OPENAI_BASE_URL", cause); !errors.Is(err, context.Canceled) {
 		t.Fatalf("dial cancellation lost: %v", err)
 	}
 }
@@ -928,7 +928,7 @@ func TestCancelledProviderDialPreservesCancellation(t *testing.T) {
 func TestProviderFailuresDoNotExposeURLCredentials(t *testing.T) {
 	endpoint := "https://user:sekret@example.com/v1"
 	cause := &url.Error{Op: "Post", URL: endpoint + "/chat/completions", Err: &net.OpError{Op: "dial", Err: context.Canceled}}
-	err := providerUnreachable(endpoint, cause)
+	err := providerUnreachable(endpoint, "OPENAI_BASE_URL", cause)
 	if strings.Contains(err.Error(), "user:") || strings.Contains(err.Error(), "sekret") {
 		t.Fatalf("credentials exposed: %v", err)
 	}
@@ -936,7 +936,7 @@ func TestProviderFailuresDoNotExposeURLCredentials(t *testing.T) {
 		t.Fatalf("redaction lost cause: %v", err)
 	}
 	// The fallback label once went through the redactor and came out escaped.
-	if err := providerUnreachable("", cause); !strings.Contains(err.Error(), "at the configured provider (") {
+	if err := providerUnreachable("", "OPENAI_BASE_URL", cause); !strings.Contains(err.Error(), "at the configured provider (") {
 		t.Fatalf("empty base URL: %v", err)
 	}
 }

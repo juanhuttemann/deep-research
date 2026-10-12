@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/microsoft/agent-framework-go/agent"
-	"github.com/microsoft/agent-framework-go/provider/openaiprovider"
 	"github.com/microsoft/agent-framework-go/tool"
 )
 
@@ -33,16 +32,11 @@ type Chat struct {
 // NewChat starts a conversation whose model knows the run from overview and
 // reads the rest through tools.
 func NewChat(cfg Config, overview string, tools []tool.Tool) (*Chat, error) {
-	impl, client, err := connect(cfg)
+	impl, newAgent, err := connect(cfg, true)
 	if err != nil {
 		return nil, err
 	}
-	ag := openaiprovider.NewChatCompletionsAgent(client, openaiprovider.AgentConfig{
-		Model:        cfg.OpenAIModel,
-		Instructions: cfg.ChatInstructions + "\n\n" + overview,
-		Config:       agent.Config{Name: "chat", Tools: tools},
-	})
-	return &Chat{impl: impl, ag: ag}, nil
+	return &Chat{impl: impl, ag: newAgent("chat", cfg.ChatInstructions+"\n\n"+overview, tools)}, nil
 }
 
 // Ask answers q, with the conversation so far ahead of it.

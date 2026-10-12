@@ -21,9 +21,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/kaptinlin/jsonrepair"
 	"github.com/microsoft/agent-framework-go/agent"
 	"github.com/microsoft/agent-framework-go/provider/openaiprovider"
+	"github.com/microsoft/agent-framework-go/tool"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 
@@ -45,6 +47,12 @@ type Config struct {
 	OpenAIAPIKey     string
 	OpenAIBaseURL    string
 	OpenAIModel      string
+	// Provider is "openai" (any OpenAI-compatible endpoint, the OpenAI*
+	// settings) or "claude" (the Claude* and Anthropic* settings).
+	Provider         string
+	ClaudeModel      string
+	AnthropicAPIKey  string
+	AnthropicBaseURL string
 	ModelCallTimeout time.Duration
 	// ModelCallRetries is how many extra attempts a failed model call gets.
 	// Zero means one attempt and no retry.
@@ -323,27 +331,18 @@ type runFunc func(ctx context.Context, prompt string) (string, error)
 // call, so a keyless online assistant cannot do anything except error at the
 // first one. Reporting it here is what lets the CLI say how to get a key.
 func New(cfg Config) (Assistant, error) {
-	impl, client, err := connect(cfg)
+	impl, newAgent, err := connect(cfg, false)
 	if err != nil {
 		return nil, err
 	}
 
-	newAgent := func(name, instructions string) *agent.Agent {
-		return openaiprovider.NewChatCompletionsAgent(client, openaiprovider.AgentConfig{
-			Model:        cfg.OpenAIModel,
-			Instructions: instructions,
-			Config:       agent.Config{Name: name},
-		})
-	}
-
-	// newRunJSON constrains the model to emit a JSON object
-	// (response_format=json_object). Search and the planner parse JSON back
+	// newRunJSON constrains the model to emit a JSON object where the provider
+	// has a mode for it (impl.jsonOpts). Search and the planner parse JSON back
 	// out, so forcing structured output stops freeform models from emitting
 	// prose that the parser cannot recover.
 	newRunJSON := func(a *agent.Agent) runFunc {
 		return func(ctx context.Context, prompt string) (string, error) {
-			return impl.call(ctx, a, prompt,
-				agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"}))
+			return impl.call(ctx, a, prompt, impl.jsonOpts...)
 		}
 	}
 
@@ -360,21 +359,21 @@ func New(cfg Config) (Assistant, error) {
 	if cfg.PlanningInstructions == "" {
 		cfg.PlanningInstructions = defaultPlanningInstructions
 	}
-	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions))
+	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions, nil))
 	// The analysis and the fact-check are not sent in JSON mode, though both
 	// are parsed as JSON. In that mode the provider held back a reasoning
 	// model's thinking and sent it in one piece after a minute of silence;
 	// without it the same request streamed its thinking from the first second.
 	// Their prompts ask for JSON only, and jsonPayloads repairs what comes back
 	// broken.
-	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions), "analyzing", analysisUnit)
-	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions), "fact-checking",
+	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions, nil), "analyzing", analysisUnit)
+	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), "fact-checking",
 		entriesUnit("claim checked", "claims checked", "claim"))
-	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions), "writing the report", wordsUnit)
+	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), "writing the report", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
 	// it, so the wait is dead air unless the run can say how much of the plan
 	// has arrived.
-	planner := newAgent("planner", cfg.PlanningInstructions)
+	planner := newAgent("planner", cfg.PlanningInstructions, nil)
 	impl.plan = func(ctx context.Context, prompt string) (string, error) {
 		reported := 0
 		return impl.callStreaming(ctx, planner, prompt, func(partial, _ string) {
@@ -385,7 +384,7 @@ func New(cfg Config) (Assistant, error) {
 				reported = n
 				impl.log(fmt.Sprintf("%d sub-topics so far", n))
 			}
-		}, agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"}))
+		}, impl.jsonOpts...)
 	}
 
 	// SearXNG alone is real web search: without a scraper every source keeps
@@ -400,20 +399,37 @@ func New(cfg Config) (Assistant, error) {
 	return impl, nil
 }
 
-// connect builds the client every model call goes through: the endpoint and
-// its key, the per-call deadline and retry policy, and the middleware that
-// records which model served each request.
-func connect(cfg Config) (*impl, openai.Client, error) {
-	key := strings.TrimSpace(cfg.OpenAIAPIKey)
-	if key == "" {
-		return nil, openai.Client{}, errors.New("no API key (set OPENAI_API_KEY)")
-	}
+// newAgentFunc builds one named agent on the configured provider. tools are
+// for agent.Chat; the pipeline's phases have none.
+type newAgentFunc func(name, instructions string, tools []tool.Tool) *agent.Agent
+
+// connect builds what every model call goes through: the endpoint and its
+// key, the per-call deadline and retry policy, and the middleware that records
+// which model served each request. withTools asks for agents that can call
+// tools, which rules out transports that cannot.
+func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 	timeout := cfg.ModelCallTimeout
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	impl := &impl{model: cfg.OpenAIModel, baseURL: cfg.OpenAIBaseURL,
-		timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
+	impl := &impl{timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
+	if cfg.Provider == "claude" {
+		newAgent, err := impl.connectClaude(cfg, withTools)
+		return impl, newAgent, err
+	}
+	key := strings.TrimSpace(cfg.OpenAIAPIKey)
+	if key == "" {
+		return nil, nil, errors.New("no API key (set OPENAI_API_KEY)")
+	}
+	impl.model, impl.baseURL = cfg.OpenAIModel, cfg.OpenAIBaseURL
+	impl.keyEnv, impl.urlEnv = "OPENAI_API_KEY", "OPENAI_BASE_URL"
+	impl.jsonOpts = []agent.Option{agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"})}
+	// An OpenAI-compatible API reports tokens for a streamed call only when
+	// stream_options.include_usage is set, so streaming without it would
+	// quietly drop the streamed phases' tokens from the run total.
+	impl.streamOpts = []agent.Option{openaiprovider.ChatCompletionNewParams(openai.ChatCompletionNewParams{
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)},
+	})}
 
 	// The deadline is applied per call as a context timeout (see impl.call),
 	// not as http.Client.Timeout: that one also caps reading the response
@@ -431,7 +447,13 @@ func connect(cfg Config) (*impl, openai.Client, error) {
 		option.WithMaxRetries(0),
 		option.WithMiddleware(impl.sniffServedModel),
 	)
-	return impl, client, nil
+	return impl, func(name, instructions string, tools []tool.Tool) *agent.Agent {
+		return openaiprovider.NewChatCompletionsAgent(client, openaiprovider.AgentConfig{
+			Model:        cfg.OpenAIModel,
+			Instructions: instructions,
+			Config:       agent.Config{Name: name, Tools: tools},
+		})
+	}, nil
 }
 
 type impl struct {
@@ -444,8 +466,16 @@ type impl struct {
 	// baseURL is kept so a transport failure can name the endpoint that was
 	// actually tried, which is the one thing the reader has to check.
 	baseURL string
-	timeout time.Duration
-	retries int
+	// keyEnv and urlEnv name the settings an error tells the reader to fix.
+	keyEnv, urlEnv string
+	// via names the provider in ModelInfo when it is not baseURL's host.
+	via string
+	// jsonOpts ask for a JSON answer; empty where the provider has no
+	// schemaless JSON mode. streamOpts are what a streamed call needs on top
+	// of agent.Stream.
+	jsonOpts, streamOpts []agent.Option
+	timeout              time.Duration
+	retries              int
 	// tokens is the provider-reported usage summed across every call. Model
 	// calls run in parallel across sub-agents, so it is updated atomically.
 	tokens      atomic.Int64
@@ -462,20 +492,10 @@ type impl struct {
 }
 
 // callStreaming is call with the response streamed and each partial reported
-// through the progress logger. Planning is the one phase with nothing on
-// screen behind it, so it is the one phase where watching the answer arrive is
-// worth the extra request options.
-//
-// Usage is the catch: an OpenAI-compatible API reports tokens for a streamed
-// call only when stream_options.include_usage is set, so streaming without it
-// would quietly drop the planner's tokens from the run total.
+// through the progress logger, with the provider's streamed-call options
+// (impl.streamOpts) ahead of the caller's.
 func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string, progress func(partial, thinking string), opts ...agent.Option) (string, error) {
-	streamOpts := append([]agent.Option{
-		agent.Stream(true),
-		openaiprovider.ChatCompletionNewParams(openai.ChatCompletionNewParams{
-			StreamOptions: openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)},
-		}),
-	}, opts...)
+	streamOpts := slices.Concat([]agent.Option{agent.Stream(true)}, a.streamOpts, opts)
 	var th thoughts
 	report, stop := tickProgress(func(p string) { progress(p, th.String()) }, progressTick)
 	report("") // the wait starts now, before the first byte arrives
@@ -525,43 +545,22 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		cancel()
 		if callErr == nil {
 			a.addUsage(out)
-			// A retry would stop at the same limit, so this is not retried.
-			// The text goes back with the error for a caller that can use a
-			// cut-off answer.
-			if out.FinishReason == "length" {
+			switch out.FinishReason {
+			case "length":
+				// A retry would stop at the same limit, so this is not retried.
+				// The text goes back with the error for a caller that can use
+				// a cut-off answer.
 				return out.String(), fmt.Errorf("%s: %w", ag.Name(), errCutOff)
+			case "content_filter":
+				// A declined request comes back as an answer with no text; a
+				// retry is declined the same way.
+				return "", fmt.Errorf("%s: %w", ag.Name(), errDeclined)
 			}
 			return out.String(), nil
 		}
 		err = endpointError(a.baseURL, callErr)
-		// A request that never reached a server is not a request that needed
-		// more time, and the retry budget here buys time: each attempt doubles
-		// the deadline. Re-dialling a host that is not there just multiplies
-		// the wait before saying so, which is how a typo in the provider URL
-		// became a 30-second pause and a syscall.
-		if unreachable(err) {
-			return "", providerUnreachable(a.baseURL, err)
-		}
-		// A daily cap will not clear on a retry, only at the next UTC day;
-		// retrying it spent the whole doubling budget on a certain failure.
-		if strings.Contains(err.Error(), dailyLimitMarker) {
-			return "", fmt.Errorf("the provider's daily request limit for %s is reached; it resets at 00:00 UTC"+
-				" — add credits or set OPENAI_MODEL to a paid model: %w", a.model, err)
-		}
-		// An expired or revoked key stays rejected; retrying it sat through
-		// every doubled deadline — minutes — before reporting a certain 401.
-		// Only the provider's reason is kept: the SDK's error text is the
-		// request URL and the raw JSON body, which buried the one actionable
-		// line under a header dump.
-		if apiErr := (*openai.Error)(nil); errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized {
-			return "", rejectedKey(apiErr.Message)
-		}
-		// A model that cannot call tools refuses every request that offers
-		// them, so a retry is a certain failure; and the provider's wording
-		// ("try disabling read_source") names a tool, not the model to change.
-		if refusesTools(err) {
-			return "", fmt.Errorf("%s cannot call tools, which questions about a run need;"+
-				" set OPENAI_MODEL to a model that supports tool calls: %w", a.model, err)
+		if final := a.finalError(err); final != nil {
+			return "", final
 		}
 		// The caller gave up (reader cancelled, or the whole run timed out):
 		// retrying would only stall a run nobody is waiting for.
@@ -569,6 +568,61 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 			return "", fmt.Errorf("agent %s call failed: %w", ag.Name(), err)
 		}
 	}
+}
+
+// finalError is err as reported to the caller when a retry cannot help it, or
+// nil when one might.
+func (a *impl) finalError(err error) error {
+	// A request that never reached a server is not a request that needed
+	// more time, and the retry budget here buys time: each attempt doubles
+	// the deadline. Re-dialling a host that is not there just multiplies
+	// the wait before saying so, which is how a typo in the provider URL
+	// became a 30-second pause and a syscall.
+	if unreachable(err) {
+		return providerUnreachable(a.baseURL, a.urlEnv, err)
+	}
+	// A daily cap will not clear on a retry, only at the next UTC day;
+	// retrying it spent the whole doubling budget on a certain failure.
+	if strings.Contains(err.Error(), dailyLimitMarker) {
+		return fmt.Errorf("the provider's daily request limit for %s is reached; it resets at 00:00 UTC"+
+			" — add credits or set OPENAI_MODEL to a paid model: %w", a.model, err)
+	}
+	// The same for a subscription's usage limit, which resets hours later.
+	if errors.Is(err, errSubscriptionLimit) {
+		return fmt.Errorf("%w — set ANTHROPIC_API_KEY to continue on the API", err)
+	}
+	// An expired or revoked key stays rejected; retrying it sat through
+	// every doubled deadline — minutes — before reporting a certain 401.
+	// Only the provider's reason is kept: the SDK's error text is the
+	// request URL and the raw JSON body, which buried the one actionable
+	// line under a header dump.
+	if status, _ := apiResponse(err); status == http.StatusUnauthorized {
+		var reason string
+		if apiErr := (*openai.Error)(nil); errors.As(err, &apiErr) {
+			reason = apiErr.Message
+		}
+		return a.rejectedKey(reason)
+	}
+	// A model that cannot call tools refuses every request that offers
+	// them, so a retry is a certain failure; and the provider's wording
+	// ("try disabling read_source") names a tool, not the model to change.
+	if refusesTools(err) {
+		return fmt.Errorf("%s cannot call tools, which questions about a run need;"+
+			" set OPENAI_MODEL to a model that supports tool calls: %w", a.model, err)
+	}
+	return nil
+}
+
+// apiResponse is the HTTP status and response of a provider's error, from
+// whichever SDK made the call; zero when err is not one.
+func apiResponse(err error) (int, *http.Response) {
+	if e := (*openai.Error)(nil); errors.As(err, &e) {
+		return e.StatusCode, e.Response
+	}
+	if e := (*anthropic.Error)(nil); errors.As(err, &e) {
+		return e.StatusCode, e.Response
+	}
+	return 0, nil
 }
 
 // noToolsMarkers are how providers refuse tools to a model that has none:
@@ -587,6 +641,9 @@ func refusesTools(err error) bool {
 // cut-off text into a complete-looking object, and the claims and conclusions
 // after the cut would be missing without a trace.
 var errCutOff = errors.New("the model's answer was cut off at its output limit")
+
+// errDeclined is a request the model refused to answer.
+var errDeclined = errors.New("the model declined to answer (a provider safety filter refused the request)")
 
 // dialTimeout bounds establishing the connection to the provider. Left to the
 // operating system, a host that is simply not there is retried at the TCP
@@ -611,9 +668,8 @@ const maxRetryAfter = time.Minute
 // provider's Retry-After when it asks for longer.
 func retryWait(err error, attempt int) time.Duration {
 	wait := time.Duration(attempt) * retryBackoff
-	var apiErr *openai.Error
-	if errors.As(err, &apiErr) && apiErr.Response != nil {
-		if secs, convErr := strconv.Atoi(apiErr.Response.Header.Get("Retry-After")); convErr == nil {
+	if _, resp := apiResponse(err); resp != nil {
+		if secs, convErr := strconv.Atoi(resp.Header.Get("Retry-After")); convErr == nil {
 			wait = max(wait, min(time.Duration(secs)*time.Second, maxRetryAfter))
 		}
 	}
@@ -641,18 +697,21 @@ func unreachable(err error) bool {
 }
 
 // rejectedKey reports a 401 with the provider's reason, when it gave one.
-func rejectedKey(reason string) error {
+func (a *impl) rejectedKey(reason string) error {
 	if reason = strings.TrimSuffix(strings.TrimSpace(reason), "."); reason != "" {
 		reason = " (" + reason + ")"
 	}
-	return fmt.Errorf("the provider rejected the API key%s — set a valid OPENAI_API_KEY"+
-		" (free keys: https://openrouter.ai/keys)", reason)
+	hint := ""
+	if a.keyEnv == "OPENAI_API_KEY" {
+		hint = " (free keys: https://openrouter.ai/keys)"
+	}
+	return fmt.Errorf("the provider rejected the API key%s — set a valid %s%s", reason, a.keyEnv, hint)
 }
 
 // providerUnreachable turns a transport failure into something the reader can
 // act on. The raw error names a URL and a syscall; what matters is which
-// endpoint was tried and that the setting pointing at it is the thing to fix.
-func providerUnreachable(baseURL string, err error) error {
+// endpoint was tried and that setting, which points at it, is the thing to fix.
+func providerUnreachable(baseURL, setting string, err error) error {
 	reason, ok := tools.DialFailure(err)
 	if !ok {
 		reason = "connection failed"
@@ -665,7 +724,7 @@ func providerUnreachable(baseURL string, err error) error {
 	}
 	return &endpointFailure{
 		detail: fmt.Sprintf("cannot reach the model provider at %s (%s) — "+
-			"check OPENAI_BASE_URL and that the server is running", endpoint, reason),
+			"check %s and that the server is running", endpoint, reason, setting),
 		cause: err,
 	}
 }
@@ -903,6 +962,9 @@ func (a *impl) addUsage(resp *agent.Response) {
 // taken alone so credentials in the URL never reach an artifact. The models
 // a router actually served are ServedModels.
 func (a *impl) ModelInfo() (model, provider string) {
+	if a.via != "" {
+		return a.model, a.via
+	}
 	if u, err := url.Parse(a.baseURL); err == nil {
 		provider = u.Hostname()
 	}
@@ -964,10 +1026,10 @@ func (s *reasoningSniffer) Read(p []byte) (int, error) {
 
 // streamedReasoning is the reasoning text in one server-sent event line.
 // OpenRouter names the field reasoning; DeepSeek and older vLLM name it
-// reasoning_content.
+// reasoning_content; Anthropic sends it as a thinking_delta.
 func streamedReasoning(line []byte) string {
 	data, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
-	if !ok || !bytes.Contains(data, []byte(`"reasoning`)) {
+	if !ok || !bytes.Contains(data, []byte(`"reasoning`)) && !bytes.Contains(data, []byte(`"thinking_delta"`)) {
 		return ""
 	}
 	var event struct {
@@ -977,9 +1039,15 @@ func streamedReasoning(line []byte) string {
 				ReasoningContent string `json:"reasoning_content"`
 			} `json:"delta"`
 		} `json:"choices"`
+		Delta struct {
+			Thinking string `json:"thinking"`
+		} `json:"delta"`
 	}
-	if json.Unmarshal(data, &event) != nil || len(event.Choices) == 0 {
+	if json.Unmarshal(data, &event) != nil {
 		return ""
+	}
+	if len(event.Choices) == 0 {
+		return event.Delta.Thinking
 	}
 	return cmp.Or(event.Choices[0].Delta.Reasoning, event.Choices[0].Delta.ReasoningContent)
 }

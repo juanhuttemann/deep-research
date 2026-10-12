@@ -109,6 +109,8 @@ func clearProviderEnv(t *testing.T) {
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
 		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODEL",
 		"SEARXNG_URL", "FIRECRAWL_URL", "FIRECRAWL_API_KEY",
+		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+		"DEEP_RESEARCH_PROVIDER", "DEEP_RESEARCH_CLAUDE_MODEL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -172,6 +174,45 @@ func TestEnvironmentOverridesTheConfigFile(t *testing.T) {
 	}
 	if cfg.OpenAIBaseURL != "http://from-env/v1" || cfg.OpenAIModel != "from-env-model" {
 		t.Errorf("env did not win: base=%q model=%q", cfg.OpenAIBaseURL, cfg.OpenAIModel)
+	}
+}
+
+// Claude is opt-in: a checkout that names no provider keeps the
+// OpenAI-compatible endpoint it always had.
+func TestProviderDefaultsToOpenAI(t *testing.T) {
+	cfg := loadIn(t, "")
+	if cfg.Provider != "openai" {
+		t.Errorf("provider: got %q, want openai", cfg.Provider)
+	}
+	if cfg.ClaudeModel != "claude-opus-5-5" || cfg.AnthropicBaseURL != "https://api.anthropic.com" {
+		t.Errorf("claude defaults: model=%q base=%q", cfg.ClaudeModel, cfg.AnthropicBaseURL)
+	}
+}
+
+// The Claude settings resolve like every other key: the file holds them, the
+// environment overrides them.
+func TestClaudeSettingsComeFromFileAndEnv(t *testing.T) {
+	cfg := loadIn(t, "provider: claude\nclaude_model: claude-sonnet-5-5\n"+
+		"anthropic_api_key: sk-file\nanthropic_base_url: http://from-file\n")
+	if cfg.Provider != "claude" || cfg.ClaudeModel != "claude-sonnet-5-5" ||
+		cfg.AnthropicAPIKey != "sk-file" || cfg.AnthropicBaseURL != "http://from-file" {
+		t.Errorf("from file: %+v", cfg.Config)
+	}
+	clearProviderEnv(t)
+	cfgDir := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "provider: openai\nclaude_model: from-file\n")
+	t.Setenv("DEEP_RESEARCH_PROVIDER", "claude")
+	t.Setenv("DEEP_RESEARCH_CLAUDE_MODEL", "claude-haiku-5-5")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-env")
+	t.Setenv("ANTHROPIC_BASE_URL", "http://from-env")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Provider != "claude" || cfg.ClaudeModel != "claude-haiku-5-5" ||
+		cfg.AnthropicAPIKey != "sk-env" || cfg.AnthropicBaseURL != "http://from-env" {
+		t.Errorf("env did not win: %+v", cfg.Config)
 	}
 }
 

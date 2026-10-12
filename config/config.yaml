@@ -31,6 +31,12 @@ parallelism: 3
 # openai_base_url: https://openrouter.ai/api/v1
 # openai_model: openrouter/free
 
+# Or Claude: your Claude subscription through Claude Code when it is signed in
+# (claude auth login), ANTHROPIC_API_KEY otherwise or once the subscription's
+# usage limit is reached. docs/configuration.md#claude has the details.
+# provider: claude
+# claude_model: claude-opus-5-5
+
 # Web search. Unset, searxng_url is "auto": public SearXNG instances listed on
 # searx.space, tried in turn — every query then goes to a third party. Set one
 # or more of your own instances (comma-separated) to keep queries local, or
