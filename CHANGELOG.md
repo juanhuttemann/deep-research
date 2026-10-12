@@ -13,7 +13,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   `ANTHROPIC_API_KEY` through the Messages API, which a run also falls back
   to when the subscription reaches its usage limit. `ask` and the page's
   follow-up questions need the key. The model is `claude_model`, by default
-  `claude-opus-5-5`. `doctor` says which way a run would go.
+  `claude-opus-5-5`. `doctor` says which way a run would go. A `provider`
+  other than `openai` or `claude` is an error.
 
 ### Changed
 
