@@ -194,8 +194,6 @@ func promptOf(msgs []*message.Message) string {
 // ccLine is one line of claude -p's stream-json output, with the fields read.
 type ccLine struct {
 	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	Error   string `json:"error"`
 	IsError bool   `json:"is_error"`
 	Result  string `json:"result"`
 	// RateLimit is a rate_limit_event's: the plan's window, "rejected" once
@@ -232,7 +230,6 @@ type ccStream struct {
 	yield         func(*agent.ResponseUpdate, error) bool
 	sent, stopped bool
 	stop          string // the model's stop_reason
-	retryErr      string // the last error Claude Code retried
 	limitHit      bool   // a rate_limit_event said the plan's limit is reached
 	limitResets   int64  // and when its window resets, when it said
 	result        *ccLine
@@ -257,8 +254,6 @@ func (s *ccStream) line(l *ccLine) {
 		s.result = l
 	case l.RateLimit.Status == "rejected":
 		s.limitHit, s.limitResets = true, l.RateLimit.ResetsAt
-	case l.Subtype == "api_retry":
-		s.retryErr = l.Error
 	case l.Event.Type == "message_start" && l.Event.Message.Model != "":
 		s.impl.addServed(l.Event.Message.Model)
 	case d.Type == "text_delta":
@@ -295,7 +290,7 @@ func (s *ccStream) finish(waitErr error, stderr string) error {
 		return fmt.Errorf("claude ended without an answer: %v %s", waitErr, strings.TrimSpace(stderr))
 	}
 	if r.IsError {
-		if s.limitHit || subscriptionLimited(r.Result, s.retryErr) {
+		if s.limitHit || subscriptionLimited(r.Result) {
 			return limitError(s.limitResets, r.Result)
 		}
 		return fmt.Errorf("claude: %s", r.Result)
@@ -327,13 +322,13 @@ func finishReason(stop string) string {
 }
 
 // subscriptionLimited reports whether a failed run hit the plan's usage limit
-// when no rate_limit_event said so: by Claude Code's wording, or by the 429 it
-// retried before giving up.
+// when no rate_limit_event said so, by Claude Code's wording. A 429 it retried
+// is not one: that is the API's rate limit, which clears in seconds.
 //
 // ponytail: a backstop for versions without the event; wording drifts.
-func subscriptionLimited(result, retryErr string) bool {
+func subscriptionLimited(result string) bool {
 	r := strings.ToLower(result)
-	return retryErr == "rate_limit" || strings.Contains(r, "usage limit") || strings.Contains(r, "hit your limit")
+	return strings.Contains(r, "usage limit") || strings.Contains(r, "hit your limit")
 }
 
 // limitError is the subscription's limit with when it resets: from the

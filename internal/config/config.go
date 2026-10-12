@@ -332,6 +332,9 @@ func Load() (Config, error) {
 	}
 
 	applyEnvDefaults(&cfg, v)
+	if cfg.Provider != "openai" && cfg.Provider != "claude" {
+		return Config{}, fmt.Errorf("provider %q: want openai or claude (provider in config.yaml, or DEEP_RESEARCH_PROVIDER)", cfg.Provider)
+	}
 
 	agentYAML, err := readFile(dirs, "agent.yaml", embeddedConfig("agent.yaml"))
 	if err != nil {

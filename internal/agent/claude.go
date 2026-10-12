@@ -1,11 +1,16 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	aoption "github.com/anthropics/anthropic-sdk-go/option"
@@ -80,11 +85,7 @@ func (a *impl) anthropicAgents(cfg Config, key string) newAgentFunc {
 		aoption.WithMiddleware(a.sniffServedModel),
 	}
 	if refusalFallback(cfg.AnthropicBaseURL, cfg.ClaudeModel) {
-		// A request a safety classifier declines is answered by another model
-		// within the same call, instead of costing the phase.
-		opts = append(opts,
-			aoption.WithHeaderAdd("anthropic-beta", "server-side-fallback-2026-07-01"),
-			aoption.WithJSONSet("fallbacks", "default"))
+		opts = append(opts, refusalFallbackOpts()...)
 	}
 	client := anthropic.NewClient(opts...)
 	unstreamed := anthropicprovider.MessageNewParams(anthropic.MessageNewParams{MaxTokens: unstreamedMaxTokens})
@@ -95,6 +96,74 @@ func (a *impl) anthropicAgents(cfg Config, key string) newAgentFunc {
 			Config:       agent.Config{Name: name, Tools: tools, RunOptions: []agent.Option{unstreamed}},
 		})
 	}
+}
+
+// fallbackBeta is the beta that takes fallbacks: "default".
+const fallbackBeta = "server-side-fallback-2026-07-01"
+
+// refusalFallbackOpts ask for server-side refusal fallback: a request a safety
+// classifier declines is answered by another model within the same call,
+// instead of costing the phase.
+func refusalFallbackOpts() []aoption.RequestOption {
+	var refused atomic.Bool
+	return []aoption.RequestOption{
+		aoption.WithHeaderAdd("anthropic-beta", fallbackBeta),
+		aoption.WithJSONSet("fallbacks", "default"),
+		aoption.WithMiddleware(func(req *http.Request, next aoption.MiddlewareNext) (*http.Response, error) {
+			return dropRefusedFallback(&refused, req, next)
+		}),
+	}
+}
+
+// dropRefusedFallback sends req without the fallback once the API has refused
+// it. An account with no default fallback configured, or a model or beta that
+// does not take it, answers every request with a 400 that a retry repeats, so
+// what was meant to save a declined phase failed every phase. Claude Code
+// drops it the same way.
+func dropRefusedFallback(refused *atomic.Bool, req *http.Request, next aoption.MiddlewareNext) (*http.Response, error) {
+	if !refused.Load() {
+		resp, err := next(req)
+		if err != nil || resp.StatusCode != http.StatusBadRequest {
+			return resp, err
+		}
+		msg, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(msg))
+		if !bytes.Contains(msg, []byte("fallback")) {
+			return resp, nil
+		}
+		refused.Store(true)
+	}
+	if err := withoutFallback(req); err != nil {
+		return nil, err
+	}
+	return next(req)
+}
+
+// withoutFallback takes the fallbacks field and its beta out of req.
+func withoutFallback(req *http.Request) error {
+	body, err := req.GetBody()
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.NewDecoder(body).Decode(&fields); err != nil {
+		return err
+	}
+	delete(fields, "fallbacks")
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(raw)), nil }
+	req.Body, _ = req.GetBody()
+	req.ContentLength = int64(len(raw))
+	betas := slices.DeleteFunc(req.Header.Values("anthropic-beta"), func(b string) bool { return b == fallbackBeta })
+	req.Header.Del("anthropic-beta")
+	for _, b := range betas {
+		req.Header.Add("anthropic-beta", b)
+	}
+	return nil
 }
 
 // fallbackModels take server-side refusal fallback.

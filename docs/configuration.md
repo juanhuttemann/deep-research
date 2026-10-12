@@ -106,7 +106,7 @@ plan. Set `model_call_timeout: 300s` to avoid that.
 
 | Key | Env var | Default |
 | --- | ------- | ------- |
-| `provider` | `DEEP_RESEARCH_PROVIDER` | `openai` |
+| `provider` | `DEEP_RESEARCH_PROVIDER` | `openai`; `claude` is the other, and anything else is an error |
 | `claude_model` | `DEEP_RESEARCH_CLAUDE_MODEL` | `claude-opus-5-5` |
 | `anthropic_api_key` | `ANTHROPIC_API_KEY` | — |
 | `anthropic_base_url` | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` |
@@ -122,7 +122,9 @@ others allow 16000. JSON is asked for in the prompt only, because the
 Messages API has no JSON mode without a schema. On `api.anthropic.com` with
 Opus 5.5, Opus 5, Sonnet 5.5 or Fable 5.1, a request a safety classifier
 declines is answered by another model within the same call (the server-side
-fallback beta). A refusal that still comes back, from either provider,
+fallback beta). If the API refuses the fallback itself (an account with none
+configured, or a retired beta), the run sends its requests without it, as
+Claude Code does. A refusal that still comes back, from either provider,
 fails the phase as "declined" instead of passing on an empty answer. Models
 older than the 4.6 generation, such as Haiku 4.5, are not supported on the
 API: they reject adaptive thinking.

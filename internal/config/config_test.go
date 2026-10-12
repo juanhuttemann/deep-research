@@ -189,6 +189,18 @@ func TestProviderDefaultsToOpenAI(t *testing.T) {
 	}
 }
 
+// An unknown provider ran as OpenAI: "provider: anthropic" asked for
+// OPENAI_API_KEY with an OpenRouter link instead of naming the typo.
+func TestUnknownProviderIsAnError(t *testing.T) {
+	clearProviderEnv(t)
+	cfgDir := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "provider: anthropic\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "openai or claude") {
+		t.Errorf("err = %v, want the providers there are", err)
+	}
+}
+
 // The Claude settings resolve like every other key: the file holds them, the
 // environment overrides them.
 func TestClaudeSettingsComeFromFileAndEnv(t *testing.T) {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	aoption "github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/microsoft/agent-framework-go/agent"
 	"github.com/microsoft/agent-framework-go/tool"
 	"github.com/microsoft/agent-framework-go/tool/functool"
@@ -33,6 +36,7 @@ type anthropicServer struct {
 
 type anthropicReply struct {
 	status     int
+	errBody    string // a failed reply's body; an invalid key's when empty
 	blocks     []map[string]any
 	stopReason string
 }
@@ -53,7 +57,7 @@ func newAnthropicServer(t *testing.T, reply func(n int) anthropicReply) *anthrop
 		if rep.status != 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(rep.status)
-			fmt.Fprint(w, `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`)
+			fmt.Fprint(w, cmp.Or(rep.errBody, `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`))
 			return
 		}
 		if body["stream"] == true {
@@ -286,6 +290,26 @@ func TestClaudeSubscriptionLimitMidAnswerRetriesOnTheAPI(t *testing.T) {
 	}
 }
 
+// A 429 that Claude Code retried is the API's rate limit, not the plan's: a run
+// that then failed for another reason moved every later phase onto the key.
+func TestClaudeRetriedRateLimitIsNotTheSubscriptionLimit(t *testing.T) {
+	fakeClaudeCode(t, subscribed, `{"type":"system","subtype":"api_retry","attempt":1,"error_status":429,"error":"rate_limit"}
+{"type":"result","subtype":"success","is_error":true,"result":"API Error: 500 Internal server error"}
+`)
+	api := newAnthropicServer(t, func(int) anthropicReply { return text("from the API") })
+	a, err := New(Config{Provider: "claude", ClaudeModel: "m", AnthropicAPIKey: "sk",
+		AnthropicBaseURL: api.URL, ModelCallTimeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Summarize(context.Background(), "p"); err == nil || errors.Is(err, errSubscriptionLimit) {
+		t.Errorf("err = %v, want the run's own failure", err)
+	}
+	if api.requests() != 0 {
+		t.Errorf("the API key was spent on %d requests", api.requests())
+	}
+}
+
 // Without a key the limit is final until it resets; retrying it spends the
 // whole doubling budget on a certain failure.
 func TestClaudeSubscriptionLimitWithoutKeyIsNotRetried(t *testing.T) {
@@ -457,6 +481,38 @@ func TestRefusalFallbackOnlyWhereItIsAccepted(t *testing.T) {
 	} {
 		if got := refusalFallback(c.base, c.model); got != c.want {
 			t.Errorf("refusalFallback(%q, %q) = %v, want %v", c.base, c.model, got, c.want)
+		}
+	}
+}
+
+// An account with no default fallback configured, or a beta since retired,
+// answers the fallback with a 400 that a retry repeats: every call on the API
+// failed. The request goes again without it, and later ones go without it.
+func TestRefusedFallbackIsDropped(t *testing.T) {
+	api := newAnthropicServer(t, func(n int) anthropicReply {
+		if n == 0 {
+			return anthropicReply{status: http.StatusBadRequest, errBody: `{"type":"error","error":` +
+				`{"type":"invalid_request_error","message":"claude-opus-5-5 has no default fallback configuration"}}`}
+		}
+		return text("ok")
+	})
+	client := anthropic.NewClient(append([]aoption.RequestOption{aoption.WithAPIKey("sk"),
+		aoption.WithBaseURL(api.URL), aoption.WithMaxRetries(0)}, refusalFallbackOpts()...)...)
+	for range 2 {
+		_, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{Model: "claude-opus-5-5", MaxTokens: 10,
+			Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if api.requests() != 3 {
+		t.Fatalf("%d requests, want the refused one, its resend, and one more", api.requests())
+	}
+	for i, body := range api.bodies {
+		_, fields := body["fallbacks"]
+		beta := slices.Contains(api.headers[i].Values("anthropic-beta"), fallbackBeta)
+		if want := i == 0; fields != want || beta != want {
+			t.Errorf("request %d: fallbacks field %v, beta %v; want %v", i, fields, beta, want)
 		}
 	}
 }
