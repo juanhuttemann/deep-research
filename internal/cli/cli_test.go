@@ -97,6 +97,39 @@ func TestMissingKeyIsAHardError(t *testing.T) {
 	}
 }
 
+// Provider claude has its own ways in, which its error already names; the
+// OpenRouter recipe under it pointed at the wrong provider.
+func TestClaudeErrorHasNoOpenRouterHint(t *testing.T) {
+	deps := Deps{
+		Assistant: func() (agent.Assistant, error) { return nil, errors.New("provider claude needs ANTHROPIC_API_KEY") },
+		Config:    config.Config{Config: agent.Config{Provider: "claude"}},
+	}
+	_, err := pickAssistant(deps)
+	if err == nil || strings.Contains(err.Error(), "openrouter") || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+		t.Errorf("err = %v, want the claude error alone", err)
+	}
+}
+
+// The offer to ask about a finished run is extra: a chat that cannot start
+// (provider claude without ANTHROPIC_API_KEY) used to fail the run that had
+// just been delivered, exiting 1 after a complete report.
+func TestAskOfferThatCannotStartDoesNotFailTheRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.json")
+	if err := os.WriteFile(path, []byte(`{"question":"q","report":"r"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+	d := Deps{Config: config.Config{Config: agent.Config{Provider: "claude", ClaudeModel: "m"}}}
+	if err := askAfter(cmd, d, path, true); err != nil {
+		t.Fatalf("askAfter = %v, want the run to stand", err)
+	}
+	if !strings.Contains(errBuf.String(), "ANTHROPIC_API_KEY") {
+		t.Errorf("stderr = %q, want why questions are unavailable", errBuf.String())
+	}
+}
+
 // TestSourcesFlagAndDeprecatedDepthAlias: the flag budgets sources per
 // sub-agent, so it is named --sources. --depth still works for scripts and
 // docs written against the old name.

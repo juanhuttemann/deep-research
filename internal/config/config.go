@@ -44,6 +44,10 @@ const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
 # OPENAI_API_KEY=
 # OPENAI_BASE_URL=https://openrouter.ai/api/v1
 # OPENAI_MODEL=openrouter/free
+# Or Claude: your subscription via Claude Code (claude auth login), with this
+# key as the fallback.
+# DEEP_RESEARCH_PROVIDER=claude
+# ANTHROPIC_API_KEY=
 # SEARXNG_URL=http://localhost:8888
 # FIRECRAWL_URL=http://localhost:3002
 # FIRECRAWL_API_KEY=
@@ -51,6 +55,9 @@ const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
 
 // DefaultModel is the model a fresh checkout uses.
 const DefaultModel = "openrouter/free"
+
+// DefaultClaudeModel is the model provider claude uses unless told otherwise.
+const DefaultClaudeModel = "claude-opus-5-5"
 
 // EnvPrefix is the prefix for the per-key environment overrides: any
 // config.yaml key resolves from DEEP_RESEARCH_<KEY> when that variable is set.
@@ -250,6 +257,13 @@ func applyEnvDefaults(cfg *Config, v *viper.Viper) {
 	// are retired regularly, and the first run should cost nothing.
 	cfg.OpenAIModel = pick("openai_model", DefaultModel,
 		"OPENAI_MODEL", "OPENROUTER_MODEL")
+	// Claude is chosen, never inferred from which keys happen to be exported.
+	// Its model has no bare ANTHROPIC_MODEL name: Claude Code reads that one,
+	// often set to an alias the API does not know.
+	cfg.Provider = strings.ToLower(pick("provider", "openai"))
+	cfg.ClaudeModel = pick("claude_model", DefaultClaudeModel)
+	cfg.AnthropicAPIKey = pick("anthropic_api_key", "", "ANTHROPIC_API_KEY")
+	cfg.AnthropicBaseURL = pick("anthropic_base_url", "https://api.anthropic.com", "ANTHROPIC_BASE_URL")
 	// Public instances out of the box ("auto"); "off" is the model-as-search
 	// mode that used to be the default, kept for runs that want no search.
 	cfg.SearXNGURL = pick("searxng_url", "auto", "SEARXNG_URL")

@@ -268,6 +268,8 @@ only what the run established and to give the status of a claim that was
 not, but nothing holds it to that the way the report's answer is held.
 Asking needs a model that supports tool calls; with one that does not, the
 first question fails at once and says to set `OPENAI_MODEL` to one that does.
+With `provider: claude` it needs `ANTHROPIC_API_KEY`, even when Claude Code is
+signed in: `claude -p` cannot call the two tools.
 
 A run watched in the terminal UI asks "Ask about this report (empty line to
 finish)" once its report is printed; an empty line or Ctrl-D ends it.
@@ -324,7 +326,9 @@ deep-research doctor
 One line per dependency a run has, each from one cheap request that spends
 no model tokens: which `config.yaml` is read; whether the model endpoint
 answers with your key (and, for OpenRouter, the key's usage, tier and
-today's free-model requests used and left);
+today's free-model requests used and left), or, with `provider: claude`,
+whether runs go through your Claude Code subscription or the key, checked
+by looking the model up;
 whether the search backend answers a real query, and which instance did;
 whether the scraper can fetch a page; and how many model requests a run at
 each `--mode` tier spends. It exits non-zero when any check fails.

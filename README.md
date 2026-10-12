@@ -153,6 +153,11 @@ Any OpenAI-compatible endpoint works — paid OpenRouter, OpenAI, or a local
 vLLM, llama.cpp or LM Studio server, which needs no key: set
 `OPENAI_BASE_URL` and `OPENAI_MODEL`.
 
+Or Claude: `DEEP_RESEARCH_PROVIDER=claude` runs on your Claude subscription
+through Claude Code when it is signed in (`claude auth login`), and on
+`ANTHROPIC_API_KEY` otherwise or once the subscription's limit is reached.
+See [Claude](docs/configuration.md#claude).
+
 ## Common commands
 
 ```bash
@@ -180,6 +185,7 @@ every `config.yaml` key is also settable as `DEEP_RESEARCH_<KEY>`.
 | `OPENAI_API_KEY` | LLM API key | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
+| `DEEP_RESEARCH_PROVIDER` | `openai`, or `claude` for Claude Code / `ANTHROPIC_API_KEY` | `openai` |
 | `SEARXNG_URL` | a URL, a comma-separated list, `auto` or `off` | `auto` |
 | `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (snippets only) |
 

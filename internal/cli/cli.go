@@ -263,14 +263,17 @@ const keyURL = "https://openrouter.ai/keys"
 func pickAssistant(d Deps) (agent.Assistant, error) {
 	a, err := d.Assistant()
 	if err != nil {
-		return nil, keyHint(err)
+		return nil, keyHint(d, err)
 	}
 	return a, nil
 }
 
 // keyHint says how to get a key, under the error of a model that could not
-// be reached without one.
-func keyHint(err error) error {
+// be reached without one. Provider claude's error names its own ways in.
+func keyHint(d Deps, err error) error {
+	if d.Config.Provider == "claude" {
+		return err
+	}
 	return fmt.Errorf("%w\n  Get a free key (no card): %s\n"+
 		"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research -p \"...\"", err, keyURL)
 }

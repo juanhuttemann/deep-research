@@ -94,3 +94,33 @@ func TestKeyTierShowsFreeModelDailyRequests(t *testing.T) {
 		t.Errorf("a key record without the counter invented one: %q", got)
 	}
 }
+
+// Doctor says which way provider claude would reach the model, and checks the
+// key only when the key is what a run would use.
+func TestDoctorReportsTheClaudeTransport(t *testing.T) {
+	fakeClaudeCode(t, subscribed, "")
+	c := checkModel(context.Background(), Config{Provider: "claude", ClaudeModel: "claude-opus-5-5"})
+	if !c.OK || !strings.Contains(c.Detail, "Claude Code (pro subscription)") {
+		t.Errorf("subscribed: %+v", c)
+	}
+
+	noClaudeCode(t)
+	api := newAnthropicServer(t, func(int) anthropicReply { return anthropicReply{} })
+	c = checkModel(context.Background(), Config{Provider: "claude", ClaudeModel: "m",
+		AnthropicAPIKey: "sk", AnthropicBaseURL: api.URL})
+	if !c.OK || api.requests() != 1 {
+		t.Errorf("key: %+v after %d requests", c, api.requests())
+	}
+
+	bad := newAnthropicServer(t, func(int) anthropicReply { return anthropicReply{status: http.StatusUnauthorized} })
+	c = checkModel(context.Background(), Config{Provider: "claude", ClaudeModel: "m",
+		AnthropicAPIKey: "sk", AnthropicBaseURL: bad.URL})
+	if c.OK || !strings.Contains(c.Detail, "401") {
+		t.Errorf("rejected key: %+v", c)
+	}
+
+	c = checkModel(context.Background(), Config{Provider: "claude", ClaudeModel: "m"})
+	if c.OK || !strings.Contains(c.Detail, "claude auth login") {
+		t.Errorf("neither: %+v", c)
+	}
+}

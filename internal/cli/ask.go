@@ -50,7 +50,7 @@ func chatAbout(d Deps, path string) (*agent.Chat, error) {
 	}
 	chat, err := agent.NewChat(d.Config.Config, ui.RunOverview(m), ui.SourceTools(m))
 	if err != nil {
-		return nil, keyHint(err)
+		return nil, keyHint(d, err)
 	}
 	return chat, nil
 }
@@ -62,9 +62,12 @@ func askAfter(cmd *cobra.Command, d Deps, path string, interactive bool) error {
 	if !interactive || path == "" {
 		return nil
 	}
+	// The run is delivered by now; a chat that cannot start costs the offer,
+	// not the run's exit status.
 	chat, err := chatAbout(d, path)
 	if err != nil {
-		return err
+		fmt.Fprintf(cmd.ErrOrStderr(), "Questions about this report are unavailable: %v\n", err)
+		return nil
 	}
 	return converse(cmd, chat, "Ask about this report (empty line to finish)")
 }

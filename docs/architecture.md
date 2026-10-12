@@ -109,6 +109,20 @@ back the conversation it shows; the server keeps none. Answers are not
 fact-checked: the prompt tells the model to state as fact only supported
 claims, and nothing checks that it did.
 
+## Providers
+
+`agent.connect` is the one place that knows the provider. It builds the
+agents the phases run on and the options a call needs on that provider (a
+JSON mode, what a streamed call asks for); retries, deadlines, progress and
+token usage above it are the same for every provider. `provider: claude`
+picks its transport at startup: the Claude Code CLI when it is signed in to a
+subscription, else the Messages API through the framework's
+`anthropicprovider`. The CLI transport (`claudecode.go`) is a framework
+provider that runs `claude -p` once per call with no tools, so a phase is
+still one model call. When the subscription reports its usage limit, it
+hands that call and every later one to the API agent built beside it.
+`Chat` always takes the API, because its tools are Go functions.
+
 ## Packages
 
 ```
@@ -117,7 +131,8 @@ internal/
   agent     one LLM phase per method (ResearchDetail / Analyze / FactCheck /
             Summarize / Plan); real search via internal/tools when SearXNG
             is configured; Diagnose for `doctor`; Chat for questions about
-            a finished run
+            a finished run; the providers (OpenAI-compatible, Claude
+            through Claude Code or the Messages API)
   cli       cobra commands (run / ask / serve / list / init / doctor /
             update)
   config    config resolution (env > config dir > embedded defaults) + .env
