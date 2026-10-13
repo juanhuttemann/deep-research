@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-13
+
 ### Added
 
 - `deep-research login` and `deep-research model` open one searchable list of
@@ -564,7 +566,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/juanhuttemann/deep-research/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/juanhuttemann/deep-research/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/juanhuttemann/deep-research/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/juanhuttemann/deep-research/compare/v0.4.0...v0.5.0
