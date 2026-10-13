@@ -5,6 +5,30 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `deep-research login` and `deep-research model` open one searchable list of
+  every model of every provider, under a heading per provider that says
+  whether its key is stored, from the environment or still needed. Picking a model whose provider has
+  no key asks for it behind a mask of asterisks; one free request checks the
+  pair before the key is stored in `auth.json` (0600, replaced atomically) and
+  the choice in `model.json`. A model the catalog lacks can be typed in.
+  `deep-research logout` removes a key. The list is Catwalk's catalog
+  (built in, refreshed when online), plus the Claude subscription and a custom
+  OpenAI-compatible endpoint. `login --provider --model --key-stdin` scripts
+  it. A stored key can be `!command`, to keep it in a password manager.
+
+### Changed
+
+- A key stored by `login` wins over `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`,
+  which are now the fallback. Provider and model settings in the environment
+  still override the stored choice. Every key goes only to its own endpoint:
+  a stored key to the one it was entered for, an environment key to the one
+  the environment names, so `OPENAI_API_KEY` for OpenRouter never reaches
+  another provider picked in `login`.
+- `doctor` says where the key came from, and a rejected stored key points at
+  `deep-research login --new-key`.
+
 ## [0.7.0] - 2026-10-12
 
 ### Added

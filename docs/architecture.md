@@ -122,6 +122,9 @@ provider that runs `claude -p` once per call with no tools, so a phase is
 still one model call. When the subscription reports its usage limit, it
 hands that call and every later one to the API agent built beside it.
 `Chat` always takes the API, because its tools are Go functions.
+`Config.ClaudeAPIOnly`, set when `login` picked Anthropic's API or an
+Anthropic-compatible provider rather than the subscription, skips Claude
+Code: `claude -p` talks to Anthropic, so it cannot serve a Kimi model.
 
 ## Packages
 
@@ -133,9 +136,17 @@ internal/
             is configured; Diagnose for `doctor`; Chat for questions about
             a finished run; the providers (OpenAI-compatible, Claude
             through Claude Code or the Messages API)
+  auth      auth.json (stored keys, 0600, atomic, each bound to its
+            endpoint; "!command" keys) and model.json (the selection)
+  catalog   the provider/model list for login: Catwalk's catalog, a
+            snapshot embedded, refreshed and cached when online
   cli       cobra commands (run / ask / serve / list / init / doctor /
-            update)
-  config    config resolution (env > config dir > embedded defaults) + .env
+            login / model / logout / update)
+  config    config resolution (env > login's selection > config dir >
+            embedded defaults; stored key > env key) + .env
+  setup     the Bubble Tea picker behind login and model: every
+            provider's models in one searchable list, then the masked key
+            when needed, then the check; returns the choice, saves nothing
   replay    --trace recorder and --replay player: wraps the assistant to
             record, or serve back, the plan and every search result; the
             same recorder saves each run's checkpoint as it goes, and
@@ -161,7 +172,9 @@ degrades to one log line per event.
 ## Layering
 
 ```
-cli → { agent, config, replay, store, ui, update, web }
+cli → { agent, auth, catalog, config, replay, setup, store, ui, update, web }
+config → { agent, auth }
+setup → { auth, catalog }
 replay → agent
 agent → tools
 tools → (standalone HTTP clients)
@@ -169,7 +182,7 @@ update → (nothing in this module)
 web → (nothing in this module)
 ```
 
-Imports go one way only. In particular `tools` must not import `agent`, and
+`auth` and `catalog` import nothing in this module. Imports go one way only. In particular `tools` must not import `agent`, and
 sequencing must not move into `agent`.
 
 `web` passes the run's `--jsonl` lines through unparsed, and the page, not

@@ -5,8 +5,13 @@
 Settings resolve in one order, highest first:
 
 1. environment variables
-2. `config.yaml` in the config directory
-3. the defaults embedded in the binary
+2. the provider and model `deep-research login` picked (`model.json`)
+3. `config.yaml` in the config directory
+4. the defaults embedded in the binary
+
+API keys resolve differently: a key stored by `deep-research login` wins, and
+the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) is the fallback, then
+`config.yaml`. See [Stored keys](#stored-keys-deep-research-login).
 
 The config directory is the first of these that exists:
 `$DEEP_RESEARCH_CONFIG_DIR`, `./config/`, `~/.config/deep-research/`.
@@ -17,11 +22,57 @@ use owner-only permissions (`0600`) on Unix; existing files are left alone.
 one found and never climbing past the project root (a directory holding
 `.git` or `go.mod`), so an unrelated `.env` in `$HOME` cannot leak into a run.
 
+## Stored keys (`deep-research login`)
+
+`deep-research login` and `deep-research model` pick a model from one list of
+every provider's models and store the key when the provider needs one;
+`deep-research logout` removes one ([usage](usage.md#login-model-logout)).
+Two files, in `$DEEP_RESEARCH_CONFIG_DIR` when set, else
+`~/.config/deep-research/` (never the project's `config/`, which sits in a
+checkout):
+
+- `auth.json` holds the keys, one per provider, each with the endpoint it was
+  entered for. It is created `0600` in a `0700` directory and replaced
+  atomically. A group- or world-readable file loads with a warning.
+- `model.json` holds the selection: provider, transport, endpoint and model.
+  It has no secrets.
+
+Every key goes only to its own endpoint. A stored key goes to the endpoint it
+was entered for: with `OPENAI_BASE_URL` pointed somewhere else for a run, the
+OpenRouter key stays home and `OPENAI_API_KEY` applies instead. A key from the
+environment or `config.yaml` goes to the endpoint the environment and
+`config.yaml` name (OpenRouter when they name none): with DeepSeek picked in
+`login`, an `OPENAI_API_KEY` meant for OpenRouter is not sent to DeepSeek, and
+`login` asks for DeepSeek's key. The environment still overrides the
+selection: `OPENAI_MODEL=x deep-research -p ...` is a one-off run on `x`, and
+`login` warns when something in the environment overrides what it just saved.
+
+A key that starts with `!` is a command whose output is the key, run once per
+process with a 10-second limit, so the secret can stay in a password manager
+or the OS keychain:
+
+```json
+{"openrouter": {"type": "api_key", "key": "!pass show openrouter", "base_url": "https://openrouter.ai/api/v1"}}
+```
+
+The provider list is [Catwalk](https://github.com/charmbracelet/catwalk)'s
+catalog, the one Crush uses, kept to the providers deep-research has a client
+for: OpenAI, OpenRouter and the OpenAI-compatible ones; Anthropic and the
+Anthropic-compatible ones (Kimi, MiniMax). Two entries are deep-research's
+own: the Claude subscription through Claude Code, which needs no key, and a
+custom OpenAI-compatible endpoint (vLLM, LM Studio, llama.cpp), whose models
+are read from its `/models`. A copy is built in; `login` refreshes it from
+Catwalk when online and caches it under the user cache directory.
+
+Picking Anthropic, Kimi or MiniMax runs on the key alone: Claude Code is used
+only for the Claude subscription entry (or `provider: claude` set without
+login), so a run never bills the plan when you chose the API.
+
 ## Provider and services
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key; free at <https://openrouter.ai/keys> | — (required) |
+| `OPENAI_API_KEY` | LLM API key, when `deep-research login` stored none for the endpoint; free at <https://openrouter.ai/keys> | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |

@@ -109,6 +109,9 @@ func New(load func() (Deps, error)) *cobra.Command {
 				return runDoctor(cmd, d)
 			},
 		},
+		loginCmd(),
+		modelCmd(),
+		logoutCmd(),
 		serveCmd(load),
 		askCmd(load),
 		updateCmd(),
@@ -148,9 +151,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(out, "  - %s\n", f)
 		}
 		if slices.Contains(created, ".env") {
-			fmt.Fprintln(out, "\nGet a free API key (no card): "+keyURL)
-			fmt.Fprintln(out, "Add it to .env as OPENAI_API_KEY=..., then run:")
-			fmt.Fprintln(out, "  ./deep-research -p \"your question\"")
+			fmt.Fprintln(out, "\nPick a provider and model, and store its key: ./deep-research login")
+			fmt.Fprintln(out, "(a free OpenRouter key, no card: "+keyURL+"; or add OPENAI_API_KEY=... to .env)")
+			fmt.Fprintln(out, "then run: ./deep-research -p \"your question\"")
 		}
 	}
 	if docker, _ := cmd.Flags().GetBool("docker"); docker {
@@ -256,6 +259,9 @@ func (w *wroteTo) Write(p []byte) (int, error) {
 }
 
 // keyURL is where a first-time user gets a free OpenRouter key.
+//
+// The hint leads with `deep-research login`, which stores the key; the .env
+// line stays for those who keep keys in the environment.
 const keyURL = "https://openrouter.ai/keys"
 
 // pickAssistant builds the assistant. One that cannot be built is an error
@@ -274,8 +280,8 @@ func keyHint(d Deps, err error) error {
 	if d.Config.Provider == "claude" {
 		return err
 	}
-	return fmt.Errorf("%w\n  Get a free key (no card): %s\n"+
-		"  then: echo 'OPENAI_API_KEY=sk-or-...' >> .env && deep-research -p \"...\"", err, keyURL)
+	return fmt.Errorf("%w\n  Pick a provider and store its key: deep-research login\n"+
+		"  (free OpenRouter key, no card: %s; or set OPENAI_API_KEY in .env)", err, keyURL)
 }
 
 // sourceBudget is the per-sub-agent source budget: the config value unless a

@@ -42,7 +42,7 @@ func checkModel(ctx context.Context, cfg Config) Check {
 	}
 	c := Check{Name: "model"}
 	if strings.TrimSpace(cfg.OpenAIAPIKey) == "" {
-		c.Detail = "no API key — get a free one (no card): https://openrouter.ai/keys"
+		c.Detail = "no API key — run `deep-research login`, or get a free one (no card): https://openrouter.ai/keys"
 		return c
 	}
 	base := strings.TrimRight(cfg.OpenAIBaseURL, "/")
@@ -65,7 +65,7 @@ func checkModel(ctx context.Context, cfg Config) Check {
 			tier = keyTier(body)
 		}
 	}
-	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers%s", cfg.OpenAIModel, host, tier)
+	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers%s%s", cfg.OpenAIModel, host, tier, keyFrom(cfg))
 	return c
 }
 
@@ -75,13 +75,20 @@ func checkModel(ctx context.Context, cfg Config) Check {
 // is free.
 func checkClaude(ctx context.Context, cfg Config) Check {
 	c := Check{Name: "model"}
-	if _, plan := claudeCodeLogin(ctx); plan != "" {
+	if !useClaudeCode(cfg) {
+		// Chosen over the subscription, or not Anthropic at all: the key is
+		// what a run would use, so the key is what to check.
+	} else if _, plan := claudeCodeLogin(ctx); plan != "" {
 		c.OK, c.Detail = true, fmt.Sprintf("%s via Claude Code (%s subscription)", cfg.ClaudeModel, plan)
 		return c
 	}
 	key := strings.TrimSpace(cfg.AnthropicAPIKey)
 	if key == "" {
-		c.Detail = "Claude Code is not signed in to a subscription (run `claude auth login`) and ANTHROPIC_API_KEY is not set"
+		c.Detail = "no API key — run `deep-research login`, or set ANTHROPIC_API_KEY"
+		if useClaudeCode(cfg) {
+			c.Detail = "Claude Code is not signed in to a subscription (run `claude auth login`)," +
+				" and there is no API key (`deep-research login`, or ANTHROPIC_API_KEY)"
+		}
 		return c
 	}
 	host := cfg.AnthropicBaseURL
@@ -92,7 +99,7 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 	defer cancel()
 	client := anthropic.NewClient(aoption.WithAPIKey(key), aoption.WithBaseURL(cfg.AnthropicBaseURL),
 		aoption.WithHTTPClient(providerHTTPClient()), aoption.WithMaxRetries(0))
-	if _, err := client.Models.Get(ctx, cfg.ClaudeModel, anthropic.ModelGetParams{}); err != nil {
+	if err := lookUpClaudeModel(ctx, client, cfg.ClaudeModel); err != nil {
 		// The SDK's error text is the URL and the raw body; the status says it.
 		if status, _ := apiResponse(err); status != 0 {
 			err = fmt.Errorf("%d %s", status, http.StatusText(status))
@@ -100,8 +107,58 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 		c.Detail = fmt.Sprintf("%s via %s: %v", cfg.ClaudeModel, host, endpointError(cfg.AnthropicBaseURL, err))
 		return c
 	}
-	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers", cfg.ClaudeModel, host)
+	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers%s", cfg.ClaudeModel, host, keyFrom(cfg))
 	return c
+}
+
+// lookUpClaudeModel asks for the model by ID. Anthropic-compatible providers
+// need not serve that route — Kimi answers 404 there, while its model list
+// and its Messages endpoint work — so a 404 falls back to the list, which
+// still proves the endpoint and the key.
+func lookUpClaudeModel(ctx context.Context, client anthropic.Client, model string) error {
+	_, err := client.Models.Get(ctx, model, anthropic.ModelGetParams{})
+	if status, _ := apiResponse(err); status != http.StatusNotFound {
+		return err
+	}
+	_, err = client.Models.List(ctx, anthropic.ModelListParams{})
+	return err
+}
+
+// keyFrom names where the key came from, for doctor's line.
+func keyFrom(cfg Config) string {
+	if cfg.KeySource == "" {
+		return ""
+	}
+	return " (key from " + cfg.KeySource + ")"
+}
+
+// CheckModel is doctor's model check alone: one free request that proves the
+// endpoint answers and accepts the key. `deep-research login` runs it on a
+// pasted key before saving it.
+func CheckModel(ctx context.Context, cfg Config) Check { return checkModel(ctx, cfg) }
+
+// ListModels returns the model IDs an OpenAI-compatible endpoint serves, from
+// its /models list: the choices for a custom endpoint, which no catalog knows.
+func ListModels(ctx context.Context, baseURL, key string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, diagnoseTimeout)
+	defer cancel()
+	body, err := getJSON(ctx, strings.TrimRight(baseURL, "/")+"/models", key)
+	if err != nil {
+		return nil, err
+	}
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("unreadable model list: %w", err)
+	}
+	ids := make([]string, 0, len(list.Data))
+	for _, m := range list.Data {
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
 }
 
 // keyTier summarises OpenRouter's key record.

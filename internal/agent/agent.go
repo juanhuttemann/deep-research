@@ -53,6 +53,14 @@ type Config struct {
 	ClaudeModel      string
 	AnthropicAPIKey  string
 	AnthropicBaseURL string
+	// KeySource says where the key came from — "auth.json" (deep-research
+	// login), "environment" or "config.yaml" — so a rejected key's error can
+	// say which one to fix. Never the key.
+	KeySource string
+	// ClaudeAPIOnly keeps provider claude off the Claude Code subscription:
+	// set when the user picked the API (or an Anthropic-compatible provider
+	// such as Kimi) rather than the subscription.
+	ClaudeAPIOnly    bool
 	ModelCallTimeout time.Duration
 	// ModelCallRetries is how many extra attempts a failed model call gets.
 	// Zero means one attempt and no retry.
@@ -61,6 +69,13 @@ type Config struct {
 	FirecrawlURL     string
 	FirecrawlAPIKey  string
 }
+
+// Key sources for Config.KeySource.
+const (
+	KeyFromLogin  = "auth.json"
+	KeyFromEnv    = "environment"
+	KeyFromConfig = "config.yaml"
+)
 
 // SubTopic is one branch of a research plan produced during the planning
 // phase. A set of sub-topics seeds the parallel sub-agent tree.
@@ -412,7 +427,7 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	impl := &impl{timeout: timeout, retries: max(cfg.ModelCallRetries, 0)}
+	impl := &impl{timeout: timeout, retries: max(cfg.ModelCallRetries, 0), keySource: cfg.KeySource}
 	if cfg.Provider == "claude" {
 		newAgent, err := impl.connectClaude(cfg, withTools)
 		return impl, newAgent, err
@@ -468,6 +483,8 @@ type impl struct {
 	baseURL string
 	// keyEnv and urlEnv name the settings an error tells the reader to fix.
 	keyEnv, urlEnv string
+	// keySource is Config.KeySource.
+	keySource string
 	// via names the provider in ModelInfo when it is not baseURL's host.
 	via string
 	// jsonOpts ask for a JSON answer; empty where the provider has no
@@ -700,6 +717,9 @@ func unreachable(err error) bool {
 func (a *impl) rejectedKey(reason string) error {
 	if reason = strings.TrimSuffix(strings.TrimSpace(reason), "."); reason != "" {
 		reason = " (" + reason + ")"
+	}
+	if a.keySource == KeyFromLogin {
+		return fmt.Errorf("the provider rejected the API key%s — replace the stored key with: deep-research login --new-key", reason)
 	}
 	hint := ""
 	if a.keyEnv == "OPENAI_API_KEY" {

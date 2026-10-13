@@ -307,7 +307,7 @@ deep-research init
 ```
 
 Writes `config.yaml` and `agent.yaml` into the config directory and a `.env`
-into the working directory, and prints where to get a free API key. Existing
+into the working directory, and points at `deep-research login` and where to get a free API key. Existing
 files are never clobbered.
 
 `init --docker` also writes a `docker-compose.yml` and `searxng/settings.yml`
@@ -316,6 +316,59 @@ enabled and a generated secret. Start it with `docker compose up -d` and set
 `SEARXNG_URL=http://localhost:8888`. Firecrawl is not included — it runs from
 its own repository ([services.md](services.md)). See [configuration.md](configuration.md) for where
 those files are looked up.
+
+## `login`, `model`, `logout`
+
+```bash
+deep-research login              # pick a model, paste its provider's key if it needs one
+deep-research login --new-key    # the same, replacing the stored key
+deep-research model              # the same picker; for switching models
+deep-research logout openrouter  # remove a stored key
+```
+
+Both open one list of every model of every provider, grouped under a heading
+per provider that says where its key comes from: stored, from your
+environment (only for the endpoint the environment names), not needed (the
+Claude subscription), or "needs a key", asked for when you pick one of its
+models. Each model shows its context size and price per million tokens
+(not for the subscription, which your plan pays for). Type to search
+provider and model together: `deep` lists DeepSeek's own models first, then
+the DeepSeek models other providers serve; `deepseek v4.1` narrows to that
+model wherever it is offered.
+While searching, each matching provider also has an "other model ID…" row,
+for a model the catalog does not list yet.
+
+Pick a row with Enter. If its provider has no key, the key is asked for next,
+shown as `*`. Then one free request — the same one `doctor` makes — checks the
+pair before anything is saved; when it fails you can enter the key again,
+pick another model, or save anyway. `login --new-key` asks for a key even
+when one is stored. The current model is shown at the top and preselected.
+
+"Custom endpoint" asks for a base URL (the stored one filled in), takes an
+optional key, and lists the models its `/models` serves; a stored key counts
+only for the URL it was entered with, so a new URL asks for its own.
+
+`logout` with no argument removes the only stored key, or lists them when
+there are several.
+
+Without a terminal, script it; the key comes from stdin, so it stays out of
+shell history and the process list, and nothing is saved when the check fails:
+
+```bash
+echo "$KEY" | deep-research login --provider openrouter --model openrouter/free --key-stdin
+echo "" | deep-research login --provider custom --base-url http://localhost:8000/v1 --model qwen --key-stdin
+```
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--new-key` | ask for the key even when one is stored |
+| `--provider` | provider ID (as in the picker; `custom` for your own endpoint) |
+| `--model` | model ID |
+| `--base-url` | endpoint for `--provider custom` |
+| `--key-stdin` | read the key from stdin; without it the stored or environment key is used (switching models by script) |
+
+Where the files go and how they rank against the environment:
+[configuration.md](configuration.md#stored-keys-deep-research-login).
 
 ## `doctor`
 
@@ -329,6 +382,7 @@ answers with your key (and, for OpenRouter, the key's usage, tier and
 today's free-model requests used and left), or, with `provider: claude`,
 whether runs go through your Claude Code subscription or the key, checked
 by looking the model up;
+and where the key came from (`auth.json`, the environment or `config.yaml`);
 whether the search backend answers a real query, and which instance did;
 whether the scraper can fetch a page; and how many model requests a run at
 each `--mode` tier spends. It exits non-zero when any check fails.

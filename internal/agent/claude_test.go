@@ -611,3 +611,35 @@ func TestStreamedReasoningReadsAnthropicThinking(t *testing.T) {
 		t.Errorf("streamedReasoning = %q, want the thinking delta", got)
 	}
 }
+
+// TestClaudeAPIOnlySkipsTheSubscription: a provider picked by key in
+// `deep-research login` — Anthropic's API, or Kimi or MiniMax, which speak the
+// Messages API at their own URL — must not be answered through Claude Code
+// because the user happens to be signed in to it. For Kimi, claude -p would
+// have sent a Kimi model name to Anthropic.
+func TestClaudeAPIOnlySkipsTheSubscription(t *testing.T) {
+	dir := fakeClaudeCode(t, subscribed, claudeCodeRun("from the subscription"))
+	api := newAnthropicServer(t, func(int) anthropicReply { return text("from the API") })
+
+	a, err := New(Config{Provider: "claude", ClaudeModel: "k3", ClaudeAPIOnly: true,
+		AnthropicAPIKey: "sk", AnthropicBaseURL: api.URL,
+		SummarizerInstructions: "write the report", ModelCallTimeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum, err := a.Summarize(context.Background(), "the findings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Report != "from the API" || api.requests() != 1 {
+		t.Errorf("report = %q after %d API requests", sum.Report, api.requests())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "args")); err == nil {
+		t.Error("claude -p ran for an API-only provider")
+	}
+	// Without a key there is no subscription to fall back on.
+	if _, err := New(Config{Provider: "claude", ClaudeModel: "k3", ClaudeAPIOnly: true,
+		AnthropicBaseURL: api.URL}); err == nil || !strings.Contains(err.Error(), "deep-research login") {
+		t.Errorf("no key: err = %v", err)
+	}
+}
