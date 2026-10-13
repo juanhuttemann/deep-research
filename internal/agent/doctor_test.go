@@ -124,3 +124,59 @@ func TestDoctorReportsTheClaudeTransport(t *testing.T) {
 		t.Errorf("neither: %+v", c)
 	}
 }
+
+// TestCheckModelNamesTheKeySourceNotTheKey: doctor says where the key came
+// from (a stale one in auth.json beats a fresh one in .env), never the key.
+func TestCheckModelNamesTheKeySourceNotTheKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-stored-secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"m1"},{"id":"m2"}]}`)
+	}))
+	defer srv.Close()
+	c := CheckModel(context.Background(), Config{OpenAIBaseURL: srv.URL, OpenAIAPIKey: "sk-stored-secret",
+		OpenAIModel: "m1", KeySource: KeyFromLogin})
+	if !c.OK || !strings.Contains(c.Detail, "key from auth.json") || strings.Contains(c.Detail, "sk-stored") {
+		t.Errorf("check = %+v", c)
+	}
+	ids, err := ListModels(context.Background(), srv.URL, "sk-stored-secret")
+	if err != nil || strings.Join(ids, ",") != "m1,m2" {
+		t.Errorf("ListModels = %v, %v", ids, err)
+	}
+	if _, err := ListModels(context.Background(), srv.URL, "wrong"); err == nil || strings.Contains(err.Error(), "wrong") {
+		t.Errorf("rejected key: err = %v", err)
+	}
+}
+
+// TestClaudeCheckFallsBackToTheModelList: Kimi's Anthropic-compatible API
+// answers 404 for /v1/models/{id} but serves the list and the Messages
+// endpoint a run uses; the check refused to save a working provider.
+func TestClaudeCheckFallsBackToTheModelList(t *testing.T) {
+	noClaudeCode(t)
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("X-Api-Key") != "sk" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"resource_not_found_error","message":"no route"}}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[],"has_more":false}`)
+	}))
+	defer srv.Close()
+	cfg := Config{Provider: "claude", ClaudeModel: "k3", ClaudeAPIOnly: true, AnthropicAPIKey: "sk", AnthropicBaseURL: srv.URL}
+	if c := CheckModel(context.Background(), cfg); !c.OK {
+		t.Errorf("check = %+v after %v", c, paths)
+	}
+	cfg.AnthropicAPIKey = "wrong"
+	if c := CheckModel(context.Background(), cfg); c.OK || !strings.Contains(c.Detail, "401") {
+		t.Errorf("rejected key passed: %+v", c)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,10 +42,15 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 		}
 		return api, nil
 	}
-	if bin, _ := claudeCodeLogin(context.Background()); bin != "" {
-		a.via = "claude-code"
-		cc := &claudeCode{bin: bin, model: cfg.ClaudeModel, impl: a, api: api}
-		return cc.newAgent, nil
+	if useClaudeCode(cfg) {
+		if bin, _ := claudeCodeLogin(context.Background()); bin != "" {
+			a.via = "claude-code"
+			cc := &claudeCode{bin: bin, model: cfg.ClaudeModel, impl: a, api: api}
+			return cc.newAgent, nil
+		}
+	}
+	if api == nil && !useClaudeCode(cfg) {
+		return nil, fmt.Errorf("no API key for %s (run `deep-research login`, or set ANTHROPIC_API_KEY)", safeEndpoint(cfg.AnthropicBaseURL))
 	}
 	if api == nil {
 		return nil, errors.New("provider claude needs Claude Code signed in to a Claude subscription" +
@@ -52,6 +58,13 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 	}
 	return api, nil
 }
+
+// useClaudeCode reports whether a run may go through the user's Claude Code
+// sign-in: not when the API was chosen over the subscription, nor for an
+// Anthropic-compatible provider (Kimi, MiniMax) — claude -p talks to
+// Anthropic, so a Kimi model picked by name would be answered by Claude, or
+// refused. `deep-research login` sets ClaudeAPIOnly for both.
+func useClaudeCode(cfg Config) bool { return !cfg.ClaudeAPIOnly }
 
 // unstreamedMaxTokens and streamedMaxTokens replace the framework's 4096,
 // which cut a report off. An unstreamed call stays below what the SDK sends

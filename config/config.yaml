@@ -25,9 +25,11 @@ sources_per_topic: 0
 # search backend or a rate-limited model provider cannot take the concurrency.
 parallelism: 3
 
-# LLM provider. Any OpenAI-compatible endpoint works (OpenRouter, vLLM,
-# llama.cpp, LM Studio). The matching OPENAI_* environment variables override
-# whatever is set here. Keep the API key in .env, not in this file.
+# LLM provider. `deep-research login` picks one from a list and stores its key;
+# what it picks wins over the settings below, and the environment wins over
+# both. Any OpenAI-compatible endpoint works (OpenRouter, vLLM, llama.cpp,
+# LM Studio). The matching OPENAI_* environment variables override whatever is
+# set here. Keep API keys in `deep-research login` or .env, not in this file.
 # openai_base_url: https://openrouter.ai/api/v1
 # openai_model: openrouter/free
 

@@ -16,6 +16,7 @@ import (
 
 	embedcfg "github.com/juanhuttemann/deep-research/config"
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/auth"
 )
 
 // Config holds all configuration for the deep research agent. The embedded
@@ -33,13 +34,31 @@ type Config struct {
 	// so a deep run with six sub-topics could not be widened or, on a rate-
 	// limited provider, narrowed.
 	Parallelism int
+	// fallback is the key from the environment or config.yaml for each
+	// transport, with the endpoint it goes with: the one the environment and
+	// config.yaml name, before `deep-research login`'s choice. See
+	// FallbackKey.
+	fallback map[string]fallbackKey
+}
+
+type fallbackKey struct{ baseURL, key, source string }
+
+// FallbackKey returns the environment's (or config.yaml's) key for a
+// transport ("openai", "claude") and the endpoint it is for. That key is
+// only ever sent there: OPENAI_API_KEY set for OpenRouter is no key for
+// DeepSeek, which login then asks for.
+func (c Config) FallbackKey(transport string) (baseURL, key string) {
+	f := c.fallback[transport]
+	return f.baseURL, f.key
 }
 
 // EnvTemplate is the default contents written to a root .env file by `init`.
 // The entries are commented out on purpose so users fill in their own values,
 // or export the matching environment variables for a session.
 const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
-# Fill in your values here, or export the matching env var for the session.
+# The easy way: run "deep-research login" to pick a provider and model and store
+# the key (auth.json, readable only by you). The keys below are the fallback;
+# the provider and model settings below override what login picked.
 # Get a free OpenRouter key (no card): https://openrouter.ai/keys
 # OPENAI_API_KEY=
 # OPENAI_BASE_URL=https://openrouter.ai/api/v1
@@ -232,46 +251,141 @@ func firstEnv(names ...string) string {
 }
 
 // applyEnvDefaults fills in LLM provider and search-service settings:
-// environment variables win over the config file, built-in defaults win
-// over everything.
-func applyEnvDefaults(cfg *Config, v *viper.Viper) {
-	// Every setting resolves the same way: the config file holds it, the
-	// environment overrides it, a built-in default fills the gap. The provider
+// environment variables win over the selection saved by `deep-research
+// login`, which wins over the config file; built-in defaults fill the gap.
+func applyEnvDefaults(cfg *Config, v *viper.Viper, sel auth.Selection) {
+	// Every setting resolves the same way: the environment, then the saved
+	// selection, then the config file, then a built-in default. The provider
 	// settings used to skip the file entirely, so an openai_model: written in
 	// the one place every other setting lives was silently ignored.
-	pick := func(key, fallback string, envNames ...string) string {
-		if v := strings.TrimSpace(firstEnv(envNames...)); v != "" {
-			return v
-		}
-		if v := strings.TrimSpace(v.GetString(key)); v != "" {
-			return v
+	//
+	// The environment is read here, not through viper: viper merges
+	// DEEP_RESEARCH_<KEY> with the file, and the saved selection has to sit
+	// between the two.
+	pick := func(key, saved, fallback string, envNames ...string) string {
+		envNames = append(envNames, EnvPrefix+"_"+strings.ToUpper(key))
+		for _, s := range []string{firstEnv(envNames...), saved, v.GetString(key)} {
+			if s = strings.TrimSpace(s); s != "" {
+				return s
+			}
 		}
 		return fallback
 	}
-	// The API key is a secret and belongs in .env or the environment; it is
-	// still read from the file for symmetry, with no default.
-	cfg.OpenAIAPIKey = pick("openai_api_key", "", "OPENAI_API_KEY", "OPENROUTER_API_KEY")
-	cfg.OpenAIBaseURL = pick("openai_base_url", "https://openrouter.ai/api/v1",
+	openaiSel, claudeSel := savedFor(sel, "openai"), savedFor(sel, "claude")
+	cfg.OpenAIBaseURL = pick("openai_base_url", openaiSel.BaseURL, "https://openrouter.ai/api/v1",
 		"OPENAI_BASE_URL", "OPENROUTER_BASE_URL")
 	// OpenRouter's free router, not a pinned ":free" id: pinned free models
 	// are retired regularly, and the first run should cost nothing.
-	cfg.OpenAIModel = pick("openai_model", DefaultModel,
+	cfg.OpenAIModel = pick("openai_model", openaiSel.Model, DefaultModel,
 		"OPENAI_MODEL", "OPENROUTER_MODEL")
 	// Claude is chosen, never inferred from which keys happen to be exported.
 	// Its model has no bare ANTHROPIC_MODEL name: Claude Code reads that one,
 	// often set to an alias the API does not know.
-	cfg.Provider = strings.ToLower(pick("provider", "openai"))
-	cfg.ClaudeModel = pick("claude_model", DefaultClaudeModel)
-	cfg.AnthropicAPIKey = pick("anthropic_api_key", "", "ANTHROPIC_API_KEY")
-	cfg.AnthropicBaseURL = pick("anthropic_base_url", "https://api.anthropic.com", "ANTHROPIC_BASE_URL")
+	cfg.Provider = strings.ToLower(pick("provider", sel.Transport, "openai"))
+	cfg.ClaudeModel = pick("claude_model", claudeSel.Model, DefaultClaudeModel)
+	cfg.AnthropicBaseURL = pick("anthropic_base_url", claudeSel.BaseURL, "https://api.anthropic.com", "ANTHROPIC_BASE_URL")
+	// Where a key from the environment or config.yaml goes: the endpoint
+	// they name, not the one login chose.
+	cfg.fallback = map[string]fallbackKey{
+		"openai": {baseURL: pick("openai_base_url", "", "https://openrouter.ai/api/v1", "OPENAI_BASE_URL", "OPENROUTER_BASE_URL")},
+		"claude": {baseURL: pick("anthropic_base_url", "", "https://api.anthropic.com", "ANTHROPIC_BASE_URL")},
+	}
 	// Public instances out of the box ("auto"); "off" is the model-as-search
 	// mode that used to be the default, kept for runs that want no search.
-	cfg.SearXNGURL = pick("searxng_url", "auto", "SEARXNG_URL")
+	cfg.SearXNGURL = pick("searxng_url", "", "auto", "SEARXNG_URL")
 	if strings.EqualFold(cfg.SearXNGURL, "off") || strings.EqualFold(cfg.SearXNGURL, "none") {
 		cfg.SearXNGURL = ""
 	}
-	cfg.FirecrawlURL = pick("firecrawl_url", "", "FIRECRAWL_URL")
-	cfg.FirecrawlAPIKey = pick("firecrawl_api_key", "", "FIRECRAWL_API_KEY")
+	cfg.FirecrawlURL = pick("firecrawl_url", "", "", "FIRECRAWL_URL")
+	cfg.FirecrawlAPIKey = pick("firecrawl_api_key", "", "", "FIRECRAWL_API_KEY")
+}
+
+// savedFor is the saved selection when it is for transport, else nothing:
+// a saved Claude model is no OpenAI model.
+func savedFor(sel auth.Selection, transport string) auth.Selection {
+	if sel.Transport != transport {
+		return auth.Selection{}
+	}
+	return sel
+}
+
+// applyKeys picks the key for the endpoint the settings resolved to: a key
+// stored by `deep-research login` for that endpoint, else the environment's,
+// else the config file's. Every key is bound to an endpoint: a stored one to
+// the endpoint it was entered for, the environment's to the one the
+// environment and config file name. So an OPENAI_BASE_URL pointed elsewhere
+// for one run never receives the stored OpenRouter key, and a DeepSeek chosen
+// in login never receives the OPENAI_API_KEY meant for OpenRouter.
+func applyKeys(cfg *Config, v *viper.Viper, store *auth.Store, sel auth.Selection) error {
+	cfg.fallback["openai"] = fallbackFor(cfg.fallback["openai"], v, "openai_api_key", "OPENAI_API_KEY", "OPENROUTER_API_KEY")
+	cfg.fallback["claude"] = fallbackFor(cfg.fallback["claude"], v, "anthropic_api_key", "ANTHROPIC_API_KEY")
+	base, transport := cfg.OpenAIBaseURL, "openai"
+	if cfg.Provider == "claude" {
+		base, transport = cfg.AnthropicBaseURL, "claude"
+	}
+	key, from, err := store.KeyFor(base, sel.Provider)
+	if err != nil {
+		return fmt.Errorf("stored key for %s in %s: %w", from, store.Path(), err)
+	}
+	source := agent.KeyFromLogin
+	if fb := cfg.fallback[transport]; key == "" && auth.SameEndpoint(fb.baseURL, base) {
+		key, source = fb.key, fb.source
+	}
+	if key == "" {
+		source = ""
+	}
+	cfg.KeySource = source
+	if cfg.Provider == "claude" {
+		cfg.AnthropicAPIKey = key
+		// The API was picked over the subscription: a run must not go
+		// through Claude Code and bill the plan instead. The choice decides
+		// it, not the endpoint: an ANTHROPIC_BASE_URL overriding it for a run
+		// (a proxy) is still the API, and claude -p would ignore that URL.
+		cfg.ClaudeAPIOnly = sel.Transport == "claude" && sel.Provider != catalogClaudeSubscription
+		return nil
+	}
+	cfg.OpenAIAPIKey = key
+	return nil
+}
+
+// fallbackFor fills in f's key: the environment's, else the config file's.
+func fallbackFor(f fallbackKey, v *viper.Viper, keyName string, envNames ...string) fallbackKey {
+	f.key, f.source = strings.TrimSpace(firstEnv(append(envNames, EnvPrefix+"_"+strings.ToUpper(keyName))...)), agent.KeyFromEnv
+	if f.key == "" {
+		// The API key is a secret and belongs in auth.json, .env or the
+		// environment; it is still read from the file for symmetry.
+		f.key, f.source = strings.TrimSpace(v.GetString(keyName)), agent.KeyFromConfig
+	}
+	return f
+}
+
+// catalogClaudeSubscription is catalog.ClaudeSubscription; config does not
+// import the catalog for one string.
+const catalogClaudeSubscription = "claude-subscription"
+
+// AuthDir is where `deep-research login` keeps auth.json and model.json:
+// DEEP_RESEARCH_CONFIG_DIR when set, else the per-user config directory.
+// Never the project's config/ directory, which sits in a checkout.
+func AuthDir() (string, error) {
+	if d := os.Getenv("DEEP_RESEARCH_CONFIG_DIR"); d != "" {
+		return d, nil
+	}
+	return UserDir()
+}
+
+// loadLogin reads what `deep-research login` saved. With no user config
+// directory there is nothing saved, which is not an error.
+func loadLogin() (*auth.Store, auth.Selection, error) {
+	dir, err := AuthDir()
+	if err != nil {
+		return auth.Empty(), auth.Selection{}, nil
+	}
+	store, err := auth.Load(dir, os.Stderr)
+	if err != nil {
+		return nil, auth.Selection{}, err
+	}
+	sel, _, err := auth.LoadSelection(dir)
+	return store, sel, err
 }
 
 // Load resolves configuration via the Dirs chain.
@@ -331,7 +445,14 @@ func Load() (Config, error) {
 		cfg.DataFile = filepath.Join(home, cfg.DataFile[1:])
 	}
 
-	applyEnvDefaults(&cfg, v)
+	store, sel, err := loadLogin()
+	if err != nil {
+		return Config{}, err
+	}
+	applyEnvDefaults(&cfg, v, sel)
+	if err := applyKeys(&cfg, v, store, sel); err != nil {
+		return Config{}, err
+	}
 	if cfg.Provider != "openai" && cfg.Provider != "claude" {
 		return Config{}, fmt.Errorf("provider %q: want openai or claude (provider in config.yaml, or DEEP_RESEARCH_PROVIDER)", cfg.Provider)
 	}

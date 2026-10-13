@@ -1,4 +1,4 @@
-.PHONY: test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools
+.PHONY: catalog test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -21,6 +21,21 @@ e2e:
 # EVAL_CASE=name runs only the cases whose name contains it.
 eval-replay:
 	go test -tags eval -count=1 -timeout 30m -run TestEvalChecker -v ./internal/ui/
+
+# The provider/model list `deep-research login` shows offline: Catwalk's
+# catalog (MIT), kept to the provider types deep-research has a client for and
+# the fields it reads. The binary refreshes it at login when online; this
+# updates the copy built in. Not part of verify: it needs the network.
+CATALOG_FILTER = [.[] | select((.type | IN("openai","openai-compat","openrouter","vercel","anthropic")) and .api_key != null) | {id, name, type, api_endpoint, api_key, default_large_model_id, models: [.models[] | {id, name, cost_per_1m_in, cost_per_1m_out, context_window}]}]
+
+# One shell line with each step checked: piped, a failed curl still let jq
+# exit 0 on empty input and replace the snapshot with an empty file.
+catalog:
+	curl -fsSL https://catwalk.charm.land/v2/providers -o internal/catalog/catwalk.raw.tmp && \
+	jq -ce '$(CATALOG_FILTER) | select(length > 0)' internal/catalog/catwalk.raw.tmp > internal/catalog/catwalk.json.tmp && \
+	test -s internal/catalog/catwalk.json.tmp && \
+	mv internal/catalog/catwalk.json.tmp internal/catalog/catwalk.json; \
+	status=$$?; rm -f internal/catalog/catwalk.raw.tmp internal/catalog/catwalk.json.tmp; exit $$status
 
 # VERSION is stamped into the binary so --version reports the build rather
 # than the hardcoded "dev" it used to print for every release.

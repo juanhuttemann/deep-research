@@ -63,13 +63,16 @@ degrades to headless output — one log line per event, then the report.
 ./deep-research init          # config files, a .env template, where to get a key
 ```
 
-Get a free OpenRouter key (no card) at <https://openrouter.ai/keys> and put it
-in `.env` or your environment:
+Pick a provider and model, and paste the key (shown as `*`, stored readable
+only by you). A free OpenRouter key (no card) is at <https://openrouter.ai/keys>:
 
 ```bash
-export OPENAI_API_KEY="sk-or-..."
+./deep-research login
 ./deep-research -p "What are the latest advances in fusion energy?"
 ```
+
+`./deep-research model` switches later. Environment variables still work as
+the fallback: `export OPENAI_API_KEY="sk-or-..."`.
 
 Something off? `./deep-research doctor` checks the model endpoint and key,
 the search backend and the scraper — one cheap request each, no tokens — and
@@ -149,9 +152,11 @@ as printed by `doctor`. Hitting the daily cap fails at once with a message
 instead of burning retries; a per-minute limit waits for the provider's
 `Retry-After`.
 
-Any OpenAI-compatible endpoint works — paid OpenRouter, OpenAI, or a local
-vLLM, llama.cpp or LM Studio server, which needs no key: set
-`OPENAI_BASE_URL` and `OPENAI_MODEL`.
+`deep-research login` lists the providers it can drive — OpenRouter, OpenAI,
+Anthropic and some thirty OpenAI- or Anthropic-compatible ones, from
+[Catwalk](https://github.com/charmbracelet/catwalk)'s catalog — and a custom
+endpoint for a local vLLM, llama.cpp or LM Studio server, which needs no key.
+Without login, set `OPENAI_BASE_URL` and `OPENAI_MODEL`.
 
 Or Claude: `DEEP_RESEARCH_PROVIDER=claude` runs on your Claude subscription
 through Claude Code when it is signed in (`claude auth login`), and on
@@ -168,6 +173,8 @@ See [Claude](docs/configuration.md#claude).
 ./deep-research serve                               # launch and audit runs in the browser
 ./deep-research --resume reports/<run>.partial.json # continue an interrupted run
 ./deep-research list                                # past runs
+./deep-research login                               # pick provider + model, store the key
+./deep-research model                               # switch provider or model
 ./deep-research doctor                              # check model, key, search
 ./deep-research init --docker                       # local SearXNG setup
 ./deep-research update                              # install the latest release
@@ -177,12 +184,14 @@ Full flag reference, key bindings and export details: [docs/usage.md](docs/usage
 
 ## Configuration
 
-Settings resolve environment > `config/config.yaml` > embedded defaults, and
-every `config.yaml` key is also settable as `DEEP_RESEARCH_<KEY>`.
+Settings resolve environment > what `deep-research login` picked >
+`config/config.yaml` > embedded defaults, and every `config.yaml` key is also
+settable as `DEEP_RESEARCH_<KEY>`. A key stored by `login` wins over the
+environment's.
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key | — (required) |
+| `OPENAI_API_KEY` | LLM API key, when `login` stored none | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `DEEP_RESEARCH_PROVIDER` | `openai`, or `claude` for Claude Code / `ANTHROPIC_API_KEY` | `openai` |
