@@ -76,15 +76,6 @@ type searxInstance struct {
 	html atomic.Bool
 }
 
-// SearXNGResult represents a single search result from SearXNG
-type SearXNGResult struct {
-	Title   string  `json:"title"`
-	URL     string  `json:"url"`
-	Content string  `json:"content"`
-	Engine  string  `json:"engine"`
-	Score   float64 `json:"score"`
-}
-
 // NewSearXNGClient creates a client for baseURL: one instance, a
 // comma-separated list, or "auto" for public instances listed on searx.space.
 func NewSearXNGClient(baseURL string, timeout time.Duration) *SearXNGClient {
@@ -107,7 +98,7 @@ func NewSearXNGClient(baseURL string, timeout time.Duration) *SearXNGClient {
 }
 
 // Search runs query on the first instance that answers.
-func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearXNGResult, error) {
+func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearchResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, maxQueryTimeout)
 	defer cancel()
 	insts, err := c.candidates(ctx)
@@ -210,6 +201,9 @@ func (c *SearXNGClient) runDiscovery(ctx context.Context, d *discovery) {
 	}
 }
 
+// Name is "searxng".
+func (c *SearXNGClient) Name() string { return EngineSearXNG }
+
 // Preferred is the instance the next query goes to first: after a success,
 // the one that answered.
 func (c *SearXNGClient) Preferred() string {
@@ -232,7 +226,7 @@ func (c *SearXNGClient) prefer(in *searxInstance) {
 }
 
 // searchOne queries one instance, through JSON unless it has refused it.
-func (c *SearXNGClient) searchOne(ctx context.Context, in *searxInstance, query string) ([]SearXNGResult, error) {
+func (c *SearXNGClient) searchOne(ctx context.Context, in *searxInstance, query string) ([]SearchResult, error) {
 	if !in.html.Load() {
 		res, err := c.searchJSON(ctx, in.url, query)
 		if !refusedJSON(err) {
@@ -286,7 +280,7 @@ func (c *SearXNGClient) get(ctx context.Context, base, query string, asJSON bool
 	return resp, nil
 }
 
-func (c *SearXNGClient) searchJSON(ctx context.Context, base, query string) ([]SearXNGResult, error) {
+func (c *SearXNGClient) searchJSON(ctx context.Context, base, query string) ([]SearchResult, error) {
 	resp, err := c.get(ctx, base, query, true)
 	if err != nil {
 		return nil, err
@@ -297,7 +291,7 @@ func (c *SearXNGClient) searchJSON(ctx context.Context, base, query string) ([]S
 		return nil, errNotJSON
 	}
 	var data struct {
-		Results []SearXNGResult `json:"results"`
+		Results []SearchResult `json:"results"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&data); err != nil {
 		return nil, fmt.Errorf("decode search response: %w", err)
@@ -305,7 +299,7 @@ func (c *SearXNGClient) searchJSON(ctx context.Context, base, query string) ([]S
 	return c.limit(data.Results), nil
 }
 
-func (c *SearXNGClient) searchHTML(ctx context.Context, base, query string) ([]SearXNGResult, error) {
+func (c *SearXNGClient) searchHTML(ctx context.Context, base, query string) ([]SearchResult, error) {
 	resp, err := c.get(ctx, base, query, false)
 	if err != nil {
 		return nil, err
@@ -318,7 +312,7 @@ func (c *SearXNGClient) searchHTML(ctx context.Context, base, query string) ([]S
 	return c.limit(res), nil
 }
 
-func (c *SearXNGClient) limit(res []SearXNGResult) []SearXNGResult {
+func (c *SearXNGClient) limit(res []SearchResult) []SearchResult {
 	if len(res) > c.ResultLimit {
 		return res[:c.ResultLimit]
 	}
@@ -329,12 +323,12 @@ func (c *SearXNGClient) limit(res []SearXNGResult) []SearXNGResult {
 // holds an h3 > a[href] with the title and a p.content with the snippet. A
 // page with no results list at all (id="urls") is not a search that found
 // nothing — it is a challenge or an error page.
-func parseResultsHTML(r io.Reader) ([]SearXNGResult, error) {
+func parseResultsHTML(r io.Reader) ([]SearchResult, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
 		return nil, fmt.Errorf("parse search page: %w", err)
 	}
-	var out []SearXNGResult
+	var out []SearchResult
 	found := false
 	for n := range doc.Descendants() {
 		if n.Type != html.ElementNode {
@@ -355,8 +349,8 @@ func parseResultsHTML(r io.Reader) ([]SearXNGResult, error) {
 	return out, nil
 }
 
-func parseArticle(article *html.Node) (SearXNGResult, bool) {
-	var res SearXNGResult
+func parseArticle(article *html.Node) (SearchResult, bool) {
+	var res SearchResult
 	for n := range article.Descendants() {
 		switch {
 		case n.Type != html.ElementNode:
@@ -419,15 +413,29 @@ func DialFailure(err error) (reason string, ok bool) {
 // connect: connection refused"); what the reader acts on is which server and
 // why.
 type unreachableError struct {
+	// service names what was not reached; empty reads as SearXNG, the one
+	// engine whose address the reader configures.
+	service     string
 	url, reason string
 	err         error
 }
 
 func (e *unreachableError) Error() string {
-	return fmt.Sprintf("cannot reach SearXNG at %s (%s)", e.url, e.reason)
+	return fmt.Sprintf("cannot reach %s at %s (%s)", cmp.Or(e.service, "SearXNG"), e.url, e.reason)
 }
 
 func (e *unreachableError) Unwrap() error { return e.err }
+
+// UnreachableService names the service err could not reach — "SearXNG",
+// "Exa" or "Tavily" — or "" when err is not a failure to reach one. The hint
+// that follows a failed run depends on it: SEARXNG_URL is no help when the
+// service nothing answered at was Exa.
+func UnreachableService(err error) string {
+	if ue, ok := errors.AsType[*unreachableError](err); ok {
+		return cmp.Or(ue.service, "SearXNG")
+	}
+	return ""
+}
 
 // SearchStatus names how a search failed, for the run's events: a limiter or
 // a challenge is a state to report, not an info line.
@@ -443,6 +451,16 @@ func SearchStatus(err error) string {
 		switch he.Code {
 		case http.StatusTooManyRequests:
 			return "rate-limited"
+		case http.StatusUnauthorized:
+			// A missing or wrong key, which no retry or other instance will
+			// fix — when the service takes one.
+			if he.Keyed {
+				return "unauthorized"
+			}
+		case http.StatusPaymentRequired, tavilyPlanLimit, tavilyKeyLimit:
+			if he.Keyed {
+				return "quota"
+			}
 		case http.StatusForbidden:
 			return "blocked"
 		case http.StatusTeapot, http.StatusAccepted:

@@ -81,6 +81,23 @@ func TestDiagnoseFlagsWhatIsBroken(t *testing.T) {
 	}
 }
 
+// A hosted engine chosen without its key fails doctor before any request, and
+// one with its key needs no scraper: the pages come with the results.
+func TestDiagnoseHostedSearch(t *testing.T) {
+	cfg := Config{SearchEngine: "exa", ModelCallTimeout: time.Second}
+	if c := checkSearch(context.Background(), cfg); c.OK || !strings.Contains(c.Detail, "EXA_API_KEY") {
+		t.Errorf("a missing Exa key passed: %+v", c)
+	}
+	cfg.ExaAPIKey = "k"
+	if c := checkScraper(context.Background(), cfg); !c.OK || !strings.Contains(c.Detail, "exa returns page text") {
+		t.Errorf("scraper check = %+v", c)
+	}
+	cfg.Scraper = "tavily"
+	if c := checkScraper(context.Background(), cfg); c.OK || !strings.Contains(c.Detail, "TAVILY_API_KEY") {
+		t.Errorf("a missing Tavily key passed: %+v", c)
+	}
+}
+
 // The free-model daily cap is counted in requests, and the key endpoint
 // reports it; doctor showed usage in dollars only, which says nothing about
 // how many free-model runs are left today.

@@ -5,6 +5,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Exa and Tavily as search engines (`search_engine: exa|tavily`, with
+  `EXA_API_KEY` / `TAVILY_API_KEY`). Each search returns the result pages'
+  text as well, so a query is one request and needs no scraper; a result that
+  brought its text is never scraped. Either can also be the scraper behind
+  SearXNG (`scraper: exa|tavily`). Nothing changes unless one is chosen: a key
+  in the environment alone sends no query anywhere.
+- A rejected key or exhausted credit on a hosted engine is reported as
+  `unauthorized` or `quota`, and `doctor` checks the configured engine and
+  scraper.
+- `serve` shows the model and provider, and the search engine and page
+  source, in the page's top bar.
+
 ## [0.8.0] - 2026-10-13
 
 ### Added

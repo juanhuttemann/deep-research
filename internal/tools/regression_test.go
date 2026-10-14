@@ -33,7 +33,7 @@ func TestFirecrawlTargetErrorsKeepOnlySearchSnippet(t *testing.T) {
 				fmt.Fprintf(w, `{"success":true,"data":{"markdown":"Error page","metadata":{"title":"Error","statusCode":%d,"error":"Target failed"}}}`, code)
 			}))
 			defer fc.Close()
-			got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q", nil)
+			got, err := newSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -58,7 +58,7 @@ func TestSearchSpendsBudgetOnRelevantResults(t *testing.T) {
 		{"title": "Locking in Go, with examples", "url": "https://gophernotes.example/4", "content": "sync.RWMutex allows many readers"},
 	})
 	fc := newFirecrawlServer(t)
-	tools := NewSearchTools(sx.URL, fc.URL, 0)
+	tools := newSearchTools(sx.URL, fc.URL, 0)
 	tools.MaxURLsPerQuery = 2
 
 	got, err := tools.Search(context.Background(), "What are the trade-offs between sync.Mutex and sync.RWMutex in Go?",
@@ -171,7 +171,7 @@ func TestBlankScrapeKeepsTheSnippet(t *testing.T) {
 		fmt.Fprint(w, `{"success":true,"data":{"markdown":"  \n","metadata":{"title":"Loading…","statusCode":200}}}`)
 	}))
 	defer fc.Close()
-	got, err := NewSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q", nil)
+	got, err := newSearchTools(sx.URL, fc.URL, 0).Search(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestBlankScrapeKeepsTheSnippet(t *testing.T) {
 // was off-topic and the run came back empty; a query in Japanese alone yielded
 // no terms and was never judged at all. Planner terms need no word boundaries.
 func TestRelevanceJudgesCJKResults(t *testing.T) {
-	in := []SearXNGResult{
+	in := []SearchResult{
 		{Title: "東京の天気予報", URL: "https://weather.example/tokyo", Content: "今日は晴れ、明日は雨の予報です。"},
 		{Title: "量子誤り訂正の現状", URL: "https://qc.example/qec", Content: "表面符号のしきい値と実機での課題を解説します。"},
 	}
@@ -285,7 +285,7 @@ func TestSearchSkipsPagesTheRunHasBeforeTheBudget(t *testing.T) {
 	}))
 	defer fc.Close()
 
-	st := NewSearchTools(sx.URL, fc.URL, 5*time.Second)
+	st := newSearchTools(sx.URL, fc.URL, 5*time.Second)
 	st.MaxURLsPerQuery = 2
 	st.Skip = func(url string) bool { return url == "https://a.example/1" }
 	res, err := st.Search(context.Background(), "q", nil)
@@ -597,7 +597,7 @@ func TestScrapeDeadlineDoesNotFollowTheModelCallTimeout(t *testing.T) {
 	defer fc.Close()
 	var client time.Duration
 	for _, model := range []time.Duration{2 * time.Minute, 10 * time.Minute} {
-		got := NewSearchTools("http://searx.invalid", fc.URL, model).Firecrawl.HTTPClient.Timeout
+		got := newSearchTools("http://searx.invalid", fc.URL, model).Scraper.(*FirecrawlClient).HTTPClient.Timeout
 		if got >= 2*time.Minute || (client != 0 && got != client) {
 			t.Errorf("model timeout %v gave the scraper %v", model, got)
 		}

@@ -232,6 +232,22 @@ The hosted service rejects unauthenticated scrapes with 401, and the run
 continues on search snippets rather than stopping, so a missing or wrong key
 shows up as every source being `snippet only`.
 
+## Using Exa or Tavily instead
+
+Both are hosted search APIs that return each result's page text with the
+search, so they replace SearXNG and Firecrawl together with one key:
+
+```sh
+DEEP_RESEARCH_SEARCH_ENGINE=exa      # or tavily
+EXA_API_KEY=...                      # or TAVILY_API_KEY=tvly-...
+```
+
+Either can also extract pages behind SearXNG, in place of Firecrawl:
+`DEEP_RESEARCH_SCRAPER=exa` (or `tavily`) with its key. `deep-research doctor`
+runs one query and says which engine answered. Every query goes to that
+company and spends its credit; costs are in
+[configuration.md](configuration.md#hosted-search-exa-and-tavily).
+
 ## Troubleshooting
 
 | Symptom | Fix |

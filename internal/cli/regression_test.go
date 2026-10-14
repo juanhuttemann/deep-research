@@ -375,3 +375,15 @@ func TestInitSaysWhereTheEnvWent(t *testing.T) {
 		t.Errorf("init says every file went to the config dir:\n%s", out.String())
 	}
 }
+
+// A missing Exa key failed the run under "Pick a provider and store its key:
+// deep-research login", sending the reader to fix a model key that worked.
+func TestSearchSettingErrorHasNoLoginHint(t *testing.T) {
+	d := Deps{Assistant: func() (agent.Assistant, error) {
+		return agent.New(agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: "http://127.0.0.1:1", SearchEngine: "exa"})
+	}}
+	_, err := pickAssistant(d)
+	if err == nil || !strings.Contains(err.Error(), "EXA_API_KEY") || strings.Contains(err.Error(), "deep-research login") {
+		t.Errorf("error = %v", err)
+	}
+}

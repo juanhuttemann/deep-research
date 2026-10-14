@@ -70,6 +70,11 @@ const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
 # SEARXNG_URL=http://localhost:8888
 # FIRECRAWL_URL=http://localhost:3002
 # FIRECRAWL_API_KEY=
+# Hosted search instead of SearXNG (page text comes with each result):
+# DEEP_RESEARCH_SEARCH_ENGINE=exa
+# EXA_API_KEY=
+# DEEP_RESEARCH_SEARCH_ENGINE=tavily
+# TAVILY_API_KEY=
 `
 
 // DefaultModel is the model a fresh checkout uses.
@@ -298,6 +303,15 @@ func applyEnvDefaults(cfg *Config, v *viper.Viper, sel auth.Selection) {
 	}
 	cfg.FirecrawlURL = pick("firecrawl_url", "", "", "FIRECRAWL_URL")
 	cfg.FirecrawlAPIKey = pick("firecrawl_api_key", "", "", "FIRECRAWL_API_KEY")
+	// The engine is chosen, never inferred from an exported key: a key alone
+	// would quietly send every query to a paid third party.
+	cfg.SearchEngine = strings.ToLower(pick("search_engine", "", "searxng"))
+	if cfg.SearchEngine == "none" {
+		cfg.SearchEngine = "off"
+	}
+	cfg.Scraper = strings.ToLower(pick("scraper", "", ""))
+	cfg.ExaAPIKey = pick("exa_api_key", "", "", "EXA_API_KEY")
+	cfg.TavilyAPIKey = pick("tavily_api_key", "", "", "TAVILY_API_KEY")
 }
 
 // savedFor is the saved selection when it is for transport, else nothing:

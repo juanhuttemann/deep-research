@@ -78,10 +78,35 @@ login), so a run never bills the plan when you chose the API.
 | `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
 | `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: search snippets only) |
 | `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none) | — |
+| `DEEP_RESEARCH_SEARCH_ENGINE` | `searxng`, `exa`, `tavily` or `off` (LLM search) | `searxng` |
+| `DEEP_RESEARCH_SCRAPER` | `firecrawl`, `exa`, `tavily` or `none` | `firecrawl` when `FIRECRAWL_URL` is set, else `none` |
+| `EXA_API_KEY` | key for [Exa](https://exa.ai), as engine or scraper | — |
+| `TAVILY_API_KEY` | key for [Tavily](https://tavily.com), as engine or scraper | — |
 
 A trailing slash on `FIRECRAWL_URL` is ignored when building API paths.
 
 To run SearXNG and Firecrawl yourself, see [services.md](services.md).
+
+### Hosted search: Exa and Tavily
+
+`search_engine: exa` or `search_engine: tavily` searches through that service
+instead of SearXNG. Each search asks for every result's page text too (Exa
+`contents.text`, Tavily `include_raw_content`), so a query is one request and
+no scraper is needed: a result that brought its text is labelled `✓ fetched`
+and never scraped. A scraper, when one is set, only covers a result that came
+back without text.
+
+`scraper: exa` or `scraper: tavily` uses the service's extract endpoint
+(`/contents`, `/extract`) as the scraper instead of Firecrawl, behind any
+engine, SearXNG included.
+
+The engine is chosen, never inferred from an exported key: with a hosted
+engine every query goes to that company and spends its credit. Measured
+October 2026: Exa charged a flat $0.007 per search, the ten results' text and
+highlights included, and about $0.001 per extracted page; Tavily charges one credit per basic search and one
+per five extracted pages. An engine chosen without its key fails at start, and
+a rejected key or exhausted credit is reported as `unauthorized` or `quota`
+rather than falling back to SearXNG or to the model.
 
 ### The default model
 
@@ -120,7 +145,8 @@ names are still read as a fallback, so existing `.env` files keep working.
 
 Each of these can also be written in `config.yaml` under the lower-case key
 (`openai_base_url`, `openai_model`, `searxng_url`, `firecrawl_url`,
-`firecrawl_api_key`); the environment variable wins where both are set. Keep
+`firecrawl_api_key`, `search_engine`, `scraper`, `exa_api_key`,
+`tavily_api_key`); the environment variable wins where both are set. Keep
 the API key in `.env`, not in the config file.
 
 ### Claude
@@ -214,7 +240,8 @@ and leaves existing ones alone.
 
 Which mode a run uses is decided by what is configured:
 
-- **Web search** — `searxng_url` set, which it is by default (`auto`).
+- **Web search** — `searxng_url` set, which it is by default (`auto`), or
+  `search_engine` set to `exa` or `tavily` (see above).
   Findings come from real web search. With `firecrawl_url` set too, each
   result page is scraped for its full text; without it the search snippet is
   the source. Firecrawl is given 60 seconds per page, and the request gives
@@ -241,9 +268,10 @@ Which mode a run uses is decided by what is configured:
     asked for first; an instance that refuses it is read through HTML.
   - A search that every instance refuses fails with its reason —
     `rate-limited`, `challenge`, `blocked`, `unreachable` (nothing answers at
-    the address) or `unavailable` — on the event and in the error. It is never replaced by the model inventing findings,
+    the address), `unauthorized` or `quota` (a hosted engine's key) or
+    `unavailable` — on the event and in the error. It is never replaced by the model inventing findings,
     and a run whose every search failed stops before analysing nothing.
-- **LLM search** — `searxng_url: off`. The model itself proposes the findings
+- **LLM search** — `searxng_url: off` or `search_engine: off`. The model itself proposes the findings
   and their URLs. Nothing is fetched, so every source is labelled
   `~ unverified` and exported with that status. The fact-check phase says so
   too: with no retrieved page to check an answer against, it runs as a

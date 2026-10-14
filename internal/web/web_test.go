@@ -245,10 +245,44 @@ func TestRunsListsReportsNewestFirst(t *testing.T) {
 	}
 }
 
+// The page shows the model and search the server's runs use.
+func TestInfoServesTheSetup(t *testing.T) {
+	calls := 0
+	s := New(context.Background(), fstest.MapFS{}, nil)
+	s.Info = func() (any, error) {
+		calls++
+		return map[string]string{"model": "m" + strconv.Itoa(calls)}, nil
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	for want := 1; want <= 2; want++ {
+		resp, err := http.Get(srv.URL + "/api/info")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&got)
+		_ = resp.Body.Close()
+		if got["model"] != "m"+strconv.Itoa(want) {
+			t.Errorf("load %d: %v", want, got)
+		}
+	}
+	bare := httptest.NewServer(New(context.Background(), fstest.MapFS{}, nil).Handler())
+	defer bare.Close()
+	resp, err := http.Get(bare.URL + "/api/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if b, _ := io.ReadAll(resp.Body); resp.StatusCode != http.StatusOK || strings.TrimSpace(string(b)) != "{}" {
+		t.Errorf("no Info: %d %q", resp.StatusCode, b)
+	}
+}
+
 // The page calls the server by path; a typo in one is invisible until a
 // button does nothing.
 func TestPageCallsTheServedEndpoints(t *testing.T) {
-	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`, `"/api/ask"`} {
+	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`, `"/api/ask"`, `"/api/info"`} {
 		if !strings.Contains(string(page), path) {
 			t.Errorf("index.html never calls %s", path)
 		}

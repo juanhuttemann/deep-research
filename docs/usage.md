@@ -228,6 +228,14 @@ in the tab and starts again when another run is opened.
 | `--addr HOST:PORT` | `127.0.0.1:7777` | address to listen on |
 | `--reports DIR` | `reports` | where runs write their artifacts; served read-only at `/reports/`, with a directory listing |
 
+- The top bar shows what the next run uses: the model and its provider's
+  host, and the search engine and where page text comes from (`firecrawl`,
+  `exa`, `tavily`, `page text included` when the engine sends it with each
+  result, or `snippets only`), and `not usable:` with the reason for a
+  search setting a run would refuse. It is the configuration `serve` loaded
+  when it started (`/api/info`), which is what every run it launches uses:
+  restart `serve` after `deep-research model` to change it. Hover a chip for
+  the full text.
 - One run at a time: a second launch is refused until the first ends.
 - Closing or reloading the tab does not cancel the run; the Cancel button
   does. A dropped connection resumes from the last event it saw

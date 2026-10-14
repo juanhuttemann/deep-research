@@ -53,3 +53,12 @@ parallelism: 3
 # hosted service rejects an unauthenticated scrape with 401, which shows up as
 # every source degrading to "snippet only". FIRECRAWL_API_KEY overrides this.
 # firecrawl_api_key:
+
+# Hosted search instead of SearXNG: exa or tavily. Each search returns the
+# pages' text too, so no scraper is needed. Every query goes to that company
+# and spends its credit; it is never chosen just because a key is set.
+# scraper picks the page extractor behind any engine: firecrawl (the default
+# when firecrawl_url is set), exa, tavily or none. Keys: EXA_API_KEY /
+# TAVILY_API_KEY, in .env rather than here. docs/configuration.md has costs.
+# search_engine: searxng
+# scraper: firecrawl

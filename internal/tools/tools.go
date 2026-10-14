@@ -40,6 +40,9 @@ const scrapeTimeout = 60 * time.Second
 // for a slow model, and held each stalled scrape that long.
 const scrapeWait = scrapeTimeout + 10*time.Second
 
+// Name is "firecrawl".
+func (c *FirecrawlClient) Name() string { return ScraperFirecrawl }
+
 // NewFirecrawlClient creates a new Firecrawl client
 func NewFirecrawlClient(baseURL string, timeout time.Duration) *FirecrawlClient {
 	if timeout <= 0 {
@@ -231,10 +234,39 @@ func truncateUTF8(s string, limit int) string {
 	return s[:cut] + "..."
 }
 
+// SearchResult is one result a search engine returned.
+type SearchResult struct {
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	Content string  `json:"content"`
+	Engine  string  `json:"engine"`
+	Score   float64 `json:"score"`
+	// Body is the page's full text when the engine returned it with the
+	// result (Exa, Tavily). A result that has it is not scraped: the text is
+	// already here, and a second fetch would cost another request per page.
+	Body string `json:"-"`
+}
+
+// Searcher is a web search engine: SearXNG, Exa or Tavily.
+type Searcher interface {
+	Search(ctx context.Context, query string) ([]SearchResult, error)
+	// Name is the engine as search_engine spells it.
+	Name() string
+}
+
+// Scraper fetches one page's text: Firecrawl, Exa or Tavily.
+type Scraper interface {
+	ScrapeURL(ctx context.Context, url string) (*ScrapedContent, error)
+	// Name is the scraper as the scraper setting spells it.
+	Name() string
+}
+
 // SearchTools provides real web search and webpage scraping capabilities.
 type SearchTools struct {
-	SearXNG         *SearXNGClient
-	Firecrawl       *FirecrawlClient
+	Engine Searcher
+	// Scraper is nil when none is configured, and every result without a Body
+	// then keeps its search snippet.
+	Scraper         Scraper
 	MaxURLsPerQuery int
 	// ScrapeParallelism bounds how many pages are scraped concurrently within
 	// a single search. Zero or less means sequential.
@@ -269,6 +301,10 @@ func (s *SearchTools) log(msg string) {
 type httpError struct {
 	Code int
 	Body string
+	// Keyed is set for a service that takes an API key (Exa, Tavily). Only
+	// there is a 401 a key to fix or a 402 credit to buy: a public SearXNG
+	// instance behind basic auth answers 401 too, and has no key of yours.
+	Keyed bool
 }
 
 func (e *httpError) Error() string {
@@ -319,31 +355,12 @@ func DomainOf(u string) string {
 	return u
 }
 
-// NewSearchTools creates a new SearchTools instance. searxURL is one instance,
-// a comma-separated list, or "auto" (see NewSearXNGClient). An empty
-// firecrawlURL means no scraper: every source keeps its search snippet and is
-// labelled snippet-only, which is still real search.
-func NewSearchTools(searxURL, firecrawlURL string, timeout time.Duration) *SearchTools {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	t := &SearchTools{
-		SearXNG:           NewSearXNGClient(searxURL, timeout),
-		MaxURLsPerQuery:   3,
-		ScrapeParallelism: 4,
-	}
-	if strings.TrimSpace(firecrawlURL) != "" {
-		t.Firecrawl = NewFirecrawlClient(firecrawlURL, scrapeWait)
-	}
-	return t
-}
-
 // scrape fetches a page's text, or reports that there is no scraper.
 func (s *SearchTools) scrape(ctx context.Context, url string) (*ScrapedContent, error) {
-	if s.Firecrawl == nil {
+	if s.Scraper == nil {
 		return nil, errNoScraper
 	}
-	return s.Firecrawl.ScrapeURL(ctx, url)
+	return s.Scraper.ScrapeURL(ctx, url)
 }
 
 // SearchResults is the full result of a search query.
@@ -394,9 +411,9 @@ type SearchFinding struct {
 }
 
 // dedupeResults keeps the first result for each distinct URL, in search order.
-func dedupeResults(in []SearXNGResult) []SearXNGResult {
+func dedupeResults(in []SearchResult) []SearchResult {
 	seen := make(map[string]bool, len(in))
-	out := make([]SearXNGResult, 0, len(in))
+	out := make([]SearchResult, 0, len(in))
 	for _, r := range in {
 		key := CanonicalURL(r.URL)
 		if key == "" || seen[key] {
@@ -432,20 +449,20 @@ func CanonicalURL(raw string) string {
 	return u.String()
 }
 
-// Search performs a real web search via SearXNG and enriches each result
-// by scraping the page via Firecrawl, so findings carry the actual page
-// text (quotable content) rather than just a search snippet. The snippet
+// Search performs a real web search and enriches each result with the page's
+// full text — the body the engine returned with it, or a scrape — so findings
+// carry the actual page text (quotable content) rather than just a snippet. The snippet
 // is kept as a fallback when scraping a URL fails, so a slow scraper
 // never drops an otherwise good result. terms rank the results; see
 // rankByRelevance.
 func (s *SearchTools) Search(ctx context.Context, query string, terms []string) (*SearchResults, error) {
 	// Returned as it is: every caller says "search failed" itself, and the
 	// prefix here printed it twice in every error line.
-	searchResults, err := s.SearXNG.Search(ctx, query)
+	searchResults, err := s.Engine.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	s.log(fmt.Sprintf("  searxng   %d results", len(searchResults)))
+	s.log(fmt.Sprintf("  %-9s %d results", s.Engine.Name(), len(searchResults)))
 
 	// SearXNG fans a query out to several engines, so the same page can come
 	// back once per engine. Deduplicating before the budget is applied stops a
@@ -462,9 +479,9 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 		// are not reported as off-topic.
 		ranked = ranked[:s.MaxURLsPerQuery]
 	}
-	candidates := make([]SearXNGResult, len(ranked))
+	candidates := make([]SearchResult, len(ranked))
 	for i, r := range ranked {
-		candidates[i] = r.SearXNGResult
+		candidates[i] = r.SearchResult
 	}
 	var skipped []SkippedSource
 	for _, r := range offTopic {
@@ -491,7 +508,7 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 
 	for i, r := range candidates {
 		wg.Add(1)
-		go func(i int, r SearXNGResult) {
+		go func(i int, r SearchResult) {
 			defer wg.Done()
 			select {
 			case sem <- struct{}{}:
@@ -540,11 +557,20 @@ func (s *SearchTools) splitKnown(ranked []ScoredResult) (fresh []ScoredResult, k
 	return fresh, known
 }
 
+// body is the result's full text: the one the engine sent with it, else a
+// scrape.
+func (s *SearchTools) body(ctx context.Context, r SearchResult) (*ScrapedContent, error) {
+	if strings.TrimSpace(r.Body) != "" {
+		return &ScrapedContent{URL: r.URL, Content: r.Body}, nil
+	}
+	return s.scrape(ctx, r.URL)
+}
+
 // fetch scrapes one search result and labels how its content was obtained.
-func (s *SearchTools) fetch(ctx context.Context, r SearXNGResult) (SearchFinding, SourceSignal) {
+func (s *SearchTools) fetch(ctx context.Context, r SearchResult) (SearchFinding, SourceSignal) {
 	title, content := r.Title, r.Content
 	signal := SourceSignal{URL: r.URL, Domain: DomainOf(r.URL), Status: "ok"}
-	scraped, err := s.scrape(ctx, r.URL)
+	scraped, err := s.body(ctx, r)
 	// A 200 with an empty body is a page the scraper could not read (JS-only,
 	// PDF, paywall), not a page with nothing on it. Taking it as a fetch threw
 	// away the snippet and labelled a blank source a clean 200.

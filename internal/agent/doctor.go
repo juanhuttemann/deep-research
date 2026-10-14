@@ -218,46 +218,82 @@ func getJSON(ctx context.Context, u, key string) ([]byte, error) {
 
 // checkSearch runs one real query: searx.space's checker is whitelisted by
 // most limiters, so only a query from here proves an instance answers this
-// client.
+// client, and only a query proves a hosted engine takes the key.
 func checkSearch(ctx context.Context, cfg Config) Check {
 	c := Check{Name: "search"}
-	if cfg.SearXNGURL == "" {
+	if !cfg.SearchEnabled() {
 		c.OK, c.Detail = true, "off — the model supplies findings from memory; every source is unverified"
+		return c
+	}
+	engine, err := tools.NewEngine(cfg.SearchOptions(), cfg.ModelCallTimeout)
+	if err != nil {
+		c.Detail = err.Error()
 		return c
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*diagnoseTimeout)
 	defer cancel()
-	client := tools.NewSearXNGClient(cfg.SearXNGURL, cfg.ModelCallTimeout)
-	res, err := client.Search(ctx, "open source metasearch engine")
+	res, err := engine.Search(ctx, "open source metasearch engine")
 	if err != nil {
 		c.Detail = fmt.Sprintf("%s: %v", tools.SearchStatus(err), err)
 		return c
 	}
 	c.OK = true
-	c.Detail = fmt.Sprintf("%s answered (%d %s)", client.Preferred(), len(res), pick(len(res), "result", "results"))
-	if strings.EqualFold(cfg.SearXNGURL, "auto") {
+	c.Detail = fmt.Sprintf("%s answered (%d %s)", searchEndpoint(engine), len(res), pick(len(res), "result", "results"))
+	switch {
+	case strings.EqualFold(cfg.SearXNGURL, "auto") && !tools.InlineText(cfg.SearchEngine):
 		c.Detail += " — a public instance: every query goes to a third party you did not pick"
+	case tools.InlineText(cfg.SearchEngine):
+		c.Detail += " — a hosted service: every query goes to it and spends credit"
 	}
 	return c
 }
 
-// checkScraper scrapes one well-known page through Firecrawl.
+// searchEndpoint names who answered: the SearXNG instance, or the hosted API.
+func searchEndpoint(e tools.Searcher) string {
+	switch e := e.(type) {
+	case *tools.SearXNGClient:
+		return e.Preferred()
+	case *tools.ExaClient:
+		return e.BaseURL
+	case *tools.TavilyClient:
+		return e.BaseURL
+	}
+	return "search"
+}
+
+// checkScraper reads one well-known page through the configured scraper.
 func checkScraper(ctx context.Context, cfg Config) Check {
 	c := Check{Name: "scraper"}
-	if cfg.SearXNGURL == "" {
+	if !cfg.SearchEnabled() {
 		c.OK, c.Detail = true, "not used — search is off"
 		return c
 	}
-	if cfg.FirecrawlURL == "" {
+	scraper, err := tools.NewScraper(cfg.SearchOptions(), diagnoseTimeout)
+	if err != nil {
+		c.Detail = err.Error()
+		return c
+	}
+	if scraper == nil {
 		c.OK, c.Detail = true, "none — sources are search snippets, labelled snippet only"
+		if tools.InlineText(cfg.SearchEngine) {
+			c.Detail = "none needed — " + strings.ToLower(cfg.SearchEngine) + " returns page text with each result"
+		}
 		return c
 	}
-	fc := tools.NewFirecrawlClient(cfg.FirecrawlURL, diagnoseTimeout)
-	fc.APIKey = cfg.FirecrawlAPIKey
-	if _, err := fc.ScrapeURL(ctx, "https://example.com"); err != nil {
-		c.Detail = fmt.Sprintf("%s: %v", cfg.FirecrawlURL, err)
+	where := scraperName(cfg, scraper)
+	if _, err := scraper.ScrapeURL(ctx, "https://example.com"); err != nil {
+		c.Detail = fmt.Sprintf("%s: %v", where, err)
 		return c
 	}
-	c.OK, c.Detail = true, cfg.FirecrawlURL+" scraped a page"
+	c.OK, c.Detail = true, where+" scraped a page"
 	return c
+}
+
+// scraperName is the scraper's name, or for Firecrawl, which runs anywhere,
+// its address.
+func scraperName(cfg Config, s tools.Scraper) string {
+	if s.Name() == tools.ScraperFirecrawl {
+		return cfg.FirecrawlURL
+	}
+	return s.Name()
 }

@@ -132,8 +132,8 @@ Code: `claude -p` talks to Anthropic, so it cannot serve a Kimi model.
 cmd/deep-research   entrypoint; version is stamped in at link time
 internal/
   agent     one LLM phase per method (ResearchDetail / Analyze / FactCheck /
-            Summarize / Plan); real search via internal/tools when SearXNG
-            is configured; Diagnose for `doctor`; Chat for questions about
+            Summarize / Plan); real search via internal/tools when a
+            search engine is configured; Diagnose for `doctor`; Chat for questions about
             a finished run; the providers (OpenAI-compatible, Claude
             through Claude Code or the Messages API)
   auth      auth.json (stored keys, 0600, atomic, each bound to its
@@ -152,8 +152,9 @@ internal/
             same recorder saves each run's checkpoint as it goes, and
             Resume serves a checkpoint's finished searches to --resume
   store     append-only JSONL run history
-  tools     SearXNG search (JSON or HTML, one or many instances, searx.space
-            discovery) + Firecrawl scrape HTTP clients
+  tools     search engines behind Searcher (SearXNG: JSON or HTML, one or
+            many instances, searx.space discovery; Exa; Tavily) and
+            scrapers behind Scraper (Firecrawl, Exa, Tavily) — HTTP clients
   update    `update`: latest release from GitHub, checksum-verified,
             installed over the running binary
   ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export;
