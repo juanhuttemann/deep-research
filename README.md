@@ -53,6 +53,8 @@ make build
 ```
 
 The build stamps the version into a `deep-research` binary in the repo root.
+Move it onto your `PATH` (or run it as `./deep-research`) for the examples
+below.
 
 The live terminal UI is unix-only. Windows binaries work, but the run
 degrades to headless output — one log line per event, then the report.
@@ -60,21 +62,21 @@ degrades to headless output — one log line per event, then the report.
 ## Quick start
 
 ```bash
-./deep-research init          # config files, a .env template, where to get a key
+deep-research init          # config files, a .env template, where to get a key
 ```
 
 Pick a provider and model, and paste the key (shown as `*`, stored readable
 only by you). A free OpenRouter key (no card) is at <https://openrouter.ai/keys>:
 
 ```bash
-./deep-research login
-./deep-research -p "What are the latest advances in fusion energy?"
+deep-research login
+deep-research -p "What are the latest advances in fusion energy?"
 ```
 
-`./deep-research model` switches later. Environment variables still work as
+`deep-research model` switches later. Environment variables still work as
 the fallback: `export OPENAI_API_KEY="sk-or-..."`.
 
-Something off? `./deep-research doctor` checks the model endpoint and key,
+Something off? `deep-research doctor` checks the model endpoint and key,
 the search backend and the scraper — one cheap request each, no tokens — and
 prints how many model requests a run spends.
 
@@ -117,6 +119,32 @@ off-topic results): its report opens by saying so and how many sources it
 rests on, with confidence `low`. With fewer than three sources such a run
 stops before the analysis instead, saying why.
 
+### In the browser
+
+`deep-research serve` runs the same pipeline from a page on localhost, styled
+after the terminal UI, in a light or a dark theme. You type the question and
+pick the depth, then edit the plan before anything is searched:
+
+![The serve page's plan review for "How close are we to a room-temperature superconductor after LK-99?": four sub-topics, each with the search it will run](docs/images/web-plan.jpg)
+
+The live frame shows the pipeline, each sub-agent with its sources, the
+follow-up searches the analysis asked for, and the model's reasoning as it
+streams:
+
+![The live frame mid-analysis: Plan and Research done, seven sub-agents complete including three follow-ups, and the model's reasoning streaming above them](docs/images/web-live.jpg)
+
+When the run ends, the report opens below it without its citation marks, with
+the `.md`, `.pdf` and `.json` downloads in the header (here in the light
+theme):
+
+![A finished run in the light theme for "Have the Voyager probes really left the solar system?": every phase done, md, pdf and json downloads in the header, and the answer opening on the two readings of "left the solar system"](docs/images/web-report.jpg)
+
+The audit shows what the fact-check decided: the statements that passed, the
+ones it blocked, every claim with its verdict, and for each verdict the quote
+it rests on and the page it was found in:
+
+![The audit view: statements passed and blocked, and the inspector showing a claim about LK-99's Cu2S impurity rated partial, with the checker's reason and the quote it located](docs/images/web-audit.jpg)
+
 ## Search
 
 | Setting (`SEARXNG_URL`) | What happens |
@@ -135,7 +163,7 @@ With `auto`, every query goes to a third party you did not pick. To keep
 queries on your machine:
 
 ```bash
-./deep-research init --docker   # docker-compose.yml + SearXNG settings
+deep-research init --docker   # docker-compose.yml + SearXNG settings
 docker compose up -d
 echo 'SEARXNG_URL=http://localhost:8888' >> .env
 ```
@@ -170,18 +198,18 @@ See [Claude](docs/configuration.md#claude).
 ## Common commands
 
 ```bash
-./deep-research -p "question" --mode deep          # quick | standard | deep
-./deep-research -p "question" --output report.md   # also save to a file
-./deep-research -p "question" --silent             # just the report
-./deep-research -p "question" --jsonl              # machine-readable events
-./deep-research serve                               # launch and audit runs in the browser
-./deep-research --resume reports/<run>.partial.json # continue an interrupted run
-./deep-research list                                # past runs
-./deep-research login                               # pick provider + model, store the key
-./deep-research model                               # switch provider or model
-./deep-research doctor                              # check model, key, search
-./deep-research init --docker                       # local SearXNG setup
-./deep-research update                              # install the latest release
+deep-research -p "question" --mode deep          # quick | standard | deep
+deep-research -p "question" --output report.md   # also save to a file
+deep-research -p "question" --silent             # just the report
+deep-research -p "question" --jsonl              # machine-readable events
+deep-research serve                               # launch and audit runs in the browser
+deep-research --resume reports/<run>.partial.json # continue an interrupted run
+deep-research list                                # past runs
+deep-research login                               # pick provider + model, store the key
+deep-research model                               # switch provider or model
+deep-research doctor                              # check model, key, search
+deep-research init --docker                       # local SearXNG setup
+deep-research update                              # install the latest release
 ```
 
 Full flag reference, key bindings and export details: [docs/usage.md](docs/usage.md).
