@@ -27,7 +27,7 @@ func chdirTemp(t *testing.T) string {
 // reported them in different orders — output that cannot be diffed, scripted
 // against, or trusted to mean the same thing twice.
 func TestInitListsCreatedFilesInAFixedOrder(t *testing.T) {
-	want := []string{"config.yaml", "agent.yaml", ".env"}
+	want := []string{"config.yaml", ".env"}
 	for range 20 {
 		chdirTemp(t)
 		_, created, err := Init()
@@ -179,7 +179,7 @@ func TestStalePromptFilesDoNotSilentlyOverrideCurrentSchemas(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, warning := loadWithPromptWarning(t, tc.yaml)
-			if strings.Contains(warning, "warning: agent.yaml") != tc.warn {
+			if strings.Contains(warning, "is not prompts_version") != tc.warn {
 				t.Fatalf("warning = %q, expected warning %v", warning, tc.warn)
 			}
 			if cfg.FactCheckerInstructions != "legacy checker" {
@@ -200,6 +200,19 @@ func loadWithPromptWarning(t *testing.T, yaml string) (Config, string) {
 	t.Helper()
 	dir := chdirTemp(t)
 	writeFile(t, filepath.Join(dir, "agent.yaml"), yaml)
+	var cfg Config
+	warning := captureStderr(t, func() {
+		var err error
+		if cfg, err = Load(); err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+	})
+	return cfg, warning
+}
+
+// captureStderr returns what fn writes to os.Stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
 	out, err := os.CreateTemp(t.TempDir(), "stderr")
 	if err != nil {
 		t.Fatalf("create stderr capture: %v", err)
@@ -208,32 +221,63 @@ func loadWithPromptWarning(t *testing.T, yaml string) (Config, string) {
 	previous := os.Stderr
 	os.Stderr = out
 	defer func() { os.Stderr = previous }()
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	warning, err := os.ReadFile(out.Name())
+	fn()
+	b, err := os.ReadFile(out.Name())
 	if err != nil {
 		t.Fatalf("read stderr: %v", err)
 	}
-	return cfg, string(warning)
+	return string(b)
 }
 
-func TestInitWritesCurrentPromptVersion(t *testing.T) {
+// The stale-prompt warning said only "agent.yaml", and three directories can
+// hold the one that is read. A user who ran it from their home directory went
+// looking in the repo's config/, found the current version there, and could
+// not tell which file the warning meant or what to do about it.
+func TestStalePromptWarningNamesTheFileAndTheFix(t *testing.T) {
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", "cfg")
+	t.Chdir(t.TempDir())
+	writeFile(t, filepath.Join("cfg", "agent.yaml"), "planner_instructions: old planner\n")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	warning := captureStderr(t, func() {
+		if _, err := Load(); err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+	})
+	if want := filepath.Join(cwd, "cfg", "agent.yaml"); !strings.Contains(warning, want) {
+		t.Errorf("warning = %q, want it to name %s", warning, want)
+	}
+	if !strings.Contains(warning, "move it aside") {
+		t.Errorf("warning = %q, want it to say how to get the current prompts", warning)
+	}
+}
+
+// init copied every prompt into the config dir, where the copy froze: prompt
+// changes in later releases never reached that install, and once the schema
+// moved, every run warned while init said "already configured". The prompts
+// are built into the binary; agent.yaml is only for the ones a user changes.
+func TestInitLeavesPromptsToTheBinary(t *testing.T) {
 	dir := chdirTemp(t)
 	if _, _, err := Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
-	if err != nil {
-		t.Fatalf("read agent.yaml: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "agent.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("init wrote agent.yaml (stat err %v); the prompts belong to the binary", err)
 	}
-	if !strings.Contains(string(raw), "prompts_version: 1\n") {
-		t.Fatalf("new prompt file lacks schema version")
-	}
-	_, warning := loadWithPromptWarning(t, string(raw))
+	var cfg Config
+	warning := captureStderr(t, func() {
+		var err error
+		if cfg, err = Load(); err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+	})
 	if warning != "" {
-		t.Fatalf("new defaults warned: %s", warning)
+		t.Errorf("a fresh init warned: %s", warning)
+	}
+	if cfg.AnalyzerInstructions == "" || cfg.ChatInstructions == "" {
+		t.Errorf("a fresh init left phases without the built-in prompts")
 	}
 }
 
@@ -256,7 +300,6 @@ func TestInitDoesNotCreateWorldReadableSecrets(t *testing.T) {
 		{".env", 0o600},
 		{filepath.Join(dockerDir, "searxng", "settings.yml"), 0o600},
 		{filepath.Join(dir, "config.yaml"), 0o644},
-		{filepath.Join(dir, "agent.yaml"), 0o644},
 		{filepath.Join(dockerDir, "docker-compose.yml"), 0o644},
 	} {
 		fi, err := os.Stat(tc.path)

@@ -15,7 +15,7 @@ the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) is the fallback, then
 
 The config directory is the first of these that exists:
 `$DEEP_RESEARCH_CONFIG_DIR`, `./config/`, `~/.config/deep-research/`.
-`deep-research init` writes the defaults there. Newly created `.env` files
+`deep-research init` writes a default `config.yaml` there. Newly created `.env` files
 use owner-only permissions (`0600`) on Unix; existing files are left alone.
 
 `.env` is looked up from the working directory upwards, stopping at the first
@@ -224,17 +224,25 @@ stray `DEEP_RESEARCH_*` variable left in a shell changes how runs behave;
 `env | grep DEEP_RESEARCH` is the place to look when a config file seems to
 be ignored.
 
-Agent prompts live in `agent.yaml` in the same directory, one block per
-phase, so they can be edited without touching Go code. `chat_instructions`
-is not a phase: it steers `ask` and the page's follow-up questions. A block
-left out falls back to the built-in prompt, so an `agent.yaml` written
-before a block existed still gets it. `prompts_version: 1` marks the output
-schema the parsers expect: a file with a missing or different version warns
-on stderr and is still used, because an older analyzer or fact-check prompt
-can return JSON this release cannot read. Compare the file with this
-release's `config/agent.yaml`, bring your prompts to its output schemas, and
-only then set the version. `init` writes the current version into new files
-and leaves existing ones alone.
+## Agent prompts
+
+Agent prompts are built into the binary, one block per phase, and each
+release brings its own. To change one without touching Go code, create
+`agent.yaml` in a config directory with `prompts_version: 1` and only the
+blocks you change, copied from this release's
+[`config/agent.yaml`](../config/agent.yaml): a block left out falls back to
+the built-in prompt, so the others keep following releases.
+`chat_instructions` is not a phase: it steers `ask` and the page's follow-up
+questions. `init` does not write `agent.yaml`; earlier releases did, and an
+unedited copy from them keeps later releases' prompts from reaching you:
+delete it.
+
+`prompts_version: 1` marks the output schema the parsers expect: a file with
+a missing or different version warns on stderr, naming the file, and is
+still used, because an older analyzer or fact-check prompt can return JSON
+this release cannot read. Move the file aside to use the built-in prompts,
+or bring your blocks to this release's output schemas and only then set the
+version.
 
 ## Research modes
 

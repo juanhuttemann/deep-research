@@ -116,15 +116,17 @@ func Init() (dir string, created []string, err error) {
 		return "", nil, err
 	}
 
-	// config.yaml / agent.yaml live in the config dir and are user-editable;
-	// only write them when missing so we never clobber existing config.
+	// config.yaml lives in the config dir and is user-editable; only write it
+	// when missing so we never clobber existing config. agent.yaml is not
+	// written: a copy froze the prompts at install time, so later releases'
+	// prompt changes never reached it. The binary carries them, and an
+	// agent.yaml a user creates overrides only the blocks it has.
 	//
 	// The list is a slice, not a map: ranging a map gave "wrote 2 file(s)" a
 	// different order on every run, so two identical inits disagreed about
 	// what they had done.
 	for _, f := range []struct{ name, content string }{
 		{"config.yaml", embeddedConfig("config.yaml")},
-		{"agent.yaml", embeddedConfig("agent.yaml")},
 	} {
 		p := filepath.Join(dir, f.name)
 		if _, statErr := os.Stat(p); statErr == nil {
@@ -409,7 +411,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	cfgYAML, err := readFile(dirs, "config.yaml", embeddedConfig("config.yaml"))
+	_, cfgYAML, err := readFile(dirs, "config.yaml", embeddedConfig("config.yaml"))
 	if err != nil {
 		return Config{}, err
 	}
@@ -471,7 +473,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("provider %q: want openai or claude (provider in config.yaml, or DEEP_RESEARCH_PROVIDER)", cfg.Provider)
 	}
 
-	agentYAML, err := readFile(dirs, "agent.yaml", embeddedConfig("agent.yaml"))
+	agentPath, agentYAML, err := readFile(dirs, "agent.yaml", embeddedConfig("agent.yaml"))
 	if err != nil {
 		return Config{}, err
 	}
@@ -480,14 +482,16 @@ func Load() (Config, error) {
 	if err := a.ReadConfig(strings.NewReader(agentYAML)); err != nil {
 		return Config{}, fmt.Errorf("read agent.yaml: %w", err)
 	}
-	if err := loadAgentConfig(&cfg, a); err != nil {
+	if err := loadAgentConfig(&cfg, a, agentPath); err != nil {
 		return Config{}, err
 	}
 
 	return cfg, nil
 }
 
-func loadAgentConfig(cfg *Config, a *viper.Viper) error {
+// loadAgentConfig reads the prompts from a, the agent.yaml at path ("" for
+// the embedded copy).
+func loadAgentConfig(cfg *Config, a *viper.Viper, path string) error {
 	embedded := viper.New()
 	embedded.SetConfigType("yaml")
 	if err := embedded.ReadConfig(strings.NewReader(embeddedConfig("agent.yaml"))); err != nil {
@@ -496,9 +500,14 @@ func loadAgentConfig(cfg *Config, a *viper.Viper) error {
 	// The per-key fallback cannot catch a stale file: its old prompts are all
 	// present, and they win. Only the version says they predate the parsers.
 	// A missing key is not stale — it falls back to the current prompt.
+	// The path is absolute because three directories can hold the file read.
 	if v := embedded.GetInt("prompts_version"); a.GetInt("prompts_version") != v {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: agent.yaml is not prompts_version %d; its prompts may not"+
-			" produce what this release parses — compare it with this release's config/agent.yaml\n", v)
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "warning: %s is not prompts_version %d; its prompts may not produce what"+
+			" this release parses — move it aside to use the built-in prompts, or update it from this"+
+			" release's config/agent.yaml\n", path, v)
 	}
 	for _, in := range []struct {
 		key string
@@ -523,17 +532,20 @@ func loadAgentConfig(cfg *Config, a *viper.Viper) error {
 	return nil
 }
 
-func readFile(dirs []string, name, embedded string) (string, error) {
+// readFile returns the first dirs/name that exists, with its path so a
+// warning about it can say which one was read; path is "" for embedded.
+func readFile(dirs []string, name, embedded string) (path, content string, err error) {
 	for _, d := range dirs {
-		b, err := os.ReadFile(filepath.Join(d, name))
+		p := filepath.Join(d, name)
+		b, err := os.ReadFile(p)
 		if err == nil {
-			return string(b), nil
+			return p, string(b), nil
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
-			return "", err
+			return "", "", err
 		}
 	}
-	return embedded, nil
+	return "", embedded, nil
 }
 
 // embeddedConfig returns the bundled default config file by name.

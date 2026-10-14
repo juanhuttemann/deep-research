@@ -5,6 +5,17 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- `init` no longer writes `agent.yaml`. The prompts are built into the
+  binary, and a copy in the config directory froze them at install time:
+  later releases' prompt changes never reached it, and once the schema moved
+  every run warned while `init` said "already configured". Create
+  `agent.yaml` only to override a prompt, with just the blocks you change.
+- The outdated-prompts warning names the `agent.yaml` it read by its full
+  path and says to move it aside to use the built-in prompts; it said only
+  "agent.yaml", and three directories can hold the one read.
+
 ## [0.10.0] - 2026-10-13
 
 ### Changed
