@@ -4,405 +4,449 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deep Research</title>
+<script>
+// The theme picked with the toggle, set before the first paint so the page
+// never flashes the other one. Without one, or without storage, the system's
+// setting decides.
+try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
 <style>
+/* The terminal UI's palette: the eight ANSI roles it paints with (theme.go),
+   tuned for a page. Three surfaces step up from the page: --bg, then the boxes
+   on it (--surface), then the wells inside them (--bg-2), so a box never reads
+   as a hole in the page. Every text colour measures at least 4.5:1 on all
+   three. Dark is a charcoal, not black: near-white on black read at 13.5:1
+   and was tiring over a long report. */
 :root {
-  /* Catppuccin Latte. Green and Yellow are mixed toward Text: as text on
-     Base they measure about 2.3-2.9:1, too faint for a status label. */
-  --base: #eff1f5;
-  --bg: #e6e9ef; --surface: #eff1f5; --surface-2: #dce0e8; --border: #ccd0da; --border-strong: #bcc0cc;
-  --text: #4c4f69; --text-2: #5c5f77; --text-3: #6c6f85;
-  --accent: #8839ef; --on-accent: #eff1f5;
-  --ok: color-mix(in srgb, #40a02b 70%, #4c4f69); --warn: color-mix(in srgb, #df8e1d 60%, #4c4f69);
-  --bad: #d20f39; --off: #6c6f85;
-  --mark: color-mix(in srgb, #df8e1d 45%, #eff1f5); --mark-text: #4c4f69;
-  --shadow: 0 1px 2px rgba(76, 79, 105, .06), 0 2px 8px rgba(76, 79, 105, .06);
-  --shadow-lg: 0 2px 4px rgba(76, 79, 105, .05), 0 12px 32px rgba(76, 79, 105, .12);
-  --radius: 12px; --radius-sm: 8px;
-  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --bg: #f3f3f0; --surface: #ffffff; --bg-2: #efefeb; --fg: #1d2025; --dim: #5d6470; --rule: #d6d7d2;
+  --cyan: #0a6b7a; --green: #2d7514; --yellow: #7f5900; --red: #b3212c; --magenta: #8a3bb5;
+  --mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
 }
+/* Dark follows the system unless the toggle chose a theme: the same values
+   twice, once per way of arriving at them. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    /* Catppuccin Mocha: Base page, Mantle cards, Surface0 wells. */
-    --base: #1e1e2e;
-    --bg: #1e1e2e; --surface: #181825; --surface-2: #313244; --border: #313244; --border-strong: #45475a;
-    --text: #cdd6f4; --text-2: #a6adc8; --text-3: #7f849c;
-    --accent: #cba6f7; --on-accent: #11111b;
-    --ok: #a6e3a1; --warn: #f9e2af; --bad: #f38ba8; --off: #9399b2;
-    --mark: #f9e2af; --mark-text: #11111b;
-    --shadow: 0 1px 2px rgba(17, 17, 27, .4); --shadow-lg: 0 12px 32px rgba(17, 17, 27, .55);
+  :root:not([data-theme=light]) {
+    --bg: #1f2228; --surface: #2a2e35; --bg-2: #32363e; --fg: #c8ccd4; --dim: #9ba2ad; --rule: #3b4049;
+    --cyan: #6fc0ca; --green: #a3c585; --yellow: #d9bb7f; --red: #e8939a; --magenta: #c99ade;
   }
 }
-:root {
-  --accent-hover: color-mix(in srgb, var(--accent) 85%, var(--text));
-  --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--base));
-  --ok-soft: color-mix(in srgb, var(--ok) 15%, var(--base));
-  --warn-soft: color-mix(in srgb, var(--warn) 15%, var(--base));
-  --bad-soft: color-mix(in srgb, var(--bad) 14%, var(--base));
-  --off-soft: color-mix(in srgb, var(--off) 14%, var(--base));
+:root[data-theme=dark] {
+  --bg: #1f2228; --surface: #2a2e35; --bg-2: #32363e; --fg: #c8ccd4; --dim: #9ba2ad; --rule: #3b4049;
+  --cyan: #6fc0ca; --green: #a3c585; --yellow: #d9bb7f; --red: #e8939a; --magenta: #c99ade;
 }
-/* Native scrollbars and the select's menu follow the theme too. */
-:root { color-scheme: light dark; }
+:root {
+  --cyan-soft: color-mix(in srgb, var(--cyan) 16%, var(--surface));
+  --red-soft: color-mix(in srgb, var(--red) 12%, var(--surface));
+  color-scheme: light dark;
+}
+:root[data-theme=light] { color-scheme: light; }
+:root[data-theme=dark] { color-scheme: dark; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 var(--sans); }
-a { color: var(--accent); text-decoration: none; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.6 var(--mono); font-variant-ligatures: none; }
+::selection { background: var(--cyan); color: var(--bg); }
+a { color: var(--cyan); text-decoration: none; }
 a:hover { text-decoration: underline; }
-button { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+h1, h2, h3 { font-size: inherit; margin: 0; }
 .mono { font-family: var(--mono); }
-.muted { color: var(--text-3); }
+.muted, .dim { color: var(--dim); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
+/* The terminal UI's chrome: a bold cyan title, dim rules, dim labels. */
+.heading { font-weight: 700; color: var(--cyan); letter-spacing: .04em; text-transform: uppercase; }
+.k { color: var(--dim); }
+.hint { color: var(--dim); white-space: pre-wrap; margin: 10px 0 0; }
+.spin { display: inline-block; width: 1ch; color: var(--cyan); flex-shrink: 0; }
+
 /* ---- top bar ---- */
-.topbar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 85%, transparent);
-  backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
-.topbar-inner { max-width: 1280px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; color: var(--text); }
+.topbar { border-bottom: 1px solid var(--rule); background: var(--bg); }
+.topbar-inner { max-width: 1200px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; gap: 3ch; }
+.brand { font-weight: 700; color: var(--cyan); letter-spacing: .04em; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
-.logo svg { width: 15px; height: 15px; color: var(--on-accent); }
 .spacer { flex: 1; }
 /* What the next run uses: model and search, read from the config. */
-.setup { display: flex; gap: 8px; min-width: 0; }
-.setup-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 340px; font-size: 12.5px;
-  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); white-space: nowrap; }
-.setup-chip svg { width: 13px; height: 13px; flex: none; color: var(--text-3); }
+/* The bar names the model and the search only; the start screen spells out
+   the whole setup. Both details inline crowded the bar and cut every value. */
+.setup { display: flex; gap: 3ch; min-width: 0; }
+.setup-chip { display: inline-flex; gap: 1ch; min-width: 0; white-space: nowrap; }
 .setup-chip .v { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.setup-chip .sub { color: var(--text-3); }
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; padding: 3px 10px;
-  border-radius: 999px; background: var(--off-soft); color: var(--off); white-space: nowrap; }
-.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.pill.live { background: var(--accent-soft); color: var(--accent); }
-.pill.live .dot { animation: pulse 1.4s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: .35; } }
+.theme-btn { display: inline-grid; place-items: center; width: 32px; height: 28px; padding: 0; border: 1px solid var(--rule);
+  background: none; color: var(--dim); cursor: pointer; flex-shrink: 0; }
+.theme-btn:hover { color: var(--fg); border-color: var(--fg); }
+.theme-btn svg { width: 16px; height: 16px; }
+.setup-list { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: 0 2ch; margin: 14px 0 0; }
+.setup-list dt { color: var(--dim); }
+.setup-list dd { margin: 0; overflow-wrap: anywhere; }
+.state { display: inline-flex; gap: 1ch; color: var(--dim); white-space: nowrap; }
+.state.live { color: var(--cyan); }
 
-/* ---- buttons ---- */
-.btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); background: var(--surface);
-  padding: 7px 14px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 550; cursor: pointer; color: var(--text);
-  transition: background .15s, border-color .15s; }
-.btn:hover { background: var(--surface-2); text-decoration: none; }
-.btn:disabled { opacity: .5; cursor: default; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
-.btn.danger { color: var(--bad); }
-.btn.ghost { border-color: transparent; background: none; color: var(--accent); }
-.btn.ghost:hover { background: var(--surface-2); }
-.btn.sm { padding: 4px 10px; font-size: 13px; }
-kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: .7; }
+/* ---- controls ---- */
+.btn { display: inline-flex; align-items: center; gap: 1ch; min-height: 30px; padding: 3px 1.5ch; border: 1px solid var(--rule);
+  background: none; color: var(--fg); cursor: pointer; white-space: nowrap; text-decoration: none; }
+.btn:hover:not(:disabled) { border-color: var(--fg); text-decoration: none; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { color: var(--cyan); border-color: var(--cyan); font-weight: 700; }
+.btn.primary:hover:not(:disabled) { background: var(--cyan); color: var(--bg); }
+.btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, var(--rule)); }
+.btn.danger:hover:not(:disabled) { background: var(--red); border-color: var(--red); color: var(--bg); }
+.btn.ghost { border-color: transparent; color: var(--dim); }
+.btn.ghost:hover:not(:disabled) { color: var(--fg); border-color: var(--rule); }
+.btn.sm { min-height: 26px; padding: 1px 1ch; }
+kbd { font: inherit; opacity: .7; }
+/* A choice of a few: the chosen one in reverse video, as a terminal menu marks it. */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 0 2px; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented label { padding: 1px 1ch; color: var(--dim); cursor: pointer; white-space: nowrap; }
+.segmented label:hover { color: var(--fg); }
+.segmented label small { font-size: inherit; margin-left: 1ch; opacity: .75; }
+.segmented input:checked + label { background: var(--cyan); color: var(--bg); font-weight: 700; }
+.segmented input:focus-visible + label { outline: 1px solid var(--cyan); outline-offset: 2px; }
+select, input[type=text], .add-topic input { background: transparent; border: 1px solid var(--rule); border-radius: 0; padding: 3px 1ch; color: var(--fg); }
+select:focus, input[type=text]:focus, .add-topic input:focus { outline: none; border-color: var(--cyan); }
+select { background: var(--surface); }
+::placeholder { color: var(--dim); opacity: 1; }
 
-main { max-width: 1280px; margin: 0 auto; padding: 32px 24px 64px; }
+main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 
 /* ---- home ---- */
-.home { max-width: 760px; margin: 6vh auto 0; }
-.home h1 { font-size: 32px; line-height: 1.2; letter-spacing: -.025em; margin: 0 0 8px; text-align: center; }
-.home .lede { text-align: center; color: var(--text-2); margin: 0 0 28px; text-wrap: balance; }
-.composer { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg);
-  transition: border-color .15s, box-shadow .15s; }
-.composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg), 0 0 0 4px var(--accent-soft); }
-.composer textarea { display: block; width: 100%; min-height: 96px; max-height: 40vh; resize: none; field-sizing: content; border: 0; outline: 0;
-  background: transparent; color: var(--text); font: 17px/1.5 var(--sans); padding: 18px 20px 8px; }
-.composer textarea::placeholder { color: var(--text-3); }
-.composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px 12px 16px; }
-.segmented { display: inline-flex; padding: 3px; background: var(--surface-2); border-radius: 10px; gap: 2px; }
-.segmented input { position: absolute; opacity: 0; pointer-events: none; }
-.segmented label { padding: 5px 12px; border-radius: 8px; font-size: 13.5px; font-weight: 550; color: var(--text-2); cursor: pointer; line-height: 1.3; text-align: center; }
-.segmented label small { display: block; font-size: 11px; font-weight: 450; color: var(--text-3); }
-.segmented input:checked + label { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
-.segmented input:focus-visible + label { outline: 2px solid var(--accent); }
-.field { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
-select { font: inherit; font-size: 13.5px; color: var(--text); background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; }
-.composer-bar .btn.primary { margin-left: auto; padding: 9px 18px; font-size: 14.5px; }
-.form-msg { color: var(--bad); font-size: 13.5px; margin: 10px 4px 0; min-height: 1.2em; }
+.home { max-width: 88ch; margin: 4vh auto 0; }
+.lede { color: var(--dim); margin: 4px 0 16px; }
+/* The terminal's line prompt: a magenta label, the text, a cyan cursor. */
+.composer { border: 1px solid var(--rule); background: var(--surface); }
+.composer:focus-within { border-color: var(--cyan); }
+.prompt { display: flex; gap: 1ch; padding: 12px 1.5ch 4px; }
+.prompt-label { color: var(--magenta); white-space: nowrap; line-height: 1.6; }
+.composer textarea { flex: 1; display: block; width: 100%; min-height: 4.8em; max-height: 40vh; resize: none; field-sizing: content;
+  border: 0; outline: 0; padding: 0; background: transparent; color: var(--fg); line-height: 1.6; caret-color: var(--cyan); }
+.composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 3ch; padding: 8px 1.5ch 10px; }
+.group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 1ch; }
+.field { display: inline-flex; align-items: center; gap: 1ch; color: var(--dim); }
+.composer-bar .btn.primary { margin-left: auto; }
+.form-msg { color: var(--red); margin: 8px 0 0; min-height: 1.6em; }
+.form-msg:empty { min-height: 0; }
 
-.section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); margin: 32px 0 10px; }
-.runs { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.runs li + li { border-top: 1px solid var(--border); }
-.runs a { display: flex; align-items: center; gap: 12px; padding: 12px 16px; color: var(--text); }
-.runs a:hover { background: var(--surface-2); text-decoration: none; }
+.section-title { margin: 36px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+.runs { list-style: none; margin: 0; padding: 4px 0 0; }
+.runs a { display: flex; gap: 2ch; padding: 4px 1ch; color: var(--fg); }
+.runs a::before { content: "·"; color: var(--dim); }
+.runs a:hover { background: var(--bg-2); text-decoration: none; }
+.runs a:hover::before { content: "▸"; color: var(--cyan); }
 .runs .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.runs .when { color: var(--text-3); font-size: 13px; white-space: nowrap; }
-.empty { padding: 20px 16px; color: var(--text-3); text-align: center; list-style: none; }
-.runs .stopped { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; }
-.runs .stopped .t { color: var(--text); }
+.runs .when { color: var(--dim); white-space: nowrap; }
+.empty { padding: 8px 1ch; color: var(--dim); list-style: none; }
+.runs .stopped { display: flex; align-items: center; gap: 2ch; padding: 4px 0 4px 1ch; }
+.runs .stopped::before { content: "✗"; color: var(--yellow); }
 .runs .stopped .btn { flex-shrink: 0; }
 
 /* ---- plan review ---- */
-.brief { max-width: 780px; margin: 4vh auto 0; }
-.brief-head { padding: 24px 24px 8px; }
-.eyebrow { font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
-.brief-head h1 { font-size: 22px; line-height: 1.3; letter-spacing: -.015em; margin: 6px 0; overflow-wrap: anywhere; }
-.brief-head p { margin: 0; color: var(--text-2); font-size: 14px; }
-.brief-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 24px 16px; }
-.brief-bar .segmented label { padding: 5px 14px; }
-.topics { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
-.topic { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 2px 12px; align-items: start; padding: 12px 20px 12px 24px; }
-.topic + .topic { border-top: 1px solid var(--border); }
-.topic .num { width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center;
-  font-size: 12px; font-weight: 650; color: var(--text-2); margin-top: 5px; }
-.topic-name { width: 100%; font: inherit; font-weight: 550; color: var(--text); background: transparent; border: 1px solid transparent;
-  border-radius: 6px; padding: 5px 8px; margin-left: -8px; }
-.topic-name:hover { border-color: var(--border); }
-.topic-name:focus { outline: none; border-color: var(--accent); background: var(--surface-2); }
-.topic-meta { font-size: 12.5px; color: var(--text-3); margin-top: 1px; overflow-wrap: anywhere; }
-.topic-meta.renamed { color: var(--warn); }
-.icon-btn { width: 32px; height: 32px; border-radius: 8px; border: 0; background: none; color: var(--text-3); cursor: pointer; font-size: 14px; }
-.icon-btn:hover:not(:disabled) { background: var(--bad-soft); color: var(--bad); }
+.brief { max-width: 88ch; margin: 4vh auto 0; }
+.brief-head { padding: 14px 2ch 12px; display: grid; gap: 6px; }
+.brief-head h1 { font-weight: 700; overflow-wrap: anywhere; }
+.brief-head p { margin: 0; color: var(--dim); }
+.brief-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 3ch; padding: 10px 2ch; border-top: 1px solid var(--rule); }
+.topics-label { padding: 10px 2ch 2px; color: var(--dim); border-top: 1px solid var(--rule); }
+.topics { list-style: none; margin: 0; padding: 0 0 6px; }
+.topic { display: grid; grid-template-columns: 3ch minmax(0, 1fr) auto; gap: 0 2ch; align-items: start; padding: 4px 1ch 4px 2ch; }
+.topic .num { color: var(--dim); text-align: right; padding-top: 4px; }
+.topic-name { width: 100%; font-weight: 700; background: transparent; border: 1px solid transparent; padding: 3px 1ch; margin-left: -1ch; }
+.topic-name:hover { border-color: var(--rule); }
+.topic-name:focus { outline: none; border-color: var(--cyan); }
+.topic-meta { color: var(--dim); overflow-wrap: anywhere; }
+.topic-meta.renamed { color: var(--yellow); }
+.icon-btn { min-width: 30px; height: 30px; border: 1px solid transparent; background: none; color: var(--dim); cursor: pointer; }
+.icon-btn:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
 .icon-btn:disabled { opacity: .3; cursor: default; }
-.add-topic { display: flex; gap: 8px; padding: 12px 20px 12px 24px; border-top: 1px solid var(--border); }
-.add-topic input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid transparent;
-  border-radius: 8px; padding: 7px 10px; }
-.add-topic input:focus { outline: none; border-color: var(--accent); }
-.brief-foot { display: flex; align-items: center; gap: 8px; padding: 14px 20px 14px 24px; border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); border-radius: 0 0 var(--radius) var(--radius); }
-.brief-foot .btn.primary { margin-left: auto; padding: 9px 18px; }
+.add-topic { display: flex; align-items: center; gap: 1ch; padding: 8px 1ch 12px 2ch; }
+.add-topic::before { content: "+"; color: var(--magenta); width: 3ch; text-align: right; flex-shrink: 0; }
+.add-topic input { flex: 1; min-width: 0; }
+.brief-foot { display: flex; align-items: center; gap: 1ch; padding: 10px 2ch; border-top: 1px solid var(--rule); }
+.brief-foot .btn.primary { margin-left: auto; }
 
 /* ---- run view ---- */
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
-.run-head { padding: 20px 24px; display: flex; gap: 16px; align-items: flex-start; }
-.run-head h1 { font-size: 22px; line-height: 1.3; letter-spacing: -.015em; margin: 0 0 6px; overflow-wrap: anywhere; }
-.run-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; color: var(--text-3); font-size: 13.5px; }
-.run-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-.run-head .actions { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; }
+.card { background: var(--surface); border: 1px solid var(--rule); }
+.run-head { padding: 12px 2ch; display: grid; gap: 4px; }
+.heading-row { display: flex; flex-wrap: wrap; gap: 0 2ch; justify-content: space-between; align-items: baseline; }
+.run-head h1 { font-weight: 400; color: var(--dim); overflow-wrap: anywhere; }
+.run-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 3ch; color: var(--dim); }
+.run-meta b { color: var(--fg); font-weight: 700; font-variant-numeric: tabular-nums; }
+.run-meta #cancel, .run-meta .exports { margin-left: auto; }
+.exports { align-items: center; }
+.exports:empty { display: none; }
 
-.stepper { display: flex; padding: 0 24px 20px; }
-.step { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-3); min-width: 0; }
-.step:last-child { flex: 0 0 auto; }
-.step:not(:last-child)::after { content: ""; flex: 1; height: 2px; background: var(--border); margin: 0 10px; border-radius: 1px; min-width: 12px; }
-.step .ix { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 650;
-  border: 2px solid var(--border-strong); flex-shrink: 0; }
-.step.done { color: var(--text-2); }
-.step.done .ix { background: var(--ok); border-color: var(--ok); color: var(--surface); }
-.step.done::after { background: var(--ok); }
-.step.current { color: var(--text); font-weight: 600; }
-.step.current .ix { border-color: var(--accent); color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
-.step .nm { white-space: nowrap; }
+/* The phase strip: done in green, the current one cyan, the rest dim. */
+.stepper { display: flex; flex-wrap: wrap; gap: 2px 2ch; padding: 10px 2ch; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.step { color: var(--dim); white-space: nowrap; }
+.step.done { color: var(--green); }
+.step.current { color: var(--cyan); font-weight: 700; }
+.step-sep { color: var(--rule); }
 
-.status { margin: 0 24px 20px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: 14px; }
-.status .now { display: flex; align-items: center; gap: 10px; color: var(--text); }
-.status .thought { margin-top: 6px; color: var(--text-3); font-size: 13px; font-style: italic; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.status { padding: 10px 2ch 0; }
+.status .now { display: flex; gap: 1ch; }
+.status .thought { margin-top: 2px; padding-left: 2ch; color: var(--dim); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
 .status .thought:empty { display: none; }
-.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite; flex-shrink: 0; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.notice { margin: 0 24px 16px; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: 14px; }
+.notice { padding: 10px 2ch 0; color: var(--yellow); }
+.notice .btn { margin-left: 1ch; }
 
-.scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px 12px 16px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
-.scope input[type=text] { flex: 1 1 220px; min-width: 0; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; }
-.scope input[type=text]::placeholder { color: var(--text-3); }
-.scope .note { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text-3); }
-.sources { border-top: 1px solid var(--border); padding: 8px 0; }
-.sources .src { display: grid; grid-template-columns: 18px auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 6px 24px; font-size: 13.5px; }
-.sources .src .ln { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ico.partial { background: var(--warn-soft); color: var(--warn); }
-.agents { border-top: 1px solid var(--border); }
+.scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 2ch; padding: 8px 1.5ch 10px; border-top: 1px solid var(--rule); }
+/* The site list wraps and grows on a row of its own: a one-line box beside
+   the scope choice held two domains before cutting the rest off. */
+.scope #domains { flex: 1 1 100%; min-width: 0; min-height: calc(1.6em + 8px); max-height: calc(5 * 1.6em + 8px);
+  field-sizing: content; resize: none; line-height: 1.6; background: transparent; border: 1px solid var(--rule); border-radius: 0;
+  padding: 3px 1ch; color: var(--fg); overflow-wrap: anywhere; }
+.scope #domains:focus { outline: none; border-color: var(--cyan); }
+.scope .note { flex-basis: 100%; margin: 0; color: var(--dim); }
+.sources { padding: 10px 0 0; }
+.sources .src { display: grid; grid-template-columns: 1ch auto minmax(0, 1fr); gap: 2ch; padding: 0 2ch; margin: 0; }
+.sources .src .ln { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ico { flex-shrink: 0; }
+.ico.done { color: var(--green); }
+.ico.partial { color: var(--yellow); }
+.ico.error { color: var(--red); }
+.ico.queued { color: var(--dim); }
+/* One row per sub-agent, as the terminal draws it: mark, name, meter, line. */
+.agents { padding: 10px 0 2px; }
 .agents:empty { display: none; }
-.agent { display: grid; grid-template-columns: 18px minmax(0, 1fr) 160px; gap: 4px 12px; align-items: center; padding: 12px 24px; }
-.agent + .agent { border-top: 1px solid var(--border); }
-.agent .nm { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent .ln { grid-column: 2 / 4; color: var(--text-3); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s; }
-.agent.done .bar > i { background: var(--ok); }
-.agent.error .bar > i { background: var(--bad); }
-.ico { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; font-size: 11px; font-weight: 700; }
-.ico.done { background: var(--ok-soft); color: var(--ok); }
-.ico.error { background: var(--bad-soft); color: var(--bad); }
-.ico.queued { color: var(--text-3); }
+.agent { display: grid; grid-template-columns: 1ch minmax(10ch, 36ch) auto minmax(0, 1fr); gap: 0 2ch; padding: 0 2ch; }
+.agent .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent .meter { white-space: pre; color: var(--dim); }
+.agent .meter b { font-weight: 400; color: var(--dim); }
+.agent .meter i { font-style: normal; color: var(--rule); }
+.agent.running .meter b { color: var(--cyan); }
+.agent.done .meter b { color: var(--green); }
+.agent.error .meter b { color: var(--red); }
+.agent .ln { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents .divider { color: var(--dim); padding: 6px 2ch 0; }
 
-.activity { border-top: 1px solid var(--border); }
-.activity summary { cursor: pointer; padding: 12px 24px; color: var(--text-2); font-size: 13.5px; font-weight: 550; list-style: none; display: flex; gap: 8px; align-items: center; }
+.activity { margin-top: 10px; border-top: 1px solid var(--rule); }
+.activity summary { cursor: pointer; padding: 8px 2ch; color: var(--dim); list-style: none; display: flex; gap: 1ch; }
+.activity summary:hover { color: var(--fg); }
 .activity summary::-webkit-details-marker { display: none; }
-.activity summary::before { content: "›"; font-size: 16px; transition: transform .15s; }
-.activity[open] summary::before { transform: rotate(90deg); }
-.log { max-height: 320px; overflow: auto; margin: 0; padding: 0 24px 16px; list-style: none; font: 12.5px/1.65 var(--mono); }
-.log li { display: grid; grid-template-columns: 44px 18px minmax(0, 1fr); gap: 8px; color: var(--text-2); }
+.activity summary::before { content: "▸"; }
+.activity[open] summary::before { content: "▾"; }
+.log { max-height: 320px; overflow: auto; margin: 0; padding: 0 2ch 12px; list-style: none; }
+.log li { display: grid; grid-template-columns: 5ch 2ch minmax(0, 1fr); gap: 1ch; }
 .log li span:last-child { overflow-wrap: anywhere; }
-.log .t, .log .s { color: var(--text-3); }
-.log .error { color: var(--bad); }
-.log .ok { color: var(--ok); }
-.log .phase { color: var(--accent); font-weight: 600; }
+.log .t, .log .s { color: var(--dim); }
+.log .error { color: var(--red); }
+.log .ok { color: var(--green); }
+.log .phase { color: var(--cyan); font-weight: 700; }
 
 /* ---- outcome ---- */
-.outcome { margin-top: 16px; padding: 16px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.outcome .msg { flex: 1; min-width: 240px; color: var(--text-2); overflow-wrap: anywhere; }
-.outcome .msg strong { color: var(--text); }
-.files { display: flex; gap: 8px; flex-wrap: wrap; }
+.outcome { margin-top: 16px; padding: 10px 2ch; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 2ch; }
+.outcome .msg { flex: 1; min-width: 30ch; color: var(--dim); overflow-wrap: anywhere; }
+.outcome .msg strong { color: var(--fg); }
+.files { display: flex; gap: 1ch; flex-wrap: wrap; }
+.files .btn { text-transform: lowercase; }
+
+/* Verdicts and provenance are coloured text with a glyph, never a badge. */
+.tag { font-weight: 700; white-space: nowrap; flex-shrink: 0; text-transform: lowercase; }
+.tag.ok { color: var(--green); }
+.tag.warn { color: var(--yellow); }
+.tag.bad { color: var(--red); }
+.tag.off { color: var(--dim); }
 
 /* ---- report: the answer to read, without its citations ---- */
-.view-bar { display: flex; justify-content: center; align-items: center; gap: 8px; margin: 24px 0 16px; }
-.ask { max-width: 880px; margin: 24px auto 0; padding: 20px 24px 16px; }
-.ask h2 { font-size: 15px; margin: 0 0 4px; }
-.ask .hint { font-size: 13px; margin: 0 0 12px; }
-.chat { list-style: none; margin: 0; padding: 0; }
-.chat .q { font-weight: 600; margin: 18px 0 6px; }
-.chat .prose { padding: 0; max-width: none; font-size: 15px; }
-.ask .composer { margin-top: 16px; box-shadow: none; }
-.ask .composer textarea { min-height: 56px; font-size: 15px; padding: 12px 16px 4px; }
-.prose { max-width: 880px; margin: 0 auto; padding: 28px 40px 32px; font-size: 16px; line-height: 1.7; overflow-wrap: anywhere; }
+.view-bar { display: flex; justify-content: center; align-items: center; gap: 2ch; margin: 24px 0 16px; }
+.prose { max-width: 90ch; margin: 0 auto; padding: 24px 4ch 28px; line-height: 1.7; overflow-wrap: anywhere; }
 .prose > :first-child { margin-top: 0; }
-.prose h1, .prose h2 { font-size: 20px; line-height: 1.3; letter-spacing: -.015em; margin: 32px 0 10px; }
-.prose h3 { font-size: 16.5px; margin: 26px 0 8px; }
+/* Headings keep their Markdown marks, as the terminal's renderer shows them. */
+.prose h1, .prose h2, .prose h3, .prose h4 { color: var(--cyan); font-weight: 700; margin: 28px 0 8px; }
+.prose h1::before { content: "# "; color: var(--dim); }
+.prose h2::before { content: "## "; color: var(--dim); }
+.prose h3::before { content: "### "; color: var(--dim); }
+.prose h4::before { content: "#### "; color: var(--dim); }
 .prose p, .prose ul, .prose ol { margin: 0 0 14px; }
-.prose li + li { margin-top: 6px; }
-.prose table { display: block; overflow-x: auto; border-collapse: collapse; font-size: 14px; line-height: 1.55; margin: 16px 0 20px; overflow-wrap: normal; }
-.prose th, .prose td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top; }
-.prose th { background: var(--surface-2); font-weight: 600; }
-.prose code { font: .9em var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.prose ul, .prose ol { padding-left: 3ch; }
+.prose ul { list-style: none; }
+.prose ul > li::before { content: "•"; color: var(--dim); display: inline-block; width: 2ch; margin-left: -2ch; }
+.prose li + li { margin-top: 4px; }
+.prose a { text-decoration: underline; text-underline-offset: 2px; }
+.prose strong { font-weight: 700; }
+.prose em { font-style: italic; }
+.prose table { display: block; overflow-x: auto; border-collapse: collapse; margin: 14px 0 18px; overflow-wrap: normal; }
+.prose th, .prose td { border: 1px solid var(--rule); padding: 4px 1.5ch; text-align: left; vertical-align: top; }
+.prose th { font-weight: 700; color: var(--cyan); }
+.prose code { color: var(--yellow); background: var(--bg-2); padding: 0 .5ch; }
+.prose pre { background: var(--bg-2); padding: 10px 2ch; overflow-x: auto; }
+.prose pre code { color: inherit; background: none; padding: 0; }
+.prose blockquote { background: none; padding: 0 0 0 2ch; border-left: 1px solid var(--dim); color: var(--dim); font-size: inherit; }
+.prose hr { border: 0; border-top: 1px solid var(--rule); margin: 20px 0; }
 
 /* ---- audit ---- */
-.summary-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0; }
-.stat { padding: 14px 16px; }
-.stat .v { font-size: 22px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.stat .l { color: var(--text-3); font-size: 13px; }
-.audit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.summary-stats { display: flex; flex-wrap: wrap; gap: 4px 4ch; margin: 0 0 20px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
+.stat .l { color: var(--dim); margin-right: 1ch; }
+.stat b { font-variant-numeric: tabular-nums; }
+.audit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3ch; align-items: start; }
 @media (max-width: 960px) { .audit { grid-template-columns: minmax(0, 1fr); } }
-.audit h2 { font-size: 15px; margin: 28px 0 10px; display: flex; align-items: center; gap: 8px; }
+.audit h2 { margin: 28px 0 8px; display: flex; gap: 1ch; font-weight: 700; color: var(--cyan); letter-spacing: .04em; text-transform: uppercase; }
 .audit h2:first-of-type { margin-top: 4px; }
-.audit h2 .count { font-size: 12px; font-weight: 600; color: var(--text-3); background: var(--surface-2); border-radius: 999px; padding: 1px 8px; }
-.interp { color: var(--text-2); font-size: 14px; margin: 0 0 20px; }
+.audit h2 .count { color: var(--dim); font-weight: 400; letter-spacing: 0; }
+.interp { color: var(--dim); margin: 0 0 20px; }
 .interp:empty { display: none; }
-.unit { padding: 14px 16px; margin-bottom: 10px; }
-.unit.blocked { border-color: color-mix(in srgb, var(--bad) 35%, var(--border)); }
-.unit .id { font: 12px var(--mono); color: var(--text-3); margin-right: 6px; }
-.unit .why { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bad-soft); color: var(--bad); font-size: 13.5px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.chip { font: 12px var(--mono); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; }
-.chip:hover { border-color: var(--accent); color: var(--accent); }
-.chip.failed { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
-.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.unit { padding: 8px 2ch; margin-bottom: 8px; }
+.unit.blocked { border-color: color-mix(in srgb, var(--red) 40%, var(--rule)); }
+.unit .id { color: var(--dim); margin-right: 1ch; }
+.unit .why { margin-top: 6px; padding-left: 1.5ch; border-left: 2px solid var(--red); color: var(--red); }
+/* Claim references read like the report's own citation marks: [c3]. */
+.chips { display: flex; flex-wrap: wrap; gap: 0 1ch; margin-top: 6px; }
+.chip { padding: 0 2px; border: 0; background: none; color: var(--cyan); cursor: pointer; }
+.chip::before { content: "["; color: var(--dim); }
+.chip::after { content: "]"; color: var(--dim); }
+.chip:hover { text-decoration: underline; }
+.chip.failed { color: var(--red); }
+.chip.active { background: var(--cyan); color: var(--bg); }
+.chip.active::before, .chip.active::after { color: inherit; }
 .list { list-style: none; margin: 0; padding: 0; overflow: hidden; }
-.list > li + li { border-top: 1px solid var(--border); }
-.row { display: flex; gap: 10px; align-items: flex-start; width: 100%; padding: 11px 14px; text-align: left; background: none; border: 0; cursor: pointer; }
-.row:hover { background: var(--surface-2); }
-.row.active { background: var(--accent-soft); }
-.row .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
-.row .sub { display: block; color: var(--text-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; }
-.tag.ok { background: var(--ok-soft); color: var(--ok); }
-.tag.warn { background: var(--warn-soft); color: var(--warn); }
-.tag.bad { background: var(--bad-soft); color: var(--bad); }
-.tag.off { background: var(--off-soft); color: var(--off); }
+.list > li + li { border-top: 1px solid var(--rule); }
+.row { display: flex; gap: 2ch; align-items: flex-start; width: 100%; padding: 6px 2ch; text-align: left; background: none; border: 0; cursor: pointer; }
+.row:hover { background: var(--bg-2); }
+.row.active { background: var(--cyan-soft); box-shadow: inset 2px 0 var(--cyan); }
+.row .tag { min-width: 15ch; }
+.row .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.row .sub { display: block; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.inspector { position: sticky; top: 76px; max-height: calc(100vh - 96px); overflow: auto; padding: 20px; }
+.inspector { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; padding: 14px 2ch; }
 @media (max-width: 960px) { .inspector { position: static; max-height: none; } }
-.inspector .placeholder { color: var(--text-3); text-align: center; padding: 48px 12px; }
-.inspector .placeholder svg { width: 36px; height: 36px; color: var(--border-strong); margin-bottom: 10px; }
-.inspector h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); margin: 22px 0 8px; }
-.inspector .lead { font-size: 16px; line-height: 1.5; margin: 10px 0; }
-.kv { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 4px 12px; font-size: 13.5px; margin: 12px 0 0; }
-.kv dt { color: var(--text-3); }
+.inspector .placeholder { color: var(--dim); padding: 32px 1ch; text-align: center; }
+.inspector h3 { color: var(--cyan); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; margin: 20px 0 6px; }
+.inspector .lead { margin: 8px 0; font-weight: 700; }
+.kv { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: 0 2ch; margin: 10px 0 0; }
+.kv dt { color: var(--dim); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
-.src { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin: 6px 0; min-width: 0; }
+.src { display: flex; align-items: center; gap: 2ch; margin: 4px 0; min-width: 0; }
 .src a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.verdict { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-2); margin: 8px 0; }
-.verdict p { margin: 8px 0 0; color: var(--text-2); font-size: 14px; }
-blockquote { margin: 12px 0 6px; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 14px; }
-.evidence-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
-.back { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; margin-bottom: 8px; }
-.page-note { font-size: 13px; color: var(--text-3); margin: 8px 0; }
-pre.page { white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.7 var(--mono); background: var(--surface-2); padding: 14px; border-radius: var(--radius-sm); margin: 10px 0 0; }
-mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; padding: 1px 0; }
+.verdict { padding: 8px 2ch; background: var(--bg-2); margin: 6px 0; }
+.verdict p { margin: 6px 0 0; color: var(--dim); }
+blockquote { margin: 10px 0 4px; padding: 6px 2ch; border-left: 2px solid var(--cyan); background: var(--bg-2); }
+.evidence-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2ch; }
+.back { display: inline-block; margin-bottom: 8px; }
+.page-note { color: var(--dim); margin: 8px 0; }
+pre.page { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; background: var(--bg-2); padding: 10px 2ch; margin: 10px 0 0; }
+mark { background: var(--yellow); color: var(--bg); }
 
+/* ---- follow-up questions ---- */
+.ask { max-width: 90ch; margin: 24px auto 0; padding: 14px 2ch; }
+.ask .hint { margin: 4px 0 8px; }
+.chat { list-style: none; margin: 0; padding: 0; }
+.chat .q { font-weight: 700; margin: 16px 0 6px; }
+.chat .q::before { content: "ask ▸ "; color: var(--magenta); font-weight: 400; }
+.chat .prose { padding: 0; max-width: none; }
+.ask .composer { margin-top: 14px; }
+.ask .composer textarea { min-height: 1.6em; }
+.ask .composer-bar { padding-top: 4px; }
+
+@media (max-width: 900px) { .setup { display: none; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 @media (max-width: 640px) {
   .topbar-inner, main { padding-left: 16px; padding-right: 16px; }
-  .topbar-inner { gap: 8px; }
-  .brand-name, .setup-chip .sub { display: none; }
-  .setup-chip { max-width: 34vw; }
-  .home { margin-top: 2vh; }
-  .home h1 { font-size: 26px; }
-  .run-head { flex-direction: column; }
-  .run-head .actions { margin-left: 0; }
-  .stepper .nm { display: none; }
-  .stepper .step.current .nm { display: inline; }
-  .agent { grid-template-columns: 18px minmax(0, 1fr) 80px; }
-  .prose { padding: 20px 18px; }
+  .topbar-inner { gap: 1.5ch; }
+  /* The bar keeps the state's mark and a short "new": with the words in full
+     it pushed the theme toggle off a phone's screen. */
+  #state-text, .wide { display: none; }
+  .home, .brief { margin-top: 0; }
+  .composer textarea { font-size: 16px; }
+  .agent { grid-template-columns: 1ch minmax(0, 1fr); }
+  .agent .meter, .agent .ln { grid-column: 2; }
+  .step-sep, #home .hint { display: none; }
+  .row { flex-direction: column; gap: 2px; }
+  .prose { padding: 18px 2ch; }
 }
 </style>
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="/">
-      <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/></svg></span>
-      <span class="brand-name">Deep Research</span>
-    </a>
+    <a class="brand" href="/">DEEP RESEARCH</a>
     <span class="spacer"></span>
     <div id="setup" class="setup" hidden>
-      <span id="setup-model" class="setup-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg><span class="v"></span></span>
-      <span id="setup-search" class="setup-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/></svg><span class="v"></span></span>
+      <span id="setup-model" class="setup-chip"><span class="k">model</span><span class="v"></span></span>
+      <span id="setup-search" class="setup-chip"><span class="k">search</span><span class="v"></span></span>
     </div>
-    <span id="state" class="pill"><span class="dot"></span><span id="state-text">idle</span></span>
-    <button id="new" class="btn sm" hidden>New research</button>
+    <span id="state" class="state"><span id="state-mark">·</span><span id="state-text">idle</span></span>
+    <button id="new" class="btn sm" hidden>new<span class="wide"> research</span></button>
+    <button id="theme" class="theme-btn" type="button" aria-label="Switch theme">
+      <svg id="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg id="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
   </div>
 </header>
 
 <main>
   <!-- start screen -->
   <section id="home" class="home">
-    <h1>What do you want to research?</h1>
+    <h1 class="heading">New research</h1>
     <p class="lede">Every statement in the answer is checked against the pages it cites. You see what passed, what didn't, and why.</p>
     <form id="launch" class="composer">
-      <label for="q" class="sr">Question</label>
-      <textarea id="q" placeholder="e.g. Heat pump or gas furnace for a house in a cold climate?" required></textarea>
+      <div class="prompt">
+        <label for="q" class="prompt-label">research ▸</label>
+        <textarea id="q" placeholder="heat pump or gas furnace for a house in a cold climate?" required></textarea>
+      </div>
       <div class="composer-bar">
-        <div class="segmented" role="radiogroup" aria-label="Depth">
-          <input type="radio" name="mode" id="m-quick" value="quick"><label for="m-quick">Quick<small>3 topics</small></label>
-          <input type="radio" name="mode" id="m-standard" value="standard" checked><label for="m-standard">Standard<small>4 topics</small></label>
-          <input type="radio" name="mode" id="m-deep" value="deep"><label for="m-deep">Deep<small>6 topics</small></label>
-        </div>
-        <label class="field" title="How many pages each sub-topic reads. Auto lets the depth decide.">Pages per topic
+        <span class="group"><span class="k">depth</span>
+        <span class="segmented" role="radiogroup" aria-label="Depth">
+          <input type="radio" name="mode" id="m-quick" value="quick"><label for="m-quick">quick<small>3</small></label>
+          <input type="radio" name="mode" id="m-standard" value="standard" checked><label for="m-standard">standard<small>4</small></label>
+          <input type="radio" name="mode" id="m-deep" value="deep"><label for="m-deep">deep<small>6</small></label>
+        </span></span>
+        <label class="field" title="How many pages each sub-topic reads. Auto lets the depth decide.">pages per topic
           <select id="sources">
-            <option value="0">Auto</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option>
+            <option value="0">auto</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option>
           </select>
         </label>
-        <button id="go" class="btn primary" type="submit">Research <kbd>↵</kbd></button>
+        <button id="go" class="btn primary" type="submit">research <kbd>↵</kbd></button>
       </div>
       <div class="scope">
-        <span>Search</span>
-        <div class="segmented" role="radiogroup" aria-label="Where to search">
-          <input type="radio" name="scope" id="s-web" value="web" checked><label for="s-web">The web</label>
-          <input type="radio" name="scope" id="s-sites" value="sites"><label for="s-sites">Only these sites</label>
-        </div>
-        <input type="text" id="domains" placeholder="wikipedia.org, britannica.com" aria-label="Sites to search" autocomplete="off" spellcheck="false" hidden>
+        <span class="group"><span class="k">search</span>
+        <span class="segmented" role="radiogroup" aria-label="Where to search">
+          <input type="radio" name="scope" id="s-web" value="web" checked><label for="s-web">the web</label>
+          <input type="radio" name="scope" id="s-sites" value="sites"><label for="s-sites">only these sites</label>
+        </span></span>
+        <textarea id="domains" rows="1" placeholder="wikipedia.org, britannica.com" aria-label="Sites to search" autocomplete="off" spellcheck="false" hidden></textarea>
         <p id="domains-note" class="note" hidden>Separate sites with commas. Each is checked before research starts; one that can't be searched or read is skipped.</p>
       </div>
     </form>
+    <p class="hint">[enter] research   [shift+enter] new line</p>
+    <dl id="setup-list" class="setup-list" hidden></dl>
     <p id="msg" class="form-msg" role="alert"></p>
     <div id="stopped-wrap" hidden>
-      <div class="section-title">Interrupted runs</div>
+      <h2 class="heading section-title">Interrupted runs</h2>
       <ul id="stopped" class="runs"></ul>
     </div>
-    <div class="section-title">Recent runs</div>
-    <ul id="runs" class="runs"><li class="empty">Loading…</li></ul>
+    <h2 class="heading section-title">Recent runs</h2>
+    <ul id="runs" class="runs"><li class="empty">loading…</li></ul>
   </section>
 
   <!-- plan review: the plan, editable before research starts -->
   <section id="brief" class="brief" hidden>
     <div class="card">
       <div class="brief-head">
-        <div class="eyebrow">Review the plan</div>
+        <h2 class="heading">Review the plan</h2>
         <h1 id="brief-question"></h1>
         <p>Each sub-topic is researched by its own agent. Rename, add or remove them before research starts.</p>
         <p id="brief-domains" class="muted" hidden></p>
       </div>
       <div class="brief-bar">
-        <div class="segmented" role="radiogroup" aria-label="Depth">
-          <input type="radio" name="bdepth" id="b-quick" value="quick"><label for="b-quick">Quick</label>
-          <input type="radio" name="bdepth" id="b-standard" value="standard"><label for="b-standard">Standard</label>
-          <input type="radio" name="bdepth" id="b-deep" value="deep"><label for="b-deep">Deep</label>
-        </div>
+        <span class="group"><span class="k">depth</span>
+        <span class="segmented" role="radiogroup" aria-label="Depth">
+          <input type="radio" name="bdepth" id="b-quick" value="quick"><label for="b-quick">quick</label>
+          <input type="radio" name="bdepth" id="b-standard" value="standard"><label for="b-standard">standard</label>
+          <input type="radio" name="bdepth" id="b-deep" value="deep"><label for="b-deep">deep</label>
+        </span></span>
         <span id="brief-budget" class="muted"></span>
       </div>
+      <div class="topics-label">planned sub-topics</div>
       <ol id="topics" class="topics"></ol>
       <form id="add-topic" class="add-topic">
-        <input id="new-topic" placeholder="Add a sub-topic…" aria-label="New sub-topic" maxlength="200">
-        <button class="btn sm" type="submit">Add</button>
+        <input id="new-topic" placeholder="add a sub-topic…" aria-label="New sub-topic" maxlength="200">
+        <button class="btn sm" type="submit">add</button>
       </form>
       <div class="brief-foot">
-        <button id="discard" class="btn ghost" type="button">Discard</button>
-        <button id="start" class="btn primary" type="button">Start research</button>
+        <button id="discard" class="btn ghost" type="button">discard</button>
+        <button id="start" class="btn primary" type="button">start research</button>
       </div>
     </div>
     <p id="brief-msg" class="form-msg" role="alert"></p>
@@ -412,24 +456,23 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
   <section id="run" hidden>
     <div class="card">
       <div class="run-head">
-        <div>
-          <h1 id="question"></h1>
-          <div class="run-meta">
-            <span id="elapsed" class="mono"></span>
-            <span><b id="n-sources">0</b> sources</span>
-            <span><b id="n-tokens">0</b> tokens</span>
-            <span id="mode-label"></span>
-          </div>
+        <div class="heading-row"><span id="run-title" class="heading">Researching</span><span id="elapsed" class="dim"></span></div>
+        <h1 id="question"></h1>
+        <div class="run-meta">
+          <span><b id="n-sources">0</b> sources</span>
+          <span><b id="n-tokens">0</b> tokens</span>
+          <span id="mode-label"></span>
+          <button id="cancel" class="btn danger sm" hidden>cancel run</button>
+          <span id="exports" class="files exports"></span>
         </div>
-        <div class="actions"><button id="cancel" class="btn danger sm" hidden>Cancel run</button></div>
       </div>
       <div id="live">
         <div id="stepper" class="stepper"></div>
         <div id="note" class="notice" hidden></div>
-        <div id="status" class="status" hidden><div class="now"><span class="spinner"></span><span id="status-now"></span></div><div id="status-thought" class="thought"></div></div>
+        <div id="status" class="status" hidden><div class="now"><span class="spin"></span><span id="status-now"></span></div><div id="status-thought" class="thought"></div></div>
         <div id="sources-check" class="sources" hidden></div>
         <div id="agents" class="agents"></div>
-        <details class="activity"><summary>Activity <span id="n-events" class="muted"></span></summary><ol id="log" class="log"></ol></details>
+        <details class="activity"><summary>activity <span id="n-events"></span></summary><ol id="log" class="log"></ol></details>
       </div>
     </div>
 
@@ -442,10 +485,10 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
     <div id="audit" hidden>
       <div id="view-bar" class="view-bar">
         <div class="segmented" role="radiogroup" aria-label="View">
-          <input type="radio" name="view" id="v-report" value="report" checked><label for="v-report">Reading view</label>
-          <input type="radio" name="view" id="v-audit" value="audit"><label for="v-audit">Audit</label>
+          <input type="radio" name="view" id="v-report" value="report" checked><label for="v-report">reading view</label>
+          <input type="radio" name="view" id="v-audit" value="audit"><label for="v-audit">audit</label>
         </div>
-        <button id="copy" class="btn sm ghost" type="button">Copy report</button>
+        <button id="copy" class="btn sm ghost" type="button">copy report</button>
       </div>
       <article id="report" class="card prose"></article>
       <div id="audit-body">
@@ -466,12 +509,15 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
         </div>
       </div>
       <section class="card ask" aria-labelledby="ask-title">
-        <h2 id="ask-title">Ask about this report</h2>
-        <p class="hint muted">Answered from this run's saved sources, without searching again. Answers are not fact-checked.</p>
+        <h2 id="ask-title" class="heading">Ask about this report</h2>
+        <p class="hint">Answered from this run's saved sources, without searching again. Answers are not fact-checked.</p>
         <ol id="chat" class="chat" aria-live="polite"></ol>
         <form id="ask-form" class="composer">
-          <textarea id="ask-q" placeholder="Ask a follow-up question…" aria-label="Follow-up question" maxlength="2000"></textarea>
-          <div class="composer-bar"><button id="ask-go" class="btn primary" type="submit">Ask</button></div>
+          <div class="prompt">
+            <label for="ask-q" class="prompt-label">ask ▸</label>
+            <textarea id="ask-q" placeholder="a follow-up question…" maxlength="2000"></textarea>
+          </div>
+          <div class="composer-bar"><span class="k">[enter] ask</span><button id="ask-go" class="btn primary sm" type="submit">ask <kbd>↵</kbd></button></div>
         </form>
         <p id="ask-msg" class="form-msg" role="alert"></p>
       </section>
@@ -523,24 +569,71 @@ function show(view) {
 }
 
 // loadSetup shows the model and the search the server's runs use, loaded
-// once when serve started. A failure hides the chips, nothing more.
+// once when serve started: their names in the bar, the whole of it on the
+// start screen. A failure hides both, nothing more.
 async function loadSetup() {
   try {
     const s = await (await fetch("/api/info")).json();
-    if (!s.model) { $("setup").hidden = true; return; }
-    fillChip("setup-model", s.model, s.provider, "Model " + s.model + " via " + s.provider);
-    fillChip("setup-search", s.search, s.pages, "Search: " + s.search + "\nPage text: " + s.pages);
+    if (!s.model) return;
+    fillChip("setup-model", s.model, "Model " + s.model + " via " + s.provider);
+    fillChip("setup-search", s.search, "Search: " + s.search + "\nPage text: " + s.pages);
     $("setup").hidden = false;
-  } catch { $("setup").hidden = true; }
+    $("setup-list").replaceChildren(...[["model", s.model], ["provider", s.provider], ["search", s.search], ["page text", s.pages]]
+      .filter(([, v]) => v).flatMap(([k, v]) => [el("dt", "", k), el("dd", "", v)]));
+    $("setup-list").hidden = false;
+  } catch {}
 }
-function fillChip(id, main, sub, title) {
-  const v = $(id).querySelector(".v");
-  v.replaceChildren(document.createTextNode(main + " "), el("span", "sub", "· " + sub));
+function fillChip(id, value, title) {
+  $(id).querySelector(".v").textContent = value;
   $(id).title = title;
 }
+
+// ---- theme --------------------------------------------------------------------
+
+// The toggle flips whichever theme is showing, and the choice is kept. The
+// icon is the theme a click switches to.
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+function darkShown() {
+  const t = document.documentElement.dataset.theme;
+  return t ? t === "dark" : systemDark.matches;
+}
+function paintTheme() {
+  const dark = darkShown();
+  $("theme-sun").style.display = dark ? "" : "none";
+  $("theme-moon").style.display = dark ? "none" : "";
+  $("theme").setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+  $("theme").title = $("theme").getAttribute("aria-label");
+}
+$("theme").onclick = () => {
+  const next = darkShown() ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch {}
+  paintTheme();
+};
+systemDark.addEventListener("change", paintTheme);
+paintTheme();
 function setState(text, live) {
   $("state-text").textContent = text;
   $("state").classList.toggle("live", !!live);
+  $("state-mark").className = live ? "spin" : "";
+  $("state-mark").textContent = live ? FRAMES[frame] : "·";
+}
+
+// The terminal UI's spinner, its frames advanced together on every element
+// that shows one. Reduced motion keeps the first frame.
+const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let frame = 0;
+function spin() { return el("span", "spin", FRAMES[frame]); }
+setInterval(() => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  frame = (frame + 1) % FRAMES.length;
+  for (const s of document.getElementsByClassName("spin")) s.textContent = FRAMES[frame];
+}, 80);
+// meter is the terminal's ten-cell progress bar, so rows stay aligned as work
+// lands: the filled cells, then the empty ones.
+function meter(p) {
+  const full = Math.floor(Math.min(Math.max(p, 0), 100) / 10);
+  return ["█".repeat(full), "░".repeat(10 - full)];
 }
 
 // ---- live frame -------------------------------------------------------------
@@ -565,21 +658,22 @@ function setRunning(on) {
 }
 function reset() {
   agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0;
-  for (const id of ["question", "agents", "sources-check", "log", "files", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
+  for (const id of ["question", "agents", "sources-check", "log", "files", "exports", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
   $("sources-check").hidden = true;
   $("n-sources").textContent = "0"; $("n-tokens").textContent = "0"; $("n-events").textContent = "";
   $("note").hidden = $("status").hidden = $("outcome").hidden = $("audit").hidden = true;
   $("live").hidden = false;
+  // The bar already names the app; the frame's title says what the run is doing.
+  $("run-title").textContent = "Researching";
   stepper();
   show("run");
 }
 function stepper() {
   let cur = PIPELINE.findIndex(p => p.toLowerCase() === phase.toLowerCase());
   if (phase === "Report" || finished) cur = PIPELINE.length;
-  $("stepper").replaceChildren(...PIPELINE.map((p, i) => {
-    const s = el("div", "step" + (i < cur ? " done" : i === cur ? " current" : ""));
-    s.append(el("span", "ix", i < cur ? "✓" : String(i + 1)), el("span", "nm", p));
-    return s;
+  $("stepper").replaceChildren(...PIPELINE.flatMap((p, i) => {
+    const s = i < cur ? el("span", "step done", "✓ " + p) : i === cur ? el("span", "step current", "▸ " + p) : el("span", "step", "· " + p);
+    return i ? [el("span", "step-sep", "─"), s] : [s];
   }));
 }
 function status(text) {
@@ -593,22 +687,31 @@ function status(text) {
 function agent(e) {
   let a = agents.get(e.sub_id);
   if (!a) {
-    a = { row: el("div", "agent"), progress: 0 };
+    a = { id: e.sub_id, row: el("div", "agent"), progress: 0, sources: 0 };
     agents.set(e.sub_id, a);
     // In plan order, follow-ups ("f1", "f2") after: sub-agents report in
     // parallel, and in arrival order the rows came out shuffled.
     const rank = id => id.startsWith("f") ? 1e6 + (+id.slice(1) || 0) : +id || 0;
-    $("agents").append(...[...agents].sort((x, y) => rank(x[0]) - rank(y[0])).map(([, v]) => v.row));
+    const rows = [...agents].sort((x, y) => rank(x[0]) - rank(y[0])).map(([, v]) => v.row);
+    // Unmarked, the follow-up rows read as more of the plan, as in the terminal.
+    const first = [...agents.keys()].sort((x, y) => rank(x) - rank(y)).findIndex(id => id.startsWith("f"));
+    if (first >= 0) rows.splice(first, 0, el("div", "divider", "follow-up searches for the analysis's open questions"));
+    $("agents").replaceChildren(...rows);
   }
   for (const k of ["sub_name", "sub_state", "line"]) if (e[k]) a[k] = e[k];
   if (e.progress > a.progress) a.progress = e.progress;
+  drawAgent(a);
+}
+function drawAgent(a) {
   const st = a.sub_state || "queued";
   a.row.className = "agent " + st;
-  const ico = st === "running" ? el("span", "spinner") : el("span", "ico " + st, st === "done" ? "✓" : st === "error" ? "✗" : "•");
-  const bar = el("div", "bar"), fill = el("i");
-  fill.style.width = (st === "done" ? 100 : a.progress) + "%";
-  bar.append(fill);
-  a.row.replaceChildren(ico, el("span", "nm", a.sub_name || "Topic " + e.sub_id), bar, el("span", "ln", a.line || ""));
+  const ico = st === "running" ? spin() : el("span", "ico " + st, st === "done" ? "✓" : st === "error" ? "✗" : "·");
+  const p = st === "done" ? 100 : a.progress, m = el("span", "meter");
+  let label = " " + String(p).padStart(3) + "%";
+  if (a.sources) label += " " + String(a.sources).padStart(2) + " " + (a.sources === 1 ? "source " : "sources");
+  const [full, empty] = meter(p);
+  m.append(el("b", "", full), el("i", "", empty), label);
+  a.row.replaceChildren(ico, el("span", "nm", a.sub_name || "Topic " + a.id), m, el("span", "ln", a.line || ""));
 }
 // source is one domain of the run's site list, as the check before planning
 // found it: read in full, from search snippets only, or not usable.
@@ -635,10 +738,16 @@ function log(e, text, cls) {
 }
 function handle(e) {
   if (!startedAt && e.time) startedAt = Date.parse(e.time) || Date.now();
+  // Running totals ride on more than token and citation events: the final
+  // count is on the report event, and reading only those two left the frame
+  // at the analysis's 21k while the run's report said 89k.
+  if (e.sources) $("n-sources").textContent = e.sources;
+  if (e.tokens) $("n-tokens").textContent = fmtNum(e.tokens);
   switch (e.type) {
   case "start":
     reset(); setRunning(true);
     planning = !!e.plan_only; madePlan = null; planStamp = e.time;
+    if (planning) $("run-title").textContent = "Planning";
     startedAt = Date.parse(e.time) || Date.now();
     // A run launched from an edited plan names its question in the plan
     // event, which follows.
@@ -658,19 +767,22 @@ function handle(e) {
     break;
   case "phase":
     phase = e.phase; stepper();
-    if (e.detail) status(e.detail);
-    log(e, e.phase + (e.detail ? " — " + e.detail : ""), "phase");
+    // A phase without a detail clears the last one: "Checking 3 sites…" stayed
+    // up through the whole of Research.
+    status(e.detail || "");
+    // The reasoning after the first line is the status row's, not the log's.
+    log(e, e.phase + (e.detail ? " — " + e.detail.split("\n")[0] : ""), "phase");
     break;
   case "info":
     if (e.transient) status(e.detail); else log(e, e.detail);
     break;
   case "subagent": agent(e); break;
-  case "token":
-  case "citation":
-    if (e.sources) $("n-sources").textContent = e.sources;
-    if (e.tokens) $("n-tokens").textContent = fmtNum(e.tokens);
-    if (e.type === "citation") log(e, "+ " + (e.source_title || e.url), "ok");
+  case "citation": {
+    log(e, "+ " + (e.source_title || e.url), "ok");
+    const a = agents.get(e.sub_id);
+    if (a) { a.sources++; drawAgent(a); }
     break;
+  }
   case "search": log(e, "search “" + e.query + "”"); break;
   case "read": log(e, "read " + (e.domain || domain(e.url))); break;
   // An off-topic result has no line of its own: the search's line counts them.
@@ -698,6 +810,7 @@ function done(e) {
   // runs, and the page opens on the start screen rather than on it.
   if (endedAt < loadedAt) { show("home"); return; }
   stepper(); status("");
+  $("run-title").textContent = "Research " + (e.status || "ended");
   $("outcome").hidden = false;
   $("outcome-tag").replaceChildren(tag(OUTCOME[e.status] || ["off", e.status]));
   const msg = $("outcome-msg");
@@ -708,21 +821,33 @@ function done(e) {
     msg.append(el("span", "", d.charAt(0).toUpperCase() + d.slice(1)));
   }
   else if (e.status === "complete") msg.append(el("strong", "", "The report is ready."), " Audit shows what the fact-check decided.");
-  const files = $("files");
+  // The downloads go in the header, from loadAudit; this box keeps the link
+  // back to the run.
   for (const p of e.artifacts || []) {
     // Every artifact is written straight into the reports directory, which
     // is what /reports/ serves.
-    const name = p.split(/[\\/]/).pop(), ext = name.split(".").pop();
-    if (name.endsWith(".trace.json")) continue;
-    const a = el("a", "btn sm", ext.toUpperCase()); a.href = "/reports/" + encodeURIComponent(name);
-    if (ext !== "json") a.download = name;
-    files.append(a);
-    if (ext === "json") {
-      const perma = el("a", "btn sm ghost", "Permalink"); perma.href = "/?run=" + encodeURIComponent(name);
-      files.append(perma);
-      loadAudit(name);
-    }
+    const name = p.split(/[\\/]/).pop();
+    if (!name.endsWith(".json") || name.endsWith(".trace.json")) continue;
+    const perma = el("a", "btn sm", "permalink"); perma.href = "/?run=" + encodeURIComponent(name);
+    $("files").append(perma);
+    loadAudit(name);
   }
+}
+
+// exports offers the run's files in its header, on a run that just ended and
+// on one opened later alike: below the live frame they sat out of sight, and
+// a run opened from Recent runs had none. Only files that exist are offered:
+// the PDF is skipped when it could not be typeset.
+async function exports(name, hasMd) {
+  const stem = name.replace(/\.json$/, "");
+  const url = ext => "/reports/" + encodeURIComponent(stem + "." + ext);
+  const pdf = await fetch(url("pdf"), { method: "HEAD" }).then(r => r.ok, () => false);
+  const links = [["md", hasMd], ["pdf", pdf], ["json", true]].filter(([, ok]) => ok).map(([ext]) => {
+    const a = el("a", "btn sm", ext); a.href = url(ext);
+    if (ext !== "json") a.download = stem + "." + ext;
+    return a;
+  });
+  $("exports").replaceChildren(el("span", "k", "download"), ...links);
 }
 
 // ---- plan review ----------------------------------------------------------
@@ -857,7 +982,7 @@ function stoppedRuns(list) {
   $("stopped-wrap").hidden = !list.length;
   $("stopped").replaceChildren(...list.map(r => {
     const li = el("li", "stopped");
-    const resume = el("button", "btn sm primary", "Resume"), drop = el("button", "btn sm ghost", "Discard");
+    const resume = el("button", "btn sm primary", "resume"), drop = el("button", "btn sm ghost", "discard");
     resume.onclick = async () => {
       const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resume: r.name }) });
       if (!res.ok) $("msg").textContent = (await res.text()).trim();
@@ -898,6 +1023,7 @@ async function loadAudit(name) {
     $("outcome-msg").textContent = "Could not load " + url + (audit.status && audit.body === null ? " (" + audit.status + ")" : "") + ".";
     return;
   }
+  exports(name, md.body !== null);
   // 404 is a complete run whose summarizer wrote nothing. Any other failure
   // is said in the report's place, not passed off as that.
   if (report.body !== null) renderReport(report.body);
@@ -941,7 +1067,7 @@ function chip(id, failed) {
   b.onclick = () => showClaim(id);
   return b;
 }
-function stat(v, l) { const c = el("div", "card stat"); c.append(el("div", "v", String(v)), el("div", "l", l)); return c; }
+function stat(v, l) { const c = el("span", "stat"); c.append(el("span", "l", l), el("b", "", String(v))); return c; }
 function renderAudit() {
   const a = meta.analysis || {};
   $("audit").hidden = false;
@@ -991,18 +1117,15 @@ function renderAudit() {
   const supported = (a.claims || []).filter(c => c.status === "supported").length;
   const fetched = (meta.citations || []).filter(c => c.status === "ok").length;
   $("stats").replaceChildren(
-    stat(passed, "statements passed"),
+    stat(passed, "passed"),
     stat(failed, "blocked"),
-    stat(supported + " / " + (a.claims || []).length, "claims supported"),
-    stat(fetched + " / " + (meta.citations || []).length, "sources fetched in full"));
+    stat(supported + "/" + (a.claims || []).length, "claims supported"),
+    stat(fetched + "/" + (meta.citations || []).length, "sources fetched in full"));
   placeholder();
 }
 function placeholder() {
   const v = $("inspector"); v.replaceChildren();
-  const p = el("div", "placeholder");
-  p.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 12h6M9 16h6M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/></svg>';
-  p.append(el("div", "", "Select a claim or a source to see its verdict, its quotes, and the page text they were found in."));
-  v.append(p);
+  v.append(el("div", "placeholder", "Select a claim or a source to see its verdict, its quotes, and the page text they were found in."));
 }
 function highlight(attr, value) {
   for (const n of document.querySelectorAll(".row.active, .chip.active")) n.classList.remove("active");
@@ -1049,7 +1172,7 @@ function showClaim(id) {
       if (!ps.page) foot.append(tag(["bad", "No fetched page"]), el("span", "muted", "The quote names a page the run did not fetch."));
       else {
         foot.append(tag(ps.located ? ["ok", "Found in page"] : ["bad", "Not in page"]), link(ps.page, citation(ps.page).title || domain(ps.page)));
-        const b = el("button", "btn sm", "View in page"); b.onclick = () => showPage(ps.page, ps.quote, ps.located);
+        const b = el("button", "btn sm", "view in page"); b.onclick = () => showPage(ps.page, ps.quote, ps.located);
         foot.append(b);
       }
       v.append(foot);
@@ -1140,9 +1263,9 @@ $("ask-q").addEventListener("keydown", ev => {
 });
 $("copy").onclick = async () => {
   const b = $("copy");
-  try { await navigator.clipboard.writeText(reportMd || ""); b.textContent = "Copied"; }
-  catch { b.textContent = "Could not copy"; }
-  setTimeout(() => { b.textContent = "Copy report"; }, 2000);
+  try { await navigator.clipboard.writeText(reportMd || ""); b.textContent = "copied"; }
+  catch { b.textContent = "could not copy"; }
+  setTimeout(() => { b.textContent = "copy report"; }, 2000);
 };
 
 $("launch").onsubmit = async ev => {
@@ -1172,6 +1295,10 @@ for (const r of document.querySelectorAll("input[name=scope]")) {
   r.onchange = () => { showScope(); if (onlySites()) $("domains").focus(); };
 }
 try { $("domains").value = localStorage.getItem("sites") || ""; } catch {}
+// Enter launches, as it did when the list was a one-line field.
+$("domains").addEventListener("keydown", ev => {
+  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("launch").requestSubmit(); }
+});
 showScope();
 $("q").addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("launch").requestSubmit(); }
@@ -1191,6 +1318,7 @@ const permalink = new URLSearchParams(location.search).get("run");
 if (permalink) {
   show("run");
   $("live").hidden = true;
+  $("run-title").textContent = "Research report";
   $("question").textContent = runTitle(permalink.split("/").pop());
   $("new").hidden = false;
   loadAudit(permalink).then(() => {
@@ -1218,8 +1346,7 @@ if (permalink) {
     try {
       const stopped = (await (await fetch("/api/runs")).json()).filter(r => r.interrupted);
       if (!stopped.length) return;
-      const b = el("button", "btn sm primary", "Resume");
-      b.style.marginLeft = "10px";
+      const b = el("button", "btn sm primary", "resume");
       b.onclick = async () => {
         const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resume: stopped[0].name }) });
         if (!res.ok) $("note").textContent = (await res.text()).trim();

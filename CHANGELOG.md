@@ -5,6 +5,44 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The `serve` page now looks like the terminal UI instead of a generic web
+  app. It is monospace throughout and uses the same ANSI palette, light or
+  dark with the system. Titles are bold cyan capitals and rules are thin.
+  It has the same phase strip (`✓ Plan ─ ▸ Research ─ · Analyze`) and
+  braille spinner, and each sub-agent gets a ten-cell `█░` meter with its
+  own source count. The follow-up round is marked as it is in the
+  terminal. The prompt is a magenta `research ▸` with key hints in brackets.
+  Verdicts are coloured words with their glyphs, and claim references read
+  `[c1]` as they do in the report. Gone: the pill badges, rounded cards,
+  shadows, stat tiles, blur and decorative icons.
+- The dark theme is a charcoal rather than near-black, and boxes sit a step
+  lighter than the page, so their contents no longer blend into it.
+
+### Added
+
+- A sun/moon toggle in the `serve` page's top bar switches between light and
+  dark. The choice is kept in the browser; without one, the system setting
+  decides.
+- The start screen lists the whole setup (model, provider, search, page
+  text). The top bar keeps only the model and search names, which no longer
+  get cut off.
+- The "Only these sites" box wraps and grows with the list, up to five lines,
+  instead of a one-line field that showed two domains and cut off the rest.
+- A report on the `serve` page offers its `.md`, `.pdf` and `.json` downloads
+  in its header, including a report opened from Recent runs or a permalink.
+  Those had no downloads at all, and on a run that just ended they sat below
+  the whole live frame.
+
+### Fixed
+
+- The `serve` page's token count stopped at the analysis's total: it read
+  totals only from citation events, and missed the final one the report
+  event carries (a run's frame said 21k where its report said 89k).
+- The run frame's title says what the run is doing (planning, researching,
+  complete) instead of repeating "Deep Research" under the top bar's.
+
 ## [0.12.0] - 2026-10-14
 
 ### Added

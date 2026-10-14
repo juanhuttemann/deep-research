@@ -270,7 +270,7 @@ deep-research serve                      # http://localhost:7777
 deep-research serve --addr 127.0.0.1:0   # any free port
 ```
 
-A page for launching a run and auditing what it decided. The form takes the
+A page for launching a run and auditing what it decided. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question, `--mode` and `--sources` (as "Pages per topic"), and Search: the
 web, or "Only these sites", which opens a box for the list (`--domains`)
 and keeps the last one typed. The run then opens with a checklist of the
@@ -290,7 +290,7 @@ confidence, the fact-check section and the source lists, and keeps
 the citations. Audit, beside it, reads the run's `.json` artifact and shows
 the answer, the statements the fact-check blocked with the claim that
 failed, every claim with its verdict, and each quote inside the page text
-the check located it in. Every source is badged `fetched`, `snippet only` or
+the check located it in. Every source is marked `fetched`, `snippet only` or
 `never fetched`. A quote is highlighted where it appears verbatim; one
 the check located only after normalising markup and whitespace is marked
 located but not highlighted. The start screen lists the 50 most recent runs
