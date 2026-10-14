@@ -809,11 +809,19 @@ func (d *Driver) searchFailure(findings []agent.Finding) error {
 		return nil
 	}
 	status := tools.SearchStatus(d.searchErr)
+	if status == "unreachable" && tools.UnreachableService(d.searchErr) != "SearXNG" {
+		// A hosted engine has a fixed address: what failed is the network.
+		return fmt.Errorf("no search answered: %w. Check this machine's network (deep-research doctor checks it)", d.searchErr)
+	}
 	if status == "unreachable" {
 		// Nothing answered at the configured address: the server is down or
 		// the setting points at the wrong place, and both are the reader's to
 		// fix.
 		return fmt.Errorf("no search answered: %w. Check SEARXNG_URL and that SearXNG is running (deep-research doctor checks it)", d.searchErr)
+	}
+	if status == "unauthorized" || status == "quota" {
+		// Only a hosted engine takes a key, and its error already names it.
+		return fmt.Errorf("no search answered (%s): %w. Check the engine's API key and its credit (deep-research doctor checks it)", status, d.searchErr)
 	}
 	return fmt.Errorf("no search answered (%s): %w", status, d.searchErr)
 }

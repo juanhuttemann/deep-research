@@ -64,6 +64,13 @@ button { font: inherit; color: inherit; }
 .logo { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
 .logo svg { width: 15px; height: 15px; color: var(--on-accent); }
 .spacer { flex: 1; }
+/* What the next run uses: model and search, read from the config. */
+.setup { display: flex; gap: 8px; min-width: 0; }
+.setup-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 340px; font-size: 12.5px;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); white-space: nowrap; }
+.setup-chip svg { width: 13px; height: 13px; flex: none; color: var(--text-3); }
+.setup-chip .v { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.setup-chip .sub { color: var(--text-3); }
 .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550; padding: 3px 10px;
   border-radius: 999px; background: var(--off-soft); color: var(--off); white-space: nowrap; }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -292,6 +299,9 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
 
 @media (max-width: 640px) {
   .topbar-inner, main { padding-left: 16px; padding-right: 16px; }
+  .topbar-inner { gap: 8px; }
+  .brand-name, .setup-chip .sub { display: none; }
+  .setup-chip { max-width: 34vw; }
   .home { margin-top: 2vh; }
   .home h1 { font-size: 26px; }
   .run-head { flex-direction: column; }
@@ -308,9 +318,13 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
   <div class="topbar-inner">
     <a class="brand" href="/">
       <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/></svg></span>
-      Deep Research
+      <span class="brand-name">Deep Research</span>
     </a>
     <span class="spacer"></span>
+    <div id="setup" class="setup" hidden>
+      <span id="setup-model" class="setup-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg><span class="v"></span></span>
+      <span id="setup-search" class="setup-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/></svg><span class="v"></span></span>
+    </div>
     <span id="state" class="pill"><span class="dot"></span><span id="state-text">idle</span></span>
     <button id="new" class="btn sm" hidden>New research</button>
   </div>
@@ -487,6 +501,23 @@ function show(view) {
   $("run").hidden = view !== "run";
   $("new").hidden = view !== "run" || running;
   if (view === "home") { loadRuns(); $("q").focus(); }
+}
+
+// loadSetup shows the model and the search the server's runs use, loaded
+// once when serve started. A failure hides the chips, nothing more.
+async function loadSetup() {
+  try {
+    const s = await (await fetch("/api/info")).json();
+    if (!s.model) { $("setup").hidden = true; return; }
+    fillChip("setup-model", s.model, s.provider, "Model " + s.model + " via " + s.provider);
+    fillChip("setup-search", s.search, s.pages, "Search: " + s.search + "\nPage text: " + s.pages);
+    $("setup").hidden = false;
+  } catch { $("setup").hidden = true; }
+}
+function fillChip(id, main, sub, title) {
+  const v = $(id).querySelector(".v");
+  v.replaceChildren(document.createTextNode(main + " "), el("span", "sub", "· " + sub));
+  $(id).title = title;
 }
 function setState(text, live) {
   $("state-text").textContent = text;
@@ -1149,6 +1180,8 @@ if (permalink) {
     $("note").textContent = "Earlier events of this run were not kept, so the frame starts partway through.";
   });
 }
+// The chips belong on every view, including a run or report opened by URL.
+loadSetup();
 </script>
 </body>
 </html>

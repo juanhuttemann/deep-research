@@ -109,6 +109,7 @@ func clearProviderEnv(t *testing.T) {
 		"OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
 		"OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODEL",
 		"SEARXNG_URL", "FIRECRAWL_URL", "FIRECRAWL_API_KEY",
+		"EXA_API_KEY", "TAVILY_API_KEY", "DEEP_RESEARCH_SEARCH_ENGINE", "DEEP_RESEARCH_SCRAPER",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
 		"DEEP_RESEARCH_PROVIDER", "DEEP_RESEARCH_CLAUDE_MODEL",
 	} {
@@ -244,6 +245,39 @@ func TestFirecrawlAPIKeyIsConfigurable(t *testing.T) {
 	}
 	if cfg.FirecrawlAPIKey != "fc-from-env" {
 		t.Errorf("FIRECRAWL_API_KEY should win: got %q", cfg.FirecrawlAPIKey)
+	}
+}
+
+// Exa and Tavily are chosen by search_engine and scraper and take their keys
+// from the usual three places; nothing changes for a config that names neither.
+func TestHostedSearchSettings(t *testing.T) {
+	def := loadIn(t, "model_call_retries: 2\n")
+	if def.SearchEngine != "searxng" || def.Scraper != "" || !def.SearchEnabled() {
+		t.Errorf("defaults changed: engine %q scraper %q enabled %v", def.SearchEngine, def.Scraper, def.SearchEnabled())
+	}
+	cfg := loadIn(t, "search_engine: Exa\nscraper: tavily\nexa_api_key: e-file\ntavily_api_key: t-file\n")
+	if cfg.SearchEngine != "exa" || cfg.Scraper != "tavily" || cfg.ExaAPIKey != "e-file" || cfg.TavilyAPIKey != "t-file" {
+		t.Errorf("file settings not read: %+v", cfg.Config)
+	}
+	for _, off := range []string{"search_engine: off\n", "search_engine: none\n", "searxng_url: off\n"} {
+		if loadIn(t, off).SearchEnabled() {
+			t.Errorf("%q left search on", off)
+		}
+	}
+
+	clearProviderEnv(t)
+	cfgDir := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "search_engine: exa\nexa_api_key: e-file\n")
+	t.Setenv("DEEP_RESEARCH_SEARCH_ENGINE", "tavily")
+	t.Setenv("EXA_API_KEY", "e-env")
+	t.Setenv("DEEP_RESEARCH_TAVILY_API_KEY", "t-env")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SearchEngine != "tavily" || cfg.ExaAPIKey != "e-env" || cfg.TavilyAPIKey != "t-env" {
+		t.Errorf("the environment should win: %+v", cfg.Config)
 	}
 }
 

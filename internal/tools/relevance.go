@@ -72,7 +72,7 @@ func foldWith(t transform.Transformer, s string) string {
 // ScoredResult pairs a search result with its relevance to the query, so the
 // caller can report why a result was dropped rather than silently losing it.
 type ScoredResult struct {
-	SearXNGResult
+	SearchResult
 	Score float64
 }
 
@@ -145,17 +145,17 @@ func judgeable(terms []string) []string {
 // floor: the genuine sources are usually present but buried, so reordering
 // alone is what puts them inside the per-query budget. Ties keep the engines'
 // own order, which is still the best tiebreak available.
-func rankByRelevance(in []SearXNGResult, terms []string) (kept, skipped []ScoredResult) {
+func rankByRelevance(in []SearchResult, terms []string) (kept, skipped []ScoredResult) {
 	terms = judgeable(terms)
 	if len(terms) < minDistinctiveTerms {
 		for _, r := range in {
-			kept = append(kept, ScoredResult{SearXNGResult: r, Score: 1})
+			kept = append(kept, ScoredResult{SearchResult: r, Score: 1})
 		}
 		return kept, nil
 	}
 	scored := make([]ScoredResult, len(in))
 	for i, r := range in {
-		scored[i] = ScoredResult{SearXNGResult: r, Score: relevance(terms, r.Title, r.Content)}
+		scored[i] = ScoredResult{SearchResult: r, Score: relevance(terms, r.Title, r.Content)}
 	}
 	sort.SliceStable(scored, func(i, j int) bool { return scored[i].Score > scored[j].Score })
 	for _, r := range scored {

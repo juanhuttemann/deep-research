@@ -2051,6 +2051,22 @@ func TestSearchFailureSaysWhatToCheck(t *testing.T) {
 	}
 }
 
+// A hosted engine nothing answered at has no address to fix: pointing at
+// SEARXNG_URL sent the reader to a setting the run did not use.
+func TestHostedSearchFailureDoesNotBlameSearXNG(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := "http://" + ln.Addr().String()
+	_ = ln.Close()
+	_, searchErr := tools.NewExaClient(addr, "k", time.Second).Search(context.Background(), "q")
+	got := (&Driver{searchErr: searchErr}).searchFailure(nil).Error()
+	if !strings.Contains(got, "cannot reach Exa") || strings.Contains(got, "SEARXNG_URL") {
+		t.Errorf("run error = %q", got)
+	}
+}
+
 // A plan handed back with --plan was written or edited by hand. It cannot
 // ask for a tier that does not exist, run with no sub-topics, or claim a
 // budget larger than its tier and sub-topic count allow.

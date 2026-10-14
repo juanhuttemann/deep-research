@@ -80,6 +80,11 @@ type Turn struct {
 // reports directory, after the conversation so far. It returns Markdown.
 type AskFunc func(ctx context.Context, run string, turns []Turn, question string) (string, error)
 
+// InfoFunc says what a run launched from the page uses: model, provider,
+// search engine and page source. Any JSON-encodable value; nil serves an
+// empty object.
+type InfoFunc func() (any, error)
+
 // maxLines bounds the replay buffer by line count, not bytes. Events are
 // short (a status line, a URL); the longest is the plan event, a few KB, so
 // the count bounds the memory too.
@@ -94,6 +99,8 @@ type Server struct {
 	reports fs.FS
 	// Ask answers questions about a finished run; nil refuses them.
 	Ask AskFunc
+	// Info describes the configured setup; nil serves an empty object.
+	Info InfoFunc
 	// remove deletes a file in the reports directory: a discarded
 	// checkpoint. Nil refuses every discard.
 	remove func(name string) error
@@ -133,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/runs", s.runs)
+	mux.HandleFunc("GET /api/info", s.info)
 	mux.HandleFunc("DELETE /api/runs/{name}", s.discard)
 	mux.HandleFunc("POST /api/run", s.launch)
 	mux.HandleFunc("POST /api/cancel", s.stop)
@@ -148,7 +156,7 @@ func (s *Server) Handler() http.Handler {
 // Serve listens on addr and serves the reports directory read-only. It
 // returns only when the listener fails: ctx bounds the runs, not the server,
 // which stops with the process.
-func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, log io.Writer) error {
+func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, info InfoFunc, log io.Writer) error {
 	if err := os.MkdirAll(reports, 0o755); err != nil {
 		return err
 	}
@@ -167,6 +175,7 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, 
 	s := New(ctx, root.FS(), run)
 	s.remove = root.Remove
 	s.Ask = ask
+	s.Info = info
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	return srv.Serve(ln)
 }
@@ -183,6 +192,21 @@ func localOnly(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// info serves the setup a run started now would use.
+func (s *Server) info(w http.ResponseWriter, _ *http.Request) {
+	var v any = struct{}{}
+	if s.Info != nil {
+		got, err := s.Info()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		v = got
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // run is one past run's .json artifact, or an interrupted run's checkpoint,

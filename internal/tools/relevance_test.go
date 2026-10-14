@@ -119,10 +119,10 @@ func TestRelevanceSeparatesSignalFromNoise(t *testing.T) {
 // ranking spends every slot before reaching them.
 func TestRankByRelevancePromotesSignalOverEngineOrder(t *testing.T) {
 	for _, f := range noiseCorpus {
-		var in []SearXNGResult
+		var in []SearchResult
 		want := 0
 		for _, r := range f.results {
-			in = append(in, SearXNGResult{Title: r.title, URL: r.url, Content: r.snippet})
+			in = append(in, SearchResult{Title: r.title, URL: r.url, Content: r.snippet})
 			if r.relevant {
 				want++
 			}
@@ -157,7 +157,7 @@ func TestRankByRelevancePromotesSignalOverEngineOrder(t *testing.T) {
 // engines' order alone rather than judge every page on one word.
 func TestRelevanceDisabledWithoutDistinctiveTerms(t *testing.T) {
 	for _, terms := range [][]string{nil, {}, {"mutex"}, {"Go", "mutex"}} {
-		in := []SearXNGResult{
+		in := []SearchResult{
 			{Title: "First", URL: "https://example.com/1", Content: "anything"},
 			{Title: "Second", URL: "https://example.com/2", Content: "anything"},
 		}
@@ -173,7 +173,7 @@ func TestRelevanceDisabledWithoutDistinctiveTerms(t *testing.T) {
 
 // Equal scores must not reshuffle the engines' own ranking.
 func TestRankByRelevanceIsStable(t *testing.T) {
-	in := []SearXNGResult{
+	in := []SearchResult{
 		{Title: "sync.Mutex guide", URL: "https://a.example/1", Content: "sync.Mutex and sync.RWMutex"},
 		{Title: "sync.Mutex guide", URL: "https://b.example/2", Content: "sync.Mutex and sync.RWMutex"},
 	}
@@ -190,7 +190,7 @@ func TestRankByRelevanceIsStable(t *testing.T) {
 // retailer and a courier for a question about Go locks. A run that found no
 // usable evidence has to say so.
 func TestRelevanceRejectsAnAllNoiseResultSet(t *testing.T) {
-	in := []SearXNGResult{
+	in := []SearchResult{
 		{Title: "Parcel tracking", URL: "https://courier.example/track", Content: "Find where your package is with the tracking number."},
 		{Title: "Grocery delivery slots", URL: "https://retailer.example/slots", Content: "Book a delivery slot for this week's shop."},
 	}
@@ -220,7 +220,7 @@ func TestRelevanceMatchesQualifiedIdentifiersBare(t *testing.T) {
 // "Go" is inside "good", "ago" and "Google": as a term it let every page
 // clear the floor. Too short to judge, it is left out of the score.
 func TestRelevanceIgnoresTermsTooShortToMatch(t *testing.T) {
-	in := []SearXNGResult{{Title: "A good recipe", URL: "https://food.example/1", Content: "Cooked long ago."}}
+	in := []SearchResult{{Title: "A good recipe", URL: "https://food.example/1", Content: "Cooked long ago."}}
 	kept, skipped := rankByRelevance(in, []string{"Go", "RWMutex", "contention"})
 	if len(kept) != 0 || len(skipped) != 1 {
 		t.Errorf("a page matching only \"go\" inside other words was kept: %+v", kept)

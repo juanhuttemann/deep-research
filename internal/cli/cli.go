@@ -191,12 +191,25 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 			}
 			addr, _ := cmd.Flags().GetString("addr")
 			reports, _ := cmd.Flags().GetString("reports")
-			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), cmd.ErrOrStderr())
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), webInfo(load), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().String("addr", "127.0.0.1:7777", "address to listen on")
 	cmd.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts, served read-only")
 	return cmd
+}
+
+// webInfo describes the setup from the same load a launch makes. serve loads
+// the configuration once, so this is the setup it started with, which is what
+// every run it launches uses.
+func webInfo(load func() (Deps, error)) web.InfoFunc {
+	return func() (any, error) {
+		d, err := load()
+		if err != nil {
+			return nil, err
+		}
+		return d.Config.Describe(), nil
+	}
 }
 
 // webRun is a launch from the page: the same command as
@@ -277,7 +290,9 @@ func pickAssistant(d Deps) (agent.Assistant, error) {
 // keyHint says how to get a key, under the error of a model that could not
 // be reached without one. Provider claude's error names its own ways in.
 func keyHint(d Deps, err error) error {
-	if d.Config.Provider == "claude" {
+	// A search setting that cannot work is not a model key problem, and the
+	// login hint under it sent the reader to fix a key that already worked.
+	if d.Config.Provider == "claude" || errors.Is(err, agent.ErrSearchConfig) {
 		return err
 	}
 	return fmt.Errorf("%w\n  Pick a provider and store its key: deep-research login\n"+
@@ -694,7 +709,7 @@ func runDoctor(cmd *cobra.Command, d Deps) error {
 		}
 		fmt.Fprintf(out, "%s %-8s %s\n", mark, c.Name, c.Detail)
 	}
-	fmt.Fprintf(out, "  budget   %s\n", callBudget(d.Config.SearXNGURL != ""))
+	fmt.Fprintf(out, "  budget   %s\n", callBudget(d.Config.SearchEnabled()))
 	if problems > 0 {
 		return fmt.Errorf("doctor found %d problem(s)", problems)
 	}

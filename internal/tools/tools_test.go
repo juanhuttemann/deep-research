@@ -27,6 +27,16 @@ func newSearXNGServer(t *testing.T, results []map[string]any) *httptest.Server {
 	return server
 }
 
+// newSearchTools is SearXNG at searxURL, with Firecrawl at firecrawlURL when
+// it is set.
+func newSearchTools(searxURL, firecrawlURL string, timeout time.Duration) *SearchTools {
+	st, err := NewSearchToolsFrom(Options{SearXNGURL: searxURL, FirecrawlURL: firecrawlURL}, timeout)
+	if err != nil {
+		panic(err)
+	}
+	return st
+}
+
 // newFirecrawlServer serves a fake Firecrawl scrape endpoint (POST).
 func newFirecrawlServer(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -124,7 +134,7 @@ func TestSearchTools_Search(t *testing.T) {
 	}))
 	t.Cleanup(fcServer.Close)
 
-	tools := NewSearchTools(searxServer.URL, fcServer.URL, 0)
+	tools := newSearchTools(searxServer.URL, fcServer.URL, 0)
 	results, err := tools.Search(context.Background(), "test query", nil)
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
@@ -154,7 +164,7 @@ func TestSearchTools_Search_ScrapeFailureFallback(t *testing.T) {
 	}))
 	t.Cleanup(fcServer.Close)
 
-	tools := NewSearchTools(searxServer.URL, fcServer.URL, 0)
+	tools := newSearchTools(searxServer.URL, fcServer.URL, 0)
 	results, err := tools.Search(context.Background(), "test query", nil)
 	if err != nil {
 		t.Fatalf("Search() error: %v", err)
@@ -206,7 +216,7 @@ func TestSearchTools_ScrapesConcurrentlyInOrder(t *testing.T) {
 	}))
 	defer fcServer.Close()
 
-	st := NewSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
+	st := newSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
 	st.MaxURLsPerQuery = 3
 	st.ScrapeParallelism = 3
 
@@ -259,7 +269,7 @@ func TestSearchTools_ScrapeParallelismIsBounded(t *testing.T) {
 	}))
 	defer fcServer.Close()
 
-	st := NewSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
+	st := newSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
 	st.MaxURLsPerQuery = 8
 	st.ScrapeParallelism = 2
 
@@ -297,7 +307,7 @@ func TestSearchTools_SignalStatusVocabulary(t *testing.T) {
 	}))
 	defer fcServer.Close()
 
-	st := NewSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
+	st := newSearchTools(sxServer.URL, fcServer.URL, 5*time.Second)
 	res, err := st.Search(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -461,7 +471,7 @@ func TestSearchDeduplicatesResultsByURL(t *testing.T) {
 	}))
 	t.Cleanup(fc.Close)
 
-	tools := NewSearchTools(searx.URL, fc.URL, 0)
+	tools := newSearchTools(searx.URL, fc.URL, 0)
 	tools.MaxURLsPerQuery = 10
 	res, err := tools.Search(context.Background(), "go", nil)
 	if err != nil {

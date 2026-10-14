@@ -34,7 +34,7 @@ import (
 
 // Config holds per-agent LLM settings. Pipeline-level settings
 // (the per-sub-agent source budget) live in config.Config.
-// When SearXNGURL and FirecrawlURL are set, research uses the real
+// When a search engine is configured (SearchEnabled), research uses the real
 // search+scrape tools; otherwise the search agent (LLM) is used.
 type Config struct {
 	AnalyzerInstructions    string
@@ -65,9 +65,36 @@ type Config struct {
 	// ModelCallRetries is how many extra attempts a failed model call gets.
 	// Zero means one attempt and no retry.
 	ModelCallRetries int
-	SearXNGURL       string
-	FirecrawlURL     string
-	FirecrawlAPIKey  string
+	// SearchEngine is searxng (also when empty), exa, tavily or off.
+	SearchEngine    string
+	SearXNGURL      string
+	Scraper         string
+	FirecrawlURL    string
+	FirecrawlAPIKey string
+	ExaAPIKey       string
+	TavilyAPIKey    string
+}
+
+// SearchEnabled reports whether research searches the web. SearXNG is off
+// when it has no address, which is what searxng_url: off has always meant.
+func (c Config) SearchEnabled() bool {
+	switch strings.ToLower(c.SearchEngine) {
+	case "off", "none":
+		return false
+	case "", tools.EngineSearXNG:
+		return c.SearXNGURL != ""
+	default:
+		return true
+	}
+}
+
+// SearchOptions is the search configuration in the form tools takes it.
+func (c Config) SearchOptions() tools.Options {
+	return tools.Options{
+		Engine: c.SearchEngine, SearXNGURL: c.SearXNGURL,
+		Scraper: c.Scraper, FirecrawlURL: c.FirecrawlURL, FirecrawlAPIKey: c.FirecrawlAPIKey,
+		ExaAPIKey: c.ExaAPIKey, TavilyAPIKey: c.TavilyAPIKey,
+	}
 }
 
 // Key sources for Config.KeySource.
@@ -405,11 +432,15 @@ func New(cfg Config) (Assistant, error) {
 	// SearXNG alone is real web search: without a scraper every source keeps
 	// its snippet and is labelled snippet-only. Requiring Firecrawl too sent
 	// every run that lacked it to the model for invented findings.
-	if cfg.SearXNGURL != "" {
-		impl.searchTools = tools.NewSearchTools(cfg.SearXNGURL, cfg.FirecrawlURL, impl.timeout)
-		if impl.searchTools.Firecrawl != nil {
-			impl.searchTools.Firecrawl.APIKey = cfg.FirecrawlAPIKey
+	//
+	// An engine chosen without its key is an error here, not a quiet fall back
+	// to SearXNG or to the model: the reader picked that engine.
+	if cfg.SearchEnabled() {
+		st, err := tools.NewSearchToolsFrom(cfg.SearchOptions(), impl.timeout)
+		if err != nil {
+			return nil, err
 		}
+		impl.searchTools = st
 	}
 	return impl, nil
 }

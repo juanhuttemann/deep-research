@@ -115,7 +115,11 @@ func TestResearchDetailReportsSkippedSources(t *testing.T) {
 	}))
 	defer fc.Close()
 
-	a := &impl{searchTools: tools.NewSearchTools(sx.URL, fc.URL, 0)}
+	st, err := tools.NewSearchToolsFrom(tools.Options{SearXNGURL: sx.URL, FirecrawlURL: fc.URL}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &impl{searchTools: st}
 	det, err := a.ResearchDetail(context.Background(), "sync.Mutex vs sync.RWMutex in Go", []string{"Mutex", "RWMutex"})
 	if err != nil {
 		t.Fatal(err)
