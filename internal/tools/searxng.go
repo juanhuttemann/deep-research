@@ -37,6 +37,18 @@ const maxSearchTimeout = 30 * time.Second
 // timeouts and covers discovery and JSON/HTML fallback under one deadline.
 const maxQueryTimeout = 2 * maxSearchTimeout
 
+// An instance in a pool that refused a query rests before it is asked again.
+// Without this every query walked the whole list: once public instances
+// started answering with challenges, each search spent its full deadline
+// (one slow instance alone holds a request timeout) relearning that all ten
+// refuse. A challenge, a 403 or an address that does not answer is how that
+// instance treats this client and outlasts a run, so it rests long; a limiter
+// or a timeout is load, and passes.
+const (
+	refusalRest = 10 * time.Minute
+	loadRest    = 2 * time.Minute
+)
+
 // errChallenge marks an instance that answered with a bot challenge instead
 // of results.
 var errChallenge = errors.New("bot challenge instead of results")
@@ -50,9 +62,15 @@ var errNotJSON = errors.New("response is not JSON")
 type SearXNGClient struct {
 	HTTPClient  *http.Client
 	ResultLimit int
+	// Public marks the instances as third parties' donated capacity, whose
+	// refusal the run explains differently from the reader's own servers
+	// failing. "auto" sets it.
+	Public bool
 
 	mu        sync.Mutex
 	instances []*searxInstance
+	// now is the clock rest periods are measured on; nil is time.Now.
+	now func() time.Time
 	// Discovery is cached only after success, so a transient failure or a
 	// cancelled query cannot poison every later search in the run.
 	discover func(ctx context.Context) ([]string, error)
@@ -74,6 +92,33 @@ type searxInstance struct {
 	// by default and most public instances never enable it, but their HTML
 	// page serves the same results.
 	html atomic.Bool
+
+	mu sync.Mutex
+	// restUntil is when the instance may be asked again after refusing, and
+	// refusal what it said, so a query that skips it can still say why.
+	restUntil time.Time
+	refusal   error
+}
+
+// resting reports the refusal that still benches the instance at now, if any.
+func (in *searxInstance) resting(now time.Time) error {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if now.Before(in.restUntil) {
+		return in.refusal
+	}
+	return nil
+}
+
+func (in *searxInstance) rest(now time.Time, err error) {
+	d := loadRest
+	switch SearchStatus(err) {
+	case "challenge", "blocked", "unreachable":
+		d = refusalRest
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.restUntil, in.refusal = now.Add(d), err
 }
 
 // NewSearXNGClient creates a client for baseURL: one instance, a
@@ -84,6 +129,7 @@ func NewSearXNGClient(baseURL string, timeout time.Duration) *SearXNGClient {
 	}
 	c := &SearXNGClient{HTTPClient: &http.Client{Timeout: timeout}, ResultLimit: 10}
 	if strings.EqualFold(strings.TrimSpace(baseURL), "auto") {
+		c.Public = true
 		c.discover = func(ctx context.Context) ([]string, error) {
 			return DiscoverInstances(ctx, c.HTTPClient, SearxSpaceURL)
 		}
@@ -105,27 +151,139 @@ func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearchResul
 	if err != nil {
 		return nil, err
 	}
-	var errs []error
+	// A single instance is the reader's own server: benching it would turn a
+	// restart into minutes of searches that never ask.
+	pool := len(insts) > 1
+	failed := &poolError{total: len(insts), public: c.Public}
 	for _, in := range insts {
+		if why := in.resting(c.clock()); pool && why != nil {
+			failed.skipped++
+			failed.errs = append(failed.errs, fmt.Errorf("%s: %w", in.url, why))
+			continue
+		}
 		res, err := c.searchOne(ctx, in, query)
 		if err == nil {
 			c.prefer(in)
 			return res, nil
 		}
-		// An unreachable instance already names itself.
-		if _, named := errors.AsType[*unreachableError](err); named {
-			errs = append(errs, err)
-		} else {
-			errs = append(errs, fmt.Errorf("%s: %w", in.url, err))
-		}
 		if ctx.Err() != nil {
+			// The query's deadline, not the instance's answer.
+			failed.errs = append(failed.errs, fmt.Errorf("%s: %w", in.url, err))
 			break
 		}
+		if pool {
+			in.rest(c.clock(), err)
+		}
+		// An unreachable instance already names itself.
+		if _, named := errors.AsType[*unreachableError](err); !named {
+			err = fmt.Errorf("%s: %w", in.url, err)
+		}
+		failed.errs = append(failed.errs, err)
 	}
-	if len(errs) == 1 {
-		return nil, errs[0]
+	if len(failed.errs) == 1 && failed.skipped == 0 {
+		return nil, failed.errs[0]
 	}
-	return nil, fmt.Errorf("all %d SearXNG instances failed: %w", len(insts), errors.Join(errs...))
+	return nil, failed
+}
+
+func (c *SearXNGClient) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+// poolError is a query every instance of a pool failed. Its message counts
+// the failures by kind: the instances' own errors joined made a wall of ten
+// URLs, challenge scripts and timeouts in which the one fact the reader needs
+// — the public instances refuse this client — was lost. Unwrap keeps every
+// instance's error for errors.Is and SearchStatus.
+type poolError struct {
+	total, skipped int
+	public         bool
+	errs           []error
+}
+
+func (e *poolError) Error() string {
+	counts := map[string]int{}
+	var kinds []string
+	for _, err := range e.errs {
+		k := failureKind(err)
+		if counts[k] == 0 {
+			kinds = append(kinds, k)
+		}
+		counts[k]++
+	}
+	slices.SortStableFunc(kinds, func(a, b string) int { return cmp.Compare(counts[b], counts[a]) })
+	parts := make([]string, len(kinds))
+	for i, k := range kinds {
+		parts[i] = fmt.Sprintf("%d %s", counts[k], k)
+	}
+	who := "SearXNG instances"
+	if e.public {
+		who = "public SearXNG instances"
+	}
+	summary := strings.Join(parts, ", ")
+	// A query that asked nothing did not fail anywhere: saying "all failed"
+	// for it read as ten fresh refusals each time.
+	if e.skipped == e.total {
+		return fmt.Sprintf("not searched: every one of %d %s refused within the last minutes (%s)", e.total, who, summary)
+	}
+	msg := fmt.Sprintf("all %d %s failed: %s", e.total, who, summary)
+	if len(e.errs) < e.total {
+		// The query's deadline ended the walk: "all ten failed" over three
+		// counted failures claimed refusals from instances never asked.
+		msg = fmt.Sprintf("%d of %d %s failed before the query's deadline: %s", len(e.errs), e.total, who, summary)
+	}
+	if e.skipped > 0 {
+		msg += fmt.Sprintf(" (%d not asked again, having refused within the last minutes)", e.skipped)
+	}
+	return msg
+}
+
+func (e *poolError) Unwrap() []error { return e.errs }
+
+// failureKind names one instance's failure for the pool's summary, as a
+// participle that reads after a count: "9 challenged, 1 timed out".
+func failureKind(err error) string {
+	if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
+		return "timed out"
+	}
+	if errors.Is(err, errOffTopic) {
+		return "off-topic only"
+	}
+	switch s := SearchStatus(err); s {
+	case "challenge":
+		return "challenged"
+	case "unavailable":
+		return "failed otherwise"
+	default:
+		return s
+	}
+}
+
+// SearchResting reports whether err is a query that asked no instance at
+// all, every one still resting from a refusal. More queries now fail the same
+// way until a rest ends, so a caller has no reason to send them.
+func SearchResting(err error) bool {
+	pe, ok := errors.AsType[*poolError](err)
+	return ok && pe.skipped == pe.total
+}
+
+// PublicSearchRefused reports whether err is every public SearXNG instance
+// refusing a query with a challenge, a block or a limiter: not a fault to fix
+// in the reader's setup, but the sign that the public pool will not serve
+// this run and a search of their own would.
+func PublicSearchRefused(err error) bool {
+	pe, ok := errors.AsType[*poolError](err)
+	if !ok || !pe.public {
+		return false
+	}
+	switch SearchStatus(err) {
+	case "challenge", "blocked", "rate-limited":
+		return true
+	}
+	return false
 }
 
 // candidates is the instance list in the order to try, discovering it first
@@ -225,16 +383,50 @@ func (c *SearXNGClient) prefer(in *searxInstance) {
 	}
 }
 
-// searchOne queries one instance, through JSON unless it has refused it.
+// searchOne queries one instance, through JSON unless it has refused it, and
+// tags the results with it.
 func (c *SearXNGClient) searchOne(ctx context.Context, in *searxInstance, query string) ([]SearchResult, error) {
+	var res []SearchResult
+	var err error
 	if !in.html.Load() {
-		res, err := c.searchJSON(ctx, in.url, query)
-		if !refusedJSON(err) {
-			return res, err
+		res, err = c.searchJSON(ctx, in.url, query)
+		if refusedJSON(err) {
+			in.html.Store(true)
 		}
-		in.html.Store(true)
 	}
-	return c.searchHTML(ctx, in.url, query)
+	if in.html.Load() {
+		res, err = c.searchHTML(ctx, in.url, query)
+	}
+	for i := range res {
+		res[i].instance = in.url
+	}
+	return res, err
+}
+
+// errOffTopic is an instance whose answer held nothing on the query's
+// subject. Two runs got the same ten results for different queries — ruby
+// hotels for any query starting "Ruby", chatbot homepages for "AI" — from
+// an instance that searched the first word alone; counting that as an answer
+// let it be asked first every time.
+var errOffTopic = errors.New("answered with only off-topic results")
+
+// restOffTopic rests instance after an answer that was all off-topic, as
+// for a load failure: a healthy instance can miss on a niche query. The
+// reader's lone instance never rests, as in Search.
+func (c *SearXNGClient) restOffTopic(instance string) {
+	c.mu.Lock()
+	pool := len(c.instances) > 1
+	i := slices.IndexFunc(c.instances, func(in *searxInstance) bool { return in.url == instance })
+	var in *searxInstance
+	if i >= 0 {
+		in = c.instances[i]
+		// Off the front, so the next query does not go to it first.
+		c.instances = append(slices.Delete(c.instances, i, i+1), in)
+	}
+	c.mu.Unlock()
+	if pool && in != nil {
+		in.rest(c.clock(), errOffTopic)
+	}
 }
 
 // refusedJSON reports whether err is an instance declining the JSON API or

@@ -57,7 +57,27 @@ type Driver struct {
 	// whose every search was refused: only the second is a failure.
 	searchesOK int
 	searchErr  error
+	// searchesFailed against searchesOK is how much of the run's evidence the
+	// search actually delivered; a report written from what little got
+	// through is marked incomplete rather than presented as a finished one.
+	searchesFailed int
+	// searchesEmpty are answered searches with nothing on the subject in
+	// them: every result off-topic, or none at all.
+	searchesEmpty int
+	// searchDown is set while the last search asked nothing, every instance
+	// resting from a refusal: queries sent then fail without trying.
+	searchDown bool
+	// refusalHinted is set once the run has said what to do about public
+	// SearXNG instances refusing it. Every sub-agent hits the same wall, and
+	// the advice repeated per failed search would bury the activity log.
+	refusalHinted bool
 }
+
+// publicRefusalHint is what to do when the public SearXNG instances refuse
+// the run: they challenge scripted traffic by design, so retrying is no fix.
+const publicRefusalHint = "Public SearXNG instances challenge automated queries, so results will be thin. " +
+	"For reliable search, run SearXNG locally and set SEARXNG_URL (docs/services.md), " +
+	"or set search_engine to exa or tavily with its API key"
 
 func NewDriver(a agent.Assistant, sink *MultiSink, input Input, parallelism int) *Driver {
 	if parallelism <= 0 {
@@ -326,6 +346,9 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err := d.searchFailure(findings); err != nil {
 		return nil, err
 	}
+	if err := d.thinEvidence(findings); err != nil {
+		return nil, err
+	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
 	analysis, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
@@ -469,9 +492,79 @@ func malformed(a *agent.Analysis) bool {
 	return len(a.Claims) == 0 && len(units(a)) == 0 && (answer == "" || strings.HasPrefix(answer, "{"))
 }
 
+func (d *Driver) isSearchDown() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.searchDown
+}
+
+// thinSearch is why the run's evidence is too thin to call complete, or ""
+// when it is not: more searches gave nothing than gave something. Public
+// SearXNG instances refusing a run left one off-topic snippet standing, and
+// the report built on it read like any other — its claims "supported" by
+// the only source there was. A search answered with only off-topic results
+// counts with the refused ones: it delivered as little.
+func (d *Driver) thinSearch() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	wasted := d.searchesFailed + d.searchesEmpty
+	if wasted <= d.searchesOK-d.searchesEmpty {
+		return ""
+	}
+	var why []string
+	if d.searchesFailed > 0 {
+		why = append(why, fmt.Sprintf("%d failed: %s", d.searchesFailed, tools.SearchStatus(d.searchErr)))
+	}
+	if d.searchesEmpty > 0 {
+		why = append(why, fmt.Sprintf("%d found nothing on the subject", d.searchesEmpty))
+	}
+	return fmt.Sprintf("%d of %d searches gave nothing (%s)",
+		wasted, d.searchesFailed+d.searchesOK, strings.Join(why, ", "))
+}
+
+// minEvidence is the fewest sources a run whose search mostly failed is
+// analysed from. Below it the analysis, fact-check, revision and report
+// were five model calls and a minute spent on one off-topic snippet, ending
+// in a report marked incomplete anyway.
+const minEvidence = 3
+
+// thinEvidence is the run's error when search mostly failed and left too
+// few sources to analyse.
+func (d *Driver) thinEvidence(findings []agent.Finding) error {
+	why := d.thinSearch()
+	if why == "" || len(findings) >= minEvidence {
+		return nil
+	}
+	err := fmt.Errorf("too little evidence to analyse: %s, leaving %s", why, sourceCount(len(findings)))
+	d.mu.Lock()
+	public := tools.PublicSearchRefused(d.searchErr)
+	d.mu.Unlock()
+	if public {
+		err = fmt.Errorf("%w. %s", err, publicRefusalHint)
+	}
+	return err
+}
+
+func sourceCount(n int) string {
+	if n == 1 {
+		return "1 source"
+	}
+	return fmt.Sprintf("%d sources", n)
+}
+
 // finish stamps a result with the run's final counters and announces it.
 func (d *Driver) finish(result *agent.ResearchResult) *agent.ResearchResult {
 	sources, tokens := d.syncUsage()
+	if why := d.thinSearch(); why != "" && result.Error == "" {
+		why += ", so the report rests on " + sourceCount(len(result.Findings))
+		d.emit(Event{Type: Error, Detail: "incomplete research: " + why})
+		result.Error = "incomplete research: " + why
+		if result.Summary != nil {
+			result.Summary.Report = "_Incomplete research: " + why +
+				". Read it as a lead to check, not an answer._\n\n" + result.Summary.Report
+			result.Summary.Confidence = "low"
+		}
+	}
 	result.Tokens, result.Timestamp = tokens, d.now()
 	if m, ok := d.Agent.(interface{ ModelInfo() (string, string) }); ok {
 		result.Model, result.Provider = m.ModelInfo()
@@ -634,6 +727,12 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 	if len(subs) == 0 || ctx.Err() != nil {
 		return analysis, findings
 	}
+	if d.isSearchDown() {
+		// Every query of the round would fail without asking anything.
+		d.emit(Event{Type: Info, Phase: "Research", Detail: fmt.Sprintf(
+			"%d open questions not followed up: no search instance is answering", len(subs))})
+		return analysis, findings
+	}
 	d.emit(Event{Type: Phase, Phase: "Research", Detail: fmt.Sprintf("Following up %d open questions", len(subs))})
 	extra, unanswered := d.research(ctx, &Plan{Question: plan.Question, MaxSources: followUpSources * len(subs), SubTopics: subs})
 	if len(extra) == 0 || ctx.Err() != nil {
@@ -707,11 +806,17 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		d.emit(Event{Type: Search, Query: q, Terms: sub.Terms, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
 
 		det, err := d.Agent.ResearchDetail(ctx, q, sub.Terms)
-		d.noteSearch(err)
+		d.noteSearch(err, det)
 		if err != nil {
 			// A limiter or a challenge is a state of the run, so it travels on
 			// the event rather than only inside the message text.
 			status := tools.SearchStatus(err)
+			if tools.SearchResting(err) {
+				// No instance would be asked for the remaining queries either:
+				// sending them only stacked up identical failures.
+				d.emit(Event{Type: Error, Detail: err.Error(), SubID: id, Status: status, Line: "no search available"})
+				break
+			}
 			d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
 				Status: status, Line: "search " + status})
 			continue
@@ -720,10 +825,15 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		// no budget and are never cited. They are still reported: a run that
 		// silently discarded most of what the engines returned would look
 		// exactly like one whose search found almost nothing.
+		// Each keeps its event for the audit, but the reader gets one line
+		// per search: one per result, twice over, buried the log in twenty
+		// lines of nothing relevant.
 		offTopic += len(det.Skipped)
 		for _, s := range det.Skipped {
-			d.emit(Event{Type: Verify, URL: s.URL, Domain: s.Domain, Status: "offtopic", SubID: id,
-				Line: verifyLabel(agent.SourceSignal{URL: s.URL, Domain: s.Domain, Status: "offtopic"})})
+			d.emit(Event{Type: Verify, URL: s.URL, Domain: s.Domain, Status: "offtopic", SubID: id})
+		}
+		if line := offTopicLine(det); line != "" {
+			d.emit(Event{Type: Info, Detail: line, SubID: id, SubName: sub.Name})
 		}
 		duplicates += d.noteKnown(id, q, det.Known)
 		for si, f := range det.Findings {
@@ -789,14 +899,47 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 	return found, kept
 }
 
+// offTopicLine is a search's off-topic results in one line, naming the first
+// few sites so the filter stays visible: "9 of 10 results off-topic:
+// ruby-lang.org, ruby-hotels.com, …".
+func offTopicLine(det *agent.ResearchDetail) string {
+	if len(det.Skipped) == 0 {
+		return ""
+	}
+	var domains []string
+	for _, s := range det.Skipped {
+		if !slices.Contains(domains, s.Domain) {
+			domains = append(domains, s.Domain)
+		}
+	}
+	more := ""
+	if len(domains) > 4 {
+		domains, more = domains[:4], ", …"
+	}
+	total := len(det.Skipped) + len(det.Findings) + len(det.Known)
+	return fmt.Sprintf("%d of %d results off-topic: %s%s", len(det.Skipped), total, strings.Join(domains, ", "), more)
+}
+
 // noteSearch records the outcome of one search.
-func (d *Driver) noteSearch(err error) {
+func (d *Driver) noteSearch(err error, det *agent.ResearchDetail) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if err != nil {
+	hint := tools.PublicSearchRefused(err) && !d.refusalHinted
+	switch {
+	case err != nil:
 		d.searchErr = err
-	} else {
+		d.searchesFailed++
+		d.refusalHinted = d.refusalHinted || hint
+	case det == nil || len(det.Findings)+len(det.Known) == 0:
+		// Answered, and still nothing on the subject: no evidence either.
 		d.searchesOK++
+		d.searchesEmpty++
+	default:
+		d.searchesOK++
+	}
+	d.searchDown = tools.SearchResting(err)
+	d.mu.Unlock()
+	if hint {
+		d.emit(Event{Type: Error, Detail: publicRefusalHint})
 	}
 }
 
@@ -822,6 +965,9 @@ func (d *Driver) searchFailure(findings []agent.Finding) error {
 	if status == "unauthorized" || status == "quota" {
 		// Only a hosted engine takes a key, and its error already names it.
 		return fmt.Errorf("no search answered (%s): %w. Check the engine's API key and its credit (deep-research doctor checks it)", status, d.searchErr)
+	}
+	if tools.PublicSearchRefused(d.searchErr) {
+		return fmt.Errorf("no search answered (%s): %w. %s", status, d.searchErr, publicRefusalHint)
 	}
 	return fmt.Errorf("no search answered (%s): %w", status, d.searchErr)
 }
@@ -895,21 +1041,30 @@ const minFacetCols = 30
 // and on a non-English question that cut the subject off and mixed two
 // languages the engines could not detect, so whole runs found nothing.
 //
-// The second query is the question anchored on the facet, and it is a
-// fallback, not a second search: runSubAgent stops issuing queries as soon as
+// The second query is the planner's terms, and it is a fallback, not a
+// second search: runSubAgent stops issuing queries as soon as
 // the branch has taken its share of sources. It is also the only query when
 // the planner wrote none (its fallback plan, or a model that skipped the
 // field). Planner sub-topic names are facets of the question ("Performance
 // Benchmarks"), not searchable on their own — "Training Data and Methodology"
 // retrieves generic articles about training data, never the model under study
-// — which is why the facet is always anchored on the question.
+// — which is why a facet is always anchored on the question. The terms need
+// no anchor: the planner writes the question's subject among them. Without
+// two terms the fallback is the question anchored on the facet; it used to
+// be always, and on a long question it came out as the sentence clipped,
+// with the facet cut mid-phrase after it ("… with all the AI Ruby on Rails
+// 2026 Health and").
 func subQueries(question string, sub agent.SubTopic) []string {
 	var out []string
 	if q := clipWords(sub.Query, maxQueryLen); q != "" {
 		out = append(out, q)
 	}
-	if q := anchoredQuery(question, sub.Name); q != "" && (len(out) == 0 || !strings.EqualFold(q, out[0])) {
-		out = append(out, q)
+	fallback := anchoredQuery(question, sub.Name)
+	if len(sub.Terms) >= 2 {
+		fallback = clipWords(strings.Join(sub.Terms, " "), maxQueryLen)
+	}
+	if fallback != "" && (len(out) == 0 || !strings.EqualFold(fallback, out[0])) {
+		out = append(out, fallback)
 	}
 	return out
 }
