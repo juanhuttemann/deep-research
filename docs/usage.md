@@ -163,7 +163,8 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
 
 - **Every run ends on one `done` line**, written after the report files and
   the history record: `status` is `complete`, `incomplete` (a late phase
-  failed; the partial report was saved), `failed` or `cancelled`, `detail`
+  failed, or more searches gave nothing than gave something; the report was
+  saved), `failed` or `cancelled`, `detail`
   is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote.
   Validation errors (an empty question, a bad `--mode`, no key) end on it
   too. A stream that stops without one means the process was killed.

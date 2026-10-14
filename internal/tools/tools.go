@@ -245,6 +245,9 @@ type SearchResult struct {
 	// result (Exa, Tavily). A result that has it is not scraped: the text is
 	// already here, and a second fetch would cost another request per page.
 	Body string `json:"-"`
+	// instance is the SearXNG instance that answered, so a result set that
+	// is all noise can be traced to it and the instance rested.
+	instance string
 }
 
 // Searcher is a web search engine: SearXNG, Exa or Tavily.
@@ -462,7 +465,6 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 	if err != nil {
 		return nil, err
 	}
-	s.log(fmt.Sprintf("  %-9s %d results", s.Engine.Name(), len(searchResults)))
 
 	// SearXNG fans a query out to several engines, so the same page can come
 	// back once per engine. Deduplicating before the budget is applied stops a
@@ -488,7 +490,14 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 		skipped = append(skipped, SkippedSource{
 			URL: r.URL, Domain: DomainOf(r.URL), Title: r.Title, Score: r.Score,
 		})
-		s.log(fmt.Sprintf("    off-topic %s (%.2f)", DomainOf(r.URL), r.Score))
+	}
+	s.logResults(searchResults)
+	if len(candidates) == 0 && len(known) == 0 && len(offTopic) > 0 {
+		// Nothing a page could answer from: an instance that does this was
+		// seen answering every query with results for its first word alone.
+		if r, ok := s.Engine.(offTopicRester); ok {
+			r.restOffTopic(searchResults[0].instance)
+		}
 	}
 
 	// Scraping dominates a search's wall-clock time, so pages are fetched
@@ -538,6 +547,24 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 	}
 
 	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped, Known: known}, nil
+}
+
+// offTopicRester is an engine that can rest the instance whose answer was
+// all off-topic, as it rests one that refused.
+type offTopicRester interface {
+	restOffTopic(instance string)
+}
+
+// logResults is the search's one line: how many results and from which
+// instance, so a run's junk can be traced to where it came from. Off-topic
+// results are the run's to report, once per search; each used to get a
+// line here as well.
+func (s *SearchTools) logResults(res []SearchResult) {
+	line := fmt.Sprintf("  %-9s %d results", s.Engine.Name(), len(res))
+	if len(res) > 0 && res[0].instance != "" {
+		line += " from " + DomainOf(res[0].instance)
+	}
+	s.log(line)
 }
 
 // splitKnown separates the results Skip says the run already has, before the

@@ -326,10 +326,13 @@ func TestOffTopicResultsAreReportedButNotCounted(t *testing.T) {
 			t.Error("off-topic source reached the findings")
 		}
 	}
-	var reported Event
+	var reported, line Event
 	for _, e := range sink.Timeline {
 		if e.Type == Verify && e.Status == "offtopic" {
 			reported = e
+		}
+		if e.Type == Info && e.SubID == "1" && strings.Contains(e.Detail, "off-topic") {
+			line = e
 		}
 		if e.Type == Citation && e.SourceURL == "https://viveros.example/1" {
 			t.Error("off-topic source was cited")
@@ -338,8 +341,9 @@ func TestOffTopicResultsAreReportedButNotCounted(t *testing.T) {
 	if reported.URL != "https://viveros.example/1" {
 		t.Fatalf("off-topic source never reported: %+v", sink.Timeline)
 	}
-	if reported.Line == "" || !strings.Contains(reported.Line, "viveros.example") {
-		t.Errorf("off-topic event has no readable line: %q", reported.Line)
+	// One line per search names them; a line per result buried the log.
+	if !strings.Contains(line.Detail, "1 of 2 results off-topic: viveros.example") {
+		t.Errorf("off-topic results have no readable line: %q", line.Detail)
 	}
 	last := sink.Timeline[len(sink.Timeline)-1]
 	if last.Sources != len(res.Findings) {
@@ -2151,5 +2155,175 @@ func TestRunReportsThatItDetached(t *testing.T) {
 				t.Errorf("Detached = %v, want %v", res.Detached, tc.want)
 			}
 		})
+	}
+}
+
+// Public SearXNG instances refusing the run left the reader with a wall of
+// per-instance errors and no word on what to do. The advice now comes once
+// per run, however many sub-agents hit the same wall, and again in the
+// run's error when nothing answered at all.
+func TestPublicSearchRefusalIsExplainedOnce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><title>Making sure you're not a bot!</title></html>`)
+	}))
+	defer srv.Close()
+	c := tools.NewSearXNGClient(srv.URL+","+srv.URL+"/x", 0)
+	c.Public = true
+	_, searchErr := c.Search(context.Background(), "q")
+	if !tools.PublicSearchRefused(searchErr) {
+		t.Fatalf("not a public refusal: %v", searchErr)
+	}
+
+	sink := &MultiSink{}
+	d := NewDriver(nil, sink, nil, 1)
+	for range 3 {
+		d.noteSearch(searchErr, nil)
+	}
+	hints := 0
+	for _, e := range sink.TimelineSnapshot() {
+		if strings.Contains(e.Detail, "docs/services.md") {
+			hints++
+		}
+	}
+	if hints != 1 {
+		t.Errorf("the refusal advice was given %d times, want once", hints)
+	}
+	if got := d.searchFailure(nil).Error(); !strings.Contains(got, "search_engine") {
+		t.Errorf("run error gives no way out: %q", got)
+	}
+}
+
+// refusedPool answers its first answered queries and sends every later one
+// to a pool of public instances that all challenge: the shape of a run
+// whose public SearXNG instances turned on it early.
+type refusedPool struct {
+	*fakeAssistant
+	pool     *tools.SearXNGClient
+	answered int32
+	queries  atomic.Int32
+}
+
+func newRefusedPool(t *testing.T, answered int32) *refusedPool {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><title>Making sure you're not a bot!</title></html>`)
+	}))
+	t.Cleanup(srv.Close)
+	pool := tools.NewSearXNGClient(srv.URL+","+srv.URL+"/x", 0)
+	pool.Public = true
+	return &refusedPool{fakeAssistant: &fakeAssistant{}, pool: pool, answered: answered}
+}
+
+func (r *refusedPool) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
+	if r.queries.Add(1) <= r.answered {
+		return r.fakeAssistant.ResearchDetail(ctx, q, terms)
+	}
+	_, err := r.pool.Search(ctx, q)
+	return nil, err
+}
+
+func (r *refusedPool) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
+	a, err := r.fakeAssistant.Analyze(ctx, prompt)
+	if a != nil {
+		a.FollowUp = []string{"what the first search missed"}
+	}
+	return a, err
+}
+
+var refusedTopics = []agent.SubTopic{{ID: "1", Name: "A", Query: "a"}, {ID: "2", Name: "B", Query: "b"}, {ID: "3", Name: "C", Query: "c"}}
+
+// Public instances refused a run after its first search. Every remaining
+// query still went out to fail without asking anything, and then five model
+// calls and a minute went on analysing, checking, revising and writing up
+// the one off-topic snippet left. The run now stops searching once nothing
+// would be asked, and stops before analysis, saying why and what to do.
+func TestRunOnARefusingPoolStopsBeforeAnalysis(t *testing.T) {
+	a := newRefusedPool(t, 1)
+	sink := &MultiSink{}
+	_, err := NewDriver(a, sink, nil, 1).Run(context.Background(), newTestPlan("quick", refusedTopics))
+	if err == nil || !strings.Contains(err.Error(), "too little evidence") || !strings.Contains(err.Error(), "docs/services.md") {
+		t.Fatalf("err = %v, want the run stopped for too little evidence, with the way out", err)
+	}
+	// Two queries a sub-agent: one answer and one refusal that sets the pool
+	// resting, then one query per remaining sub-agent that finds it resting
+	// and stops that sub-agent.
+	if n := a.queries.Load(); n > 4 {
+		t.Errorf("%d queries sent, want searching to stop once no instance would be asked", n)
+	}
+	for _, e := range sink.TimelineSnapshot() {
+		if e.Type == Phase && e.Phase == "Analyze" {
+			t.Error("analysis ran on one source from a refused search")
+		}
+	}
+}
+
+// With enough sources to analyse but most searches failed, the report used
+// to read like any finished one. It is now delivered marked incomplete, and
+// a follow-up round that would ask no instance is skipped.
+func TestRunOnMostlyFailedSearchIsReportedIncomplete(t *testing.T) {
+	a := newRefusedPool(t, 3)
+	sink := &MultiSink{}
+	d := NewDriver(a, sink, nil, 1)
+	d.noteSearch(errors.New("refused"), nil)
+	d.noteSearch(errors.New("refused"), nil)
+	res, err := d.Run(context.Background(), newTestPlan("quick", refusedTopics))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.HasPrefix(res.Error, "incomplete research:") {
+		t.Errorf("result error = %q, want the run marked incomplete", res.Error)
+	}
+	if !strings.HasPrefix(res.Summary.Report, "_Incomplete research:") || res.Summary.Confidence != "low" {
+		t.Errorf("report does not say it is incomplete (confidence %q):\n%s", res.Summary.Confidence, res.Summary.Report)
+	}
+	for _, e := range sink.TimelineSnapshot() {
+		if e.Type == Phase && strings.HasPrefix(e.Detail, "Following up") {
+			t.Error("a follow-up round ran with no search instance answering")
+		}
+	}
+}
+
+// A search answered with nothing on the subject delivered as little as a
+// refused one. Counted as an answer, two such searches beside one refusal
+// read as a healthy run.
+func TestSearchWithOnlyOffTopicResultsCountsAsGivingNothing(t *testing.T) {
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	empty := &agent.ResearchDetail{Skipped: []agent.SkippedSource{{URL: "https://ruby-hotels.example", Domain: "ruby-hotels.example"}}}
+	d.noteSearch(nil, empty)
+	d.noteSearch(nil, empty)
+	d.noteSearch(errors.New("refused"), nil)
+	if why := d.thinSearch(); !strings.Contains(why, "3 of 3 searches gave nothing") || !strings.Contains(why, "2 found nothing on the subject") {
+		t.Errorf("thinSearch = %q", why)
+	}
+}
+
+// A run where most searches answered is not marked: the mark is for a
+// report the search failed to deliver evidence for, not for one refusal.
+func TestRunWithAFewFailedSearchesIsComplete(t *testing.T) {
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	d.noteSearch(errors.New("one refusal"), nil)
+	res, err := d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}, {ID: "2", Name: "B"}}))
+	if err != nil || res.Error != "" {
+		t.Errorf("err=%v result error=%q, want a complete run", err, res.Error)
+	}
+}
+
+// The fallback query was the question clipped with the facet glued on and
+// cut mid-phrase: "Is Ruby on Rails still a good framework pick as of 2026
+// with all the AI Ruby on Rails 2026 Health and". With the planner's terms
+// it is those keywords, which name the subject by instruction.
+func TestFallbackQueryIsThePlannersTerms(t *testing.T) {
+	question := "Is Ruby on Rails still a good framework pick as of 2026 with all the AI coding tools around now?"
+	sub := agent.SubTopic{Name: "Ruby on Rails 2026 Health and Maintenance", Query: "Rails 8 adoption 2026",
+		Terms: []string{"Ruby on Rails", "Rails 8", "maintenance"}}
+	got := subQueries(question, sub)
+	if len(got) != 2 || got[1] != "Ruby on Rails Rails 8 maintenance" {
+		t.Errorf("queries = %q, want the planner's query then its terms", got)
+	}
+	sub.Terms = nil
+	if got := subQueries(question, sub); len(got) != 2 || !strings.HasPrefix(got[1], "Is Ruby on Rails") {
+		t.Errorf("without terms the fallback should stay the anchored question, got %q", got)
 	}
 }

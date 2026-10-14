@@ -264,8 +264,26 @@ Which mode a run uses is decided by what is configured:
     has a one-minute deadline across discovery and all instance/JSON/HTML
     attempts (or an earlier caller deadline); each request is still capped
     at 30 seconds.
+    When every public instance refuses with a challenge, a block or a limit,
+    the run says once what to do instead (a local SearXNG, or Exa/Tavily).
   - A URL, or a comma-separated list of URLs, pins your own instances. JSON is
     asked for first; an instance that refuses it is read through HTML.
+  - With more than one instance (`auto`, or a list), one that fails a query
+    is not asked again for a while: ten minutes after a challenge, a `403`
+    or no answer at its address, two minutes after a rate limit, timeout or
+    other error. A query whose every instance is resting fails at once
+    instead of waiting through each. A single instance never rests. When a
+    whole pool fails, the error counts the failures by kind
+    (`all 10 public SearXNG instances failed: 9 challenged, 1 timed out`).
+    Once a query finds every instance resting, its sub-agent sends no more
+    queries and the follow-up round is skipped, since none of them would ask
+    anything. An instance whose answer was all off-topic rests two minutes
+    too, and each search's line names the instance that answered
+    (`searxng 10 results from baresearch.org`).
+  - A search refused, or answered with nothing on the subject, gave the run
+    nothing. When those outnumber the searches that gave something, a run
+    with fewer than three sources stops before the analysis, and one with
+    more is delivered marked incomplete.
   - A search that every instance refuses fails with its reason —
     `rate-limited`, `challenge`, `blocked`, `unreachable` (nothing answers at
     the address), `unauthorized` or `quota` (a hosted engine's key) or

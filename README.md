@@ -111,7 +111,11 @@ The **report** is rendered in the terminal and saved to `reports/` as `.md`,
 
 If the analysis or the report call fails late in a run — a provider error, or
 the run deadline — what was gathered is still saved and exported, marked
-incomplete, and the command exits non-zero.
+incomplete, and the command exits non-zero. The same goes for a run where more
+searches gave nothing than gave something (refused, or answered with only
+off-topic results): its report opens by saying so and how many sources it
+rests on, with confidence `low`. With fewer than three sources such a run
+stops before the analysis instead, saying why.
 
 ## Search
 

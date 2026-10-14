@@ -636,7 +636,8 @@ function handle(e) {
     break;
   case "search": log(e, "search “" + e.query + "”"); break;
   case "read": log(e, "read " + (e.domain || domain(e.url))); break;
-  case "verify": log(e, e.line || (e.status + " " + (e.domain || domain(e.url)) + (e.code ? " " + e.code : "")), e.status === "ok" ? "ok" : ""); break;
+  // An off-topic result has no line of its own: the search's line counts them.
+  case "verify": if (e.status === "offtopic" && !e.line) break; log(e, e.line || (e.status + " " + (e.domain || domain(e.url)) + (e.code ? " " + e.code : "")), e.status === "ok" ? "ok" : ""); break;
   case "error": log(e, e.detail, "error"); break;
   case "done": done(e); break;
   }

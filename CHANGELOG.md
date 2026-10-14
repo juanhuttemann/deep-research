@@ -5,6 +5,37 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- A SearXNG instance that fails a query rests before it is asked again (ten
+  minutes after a challenge or block, two after a limit or timeout), so once
+  the public instances start refusing, a search fails at once instead of
+  spending 30 seconds or more walking all ten again. A single configured
+  instance never rests.
+- A search every instance failed is reported as counts by kind
+  (`9 challenged, 1 timed out`) instead of every instance's error, challenge
+  scripts included, in one line.
+- When the public instances refuse the run, it says once — and again in the
+  run's error if no search answered — to run SearXNG locally or use Exa or
+  Tavily.
+- Once every instance is resting, a sub-agent stops sending queries and the
+  follow-up round is skipped, instead of listing failures that asked nothing.
+- A run where more searches gave nothing than gave something — refused, or
+  answered with only off-topic results — is delivered marked incomplete
+  (exit status non-zero, `done` status `incomplete`), its report opening with
+  how many searches gave nothing and how many sources it rests on, at `low`
+  confidence. With fewer than three sources it stops before the analysis,
+  saying why, rather than spending five model calls on them. One that
+  survived on a single off-topic snippet used to read like any finished
+  report.
+- A SearXNG instance whose answer was all off-topic rests like one that
+  refused; one was seen answering every query with results for its first
+  word alone. Each search's line names the instance that answered.
+- Off-topic results are one line per search (`9 of 10 results off-topic:
+  ruby-lang.org, …`) instead of two lines per result.
+- A sub-agent's fallback query is the planner's terms for it, not the
+  question clipped with the sub-topic name cut off after it.
+
 ## [0.9.0] - 2026-10-13
 
 ### Added

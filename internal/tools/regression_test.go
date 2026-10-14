@@ -615,3 +615,149 @@ func TestScrapeDeadlineDoesNotFollowTheModelCallTimeout(t *testing.T) {
 		t.Errorf("Firecrawl was given %v to scrape and the client %v: the server must give up first", limit, client)
 	}
 }
+
+// challengeServer refuses every query the way public instances refused a
+// real run: a challenge page, or ctq.ro's 418 with a cookie script.
+func challengeServer(t *testing.T, teapot bool, hits *atomic.Int32) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if teapot {
+			w.WriteHeader(http.StatusTeapot)
+			fmt.Fprint(w, `<script>document.cookie = "Yogsototh_opens_the_door=1; Path=/;"; window.location.reload();</script>`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><title>Making sure you're not a bot!</title></html>`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// Once the public instances started challenging, every query walked all ten
+// again and spent 37 seconds learning what the last query had: a sub-agent
+// stalled for its whole deadline per search. An instance that refused now
+// rests, and a query whose every instance is resting fails at once.
+func TestRefusingInstancesAreNotAskedAgainAtOnce(t *testing.T) {
+	var hits atomic.Int32
+	a, b := challengeServer(t, false, &hits), challengeServer(t, true, &hits)
+	now := time.Unix(0, 0)
+	c := NewSearXNGClient(a+","+b, 0)
+	c.now = func() time.Time { return now }
+
+	if _, err := c.Search(context.Background(), "q"); err == nil {
+		t.Fatal("a pool of challenges answered")
+	}
+	asked := hits.Load()
+	_, err := c.Search(context.Background(), "q")
+	if err == nil || hits.Load() != asked {
+		t.Fatalf("second query asked %d more times (err %v), want resting instances skipped", hits.Load()-asked, err)
+	}
+	if SearchStatus(err) != "challenge" || !SearchResting(err) || !strings.HasPrefix(err.Error(), "not searched") {
+		t.Errorf("a query of resting instances lost why they rest, or read as fresh failures: %v", err)
+	}
+
+	now = now.Add(refusalRest + time.Second)
+	_, _ = c.Search(context.Background(), "q")
+	if hits.Load() == asked {
+		t.Error("an instance was never asked again after its rest")
+	}
+}
+
+// The reader's own server has no other instance to move to: benching it
+// would turn a restart into minutes of searches that never ask it.
+func TestASingleInstanceNeverRests(t *testing.T) {
+	var hits atomic.Int32
+	c := NewSearXNGClient(challengeServer(t, false, &hits), 0)
+	for range 2 {
+		_, _ = c.Search(context.Background(), "q")
+	}
+	if hits.Load() < 2 {
+		t.Errorf("a lone instance was asked %d times in two queries", hits.Load())
+	}
+}
+
+// Ten instances' errors joined made one event line of URLs, challenge
+// scripts and timeouts. The run's line counts the failures by kind instead,
+// and only the public pool's refusal reads as public.
+func TestPoolFailureIsCountedNotDumped(t *testing.T) {
+	var hits atomic.Int32
+	a, b, d := challengeServer(t, false, &hits), challengeServer(t, false, &hits), challengeServer(t, true, &hits)
+
+	listed := NewSearXNGClient(a+","+b+","+d, 0)
+	_, err := listed.Search(context.Background(), "q")
+	if err == nil {
+		t.Fatal("a pool of challenges answered")
+	}
+	msg := err.Error()
+	if msg != "all 3 SearXNG instances failed: 3 challenged" {
+		t.Errorf("pool error = %q", msg)
+	}
+	if PublicSearchRefused(err) {
+		t.Error("the reader's own instances were reported as the public pool")
+	}
+
+	auto := NewSearXNGClient("auto", 0)
+	auto.discover = func(context.Context) ([]string, error) { return []string{a, b, d}, nil }
+	_, err = auto.Search(context.Background(), "q")
+	if !PublicSearchRefused(err) || !strings.Contains(err.Error(), "public SearXNG") {
+		t.Errorf("public pool refusal not recognised: %v", err)
+	}
+	if strings.Contains(err.Error(), "<script") || strings.Contains(err.Error(), "127.0.0.1") {
+		t.Errorf("pool error still dumps each instance: %q", err)
+	}
+}
+
+// resultsServer answers every query with one SearXNG result page titled
+// title, counting the queries it gets.
+func resultsServer(t *testing.T, title string, hits *atomic.Int32) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<html><body><div id="urls"><article class="result"><h3><a href="https://%s.example/">%s</a></h3>`+
+			`<p class="content">%s</p></article></div></body></html>`, strings.ReplaceAll(title, " ", ""), title, title)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// One public instance answered every query with results for its first word
+// alone — ruby hotels for "Ruby on Rails …", chatbot homepages for "AI …" —
+// and, counted as an answer, was asked first every time. An answer with
+// nothing on the subject now rests the instance like a refusal, and the
+// search's line names the instance, so junk can be traced to where it came
+// from.
+func TestAnInstanceAnsweringOffTopicIsRested(t *testing.T) {
+	var junkHits, goodHits atomic.Int32
+	junk := resultsServer(t, "Ruby Hotels Berlin", &junkHits)
+	good := resultsServer(t, "Rails 8 release notes", &goodHits)
+	var lines []string
+	st := &SearchTools{Engine: NewSearXNGClient(junk+","+good, 0), MaxURLsPerQuery: 5, ScrapeParallelism: 1}
+	st.SetLogger(func(s string) { lines = append(lines, s) })
+
+	res, err := st.Search(context.Background(), "Ruby on Rails 2026", []string{"Rails", "2026"})
+	if err != nil || len(res.Findings) != 0 || len(res.Skipped) != 1 {
+		t.Fatalf("first search: findings %d skipped %d err %v", len(res.Findings), len(res.Skipped), err)
+	}
+	if len(lines) == 0 || !strings.Contains(lines[0], "1 results from "+DomainOf(junk)) {
+		t.Errorf("search line does not name the instance: %q", lines)
+	}
+	asked := junkHits.Load()
+	res, err = st.Search(context.Background(), "Ruby on Rails 2026", []string{"Rails", "2026"})
+	if err != nil || len(res.Findings) != 1 {
+		t.Fatalf("second search: findings %v err %v", res, err)
+	}
+	if junkHits.Load() != asked {
+		t.Errorf("the off-topic instance was asked again (%d more requests)", junkHits.Load()-asked)
+	}
+}
+
+// A query whose deadline ended the walk said "all 10 SearXNG instances
+// failed" over the few it had asked.
+func TestPoolFailureCutShortSaysHowManyWereAsked(t *testing.T) {
+	e := &poolError{total: 10, errs: []error{errChallenge, errChallenge, context.DeadlineExceeded}}
+	if got := e.Error(); !strings.HasPrefix(got, "3 of 10 SearXNG instances failed before the query's deadline") {
+		t.Errorf("pool error = %q", got)
+	}
+}
