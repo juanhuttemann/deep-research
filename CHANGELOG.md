@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-14
+
 ### Added
 
 - `--domains go.dev,pkg.go.dev` confines a run's search to your own list of
@@ -671,7 +673,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/juanhuttemann/deep-research/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/juanhuttemann/deep-research/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/juanhuttemann/deep-research/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/juanhuttemann/deep-research/compare/v0.8.0...v0.9.0
