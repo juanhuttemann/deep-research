@@ -3,56 +3,117 @@ package ui
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
-// Minimal, dependency-free PDF writer. It streams word-wrapped text lines in a
-// single Helvetica font, paginated so a long report is not clipped at the
-// bottom of page one. The output is a valid PDF 1.4 document: every reserved
-// object is written, the xref lists them all as in-use, and each content
-// stream declares its exact byte length.
+// Minimal, dependency-free PDF writer. The report is laid out by
+// pdf_layout.go into pages of positioned text, rules and link rectangles;
+// this file turns those pages into a valid PDF 1.4 document: every object is
+// written, the xref lists them all as in-use, and each content stream
+// declares its exact byte length. The fonts are the standard Helvetica and
+// Courier faces, which every viewer has, so nothing is embedded.
 
 // US Letter layout, in PDF user-space units (1/72").
 const (
-	pdfLeading      = 14 // baseline-to-baseline distance, i.e. the T* step
-	pdfFontSize     = 11
-	pdfLeftMargin   = 50
-	pdfTopBaseline  = 740 // first baseline, measured from the bottom edge
-	pdfBottomMargin = 50
-	pdfLinesPerPage = (pdfTopBaseline - pdfBottomMargin) / pdfLeading
+	pdfPageWidth  = 612
+	pdfPageHeight = 792
+	pdfMargin     = 54
 )
 
-// BuildPDF turns wrapped text lines into a PDF document and returns the bytes.
-//
-// Object layout: 1 catalog, 2 page tree, 3 font, then two objects per page
-// (the page itself, then its content stream).
-func BuildPDF(lines []string) []byte {
-	const (
-		catalogObj = 1
-		pagesObj   = 2
-		fontObj    = 3
-		firstPage  = 4
-	)
-	pageObj := func(i int) int { return firstPage + 2*i }
+type pdfFont int
 
-	pages := paginate(lines, pdfLinesPerPage)
+const (
+	fontRegular pdfFont = iota
+	fontBold
+	fontItalic
+	fontBoldItalic
+	fontMono
+)
+
+// pdfFontNames are the resource order: fontRegular is /F1.
+var pdfFontNames = [...]string{"Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique", "Courier"}
+
+// pdfLink is a clickable rectangle on a page that opens uri.
+type pdfLink struct {
+	x0, y0, x1, y1 float64
+	uri            string
+}
+
+// pdfPage accumulates one page's content-stream operators and links.
+type pdfPage struct {
+	ops   strings.Builder
+	links []pdfLink
+}
+
+// text draws s with its baseline starting at (x, y). Each string sets its own
+// font and colour so no graphics state leaks from one to the next.
+func (p *pdfPage) text(x, y float64, f pdfFont, size float64, rgb, s string) {
+	fmt.Fprintf(&p.ops, "BT /F%d %s Tf %s rg 1 0 0 1 %s %s Tm (%s) Tj ET\n",
+		f+1, pdfNum(size), rgb, pdfNum(x), pdfNum(y), escapePDF(s))
+}
+
+// fill paints a grey rectangle whose lower-left corner is (x, y).
+func (p *pdfPage) fill(x, y, w, h, gray float64) {
+	fmt.Fprintf(&p.ops, "q %s g %s %s %s %s re f Q\n", pdfNum(gray), pdfNum(x), pdfNum(y), pdfNum(w), pdfNum(h))
+}
+
+// rule strokes a horizontal line at y from x0 to x1.
+func (p *pdfPage) rule(x0, x1, y, gray, width float64) {
+	fmt.Fprintf(&p.ops, "q %s G %s w %s %s m %s %s l S Q\n",
+		pdfNum(gray), pdfNum(width), pdfNum(x0), pdfNum(y), pdfNum(x1), pdfNum(y))
+}
+
+// pdfNum formats a coordinate with at most two decimals and no exponent.
+func pdfNum(v float64) string {
+	return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64)
+}
+
+// BuildPDF lays out a Markdown report and returns the PDF bytes.
+func BuildPDF(markdown string) []byte {
+	pages := layoutPDF(parsePDFBlocks(markdown))
+	for i, p := range pages {
+		label := fmt.Sprintf("%d / %d", i+1, len(pages))
+		p.text((pdfPageWidth-pdfWidth(label, fontRegular, 8))/2, pdfMargin/2, fontRegular, 8, pdfGrayText, label)
+	}
+	return writePDF(pages)
+}
+
+// writePDF serializes laid-out pages. Object numbers are allocated as the
+// objects are added; the catalog and page tree are reserved first because
+// they must point at objects that do not exist yet.
+func writePDF(pages []*pdfPage) []byte {
+	var objects []string
+	add := func(body string) int {
+		objects = append(objects, body)
+		return len(objects)
+	}
+	catalog, tree := add(""), add("")
+	var fonts []string
+	for i, name := range pdfFontNames {
+		n := add("<< /Type /Font /Subtype /Type1 /BaseFont /" + name + " /Encoding /WinAnsiEncoding >>")
+		fonts = append(fonts, fmt.Sprintf("/F%d %d 0 R", i+1, n))
+	}
+	resources := "<< /Font << " + strings.Join(fonts, " ") + " >> >>"
 	kids := make([]string, len(pages))
-	for i := range pages {
-		kids[i] = fmt.Sprintf("%d 0 R", pageObj(i))
+	for i, p := range pages {
+		contents := add(contentStream(p.ops.String()))
+		var annots []string
+		for _, l := range p.links {
+			annots = append(annots, fmt.Sprintf("%d 0 R", add(linkAnnotation(l))))
+		}
+		extra := ""
+		if len(annots) > 0 {
+			extra = " /Annots [" + strings.Join(annots, " ") + "]"
+		}
+		kids[i] = fmt.Sprintf("%d 0 R", add(fmt.Sprintf(
+			"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %d %d] /Resources %s /Contents %d 0 R%s >>",
+			tree, pdfPageWidth, pdfPageHeight, resources, contents, extra)))
 	}
-
-	objects := []string{
-		fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pagesObj),
-		fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(pages)),
-		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-	}
-	for i, page := range pages {
-		objects = append(objects,
-			fmt.Sprintf("<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "+
-				"/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
-				pagesObj, fontObj, pageObj(i)+1),
-			contentStream(page))
-	}
+	objects[catalog-1] = fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", tree)
+	objects[tree-1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(pages))
 
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
@@ -68,47 +129,50 @@ func BuildPDF(lines []string) []byte {
 	for _, off := range offsets {
 		fmt.Fprintf(&buf, "%010d 00000 n \n", off)
 	}
-	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root %d 0 R >>\n", size, catalogObj)
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root %d 0 R >>\n", size, catalog)
 	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", xrefOff)
 	return buf.Bytes()
 }
 
-// paginate splits lines into pages of at most n lines. An empty document still
-// gets one (blank) page: a page tree with no kids is not a valid PDF.
-func paginate(lines []string, n int) [][]string {
-	if len(lines) == 0 {
-		return [][]string{nil}
-	}
-	var pages [][]string
-	for len(lines) > n {
-		pages = append(pages, lines[:n])
-		lines = lines[n:]
-	}
-	return append(pages, lines)
+// contentStream wraps a page's operators as a stream object body.
+func contentStream(body string) string {
+	return fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(body), body)
 }
 
-// contentStream renders one page's text as a content-stream object body.
-func contentStream(lines []string) string {
-	var s strings.Builder
-	fmt.Fprintf(&s, "BT\n/F1 %d Tf\n%d TL\n%d %d Td\n",
-		pdfFontSize, pdfLeading, pdfLeftMargin, pdfTopBaseline)
-	for _, ln := range lines {
-		s.WriteString("(" + escapePDF(ln) + ") Tj\nT*\n")
+func linkAnnotation(l pdfLink) string {
+	return fmt.Sprintf("<< /Type /Annot /Subtype /Link /Rect [%s %s %s %s] /Border [0 0 0] /A << /S /URI /URI (%s) >> >>",
+		pdfNum(l.x0), pdfNum(l.y0), pdfNum(l.x1), pdfNum(l.y1), escapeURI(l.uri))
+}
+
+// escapeURI writes a URI action's string, which must be 7-bit ASCII:
+// anything else is percent-encoded byte by byte, as a browser would send it.
+func escapeURI(s string) string {
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '(' || c == ')' || c == '\\':
+			sb.WriteByte('\\')
+			sb.WriteByte(c)
+		case c > 0x20 && c < 0x7f:
+			sb.WriteByte(c)
+		default:
+			fmt.Fprintf(&sb, "%%%02X", c)
+		}
 	}
-	s.WriteString("ET")
-	body := s.String()
-	return fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(body), body)
+	return sb.String()
 }
 
 // winAnsi maps the typographic runes the report text actually uses onto their
 // WinAnsiEncoding slots. WinAnsi is Latin-1 except for 0x80-0x9F, so anything
 // else in Latin-1 passes through as its own byte and the rest becomes '?'.
+// The fact-check marks have no WinAnsi glyph and get the nearest that
+// prints, rather than a '?' on every unverified claim.
 var winAnsi = map[rune]byte{
 	'€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85,
 	'†': 0x86, '‡': 0x87, '‰': 0x89, '‹': 0x8b,
 	'‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94,
 	'•': 0x95, '–': 0x96, '—': 0x97, '™': 0x99,
-	'›': 0x9b,
+	'›': 0x9b, '✗': 0xd7, '⚠': '!',
 }
 
 // escapePDF encodes a string as a PDF literal string in WinAnsiEncoding.
@@ -124,11 +188,7 @@ func escapePDF(s string) string {
 		case r >= 0x20 && r < 0x7f:
 			sb.WriteRune(r)
 		default:
-			b, ok := pdfByte(r)
-			if !ok {
-				b = '?'
-			}
-			fmt.Fprintf(&sb, "\\%03o", b)
+			fmt.Fprintf(&sb, "\\%03o", pdfGlyph(r))
 		}
 	}
 	return sb.String()
@@ -145,13 +205,21 @@ func pdfByte(r rune) (byte, bool) {
 	return 0, false
 }
 
+// pdfGlyph is the byte the PDF draws for r: its own, or '?' when it has none.
+func pdfGlyph(r rune) byte {
+	if b, ok := pdfByte(r); ok {
+		return b
+	}
+	return '?'
+}
+
 // pdfHasUnsupportedText reports whether escapePDF would write a '?' for any of
 // text. It asks pdfByte, as escapePDF does, so accented Latin and the mapped
-// punctuation never warn. Line breaks and tabs are skipped: wrapText consumes
-// them before a line is encoded.
+// punctuation never warn. Whitespace is skipped: layout draws every kind as a
+// plain space, or as a line break, before a line is encoded.
 func pdfHasUnsupportedText(text string) bool {
 	for _, r := range text {
-		if r == '\n' || r == '\r' || r == '\t' {
+		if unicode.IsSpace(r) {
 			continue
 		}
 		if _, ok := pdfByte(r); !ok {
@@ -161,22 +229,57 @@ func pdfHasUnsupportedText(text string) bool {
 	return false
 }
 
-// wrapText breaks s onto lines of at most width display columns for the PDF,
-// preserving the blank lines that separate the report's paragraphs. The
-// per-paragraph wrapping is wrapWords, the same word-boundary wrap the live
-// frame uses; cutting at an exact rune count instead split words in half
-// ("supply-chain" became "su" / "pply-chain") all through the exports.
-func wrapText(s string, width int) []string {
-	if width <= 0 {
-		width = 75
-	}
-	var out []string
-	for _, paragraph := range strings.Split(s, "\n") {
-		if strings.TrimSpace(paragraph) == "" {
-			out = append(out, "")
-			continue
+// pdfWidth is the advance width of s in points, measured glyph by glyph as
+// the viewer will draw it.
+func pdfWidth(s string, f pdfFont, size float64) float64 {
+	units := 0
+	for _, r := range s {
+		b := pdfGlyph(r)
+		switch f {
+		case fontMono:
+			units += 600
+		case fontBold, fontBoldItalic:
+			units += int(helveticaBoldWidths[b-0x20])
+		default:
+			units += int(helveticaWidths[b-0x20])
 		}
-		out = append(out, wrapWords(paragraph, width)...)
 	}
-	return out
+	return float64(units) * size / 1000
+}
+
+// Advance widths in 1/1000 em for WinAnsi codes 0x20-0xFF, taken by glyph
+// name from the URW Nimbus Sans AFMs (urw-base35), which are metric-
+// compatible with Helvetica. The obliques share their upright widths.
+var helveticaWidths = [224]uint16{
+	278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+	556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+	1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+	667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+	333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+	556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, 0,
+	556, 0, 222, 556, 333, 1000, 556, 556, 333, 1000, 667, 333, 1000, 0, 611, 0,
+	0, 222, 222, 333, 333, 350, 556, 1000, 333, 1000, 500, 333, 944, 0, 500, 667,
+	278, 333, 556, 556, 556, 556, 260, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+	400, 584, 333, 333, 333, 556, 537, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+	667, 667, 667, 667, 667, 667, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+	722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+	556, 556, 556, 556, 556, 556, 889, 500, 556, 556, 556, 556, 278, 278, 278, 278,
+	556, 556, 556, 556, 556, 556, 556, 584, 611, 556, 556, 556, 556, 500, 556, 500,
+}
+
+var helveticaBoldWidths = [224]uint16{
+	278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+	556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611,
+	975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+	667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556,
+	333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+	611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584, 0,
+	556, 0, 278, 556, 500, 1000, 556, 556, 333, 1000, 667, 333, 1000, 0, 611, 0,
+	0, 278, 278, 500, 500, 350, 556, 1000, 333, 1000, 556, 333, 944, 0, 500, 667,
+	278, 333, 556, 556, 556, 556, 280, 556, 333, 737, 370, 556, 584, 333, 737, 333,
+	400, 584, 333, 333, 333, 611, 556, 278, 333, 333, 365, 556, 834, 834, 834, 611,
+	722, 722, 722, 722, 722, 722, 1000, 722, 667, 667, 667, 667, 278, 278, 278, 278,
+	722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
+	556, 556, 556, 556, 556, 556, 889, 556, 556, 556, 556, 556, 278, 278, 278, 278,
+	611, 611, 611, 611, 611, 611, 611, 584, 611, 611, 611, 611, 611, 556, 611, 556,
 }

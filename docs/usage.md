@@ -466,10 +466,15 @@ JSONL stay unstyled. The default style is `dark`; set `GLAMOUR_STYLE=light`
 for a light terminal, or point `GLAMOUR_STYLE` at a Glamour JSON stylesheet.
 
 Each run writes `.md`, `.pdf` and `.json` artifacts into `--reports`.
-Markdown and PDF exports include one executive summary, and PDFs render
-readable text with link URLs preserved. The PDF uses Helvetica with
+Markdown and PDF exports include one executive summary. The PDF is typeset
+from the Markdown: headings, bulleted and numbered lists, tables with their
+header repeated on each page, code blocks and page numbers. Links are
+clickable, and each link's URL is printed once, at its last link, so a
+source the report cites shows its URL in the citation list rather than in
+every paragraph that cites it. The PDF uses Helvetica with
 WinAnsi encoding: Latin-1 and supported typographic punctuation render,
-while other scripts (including Cyrillic, Greek and CJK) become `?`. The CLI
+arrows and comparison signs are spelled `->`, `<=`, `>=`, `!=` and `~`, and
+other scripts (including Cyrillic, Greek and CJK) become `?`. The CLI
 warns on stderr when characters are lost; use `.md` or `.json` for the full
 Unicode text. Artifact filenames use a readable
 question stem plus a 128-bit hash; reports created with the earlier short
