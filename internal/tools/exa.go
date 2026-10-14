@@ -42,10 +42,15 @@ func (c *ExaClient) Name() string { return EngineExa }
 
 // Search runs query and returns each result with its text as Body.
 func (c *ExaClient) Search(ctx context.Context, query string) ([]SearchResult, error) {
+	return c.SearchIn(ctx, query, nil)
+}
+
+// SearchIn runs query on domains only, through Exa's own includeDomains.
+func (c *ExaClient) SearchIn(ctx context.Context, query string, domains []string) ([]SearchResult, error) {
 	var data struct {
 		Results []exaResult `json:"results"`
 	}
-	err := c.post(ctx, "/search", map[string]any{
+	body := map[string]any{
 		"query":      query,
 		"type":       "auto",
 		"numResults": c.ResultLimit,
@@ -53,7 +58,11 @@ func (c *ExaClient) Search(ctx context.Context, query string) ([]SearchResult, e
 			"text":       map[string]any{"maxCharacters": c.ContentLimit},
 			"highlights": true,
 		},
-	}, &data)
+	}
+	if len(domains) > 0 {
+		body["includeDomains"] = domains
+	}
+	err := c.post(ctx, "/search", body, &data)
 	if err != nil {
 		return nil, err
 	}

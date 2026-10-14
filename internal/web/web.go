@@ -45,6 +45,9 @@ type Request struct {
 	// Resume names an interrupted run's checkpoint in the reports
 	// directory (--resume).
 	Resume string `json:"resume,omitempty"`
+	// Domains confines the run to these sites (--domains). The run checks
+	// them; a bad one ends it with the reason in its done event.
+	Domains []string `json:"domains,omitempty"`
 }
 
 // checkpointSuffix ends the file an interrupted run left in the reports

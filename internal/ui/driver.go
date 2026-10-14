@@ -38,6 +38,8 @@ type Driver struct {
 	// phase is the pipeline phase most recently announced; every event that
 	// names no phase of its own is stamped with it.
 	phase string
+	// domains are the sites the search is confined to, recorded on the result.
+	domains []string
 	// running counters surfaced in the status line.
 	tokens  int
 	sources int
@@ -566,6 +568,7 @@ func (d *Driver) finish(result *agent.ResearchResult) *agent.ResearchResult {
 		}
 	}
 	result.Tokens, result.Timestamp = tokens, d.now()
+	result.Domains = d.domains
 	if m, ok := d.Agent.(interface{ ModelInfo() (string, string) }); ok {
 		result.Model, result.Provider = m.ModelInfo()
 	}

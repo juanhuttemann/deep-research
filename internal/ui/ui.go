@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
 // Action constants returned from the brief confirmation loop.
@@ -48,6 +49,9 @@ type Options struct {
 	// OnPlan, when set, is given the plan once it is confirmed, before the
 	// first search: the plan a resumed run must run again.
 	OnPlan func(*Plan)
+	// Domains confines the search to these sites, each checked before the
+	// run plans. A Plan handed in brings its own.
+	Domains []string
 }
 
 // RunResult carries the artifacts produced by a run.
@@ -98,7 +102,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 		wireProgress(o.Assistant, func(e Event) { e.Phase = "Plan"; sink.Emit(e) })
 	}
 
-	plan, err := o.plan(ctx)
+	plan, usable, err := o.scopedPlan(ctx, sink)
 	if err != nil {
 		// A cancel can arrive while the plan call is still out (the browser's
 		// cancel button can press it there); it is the same stop as Esc later.
@@ -128,6 +132,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	driver := NewDriver(o.Assistant, sink, input, o.Parallelism)
 	driver.now = o.Now
 	driver.detached = o.Detach
+	driver.domains = usable
 	if interactive || o.JSONL {
 		// A retried model call is the assistant's own progress line. Without
 		// routing it into the events, a retry that takes minutes looks like a
@@ -165,6 +170,30 @@ func ended(ctx context.Context, res RunResult, err error) (RunResult, error) {
 		return res, nil
 	}
 	return RunResult{}, err
+}
+
+// scopedPlan checks the run's domain list, then plans: a list with nothing
+// usable on it ends the run before the planner's model call. usable is what
+// the search was confined to; the plan keeps the list as asked.
+func (o Options) scopedPlan(ctx context.Context, sink *MultiSink) (plan *Plan, usable []string, err error) {
+	domains := o.Domains
+	if o.Plan != nil && len(domains) == 0 {
+		domains = o.Plan.Domains
+	}
+	// Parsed here, where every run passes, and not only where a list is
+	// typed: a resumed checkpoint's list went straight to the search, so
+	// "localhost" was searched and "GO.DEV" matched no result at all.
+	if domains, err = tools.ParseDomains(domains); err != nil {
+		return nil, nil, err
+	}
+	if usable, err = o.checkSources(ctx, sink, domains); err != nil {
+		return nil, nil, err
+	}
+	if plan, err = o.plan(ctx); err != nil {
+		return nil, nil, err
+	}
+	plan.Domains = domains
+	return plan, usable, nil
 }
 
 // plan is the plan to run: the one handed in, or the planner's.

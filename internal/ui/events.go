@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/juanhuttemann/deep-research/internal/agent"
 )
 
 // EventType enumerates the kinds of lifecycle events the research driver
@@ -43,6 +45,9 @@ const (
 	// confirmed in the brief, or handed in with --plan. A caller can keep it,
 	// edit it and hand it back.
 	PlanReady EventType = "plan"
+	// SourceCheck is the preflight's finding for one domain of a --domains
+	// list, sent before planning. Check carries it whole.
+	SourceCheck EventType = "source"
 	// Done is the last line of every --jsonl run, sent once the report files
 	// and the history record are written. Status is complete, incomplete,
 	// failed or cancelled; Detail is the error; Artifacts are the files. A
@@ -98,6 +103,8 @@ type Event struct {
 	Artifacts []string `json:"artifacts,omitempty"`
 	// Plan is the plan about to run (PlanReady only).
 	Plan *Plan `json:"plan,omitempty"`
+	// Check is one domain's preflight result (SourceCheck only).
+	Check *agent.DomainCheck `json:"check,omitempty"`
 }
 
 func (e Event) withTime() Event {

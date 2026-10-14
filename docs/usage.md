@@ -31,6 +31,7 @@ progress meter, a rolling activity tail, and running source/token counters.
 | `--replay TRACE` | — | re-run analyze, fact-check and summarize on a trace's recorded plan and search results, without searching; see below |
 | `--plan-only` | off | make the plan, print it as JSON (under `--jsonl`, as the `plan` event) and stop before searching; see below |
 | `--plan FILE` | — | run a plan `--plan-only` wrote, edited or not, without planning again; `-` reads stdin |
+| `--domains LIST` | — | research only these sites (comma-separated hosts or URLs); each is checked before planning; see below |
 | `--resume CHECKPOINT` | — | continue an interrupted run from its `<reports>/*.partial.json`, without searching again what it searched; see below |
 | `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
 
@@ -57,6 +58,75 @@ read from the file. When you rename a sub-topic, clear its `query` and
 `terms`: they were written for the old name, and the run searches them as
 written. A plan-only run writes no report and no history record; `-o FILE`
 writes its plan to FILE instead of stdout.
+
+### Researching only your own sites
+
+`--domains` confines every search to a list of sites instead of the open
+web:
+
+```bash
+deep-research -p "how do Go generics constrain type parameters" \
+  --domains go.dev,pkg.go.dev
+```
+
+Each entry is a host or a URL, from the flag, an edited plan or a
+checkpoint alike. It is reduced to its lower-case host, without `www.`,
+and covers the host's subdomains, so a path in it is dropped. Only public
+names are accepted: an IP address, `localhost` or a single-label intranet
+name is refused, as it would be as a scrape target. A list holds at most
+20 sites.
+
+Before planning, so before any model request, each site is checked the way
+a run will use it. A search scoped to the site must return pages on it,
+and one of the first three must be readable through the scraper (or come
+with its text, on Exa and Tavily), with at least 200 characters of text. A
+search that comes back empty or rate-limited is asked once more, a few
+seconds later, before the site is judged: a throttled engine often answers
+the second time. A site that fails is named with the reason and
+dropped, and the run goes on with the rest. A run where none pass stops
+there. The table goes to stderr, and under `--jsonl` each site is a `source`
+event.
+
+| Status | Meaning | Researched |
+| ------ | ------- | ---------- |
+| `ok` | pages found and one read in full | yes |
+| `snippet-only` | pages found, but read only from their search snippets: no scraper is configured, or it could not read them | yes |
+| `unindexed` | the search engine returned no pages on the site, asked twice; the detail says whether its home page loads | no |
+| `unreadable` | pages found, but none of the first three could be read (blocked, an error status, or a JavaScript shell with no text) and none came with a snippet | no |
+| `search-failed` | the search itself failed (a refusal, a rate limit, an outage, or SearXNG's own engines not answering) | no |
+
+Exa and Tavily take the list as their own domain filter. SearXNG has no
+such parameter, so the list goes into the query as `site:` operators, which
+Google, Bing, DuckDuckGo and Brave honour and other engines ignore. Either
+way, a result from a site not on the list is dropped before it is ranked,
+so the scope holds even when an engine ignores it. A site that SearXNG's
+engines do not index is reported `unindexed` before the run starts.
+
+On SearXNG, the list works only as well as the instance's engines that
+honour `site:` and still answer this machine. Google, Brave, DuckDuckGo and
+Qwant suspend or challenge an address that searches in bursts, and Bing
+can answer `site:` with nothing. Yahoo honours `site:` and an OR group of
+them, but SearXNG's default settings leave it out of general search. If the
+check reports `search-failed` naming suspended engines, enable it in
+`searxng/settings.yml`:
+
+```yaml
+engines:
+  - name: yahoo
+    disabled: false
+```
+
+Exa and Tavily need none of this.
+
+A plan made with `--domains` carries the list (`domains` in `--plan-only`
+output), and so does a checkpoint. `--plan` and `--resume` check the sites
+again and take no `--domains` of their own. `--replay` searches nothing and
+rejects it. With search off there is nothing to confine, and the run
+refuses the flag. The run's `.json` and history record list the sites it
+used.
+
+`deep-research doctor --domains LIST` runs the same check on its own, so a
+list can be proved before a run is started on it.
 
 ### Resuming an interrupted run
 
@@ -185,6 +255,9 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
 
 The `plan` event arrives once, before the first search, and carries the
 plan the run is about to execute in `plan`: the input `--plan` reads.
+A run with `--domains` first sends one `source` event per site, before
+planning, with the check's result in `check` (`domain`, `status`, `pages`,
+`sample`, `chars`, `detail`).
 The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
 `citation`, `token`, `report`, `detach` and `error`; their fields are the
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
@@ -198,7 +271,11 @@ deep-research serve --addr 127.0.0.1:0   # any free port
 ```
 
 A page for launching a run and auditing what it decided. The form takes the
-question, `--mode` and `--sources`. Research makes the plan first (the same
+question, `--mode` and `--sources` (as "Pages per topic"), and Search: the
+web, or "Only these sites", which opens a box for the list (`--domains`)
+and keeps the last one typed. The run then opens with a checklist of the
+sites, each marked usable, from snippets only, or dropped with the reason,
+and the plan review shows them. Research makes the plan first (the same
 as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
 add and remove sub-topics, or change the depth. A renamed sub-topic drops
 the query the planner wrote for its old name. Start research runs the
@@ -385,6 +462,7 @@ Where the files go and how they rank against the environment:
 
 ```bash
 deep-research doctor
+deep-research doctor --domains go.dev,pkg.go.dev   # also check a site list
 ```
 
 One line per dependency a run has, each from one cheap request that spends
@@ -396,7 +474,9 @@ by looking the model up;
 and where the key came from (`auth.json`, the environment or `config.yaml`);
 whether the search backend answers a real query, and which instance did;
 whether the scraper can fetch a page; and how many model requests a run at
-each `--mode` tier spends. It exits non-zero when any check fails.
+each `--mode` tier spends. With `--domains`, one more line per site says
+whether a run could search and read it (see "Researching only your own
+sites"). It exits non-zero when any check fails.
 
 ## `update`
 

@@ -33,6 +33,24 @@ func Diagnose(ctx context.Context, cfg Config) []Check {
 	return []Check{checkModel(ctx, cfg), checkSearch(ctx, cfg), checkScraper(ctx, cfg)}
 }
 
+// DiagnoseDomains runs a run's source-list preflight on its own: one line per
+// domain, saying whether a run could search and read it. It spends no model
+// tokens, so a list can be proved before any run is started on it.
+func DiagnoseDomains(ctx context.Context, cfg Config, domains []string) []Check {
+	if !cfg.SearchEnabled() {
+		return []Check{{Name: "domains", Detail: ErrNoScopedSearch.Error() + ", and search is off"}}
+	}
+	st, err := tools.NewSearchToolsFrom(cfg.SearchOptions(), cfg.ModelCallTimeout)
+	if err != nil {
+		return []Check{{Name: "domains", Detail: err.Error()}}
+	}
+	var out []Check
+	for _, c := range st.CheckDomains(ctx, domains) {
+		out = append(out, Check{Name: "domain", OK: c.Usable(), Detail: c.Domain + "  " + c.Line()})
+	}
+	return out
+}
+
 // checkModel lists the provider's models with the key: it proves the host
 // answers and, on providers that check keys there, that the key is accepted.
 // OpenRouter lists models for anyone, so there the key endpoint is asked too.

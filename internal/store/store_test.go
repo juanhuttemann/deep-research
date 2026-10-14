@@ -94,3 +94,27 @@ func TestNewIDIsUnique(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// A run confined to a domain list records it; a record from before the field
+// existed still loads, as a run on the open web.
+func TestDomainsRoundTripBesideLegacyRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	legacy := `{"id":"old","question":"q0","analysis":"a","confidence":"low"}`
+	if err := os.WriteFile(path, []byte(legacy+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{Question: "q1", Domains: []string{"go.dev"}}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := st.List()
+	if err != nil || skipped != 0 || len(runs) != 2 {
+		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
+	}
+	if runs[0].Domains != nil || runs[0].Analysis == nil {
+		t.Errorf("legacy record = %+v", runs[0])
+	}
+	if d := runs[1].Domains; len(d) != 1 || d[0] != "go.dev" {
+		t.Errorf("domains = %v, want [go.dev]", d)
+	}
+}

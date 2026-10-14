@@ -42,6 +42,9 @@ type Trace struct {
 	// searches in one run), and storing it with every result made the page
 	// text most of the file several times over.
 	Pages map[string]string `json:"pages,omitempty"`
+	// Domains is the run's --domains list, so a resumed run searches the same
+	// sites. A replay searches nothing and ignores it.
+	Domains []string `json:"domains,omitempty"`
 	// Phases are each model phase's prompt and parsed output, in call order,
 	// for comparing a replay against the run it came from.
 	Phases []Phase `json:"phases"`
@@ -186,6 +189,13 @@ func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int) {
 	r.trace.Mode, r.trace.Sources = mode, sources
 	r.mu.Unlock()
 	r.save()
+}
+
+// SetDomains records the run's source list; SetPlan, which follows it, saves.
+func (r *Recorder) SetDomains(domains []string) {
+	r.mu.Lock()
+	r.trace.Domains = slices.Clone(domains)
+	r.mu.Unlock()
 }
 
 // Checkpoint saves the trace to path after each step from the plan on, and
@@ -434,6 +444,14 @@ func (r *Resumer) ModelInfo() (string, string) { return modelInfo(r.Assistant) }
 func (r *Resumer) ServedModels() []string      { return servedModels(r.Assistant) }
 func (r *Resumer) SetStatus(f func(string))    { setStatus(r.Assistant, f) }
 
+// A resumed run searches live for what its checkpoint lacks, so it is
+// scoped like any other; a Player searches nothing and is not a scoper.
+
+func (r *Resumer) CheckDomains(ctx context.Context, domains []string) ([]agent.DomainCheck, error) {
+	return checkDomains(ctx, r.Assistant, domains)
+}
+func (r *Resumer) ScopeTo(domains []string) { scopeTo(r.Assistant, domains) }
+
 // The driver and UI look for these optional methods on the assistant. An
 // embedded interface does not promote them, so each wrapper forwards them.
 
@@ -443,6 +461,24 @@ func (r *Recorder) SetStatus(f func(string))    { setStatus(r.Assistant, f) }
 func (p *Player) ModelInfo() (string, string)   { return modelInfo(p.Assistant) }
 func (p *Player) ServedModels() []string        { return servedModels(p.Assistant) }
 func (p *Player) SetStatus(f func(string))      { setStatus(p.Assistant, f) }
+
+func (r *Recorder) CheckDomains(ctx context.Context, domains []string) ([]agent.DomainCheck, error) {
+	return checkDomains(ctx, r.Assistant, domains)
+}
+func (r *Recorder) ScopeTo(domains []string) { scopeTo(r.Assistant, domains) }
+
+func checkDomains(ctx context.Context, a agent.Assistant, domains []string) ([]agent.DomainCheck, error) {
+	if s, ok := a.(agent.SourceScoper); ok {
+		return s.CheckDomains(ctx, domains)
+	}
+	return nil, agent.ErrNoScopedSearch
+}
+
+func scopeTo(a agent.Assistant, domains []string) {
+	if s, ok := a.(agent.SourceScoper); ok {
+		s.ScopeTo(domains)
+	}
+}
 
 func modelInfo(a agent.Assistant) (string, string) {
 	if m, ok := a.(interface{ ModelInfo() (string, string) }); ok {

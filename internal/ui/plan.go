@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
 // DepthMode describes a research budget tier: a per-sub-agent source ceiling
@@ -52,6 +53,10 @@ type Plan struct {
 	// Choosing a depth tier in the brief is a later, explicit choice and
 	// clears it.
 	PinnedPerTopic int `json:"pinned_per_topic,omitempty"`
+	// Domains is the --domains source list the run is confined to, as asked:
+	// each run of the plan checks them again, since a site that failed once
+	// may answer the next time.
+	Domains []string `json:"domains,omitempty"`
 }
 
 // PerTopic is the source budget for a single sub-agent: the whole-
@@ -120,7 +125,15 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	if len(topics) == 0 {
 		return nil, errors.New("read plan: no sub-topics to research")
 	}
-	return PlanFor(p.Question, depth, topics, p.PinnedPerTopic), nil
+	// An edited list is input like any other: a private host typed into it
+	// is refused here as it is on the command line.
+	domains, err := tools.ParseDomains(p.Domains)
+	if err != nil {
+		return nil, fmt.Errorf("read plan: %w", err)
+	}
+	plan := PlanFor(p.Question, depth, topics, p.PinnedPerTopic)
+	plan.Domains = domains
+	return plan, nil
 }
 
 // PlanFor builds a runnable plan from parts kept elsewhere (an edited plan,

@@ -761,3 +761,103 @@ func TestPoolFailureCutShortSaysHowManyWereAsked(t *testing.T) {
 		t.Errorf("pool error = %q", got)
 	}
 }
+
+// Exa answered the probe for pkg.go.dev with its home page first, 165
+// characters of navigation, and the site was dropped as unreadable although
+// every other page on it was text. A site is judged on several of its pages.
+func TestDomainCheckTriesMoreThanTheFirstPage(t *testing.T) {
+	eng := &recordingEngine{results: []SearchResult{
+		{URL: "https://pkg.go.dev/", Body: "Search packages"},
+		{URL: "https://pkg.go.dev/fmt", Body: strings.Repeat("Package fmt implements formatted I/O. ", 20)},
+	}}
+	got := (&SearchTools{Engine: eng}).CheckDomains(context.Background(), []string{"pkg.go.dev"})[0]
+	if got.Status != DomainOK || got.Sample != "https://pkg.go.dev/fmt" {
+		t.Errorf("check = %+v, want ok on the second page", got)
+	}
+}
+
+// Tavily sent one site's results without their page text, and the check
+// said "no scraper configured", which on Tavily reads as a setup mistake: it
+// needs none. It names the engine that sent no text.
+func TestSnippetOnlyOnAHostedEngineBlamesTheEngine(t *testing.T) {
+	eng := &recordingEngine{name: EngineTavily, results: []SearchResult{{URL: "https://research.swtch.com/x", Content: "snippet"}}}
+	got := (&SearchTools{Engine: eng}).CheckDomains(context.Background(), []string{"research.swtch.com"})[0]
+	if got.Status != DomainSnippetOnly || !strings.Contains(got.Detail, "tavily sent no page text") {
+		t.Errorf("check = %+v", got)
+	}
+}
+
+// flakyEngine answers its first query empty, as SearXNG does when an
+// upstream engine throttles a burst, and every later one with results.
+type flakyEngine struct {
+	mu    sync.Mutex
+	calls int
+	res   []SearchResult
+}
+
+func (f *flakyEngine) Name() string { return EngineSearXNG }
+
+func (f *flakyEngine) Search(context.Context, string) ([]SearchResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if f.calls == 1 {
+		return nil, nil
+	}
+	return f.res, nil
+}
+
+// Three probes at once had Google CSE throttle one, SearXNG answered it with
+// no results, and pkg.go.dev was dropped as unindexed. An empty probe asks
+// again before the site is judged.
+func TestEmptyProbeIsAskedAgainBeforeTheSiteIsUnindexed(t *testing.T) {
+	defer func(w time.Duration) { probeRetryWait = w }(probeRetryWait)
+	probeRetryWait = 0
+	eng := &flakyEngine{res: []SearchResult{{URL: "https://pkg.go.dev/fmt", Content: "snippet"}}}
+	got := (&SearchTools{Engine: eng}).CheckDomains(context.Background(), []string{"pkg.go.dev"})[0]
+	if got.Status != DomainSnippetOnly || eng.calls != 2 {
+		t.Errorf("check = %+v after %d searches, want it found on the second", got, eng.calls)
+	}
+}
+
+// After a burst of searches got its Google engine suspended, a local SearXNG
+// answered every query with a 200, no results and the engines that failed.
+// Taken as an empty answer, it had every site of a --domains list reported
+// as one no engine indexes. It is a search failure that names the engines.
+func TestSearXNGEmptyAnswerWithFailedEnginesIsAnError(t *testing.T) {
+	body := `{"results":[],"unresponsive_engines":[["google cse","Suspended: too many requests"],["duckduckgo","CAPTCHA"]]}`
+	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(sv.Close)
+	_, err := NewSearXNGClient(sv.URL, 0).Search(context.Background(), "go.dev site:go.dev")
+	if err == nil || !strings.Contains(err.Error(), "google cse (Suspended: too many requests)") {
+		t.Fatalf("err = %v, want the failed engines named", err)
+	}
+	if s := SearchStatus(err); s != "rate-limited" {
+		t.Errorf("status = %q, want rate-limited", s)
+	}
+	st := newSearchTools(sv.URL, "", 0)
+	if c := st.CheckDomains(context.Background(), []string{"go.dev"})[0]; c.Status != DomainSearchFail {
+		t.Errorf("domain check = %+v, want search-failed, not unindexed", c)
+	}
+
+	// No results with every engine answering is an empty answer, as before.
+	body = `{"results":[],"unresponsive_engines":[]}`
+	if res, err := NewSearXNGClient(sv.URL, 0).Search(context.Background(), "q"); err != nil || len(res) != 0 {
+		t.Errorf("an honest empty answer = %v, %v", res, err)
+	}
+}
+
+// A snippet kept a site in the check only when no scraper was configured, so
+// adding Firecrawl dropped every site it was refused on, although a run keeps
+// a refused page's snippet as a degraded source.
+func TestScraperRefusalKeepsASiteWithSnippets(t *testing.T) {
+	eng := &recordingEngine{results: []SearchResult{{URL: "https://walled.com/a", Content: "snippet"}}}
+	sc := pageScraper{"https://walled.com/a": &httpError{Code: http.StatusForbidden}}
+	got := (&SearchTools{Engine: eng, Scraper: sc}).CheckDomains(context.Background(), []string{"walled.com"})[0]
+	if got.Status != DomainSnippetOnly || !strings.Contains(got.Detail, "403") {
+		t.Errorf("check = %+v, want snippet-only naming the refusal", got)
+	}
+}

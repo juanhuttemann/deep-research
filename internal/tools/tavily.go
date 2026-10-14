@@ -36,6 +36,11 @@ func (c *TavilyClient) Name() string { return EngineTavily }
 
 // Search runs query and returns each result with its page as Body.
 func (c *TavilyClient) Search(ctx context.Context, query string) ([]SearchResult, error) {
+	return c.SearchIn(ctx, query, nil)
+}
+
+// SearchIn runs query on domains only, through Tavily's own include_domains.
+func (c *TavilyClient) SearchIn(ctx context.Context, query string, domains []string) ([]SearchResult, error) {
 	var data struct {
 		Results []struct {
 			URL        string  `json:"url"`
@@ -47,12 +52,16 @@ func (c *TavilyClient) Search(ctx context.Context, query string) ([]SearchResult
 	}
 	// Basic depth is one credit a query; advanced costs two for chunks the
 	// relevance ranker and ExcerptFor already pick out of the full page.
-	err := c.post(ctx, "/search", map[string]any{
+	body := map[string]any{
 		"query":               query,
 		"max_results":         c.ResultLimit,
 		"search_depth":        "basic",
 		"include_raw_content": "markdown",
-	}, &data)
+	}
+	if len(domains) > 0 {
+		body["include_domains"] = domains
+	}
+	err := c.post(ctx, "/search", body, &data)
 	if err != nil {
 		return nil, err
 	}

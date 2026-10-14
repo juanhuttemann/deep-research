@@ -343,6 +343,27 @@ type ResearchDetail struct {
 // SkippedSource is a search result rejected as off-topic before any fetch.
 type SkippedSource = tools.SkippedSource
 
+// DomainCheck is the preflight's finding for one domain of a source list.
+type DomainCheck = tools.DomainCheck
+
+// ErrNoScopedSearch marks a source list given to a run that cannot honour
+// it: one with web search off, where the model supplies the URLs and nothing
+// could show they came from the list.
+var ErrNoScopedSearch = errors.New("a domain list needs web search")
+
+// SourceScoper is an Assistant whose search can be confined to a source list.
+// It is separate from Assistant because only a live search has one to
+// confine: a replay re-runs recorded results, and test doubles search
+// nothing.
+type SourceScoper interface {
+	// CheckDomains searches each domain and reads a page from it, so a run
+	// learns which of its sources work before spending a model call.
+	CheckDomains(ctx context.Context, domains []string) ([]DomainCheck, error)
+	// ScopeTo confines every later search to domains. It is called before
+	// the run's searches start.
+	ScopeTo(domains []string)
+}
+
 // SourceSignal is the quality/availability outcome of fetching a single URL.
 type SourceSignal = tools.SourceSignal
 type ResearchResult struct {
@@ -356,6 +377,9 @@ type ResearchResult struct {
 	// Error is set when a late phase failed and the run was delivered from
 	// what it had gathered; empty for a complete run.
 	Error string `json:"error,omitempty"`
+	// Domains are the sites the run's search was confined to: the --domains
+	// that passed the preflight. Empty for a run on the open web.
+	Domains []string `json:"domains,omitempty"`
 	// Model and Provider name what wrote the report: the configured model and
 	// the endpoint's host. With a router alias the provider picks the model
 	// per request, and without this two runs could not be compared; ServedBy
@@ -1169,6 +1193,25 @@ func (a *impl) TokensUsed() int { return int(a.tokens.Load()) }
 func (a *impl) SetSourceBudget(perQuery int) {
 	if a.searchTools != nil && perQuery > 0 {
 		a.searchTools.MaxURLsPerQuery = perQuery
+	}
+}
+
+// CheckDomains runs the preflight on the configured search and scraper.
+func (a *impl) CheckDomains(ctx context.Context, domains []string) ([]DomainCheck, error) {
+	if a.searchTools == nil {
+		return nil, fmt.Errorf("%w: %w, and search is off", tools.ErrSearchConfig, ErrNoScopedSearch)
+	}
+	return a.searchTools.CheckDomains(ctx, domains), nil
+}
+
+// ParseDomains reads a --domains list into hosts, refusing anything that is
+// not a public name. See tools.ParseDomains.
+func ParseDomains(raw []string) ([]string, error) { return tools.ParseDomains(raw) }
+
+// ScopeTo confines the run's searches to domains.
+func (a *impl) ScopeTo(domains []string) {
+	if a.searchTools != nil {
+		a.searchTools.Domains = domains
 	}
 }
 
