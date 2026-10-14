@@ -1,5 +1,6 @@
 # Default config for deep-research agent
-# See config/agent.yaml for agent prompts
+# Agent prompts are built in; an agent.yaml beside this file overrides them
+# (see docs/configuration.md)
 #
 # Every key below can also be set from the environment as DEEP_RESEARCH_<KEY>
 # (uppercase), e.g. DEEP_RESEARCH_SOURCES_PER_TOPIC=9. The environment wins

@@ -315,9 +315,11 @@ stays unknown.
 deep-research init
 ```
 
-Writes `config.yaml` and `agent.yaml` into the config directory and a `.env`
-into the working directory, and points at `deep-research login` and where to get a free API key. Existing
-files are never clobbered.
+Writes `config.yaml` into the config directory and a `.env` into the working
+directory, and points at `deep-research login` and where to get a free API key. Existing
+files are never clobbered. The agent prompts are built into the binary, so
+no `agent.yaml` is written; create one only to override a prompt
+([configuration](configuration.md#agent-prompts)).
 
 `init --docker` also writes a `docker-compose.yml` and `searxng/settings.yml`
 into the working directory: a SearXNG on `127.0.0.1:8888` with the JSON API

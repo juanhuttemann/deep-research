@@ -83,7 +83,6 @@ func TestInitReportsFreshCreation(t *testing.T) {
 
 	want := map[string]bool{
 		filepath.Join(cfgDir, "config.yaml"): false,
-		filepath.Join(cfgDir, "agent.yaml"):  false,
 		filepath.Join(".env"):                false,
 	}
 	for _, c := range created {
