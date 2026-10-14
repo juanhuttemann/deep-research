@@ -15,6 +15,21 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - The outdated-prompts warning names the `agent.yaml` it read by its full
   path and says to move it aside to use the built-in prompts; it said only
   "agent.yaml", and three directories can hold the one read.
+- The PDF export is typeset instead of dumped as plain text: headings in
+  bold at their own sizes, lists with their bullets and numbers and a
+  hanging indent, tables as columns under a repeated header row, code on a
+  grey band, and page numbers. Lines are wrapped by the measured width of
+  the font; wrapping at 78 characters filled two thirds of the page, list
+  items stood three blank lines apart and tables were flattened into
+  "cell — cell — cell".
+- PDF links are clickable, and each link's URL is printed once, at its
+  last link, which is the citation list for every source the report cites;
+  printing it at every link buried the paragraphs and table cells in URLs.
+- The fact-check marks print in the PDF (✗ as ×, ⚠ as !) instead of as
+  `?`, and no longer set off the lost-characters warning on every run that
+  left a claim unconfirmed. Arrows and comparison signs, which reports use
+  often and WinAnsi has no glyph for, are spelled `->`, `<=`, `>=`, `!=`
+  and `~` instead of `?`.
 
 ## [0.10.0] - 2026-10-13
 

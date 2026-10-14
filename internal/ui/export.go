@@ -299,8 +299,7 @@ func WriteMarkdown(res *agent.ResearchResult, dir string) (string, error) {
 
 // WritePDF builds a PDF from the report and executive summary and writes it.
 func WritePDF(res *agent.ResearchResult, dir string) (string, error) {
-	body := markdownText(MarkdownReport(res))
-	data := BuildPDF(wrapText(strings.ReplaceAll(body, "\t", "  "), 78))
+	data := BuildPDF(MarkdownReport(res))
 	name := slug(res.Question) + ".pdf"
 	path := filepath.Join(dir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

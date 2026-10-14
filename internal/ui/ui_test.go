@@ -711,7 +711,7 @@ func TestWriteExportsToTempDir(t *testing.T) {
 }
 
 func TestBuildPDFFormsValidStructure(t *testing.T) {
-	pdf := BuildPDF([]string{"Title line", "Second paragraph that is a bit longer to exercise wrapping logic here.", "Third line"})
+	pdf := BuildPDF("Title line\n\nSecond paragraph that is a bit longer to exercise wrapping logic here.\n\nThird line")
 	s := string(pdf)
 	if !strings.HasPrefix(s, "%PDF-1.4") {
 		t.Fatalf("bad header: %q", s[:8])
@@ -786,7 +786,7 @@ func checkPDFXref(t *testing.T, pdf []byte) {
 // blindly: a /Length that disagrees with the bytes between stream and
 // endstream makes the page render empty or the file fail to parse.
 func TestBuildPDFStreamLengthIsAccurate(t *testing.T) {
-	s := string(BuildPDF([]string{"alpha", "beta (with parens) and a \\ backslash"}))
+	s := string(BuildPDF("alpha\n\nbeta (with parens) and a \\\\ backslash"))
 	rest := s
 	found := 0
 	for {
@@ -815,14 +815,14 @@ func TestBuildPDFStreamLengthIsAccurate(t *testing.T) {
 }
 
 // TestBuildPDFPaginates keeps a long report from being clipped: a single page
-// holds ~48 lines, so 200 lines must produce several page objects and still
-// contain every line.
+// holds ~48 lines, so 200 paragraphs must produce several page objects and
+// still contain every one.
 func TestBuildPDFPaginates(t *testing.T) {
 	lines := make([]string, 200)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("line-%03d", i)
 	}
-	s := string(BuildPDF(lines))
+	s := string(BuildPDF(strings.Join(lines, "\n\n")))
 	if n := strings.Count(s, "/Type /Page "); n < 2 {
 		t.Errorf("200 lines produced %d page objects, want several", n)
 	}
@@ -837,7 +837,7 @@ func TestBuildPDFPaginates(t *testing.T) {
 // TestBuildPDFEncodesNonASCII keeps the report's typographic characters (…, —,
 // •) from emitting raw UTF-8, which a WinAnsi-encoded font renders as mojibake.
 func TestBuildPDFEncodesNonASCII(t *testing.T) {
-	s := string(BuildPDF([]string{"an em—dash, an ellipsis… and a bullet •", "arrow → ok"}))
+	s := string(BuildPDF("an em—dash, an ellipsis… and a bullet •\n\narrow → ok"))
 	body := s[strings.Index(s, "stream\n"):]
 	for _, r := range body {
 		if r > 0x7f {
@@ -846,65 +846,6 @@ func TestBuildPDFEncodesNonASCII(t *testing.T) {
 	}
 	if !strings.Contains(s, `\227`) { // em dash in WinAnsi is 0x97
 		t.Error("em dash was not mapped to its WinAnsi slot")
-	}
-}
-
-// TestWrapTextBreaksOnWords: the PDF export wraps the report body, and a wrap
-// that cuts at an exact rune count splits words down the middle ("supply" ->
-// "su" / "pply"), which is what the real exports were doing.
-func TestWrapTextBreaksOnWords(t *testing.T) {
-	src := "supply-chain security versus higher efficiency and manufacturing maturity"
-	lines := wrapText(src, 24)
-	for _, ln := range lines {
-		if dispWidth(ln) > 24 {
-			t.Errorf("line exceeds width: %q", ln)
-		}
-	}
-	// Every word must survive intact across the wrap.
-	for _, w := range strings.Fields(src) {
-		found := false
-		for _, ln := range lines {
-			for _, got := range strings.Fields(ln) {
-				if got == w {
-					found = true
-				}
-			}
-		}
-		if !found {
-			t.Errorf("word %q was split across lines: %q", w, lines)
-		}
-	}
-}
-
-// TestWrapTextKeepsParagraphBreaks: blank lines separate the report's sections
-// and must survive into the PDF.
-func TestWrapTextKeepsParagraphBreaks(t *testing.T) {
-	lines := wrapText("first para\n\nsecond para", 40)
-	if len(lines) != 3 || lines[0] != "first para" || lines[1] != "" || lines[2] != "second para" {
-		t.Errorf("paragraph break lost: %q", lines)
-	}
-}
-
-// TestWrapTextHardBreaksLongWords: a URL longer than the line still must not
-// overflow the page.
-func TestWrapTextHardBreaksLongWords(t *testing.T) {
-	lines := wrapText("see https://example.com/a/very/long/path/that/never/ends/at/all here", 20)
-	for _, ln := range lines {
-		if dispWidth(ln) > 20 {
-			t.Errorf("long word overflowed: %q", ln)
-		}
-	}
-}
-
-func TestWrapText(t *testing.T) {
-	lines := wrapText("one two three four five six seven", 10)
-	if len(lines) < 3 {
-		t.Errorf("expected wrapping to produce multiple lines, got %d: %v", len(lines), lines)
-	}
-	for _, ln := range lines {
-		if len([]rune(ln)) > 10 {
-			t.Errorf("line exceeds width: %q (%d)", ln, len([]rune(ln)))
-		}
 	}
 }
 

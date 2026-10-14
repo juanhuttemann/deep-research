@@ -16,8 +16,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -276,7 +278,11 @@ func TestPDFRendersMarkdownAsReadableText(t *testing.T) {
 }
 
 func TestMarkdownTablesRenderWithoutSourceDelimiters(t *testing.T) {
-	got := markdownText("| Read:Write Ratio | Choice |\n| --- | --- |\n| 1:1 | **Mutex** |\n| 10:1 | RWMutex |\n")
+	var drawn []string
+	for _, tx := range pdfTexts(t, BuildPDF("| Read:Write Ratio | Choice |\n| --- | --- |\n| 1:1 | **Mutex** |\n| 10:1 | RWMutex |\n")) {
+		drawn = append(drawn, tx.text)
+	}
+	got := strings.Join(drawn, " ")
 	if strings.ContainsAny(got, "|*") || strings.Contains(got, "---") {
 		t.Errorf("table contains Markdown source delimiters: %q", got)
 	}
@@ -2325,5 +2331,384 @@ func TestFallbackQueryIsThePlannersTerms(t *testing.T) {
 	sub.Terms = nil
 	if got := subQueries(question, sub); len(got) != 2 || !strings.HasPrefix(got[1], "Is Ruby on Rails") {
 		t.Errorf("without terms the fallback should stay the anchored question, got %q", got)
+	}
+}
+
+// pdfText is one string the PDF draws: the font slot it uses (1 Helvetica,
+// 2 Bold, 3 Oblique, 4 BoldOblique, 5 Courier), its size, where its baseline
+// starts, and the page it is on.
+type pdfText struct {
+	page       int
+	font       int
+	size, x, y float64
+	text       string
+}
+
+var pdfTextOp = regexp.MustCompile(`/F(\d) ([\d.]+) Tf [\d. ]+ rg 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(((?:[^()\\]|\\.)*)\) Tj`)
+
+// pdfTexts parses every text-drawing operation out of a BuildPDF document.
+func pdfTexts(t *testing.T, pdf []byte) []pdfText {
+	t.Helper()
+	var out []pdfText
+	for page, stream := range strings.Split(string(pdf), ">>\nstream\n")[1:] {
+		stream, _, _ = strings.Cut(stream, "\nendstream")
+		for _, m := range pdfTextOp.FindAllStringSubmatch(stream, -1) {
+			font, _ := strconv.Atoi(m[1])
+			size, _ := strconv.ParseFloat(m[2], 64)
+			x, _ := strconv.ParseFloat(m[3], 64)
+			y, _ := strconv.ParseFloat(m[4], 64)
+			out = append(out, pdfText{page, font, size, x, y, unescapePDF(m[5])})
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no text operations in the PDF")
+	}
+	return out
+}
+
+// unescapePDF undoes escapePDF, giving each WinAnsi byte back as the rune it
+// stands for, so tests match "•" and pdfWidth measures the glyph drawn.
+func unescapePDF(s string) string {
+	fromWinAnsi := map[byte]rune{}
+	for r, b := range winAnsi {
+		if b >= 0x80 && b < 0xa0 {
+			fromWinAnsi[b] = r
+		}
+	}
+	decode := func(b byte) rune {
+		if r, ok := fromWinAnsi[b]; ok {
+			return r
+		}
+		return rune(b)
+	}
+	var sb strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' {
+			sb.WriteByte(s[i])
+			continue
+		}
+		if i+3 < len(s) && s[i+1] >= '0' && s[i+1] <= '7' {
+			n, _ := strconv.ParseUint(s[i+1:i+4], 8, 8)
+			sb.WriteRune(decode(byte(n)))
+			i += 3
+			continue
+		}
+		i++
+		sb.WriteByte(s[i])
+	}
+	return sb.String()
+}
+
+// findPDFText is the first drawn string containing text. A string holds a
+// run of words in one style, so a word is found inside its line.
+func findPDFText(texts []pdfText, text string) (pdfText, bool) {
+	for _, tx := range texts {
+		if strings.Contains(tx.text, text) {
+			return tx, true
+		}
+	}
+	return pdfText{}, false
+}
+
+// The exported PDF drew every heading in the body's font and size, so the
+// report read as one undifferentiated wall of text.
+func TestPDFHeadingsStandOutFromBody(t *testing.T) {
+	texts := pdfTexts(t, BuildPDF("# Title\n\n## Section\n\nBody text here.\n\n### Detail\n\nMore body."))
+	body, _ := findPDFText(texts, "Body")
+	for _, h := range []string{"Title", "Section", "Detail"} {
+		got, ok := findPDFText(texts, h)
+		if !ok {
+			t.Fatalf("heading %q missing: %+v", h, texts)
+		}
+		if got.font != 2 || got.size <= body.size {
+			t.Errorf("heading %q drawn in font F%d at %.1fpt, body F%d at %.1fpt", h, got.font, got.size, body.font, body.size)
+		}
+	}
+}
+
+// List items were separated by three blank lines (the item and its paragraph
+// each ended with a paragraph break), and their wrapped lines ran back under
+// the bullet instead of under the text.
+func TestPDFListItemsAreTightWithHangingIndent(t *testing.T) {
+	long := strings.Repeat("evidence supports the conditional answer ", 6)
+	texts := pdfTexts(t, BuildPDF("- first item\n- second item\n- "+long+"\n- last item"))
+	first, _ := findPDFText(texts, "first")
+	second, _ := findPDFText(texts, "second")
+	if gap := first.y - second.y; gap <= 0 || gap > 2*first.size {
+		t.Errorf("items %.1fpt apart at %.1fpt text, want a single line step", gap, first.size)
+	}
+	bullet, ok := findPDFText(texts, "•")
+	if !ok {
+		t.Fatalf("no bullet drawn: %+v", texts)
+	}
+	last, _ := findPDFText(texts, "last")
+	var starts []float64
+	for _, tx := range texts {
+		if tx.y < second.y && tx.y > last.y && tx.text != "•" {
+			starts = append(starts, tx.x)
+		}
+	}
+	if len(starts) < 2 {
+		t.Fatalf("long item did not wrap: %+v", texts)
+	}
+	for _, x := range starts {
+		if x <= bullet.x || x != first.x {
+			t.Errorf("wrapped line starts at %.1f, bullet at %.1f, item text at %.1f", x, bullet.x, first.x)
+		}
+	}
+}
+
+// Ordered lists lost their numbers: every item became "- ", so the
+// numbered citations no longer matched the numbers the report refers to.
+func TestPDFOrderedListsKeepTheirNumbers(t *testing.T) {
+	texts := pdfTexts(t, BuildPDF("3. third\n4. fourth"))
+	for _, n := range []string{"3.", "4."} {
+		if _, ok := findPDFText(texts, n); !ok {
+			t.Errorf("marker %q missing: %+v", n, texts)
+		}
+	}
+}
+
+// Lines were wrapped at 78 characters of a proportional font, which filled
+// about two thirds of the page and left a ragged empty right margin.
+func TestPDFFillsTheMeasuredLineWidth(t *testing.T) {
+	texts := pdfTexts(t, BuildPDF(strings.Repeat("The residential evidence is narrower than the commercial record. ", 20)))
+	lines := map[float64][]pdfText{}
+	for _, tx := range texts {
+		if tx.size > 8 { // skip the page-number footer
+			lines[tx.y] = append(lines[tx.y], tx)
+		}
+	}
+	var rights []float64
+	for _, words := range lines {
+		last := words[len(words)-1]
+		rights = append(rights, last.x+pdfWidth(last.text, pdfFont(last.font-1), last.size))
+	}
+	slices.Sort(rights)
+	if len(rights) < 4 {
+		t.Fatalf("paragraph wrapped onto %d lines", len(rights))
+	}
+	if right := rights[len(rights)-1]; right > pdfPageWidth-pdfMargin+0.01 {
+		t.Errorf("a line overflows the right margin: ends at %.1f", right)
+	}
+	// Every line but the paragraph's last must reach close to the margin.
+	if short := rights[1]; short < pdfPageWidth-pdfMargin-60 {
+		t.Errorf("a full line ends at %.1f, %.1fpt short of the margin", short, pdfPageWidth-pdfMargin-short)
+	}
+}
+
+// A word wrapped at a rune count was split in half ("su" / "pply-chain");
+// the measured wrap must keep words whole, styled pieces included.
+func TestPDFWrapKeepsWordsWhole(t *testing.T) {
+	src := strings.Repeat("sup**ply**-chain security versus manufacturing maturity ", 12)
+	texts := pdfTexts(t, BuildPDF(src))
+	for i := 1; i < len(texts); i++ {
+		prev, cur := texts[i-1], texts[i]
+		if strings.HasSuffix(prev.text, "sup") && (cur.text != "ply" || cur.y != prev.y) {
+			t.Fatalf("styled word split across lines: %+v then %+v", prev, cur)
+		}
+	}
+	if got, _ := findPDFText(texts, "ply"); got.font != 2 {
+		t.Errorf("bold piece drawn in F%d", got.font)
+	}
+}
+
+// Tables were flattened into "cell — cell — cell" runs of text with no
+// columns at all.
+func TestPDFTablesRenderAsColumns(t *testing.T) {
+	pdf := BuildPDF("| Dimension | LFP | Sodium-ion |\n|---|---|---|\n| Safety | Proven | Assessed |\n| Cost | Lower | Higher |\n")
+	texts := pdfTexts(t, pdf)
+	if strings.Contains(string(pdf), "—") || strings.Contains(string(pdf), `\227`) || strings.Contains(string(pdf), "|") {
+		t.Error("table cells are still joined by delimiters")
+	}
+	header, _ := findPDFText(texts, "Dimension")
+	if header.font != 2 {
+		t.Errorf("header row drawn in F%d, want bold", header.font)
+	}
+	row := []string{"Safety", "Proven", "Assessed"}
+	prev, _ := findPDFText(texts, row[0])
+	for _, cell := range row[1:] {
+		got, ok := findPDFText(texts, cell)
+		if !ok || got.y != prev.y || got.x <= prev.x {
+			t.Errorf("cell %q at (%.1f, %.1f), previous cell at (%.1f, %.1f)", cell, got.x, got.y, prev.x, prev.y)
+		}
+		prev = got
+	}
+	if cost, _ := findPDFText(texts, "Cost"); cost.y >= prev.y {
+		t.Error("second row is not below the first")
+	}
+}
+
+// A row taller than a page must continue on the next one rather than run
+// off the bottom of the first, and nothing in it may be lost.
+func TestPDFSplitsOversizedTableRows(t *testing.T) {
+	long := strings.Repeat("word ", 1500) + "LASTWORD"
+	texts := pdfTexts(t, BuildPDF("| A | B |\n|---|---|\n| "+long+" | short |\n"))
+	last, ok := findPDFText(texts, "LASTWORD")
+	if !ok {
+		t.Fatal("oversized row lost its tail")
+	}
+	if last.page == 0 {
+		t.Error("oversized row did not continue on a later page")
+	}
+	for _, tx := range texts {
+		if tx.y < pdfMargin-1 && tx.size > 8 {
+			t.Fatalf("text drawn below the bottom margin: %+v", tx)
+		}
+	}
+}
+
+// Links must stay clickable and printed: the link text, an annotation that
+// opens the URL, and the URL itself for a paper copy.
+func TestPDFLinksAreClickableAndKeepTheURL(t *testing.T) {
+	pdf := string(BuildPDF("See [the guide](https://example.com/a_(b)/c) and https://example.org/x."))
+	if !strings.Contains(pdf, `/S /URI /URI (https://example.com/a_\(b\)/c)`) {
+		t.Errorf("no URI annotation for the link:\n%s", pdf)
+	}
+	if !strings.Contains(pdf, "/Annots [") || !strings.Contains(pdf, "/Subtype /Link") {
+		t.Error("page carries no link annotations")
+	}
+	texts := pdfTexts(t, []byte(pdf))
+	var all strings.Builder
+	for _, tx := range texts {
+		all.WriteString(tx.text)
+	}
+	for _, want := range []string{"guide", "https://example.com/a_(b)/c", "https://example.org/x"} {
+		if !strings.Contains(all.String(), want) {
+			t.Errorf("printed text lost %q: %q", want, all.String())
+		}
+	}
+}
+
+// A long URL broke mid-word at an arbitrary character and could overflow
+// the line; it must break at its own separators and stay inside the margin.
+func TestPDFLongURLsStayInsideTheMargin(t *testing.T) {
+	url := "https://www.downgraf.com/general/sodium-ion-battery-for-home-storage-best-brands-buyers-guide-2026-with-a-very-long-tail/"
+	texts := pdfTexts(t, BuildPDF("Source: ["+url+"]("+url+") and ["+url+"]("+url+")"))
+	for _, tx := range texts {
+		if right := tx.x + pdfWidth(tx.text, pdfFont(tx.font-1), tx.size); right > pdfPageWidth-pdfMargin+0.01 {
+			t.Errorf("%q ends at %.1f, past the margin", tx.text, right)
+		}
+	}
+}
+
+// The fact-check list marks unverified claims with ✗ and contradictions with
+// ⚠; both printed as "?" and set off the lost-characters warning on every
+// run that left a claim unconfirmed.
+func TestPDFPrintsFactCheckMarks(t *testing.T) {
+	if pdfHasUnsupportedText("✗ not verified · ⚠ contradiction") {
+		t.Error("fact-check marks still count as unsupported text")
+	}
+	pdf := string(BuildPDF("- ✗ not verified: c3\n- ⚠ contradiction on c4"))
+	if strings.Contains(pdf, "(?)") || strings.Contains(pdf, "?") {
+		t.Errorf("a mark printed as ?:\n%s", pdf)
+	}
+}
+
+// A twelve-page export had no page numbers.
+func TestPDFNumbersPages(t *testing.T) {
+	texts := pdfTexts(t, BuildPDF(strings.Repeat("A paragraph of report text.\n\n", 120)))
+	pages := texts[len(texts)-1].page + 1
+	if pages < 2 {
+		t.Fatalf("120 paragraphs fit on %d page", pages)
+	}
+	for p := 1; p <= pages; p++ {
+		if _, ok := findPDFText(texts, fmt.Sprintf("%d / %d", p, pages)); !ok {
+			t.Errorf("page %d has no number", p)
+		}
+	}
+}
+
+// Every link printed its destination inline, so a table cell citing three
+// sources carried three URLs and grew a page tall. Each destination is
+// printed once, at its last link: the citation list closing the report.
+func TestPDFPrintsEachLinkDestinationOnce(t *testing.T) {
+	pdf := BuildPDF("Body cites [Guide](https://example.com/guide).\n\n1. [Guide: full title](https://example.com/guide) — ok")
+	var drawn []string
+	for _, tx := range pdfTexts(t, pdf) {
+		drawn = append(drawn, tx.text)
+	}
+	all := strings.Join(drawn, "\n")
+	if n := strings.Count(all, "https://example.com/guide"); n != 1 {
+		t.Errorf("destination printed %d times, want once:\n%s", n, all)
+	}
+	if body, _ := findPDFText(pdfTexts(t, pdf), "Body cites"); !strings.Contains(all, "full title\n(https://example.com/guide)") {
+		t.Errorf("destination not printed at the citation (body at y=%.1f):\n%s", body.y, all)
+	}
+	if n := strings.Count(string(pdf), "/URI (https://example.com/guide)"); n != 2 {
+		t.Errorf("%d links open the destination, want both", n)
+	}
+}
+
+// A URL's closing parenthesis was a break point of its own and could start
+// the next line alone.
+func TestPDFURLKeepsItsClosingParenthesis(t *testing.T) {
+	for _, piece := range splitURL("(https://homepowermatrix.com/sodium-ion-batteries-home-backup/)") {
+		if piece == ")" {
+			t.Fatal("closing parenthesis split from the URL")
+		}
+	}
+}
+
+// Found in review of the typeset PDF: a heading longer than a page was drawn
+// after a single room check and ran off the bottom.
+func TestPDFLongHeadingStaysOnThePage(t *testing.T) {
+	for _, tx := range pdfTexts(t, BuildPDF("# "+strings.Repeat("Wide ", 400))) {
+		if tx.y < pdfMargin-1 && tx.size > 8 {
+			t.Fatalf("heading drawn below the bottom margin: %+v", tx)
+		}
+	}
+}
+
+// goldmark keeps a link destination as written, so a Markdown escape or an
+// entity reached the clickable URI instead of the URL it spells.
+func TestPDFLinkDestinationIsUnescaped(t *testing.T) {
+	pdf := string(BuildPDF(`[x](https://example.com/a\_b?x=1&amp;y=2)`))
+	if !strings.Contains(pdf, "/URI (https://example.com/a_b?x=1&y=2)") {
+		t.Errorf("URI keeps Markdown escapes:\n%s", pdf)
+	}
+}
+
+// Two columns of unbreakable words claimed the whole width and squeezed the
+// third below its own padding, so its text ran past the right margin.
+func TestPDFTableColumnsStayInsideTheMargin(t *testing.T) {
+	long := strings.Repeat("W", 100)
+	texts := pdfTexts(t, BuildPDF("| A | B | W |\n|---|---|---|\n| "+long+" | "+long+" | W |\n"))
+	for _, tx := range texts {
+		if right := tx.x + pdfWidth(tx.text, pdfFont(tx.font-1), tx.size); right > pdfPageWidth-pdfMargin+0.01 {
+			t.Errorf("%q ends at %.2f, past the margin", tx.text, right)
+		}
+	}
+}
+
+// The lost-characters warning must judge what is drawn: a carriage return
+// kept in a code block printed as "?" unwarned, and an em space, drawn as a
+// plain space, warned.
+func TestPDFWarningMatchesWhatIsDrawn(t *testing.T) {
+	if pdf := string(BuildPDF("```\r\nalpha\r\n```\r\n")); strings.Contains(pdf, "alpha?") || strings.Contains(pdf, `alpha\015`) {
+		t.Error("carriage return printed in a code block")
+	}
+	if pdfDropsText("A B") {
+		t.Error("an em space, drawn as a space, set off the warning")
+	}
+}
+
+// Found in an end-to-end run: "string → string" printed as "string ? string"
+// and set off the lost-characters warning. Arrows and comparison signs have
+// no WinAnsi glyph but a plain-text spelling.
+func TestPDFSpellsArrowsAndComparisons(t *testing.T) {
+	src := "`string → string` and x ≤ y ≥ z ≠ w ≈ v, a ⇒ b, −3"
+	if pdfDropsText(src) {
+		t.Error("arrows and comparisons still count as lost text")
+	}
+	var drawn []string
+	for _, tx := range pdfTexts(t, BuildPDF(src)) {
+		drawn = append(drawn, tx.text)
+	}
+	got := strings.Join(drawn, "")
+	for _, want := range []string{"string -> string", "x <= y >= z != w ~ v", "a => b", "-3"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("printed %q, want %q in it", got, want)
+		}
 	}
 }
