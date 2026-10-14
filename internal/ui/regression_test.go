@@ -2712,3 +2712,35 @@ func TestPDFSpellsArrowsAndComparisons(t *testing.T) {
 		}
 	}
 }
+
+// checkSources returned early on an empty list without clearing the scope,
+// so an assistant reused for a second run stayed confined to the first run's
+// sites while the second run's record said it searched the open web.
+func TestAnOpenWebRunClearsAnEarlierScope(t *testing.T) {
+	a := &scopingAssistant{fakeAssistant: &fakeAssistant{}}
+	if _, _, err := runWithDomains(t, a, []string{"go.dev"}); err != nil {
+		t.Fatal(err)
+	}
+	res, _, err := runWithDomains(t, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.scoped != nil || res.Report.Domains != nil {
+		t.Errorf("second run scoped to %v, record says %v; want the open web on both", a.scoped, res.Report.Domains)
+	}
+}
+
+// Options.Domains reached the search unparsed from any caller but the CLI
+// flag, so a library caller's "GO.DEV" matched no result.
+func TestRunParsesTheDomainsItIsGiven(t *testing.T) {
+	a := &scopingAssistant{fakeAssistant: &fakeAssistant{}}
+	if _, _, err := runWithDomains(t, a, []string{"https://www.GO.dev/doc"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(a.scoped, []string{"go.dev"}) {
+		t.Errorf("scoped to %v, want go.dev", a.scoped)
+	}
+	if _, _, err := runWithDomains(t, a, []string{"localhost"}); !errors.Is(err, tools.ErrSearchConfig) {
+		t.Errorf("localhost: err = %v, want a search setting error", err)
+	}
+}

@@ -261,3 +261,45 @@ func TestResumedRecordingKeepsTheSavedSearches(t *testing.T) {
 		t.Errorf("the saved search was searched again live %d times", l.searches)
 	}
 }
+
+// scopingLive is live with a search that can be confined to a domain list.
+type scopingLive struct {
+	live
+	scoped []string
+}
+
+func (s *scopingLive) CheckDomains(_ context.Context, d []string) ([]agent.DomainCheck, error) {
+	return []agent.DomainCheck{{Domain: d[0], Status: "ok"}}, nil
+}
+func (s *scopingLive) ScopeTo(d []string) { s.scoped = d }
+
+// The wrappers embed an interface, which does not promote the scoping
+// methods; without forwarding, a recorded or resumed run would refuse its
+// --domains. A replay searches nothing and is not a scoper at all.
+func TestWrappersForwardScopingButAPlayerHasNone(t *testing.T) {
+	ctx := context.Background()
+	inner := &scopingLive{}
+	for name, a := range map[string]agent.Assistant{
+		"recorder": Record(inner, "q", "quick", 0),
+		"resumer":  Resume(inner, &Trace{}),
+	} {
+		sc, ok := a.(agent.SourceScoper)
+		if !ok {
+			t.Fatalf("%s is not a SourceScoper", name)
+		}
+		if got, err := sc.CheckDomains(ctx, []string{"go.dev"}); err != nil || got[0].Domain != "go.dev" {
+			t.Errorf("%s: CheckDomains = %v, %v", name, got, err)
+		}
+		inner.scoped = nil
+		sc.ScopeTo([]string{"go.dev"})
+		if len(inner.scoped) != 1 {
+			t.Errorf("%s: ScopeTo did not reach the live assistant", name)
+		}
+	}
+	if _, err := Record(&live{}, "q", "quick", 0).CheckDomains(ctx, []string{"go.dev"}); !errors.Is(err, agent.ErrNoScopedSearch) {
+		t.Errorf("recorder over an unscoped search: err = %v, want ErrNoScopedSearch", err)
+	}
+	if _, ok := any(Play(inner, &Trace{})).(agent.SourceScoper); ok {
+		t.Error("a Player claims to scope a search it never makes")
+	}
+}

@@ -483,12 +483,47 @@ func (c *SearXNGClient) searchJSON(ctx context.Context, base, query string) ([]S
 		return nil, errNotJSON
 	}
 	var data struct {
-		Results []SearchResult `json:"results"`
+		Results      []SearchResult `json:"results"`
+		Unresponsive [][]string     `json:"unresponsive_engines"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&data); err != nil {
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
+	if len(data.Results) == 0 && len(data.Unresponsive) > 0 {
+		return nil, newEnginesDown(data.Unresponsive)
+	}
 	return c.limit(data.Results), nil
+}
+
+// enginesDownError is an instance that answered with no results while its
+// own upstream engines failed. SearXNG says so with a 200, and taking it as
+// an empty answer told a run that nothing on the web matched: after a burst
+// of searches got Google suspended, every site of a --domains list was
+// reported as one no engine indexes.
+type enginesDownError struct {
+	engines []string // "google cse (Suspended: too many requests)"
+	limited bool     // one of them was rate-limited or suspended
+}
+
+func newEnginesDown(unresponsive [][]string) *enginesDownError {
+	e := &enginesDownError{}
+	for _, u := range unresponsive {
+		if len(u) == 0 {
+			continue
+		}
+		name, why := u[0], ""
+		if len(u) > 1 {
+			why = u[1]
+		}
+		e.engines = append(e.engines, fmt.Sprintf("%s (%s)", name, why))
+		low := strings.ToLower(why)
+		e.limited = e.limited || strings.Contains(low, "too many requests") || strings.Contains(low, "suspended")
+	}
+	return e
+}
+
+func (e *enginesDownError) Error() string {
+	return "no results, and its engines did not answer: " + strings.Join(e.engines, ", ")
 }
 
 func (c *SearXNGClient) searchHTML(ctx context.Context, base, query string) ([]SearchResult, error) {
@@ -661,6 +696,9 @@ func SearchStatus(err error) string {
 	}
 	if _, ok := errors.AsType[*unreachableError](err); ok {
 		return "unreachable"
+	}
+	if ed, ok := errors.AsType[*enginesDownError](err); ok && ed.limited {
+		return "rate-limited"
 	}
 	return "unavailable"
 }

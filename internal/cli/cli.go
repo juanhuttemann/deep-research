@@ -83,10 +83,16 @@ func New(load func() (Deps, error)) *cobra.Command {
 		root.MarkFlagsMutuallyExclusive("plan", other)
 	}
 	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
+	root.Flags().StringSlice("domains", nil, "research only these sites (comma-separated); each is checked before planning")
+	// A replay searches nothing to confine, and a plan or a checkpoint
+	// carries the list it was made with.
+	for _, other := range []string{"replay", "plan"} {
+		root.MarkFlagsMutuallyExclusive("domains", other)
+	}
 	root.Flags().String("resume", "", "continue an interrupted run from its checkpoint (<reports>/*.partial.json), without searching again what it searched")
 	// A checkpoint carries the question, the confirmed plan, its tier and
 	// budget, and the searches already made.
-	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth"} {
+	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth", "domains"} {
 		root.MarkFlagsMutuallyExclusive("resume", other)
 	}
 
@@ -98,17 +104,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	initCmd.Flags().Bool("docker", false, "also write a docker-compose.yml for a local SearXNG")
 
 	root.AddCommand(initCmd,
-		&cobra.Command{
-			Use:   "doctor",
-			Short: "check the model endpoint, search and scraper a run depends on",
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				d, err := load()
-				if err != nil {
-					return err
-				}
-				return runDoctor(cmd, d)
-			},
-		},
+		doctorCmd(load),
 		loginCmd(),
 		modelCmd(),
 		logoutCmd(),
@@ -176,6 +172,29 @@ func initDocker(out io.Writer) error {
 	fmt.Fprintln(out, "  echo 'SEARXNG_URL=http://localhost:8888' >> .env")
 	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: docs/services.md")
 	return nil
+}
+
+// doctorCmd checks what a run depends on; --domains adds a source list's
+// preflight, the proof a list works before any run is started on it.
+func doctorCmd(load func() (Deps, error)) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "check the model endpoint, search and scraper a run depends on",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			raw, _ := cmd.Flags().GetStringSlice("domains")
+			domains, err := agent.ParseDomains(raw)
+			if err != nil {
+				return err
+			}
+			d, err := load()
+			if err != nil {
+				return err
+			}
+			return runDoctor(cmd, d, domains)
+		},
+	}
+	cmd.Flags().StringSlice("domains", nil, "also check that these sites can be searched and read (comma-separated)")
+	return cmd
 }
 
 // serveCmd runs the browser UI on this machine.
@@ -253,6 +272,9 @@ func webArgs(r web.Request, reports string) ([]string, io.Reader) {
 	}
 	if r.Sources > 0 {
 		args = append(args, "--sources="+strconv.Itoa(r.Sources))
+	}
+	if len(r.Domains) > 0 {
+		args = append(args, "--domains="+strings.Join(r.Domains, ","))
 	}
 	if r.PlanOnly {
 		args = append(args, "--plan-only")
@@ -376,6 +398,11 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if _, err := ui.ParseDepthMode(mode); err != nil {
 		return ui.RunResult{}, err
 	}
+	rawDomains, _ := cmd.Flags().GetStringSlice("domains")
+	domains, err := agent.ParseDomains(rawDomains)
+	if err != nil {
+		return ui.RunResult{}, err
+	}
 	assistant, err := pickAssistant(d)
 	if err != nil {
 		return ui.RunResult{}, err
@@ -423,6 +450,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		Plan:            st.plan,
 		PlanOnly:        planOnly,
 		OnPlan:          recordPlan(rec),
+		Domains:         domains,
 	})
 	if err != nil {
 		return res, fmt.Errorf("research failed: %w", err)
@@ -527,7 +555,13 @@ func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*
 		if err != nil {
 			return nil, "", err
 		}
-		return ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d)), tr.Question, nil
+		plan := ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d))
+		// A resumed run searches live for what it lacks, on the sites it was
+		// confined to; a replay searches nothing.
+		if replaying, _ := cmd.Flags().GetString("replay"); replaying == "" {
+			plan.Domains = tr.Domains
+		}
+		return plan, tr.Question, nil
 	}
 	path, _ := cmd.Flags().GetString("plan")
 	if path == "" {
@@ -624,7 +658,10 @@ func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
 	if rec == nil {
 		return nil
 	}
-	return func(p *ui.Plan) { rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic) }
+	return func(p *ui.Plan) {
+		rec.SetDomains(p.Domains)
+		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic)
+	}
 }
 
 // writeTrace saves a recorded run next to its report, named after it.
@@ -698,11 +735,16 @@ func printResult(cmd *cobra.Command, result *agent.ResearchResult, printed bool)
 }
 
 // runDoctor prints one line per dependency and fails when any is broken.
-func runDoctor(cmd *cobra.Command, d Deps) error {
+// With domains, it also runs the source-list preflight a run would.
+func runDoctor(cmd *cobra.Command, d Deps, domains []string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "  config   %s\n", configSource())
 	problems := 0
-	for _, c := range agent.Diagnose(cmd.Context(), d.Config.Config) {
+	checks := agent.Diagnose(cmd.Context(), d.Config.Config)
+	if len(domains) > 0 {
+		checks = append(checks, agent.DiagnoseDomains(cmd.Context(), d.Config.Config, domains)...)
+	}
+	for _, c := range checks {
 		mark := "✓"
 		if !c.OK {
 			mark, problems = "✗", problems+1

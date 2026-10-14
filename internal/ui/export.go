@@ -19,18 +19,20 @@ import (
 // Meta is the structured trace written to the .json sidecar: full citations,
 // per-sub-agent research notes, and the full event timeline.
 type Meta struct {
-	Version          string    `json:"version"`
-	Question         string    `json:"question"`
-	Timestamp        time.Time `json:"timestamp"`
-	Depth            string    `json:"depth"`
-	Model            string    `json:"model,omitempty"`
-	Provider         string    `json:"provider,omitempty"`
-	ServedBy         []string  `json:"served_by,omitempty"`
-	Confidence       string    `json:"confidence"`
-	Tokens           int       `json:"tokens"`
-	Sources          int       `json:"sources"`
-	ExecutiveSummary string    `json:"executive_summary"`
-	Report           string    `json:"report"`
+	Version   string    `json:"version"`
+	Question  string    `json:"question"`
+	Timestamp time.Time `json:"timestamp"`
+	Depth     string    `json:"depth"`
+	Model     string    `json:"model,omitempty"`
+	Provider  string    `json:"provider,omitempty"`
+	ServedBy  []string  `json:"served_by,omitempty"`
+	// Domains are the sites the run was confined to (--domains).
+	Domains          []string `json:"domains,omitempty"`
+	Confidence       string   `json:"confidence"`
+	Tokens           int      `json:"tokens"`
+	Sources          int      `json:"sources"`
+	ExecutiveSummary string   `json:"executive_summary"`
+	Report           string   `json:"report"`
 	// Error is set when a late phase failed and the report is incomplete.
 	Error string `json:"error,omitempty"`
 	// Topics is the analyzer's per-topic evidence with its own confidence.
@@ -132,6 +134,11 @@ func MarkdownReport(res *agent.ResearchResult) string {
 			fmt.Fprintf(&sb, " (served by %s)", strings.Join(res.ServedBy, ", "))
 		}
 		sb.WriteString("\n\n")
+	}
+	// A report from a few chosen sites reads differently from one off the
+	// open web, and nothing else in it says which it is.
+	if len(res.Domains) > 0 {
+		fmt.Fprintf(&sb, "**Sources limited to:** %s\n\n", strings.Join(res.Domains, ", "))
 	}
 	if body := summaryBody(res.Question, sum); body != "" {
 		sb.WriteString(body)
@@ -377,6 +384,7 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 		Model:            res.Model,
 		Provider:         res.Provider,
 		ServedBy:         res.ServedBy,
+		Domains:          res.Domains,
 		FactCheck:        res.FactCheck,
 	}
 	if res.Analysis != nil {

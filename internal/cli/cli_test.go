@@ -720,3 +720,94 @@ func TestWebAskCarriesTheConversation(t *testing.T) {
 		t.Errorf("the request lacks the run, the earlier turn or the question: %s", b)
 	}
 }
+
+// scopingStub is the stub whose search can be confined to a domain list; every
+// domain passes the preflight.
+type scopingStub struct {
+	stub
+	scoped *[]string
+}
+
+func (s scopingStub) CheckDomains(_ context.Context, domains []string) ([]agent.DomainCheck, error) {
+	out := make([]agent.DomainCheck, len(domains))
+	for i, d := range domains {
+		out[i] = agent.DomainCheck{Domain: d, Status: "ok", Pages: 1, Chars: 500, Sample: "https://" + d + "/"}
+	}
+	return out, nil
+}
+
+func (s scopingStub) ScopeTo(domains []string) { *s.scoped = domains }
+
+// --domains reaches the search, through the recorder that wraps it, and the
+// trace keeps it so a resumed run searches the same sites.
+func TestDomainsScopeTheRunAndAreTraced(t *testing.T) {
+	dir := t.TempDir()
+	var scoped []string
+	if _, err := runCLI(t, dir, scopingStub{scoped: &scoped}, "-p", "q", "--silent", "--trace", "--reports", dir, "--domains", "https://www.Go.dev/doc,pkg.go.dev"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"go.dev", "pkg.go.dev"}; !slices.Equal(scoped, want) {
+		t.Errorf("scoped to %v, want %v", scoped, want)
+	}
+	traces, _ := filepath.Glob(filepath.Join(dir, "*.trace.json"))
+	if len(traces) != 1 {
+		t.Fatalf("traces = %v", traces)
+	}
+	tr, err := replay.Load(traces[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(tr.Domains, scoped) {
+		t.Errorf("trace domains = %v, want %v", tr.Domains, scoped)
+	}
+}
+
+// A resumed run checks and searches the sites its checkpoint was made on.
+func TestResumeKeepsTheDomains(t *testing.T) {
+	dir := t.TempDir()
+	cp := filepath.Join(dir, "q.abc.partial.json")
+	b, _ := json.Marshal(replay.Trace{Version: 1, Question: "q", Mode: "quick", Plan: []agent.SubTopic{{ID: "1", Name: "A"}}, Domains: []string{"go.dev"}})
+	if err := os.WriteFile(cp, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var scoped []string
+	if _, err := runCLI(t, dir, scopingStub{scoped: &scoped}, "--resume", cp, "--silent", "--reports", dir); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(scoped, []string{"go.dev"}) {
+		t.Errorf("resumed run scoped to %v, want go.dev", scoped)
+	}
+}
+
+// A private host in the list is refused before any model call is made.
+func TestPrivateDomainIsRejected(t *testing.T) {
+	var scoped []string
+	_, err := runCLI(t, t.TempDir(), scopingStub{scoped: &scoped}, "-p", "q", "--silent", "--domains", "go.dev,localhost")
+	if err == nil || !strings.Contains(err.Error(), "localhost") {
+		t.Fatalf("err = %v, want localhost refused", err)
+	}
+	if scoped != nil {
+		t.Errorf("the run went on to scope %v", scoped)
+	}
+}
+
+// An edited plan carries its own list, as it carries its own depth.
+func TestDomainsAndPlanAreExclusive(t *testing.T) {
+	if _, err := runCLI(t, t.TempDir(), stub{}, "--plan", "x.json", "--domains", "go.dev"); err == nil {
+		t.Error("--plan with --domains was accepted")
+	}
+}
+
+func TestWebArgsPassDomains(t *testing.T) {
+	args, _ := webArgs(web.Request{Question: "q", Domains: []string{"go.dev", "pkg.go.dev"}}, "reports")
+	if !slices.Contains(args, "--domains=go.dev,pkg.go.dev") {
+		t.Errorf("args = %v, want --domains", args)
+	}
+}
+
+func TestDoctorRefusesABadDomainList(t *testing.T) {
+	_, err := runCLI(t, t.TempDir(), stub{}, "doctor", "--domains", "127.0.0.1")
+	if err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Errorf("err = %v, want the private address refused", err)
+	}
+}

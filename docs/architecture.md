@@ -26,6 +26,16 @@ mention none of them are reported off-topic and never fetched. A plan without
 query or terms (the planner's fallback) searches the anchored question and
 keeps the engines' order.
 
+A run given `--domains` checks its sites first, before the plan
+(`ui.Options.checkSources`, through the optional `agent.SourceScoper` the
+live assistant and the replay recorder and resumer implement). Each site is
+searched on its own and its first page read (`tools.SearchTools.CheckDomains`).
+The ones that pass are handed to the search (`SearchTools.Domains`): Exa and
+Tavily filter by them natively (`tools.DomainSearcher`), SearXNG gets
+`site:` operators in the query, and `SearchTools.Search` drops any result
+from elsewhere before ranking, because an engine may ignore the operator.
+A list where nothing passes ends the run before the planner's model call.
+
 A page that several searches return is one source, counted and cited once;
 the queries that found it are kept on it. Once a page is cited with its full
 text, later searches do not fetch it again and spend their budget on other
@@ -154,7 +164,8 @@ internal/
   store     append-only JSONL run history
   tools     search engines behind Searcher (SearXNG: JSON or HTML, one or
             many instances, searx.space discovery; Exa; Tavily) and
-            scrapers behind Scraper (Firecrawl, Exa, Tavily) — HTTP clients
+            scrapers behind Scraper (Firecrawl, Exa, Tavily) — HTTP clients;
+            the --domains list: parsing, scoping and the preflight check
   update    `update`: latest release from GitHub, checksum-verified,
             installed over the running binary
   ui        live terminal frame, event sinks (TUI / JSONL), md+pdf+json export;

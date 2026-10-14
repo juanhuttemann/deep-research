@@ -188,6 +188,14 @@ select { font: inherit; font-size: 13.5px; color: var(--text); background: var(-
 @keyframes spin { to { transform: rotate(360deg); } }
 .notice { margin: 0 24px 16px; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: 14px; }
 
+.scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px 12px 16px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
+.scope input[type=text] { flex: 1 1 220px; min-width: 0; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; }
+.scope input[type=text]::placeholder { color: var(--text-3); }
+.scope .note { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text-3); }
+.sources { border-top: 1px solid var(--border); padding: 8px 0; }
+.sources .src { display: grid; grid-template-columns: 18px auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 6px 24px; font-size: 13.5px; }
+.sources .src .ln { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ico.partial { background: var(--warn-soft); color: var(--warn); }
 .agents { border-top: 1px solid var(--border); }
 .agents:empty { display: none; }
 .agent { display: grid; grid-template-columns: 18px minmax(0, 1fr) 160px; gap: 4px 12px; align-items: center; padding: 12px 24px; }
@@ -344,12 +352,21 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
           <input type="radio" name="mode" id="m-standard" value="standard" checked><label for="m-standard">Standard<small>4 topics</small></label>
           <input type="radio" name="mode" id="m-deep" value="deep"><label for="m-deep">Deep<small>6 topics</small></label>
         </div>
-        <label class="field">Sources per topic
+        <label class="field" title="How many pages each sub-topic reads. Auto lets the depth decide.">Pages per topic
           <select id="sources">
             <option value="0">Auto</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option>
           </select>
         </label>
         <button id="go" class="btn primary" type="submit">Research <kbd>↵</kbd></button>
+      </div>
+      <div class="scope">
+        <span>Search</span>
+        <div class="segmented" role="radiogroup" aria-label="Where to search">
+          <input type="radio" name="scope" id="s-web" value="web" checked><label for="s-web">The web</label>
+          <input type="radio" name="scope" id="s-sites" value="sites"><label for="s-sites">Only these sites</label>
+        </div>
+        <input type="text" id="domains" placeholder="wikipedia.org, britannica.com" aria-label="Sites to search" autocomplete="off" spellcheck="false" hidden>
+        <p id="domains-note" class="note" hidden>Separate sites with commas. Each is checked before research starts; one that can't be searched or read is skipped.</p>
       </div>
     </form>
     <p id="msg" class="form-msg" role="alert"></p>
@@ -368,6 +385,7 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
         <div class="eyebrow">Review the plan</div>
         <h1 id="brief-question"></h1>
         <p>Each sub-topic is researched by its own agent. Rename, add or remove them before research starts.</p>
+        <p id="brief-domains" class="muted" hidden></p>
       </div>
       <div class="brief-bar">
         <div class="segmented" role="radiogroup" aria-label="Depth">
@@ -409,6 +427,7 @@ mark { background: var(--mark); color: var(--mark-text); border-radius: 3px; pad
         <div id="stepper" class="stepper"></div>
         <div id="note" class="notice" hidden></div>
         <div id="status" class="status" hidden><div class="now"><span class="spinner"></span><span id="status-now"></span></div><div id="status-thought" class="thought"></div></div>
+        <div id="sources-check" class="sources" hidden></div>
         <div id="agents" class="agents"></div>
         <details class="activity"><summary>Activity <span id="n-events" class="muted"></span></summary><ol id="log" class="log"></ol></details>
       </div>
@@ -546,7 +565,8 @@ function setRunning(on) {
 }
 function reset() {
   agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0;
-  for (const id of ["question", "agents", "log", "files", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
+  for (const id of ["question", "agents", "sources-check", "log", "files", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
+  $("sources-check").hidden = true;
   $("n-sources").textContent = "0"; $("n-tokens").textContent = "0"; $("n-events").textContent = "";
   $("note").hidden = $("status").hidden = $("outcome").hidden = $("audit").hidden = true;
   $("live").hidden = false;
@@ -590,6 +610,20 @@ function agent(e) {
   bar.append(fill);
   a.row.replaceChildren(ico, el("span", "nm", a.sub_name || "Topic " + e.sub_id), bar, el("span", "ln", a.line || ""));
 }
+// source is one domain of the run's site list, as the check before planning
+// found it: read in full, from search snippets only, or not usable.
+function source(e) {
+  const c = e.check || {};
+  const kind = c.status === "ok" ? "done" : c.status === "snippet-only" ? "partial" : "error";
+  const row = el("div", "src");
+  const line = c.status === "ok" ? (c.pages + (c.pages === 1 ? " page" : " pages") + " found · read " + fmtNum(c.chars) + " characters")
+    : c.status + (c.detail ? " — " + c.detail : "");
+  row.append(el("span", "ico " + kind, kind === "done" ? "✓" : kind === "partial" ? "~" : "✗"), el("span", "nm", c.domain || e.domain || ""), el("span", "ln", line));
+  row.title = c.sample || "";
+  $("sources-check").append(row);
+  $("sources-check").hidden = false;
+  log(e, (kind === "error" ? "✗ " : "✓ ") + (c.domain || "") + " " + c.status, kind === "error" ? "error" : "ok");
+}
 function log(e, text, cls) {
   events++;
   $("n-events").textContent = "· " + events;
@@ -613,7 +647,10 @@ function handle(e) {
     phase = "Plan"; stepper();
     // The model's own status replaces this once the plan call streams.
     if (planning) status("Planning the sub-topics…");
+    // The sites are checked before anything else: no model call until then.
+    if (e.domains && e.domains.length) status("Checking " + e.domains.length + (e.domains.length === 1 ? " site…" : " sites…"));
     break;
+  case "source": source(e); break;
   case "plan":
     if (planning) madePlan = e.plan;
     $("question").textContent = e.plan.question;
@@ -701,6 +738,9 @@ function showBrief(plan) {
   // renamed sub-topic drops them, as the CLI brief does.
   for (const t of brief.sub_topics) t.planned = t.name;
   $("brief-question").textContent = brief.question;
+  const sites = brief.domains || [];
+  $("brief-domains").textContent = sites.length ? "Only on: " + sites.join(", ") : "";
+  $("brief-domains").hidden = !sites.length;
   const depth = $("b-" + brief.depth.key) || $("b-standard");
   depth.checked = true;
   $("brief-msg").textContent = "";
@@ -742,6 +782,7 @@ function editedPlan() {
     question: brief.question,
     depth: { key: brief.depth.key },
     pinned_per_topic: brief.pinned_per_topic || 0,
+    domains: brief.domains || [],
     sub_topics: brief.sub_topics.filter(t => t.name.trim()).map(t => {
       const name = t.name.trim();
       return t.planned === undefined || name !== t.planned
@@ -1111,13 +1152,27 @@ $("launch").onsubmit = async ev => {
     question: $("q").value.trim(),
     mode: document.querySelector("input[name=mode]:checked").value,
     sources: Number($("sources").value) || 0,
+    domains: onlySites() ? $("domains").value.split(/[\s,]+/).filter(Boolean) : [],
     // The plan first, for review; Start research in the review runs it.
     plan_only: true,
   };
   if (!body.question) return;
+  if (onlySites() && !body.domains.length) { $("msg").textContent = "Add at least one site, or search the web."; $("domains").focus(); return; }
+  try { localStorage.setItem("sites", $("domains").value); } catch {}
   const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) $("msg").textContent = (await r.text()).trim();
 };
+// Where to search: the sites box shows only when it is used, so an empty one
+// is never a question to answer. The last list typed is kept for next time.
+function onlySites() { return $("s-sites").checked; }
+function showScope() {
+  $("domains").hidden = $("domains-note").hidden = !onlySites();
+}
+for (const r of document.querySelectorAll("input[name=scope]")) {
+  r.onchange = () => { showScope(); if (onlySites()) $("domains").focus(); };
+}
+try { $("domains").value = localStorage.getItem("sites") || ""; } catch {}
+showScope();
 $("q").addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("launch").requestSubmit(); }
 });

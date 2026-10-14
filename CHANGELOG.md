@@ -5,6 +5,34 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `--domains go.dev,pkg.go.dev` confines a run's search to your own list of
+  sites instead of the open web. Exa and Tavily filter by it natively,
+  SearXNG gets `site:` operators, and any result from another site is
+  dropped either way, since an engine may ignore the operator.
+- Before planning, so before any model request, each listed site is proved
+  usable: a search scoped to it must find pages there, and the first must
+  be readable through the scraper. A site that fails is named with the
+  reason (unindexed, unreadable, search failed) and dropped. A list where
+  none pass stops the run. The plan, the checkpoint, the trace and the
+  run's record keep the list, so `--plan` and `--resume` check it again.
+- `doctor --domains` runs the same check on its own.
+- The web page asks where to search, the web or "Only these sites", and
+  shows a box for the list only when it is used. It shows each site's check
+  as the run opens, and the list in the plan review. "Sources per topic" is
+  now "Pages per topic": beside a list of sites, "sources" read as the same
+  setting.
+
+### Fixed
+
+- A SearXNG instance that answers with no results while its own engines
+  failed (suspended for too many requests, a CAPTCHA) is a failed search
+  that names those engines, not an empty one. `doctor` said "answered (0
+  results)" while every engine of a local instance was suspended, and a
+  run took each search as one that found nothing; a public pool now moves
+  on to the next instance instead.
+
 ## [0.11.0] - 2026-10-13
 
 ### Changed

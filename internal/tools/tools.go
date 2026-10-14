@@ -282,6 +282,10 @@ type SearchTools struct {
 	// already read cost a second download and left this search one new page
 	// short.
 	Skip func(url string) bool
+	// Domains, when set, is the source list: every search is scoped to these
+	// sites and anything the engine returns from elsewhere is dropped. It is
+	// set before the run's searches start and not changed during them.
+	Domains []string
 }
 
 // SetLogger wires the progress logger so each sub-step reports the source
@@ -461,7 +465,7 @@ func CanonicalURL(raw string) string {
 func (s *SearchTools) Search(ctx context.Context, query string, terms []string) (*SearchResults, error) {
 	// Returned as it is: every caller says "search failed" itself, and the
 	// prefix here printed it twice in every error line.
-	searchResults, err := s.Engine.Search(ctx, query)
+	searchResults, err := searchIn(ctx, s.Engine, query, s.Domains)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +478,7 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 	// spent every slot on whatever they ranked first, which on a long
 	// technical question is routinely unrelated to it; the pages that answer
 	// the question are usually present but buried below them.
-	ranked, offTopic := rankByRelevance(dedupeResults(searchResults), terms)
+	ranked, offTopic := rankByRelevance(s.inScope(dedupeResults(searchResults)), terms)
 	ranked, known := s.splitKnown(ranked)
 	if len(ranked) > s.MaxURLsPerQuery {
 		// Results past the budget were not rejected, only not reached, so they

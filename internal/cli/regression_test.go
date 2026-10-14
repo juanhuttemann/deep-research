@@ -13,12 +13,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
+	"github.com/juanhuttemann/deep-research/internal/replay"
 )
 
 func TestHistoryPreservesResearchAndVerification(t *testing.T) {
@@ -385,5 +387,29 @@ func TestSearchSettingErrorHasNoLoginHint(t *testing.T) {
 	_, err := pickAssistant(d)
 	if err == nil || !strings.Contains(err.Error(), "EXA_API_KEY") || strings.Contains(err.Error(), "deep-research login") {
 		t.Errorf("error = %v", err)
+	}
+}
+
+// A checkpoint's domain list went straight to the search on --resume, while
+// --plan parsed the same list: "localhost" was searched, and "GO.DEV" matched
+// no result, so the run found nothing and said nothing. A resumed list is
+// held to the rule a typed one is.
+func TestResumedDomainListIsParsedLikeATypedOne(t *testing.T) {
+	resume := func(domain string) ([]string, error) {
+		dir := t.TempDir()
+		cp := filepath.Join(dir, "q.abc.partial.json")
+		b, _ := json.Marshal(replay.Trace{Version: 1, Question: "q", Mode: "quick", Plan: []agent.SubTopic{{ID: "1", Name: "A"}}, Domains: []string{domain}})
+		if err := os.WriteFile(cp, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var scoped []string
+		_, err := runCLI(t, dir, scopingStub{scoped: &scoped}, "--resume", cp, "--silent", "--reports", dir)
+		return scoped, err
+	}
+	if scoped, err := resume("localhost"); err == nil || scoped != nil {
+		t.Errorf("checkpoint with localhost: err=%v scoped=%v, want refused before any search", err, scoped)
+	}
+	if scoped, err := resume("GO.DEV"); err != nil || !slices.Equal(scoped, []string{"go.dev"}) {
+		t.Errorf("checkpoint with GO.DEV: err=%v scoped=%v, want it normalised to go.dev", err, scoped)
 	}
 }
