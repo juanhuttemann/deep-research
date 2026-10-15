@@ -263,6 +263,15 @@ The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
 structured result: analysis, fact-check, sources and the whole timeline.
 
+For a coding agent, [`skills/deep-research`](../skills/deep-research/SKILL.md)
+is an [Agent Skill](https://agentskills.io) that follows this contract: it
+checks the install with `doctor`, runs with `--jsonl` into a fresh
+`--reports` directory, waits for `done`, answers from the artifacts, and
+uses `ask` and `--resume`. Install it with
+`/plugin install deep-research --marketplace juanhuttemann/deep-research` in
+Claude Code or `npx skills add juanhuttemann/deep-research` elsewhere. A
+test fails if it mentions a flag no command defines.
+
 ## `serve`
 
 ```bash

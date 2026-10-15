@@ -10,12 +10,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
@@ -810,4 +813,86 @@ func TestDoctorRefusesABadDomainList(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
 		t.Errorf("err = %v, want the private address refused", err)
 	}
+}
+
+// skillDir is the agent skill shipped from the repo root (skills/), which
+// agents follow to drive the binary.
+var skillDir = filepath.Join("..", "..", "skills", "deep-research")
+
+// skillFrontmatter returns the single-line `key: value` fields of SKILL.md.
+func skillFrontmatter(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(string(raw), "---\n", 3)
+	if len(parts) < 3 || parts[0] != "" {
+		t.Fatal("SKILL.md does not start with a --- frontmatter block")
+	}
+	fields := map[string]string{}
+	for _, line := range strings.Split(parts[1], "\n") {
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			fields[k] = strings.TrimSpace(v)
+		}
+	}
+	return fields
+}
+
+// TestSkillFrontmatterFollowsTheSpec pins the Agent Skills rules a loader
+// enforces: a name that differs from its directory, or a description over
+// 1024 characters, is refused or truncated by some agents and never shows
+// up as an error here.
+func TestSkillFrontmatterFollowsTheSpec(t *testing.T) {
+	f := skillFrontmatter(t)
+	if f["name"] != filepath.Base(skillDir) {
+		t.Errorf("name = %q, want the directory name %q", f["name"], filepath.Base(skillDir))
+	}
+	if n := len(f["description"]); n == 0 || n > 1024 {
+		t.Errorf("description is %d characters, want 1-1024", n)
+	}
+	if n := len(f["compatibility"]); n > 500 {
+		t.Errorf("compatibility is %d characters, want at most 500", n)
+	}
+	// claude.ai and the Skills API refuse a skill with any other field.
+	allowed := []string{"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
+	for k := range f {
+		if !slices.Contains(allowed, k) {
+			t.Errorf("frontmatter field %q is not in the Agent Skills spec", k)
+		}
+	}
+}
+
+// TestSkillFlagsExist keeps the skill from teaching agents a flag the CLI
+// no longer has: a renamed flag would fail every run an agent starts from
+// it, and nothing else reads the skill's Markdown.
+func TestSkillFlagsExist(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join(skillDir, "*", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, filepath.Join(skillDir, "SKILL.md"))
+	root := New(func() (Deps, error) { return Deps{}, nil })
+	// main sets Version, which is what gives the binary --version.
+	root.Version = "test"
+	root.InitDefaultVersionFlag()
+	flag := regexp.MustCompile("(?:^|[\\s`(])--([a-z][a-z0-9-]*)")
+	for _, path := range files {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range flag.FindAllStringSubmatch(string(raw), -1) {
+			if !hasFlag(root, m[1]) {
+				t.Errorf("%s mentions --%s, which no command defines", filepath.Base(path), m[1])
+			}
+		}
+	}
+}
+
+// hasFlag reports whether the root command or any subcommand defines name.
+func hasFlag(root *cobra.Command, name string) bool {
+	return slices.ContainsFunc(append(root.Commands(), root), func(c *cobra.Command) bool {
+		return c.Flags().Lookup(name) != nil
+	})
 }

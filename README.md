@@ -214,6 +214,30 @@ deep-research update                              # install the latest release
 
 Full flag reference, key bindings and export details: [docs/usage.md](docs/usage.md).
 
+## Use it from an agent
+
+The repo ships an [Agent Skill](skills/deep-research/SKILL.md) that teaches a
+coding agent to run `deep-research`, wait for the result and report the
+fact-checked answer with its sources. The binary must be installed first.
+
+Claude Code:
+
+```
+/plugin install deep-research --marketplace juanhuttemann/deep-research
+```
+
+(Before Claude Code 2.1.275: `/plugin marketplace add juanhuttemann/deep-research`,
+then `/plugin install deep-research@deep-research`.)
+
+Codex, Cursor, Gemini CLI, OpenCode and other agents that read Agent
+Skills (and Claude Code too):
+
+```sh
+npx skills add juanhuttemann/deep-research
+```
+
+Or copy `skills/deep-research/` into the agent's skills directory.
+
 ## Configuration
 
 Settings resolve environment > what `deep-research login` picked >

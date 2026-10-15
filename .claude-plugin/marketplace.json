@@ -1,0 +1,19 @@
+{
+  "name": "deep-research",
+  "description": "Agent skill for running deep-research: fact-checked, cited web research from the command line",
+  "owner": {
+    "name": "Juan Huttemann",
+    "url": "https://github.com/juanhuttemann"
+  },
+  "plugins": [
+    {
+      "name": "deep-research",
+      "source": "./",
+      "description": "Teaches the agent to run the deep-research CLI, wait for its result and report the fact-checked answer with its sources",
+      "license": "MIT",
+      "homepage": "https://github.com/juanhuttemann/deep-research",
+      "repository": "https://github.com/juanhuttemann/deep-research",
+      "keywords": ["research", "web-search", "fact-check", "citations"]
+    }
+  ]
+}
