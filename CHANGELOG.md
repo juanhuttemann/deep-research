@@ -5,6 +5,18 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- An Agent Skill, `skills/deep-research`, that teaches a coding agent to run
+  deep-research: check it with `doctor`, run with `--jsonl` into a fresh
+  reports directory, wait for the `done` line, answer from the report
+  without adding to it, and use `ask` and `--resume`. The repo is also a
+  Claude Code plugin marketplace
+  (`/plugin install deep-research --marketplace juanhuttemann/deep-research`),
+  and `npx skills add juanhuttemann/deep-research` installs it for Codex,
+  Cursor, Gemini CLI and other agents. A test fails when the skill names a
+  flag the CLI does not define.
+
 ### Changed
 
 - The `serve` page now looks like the terminal UI instead of a generic web
