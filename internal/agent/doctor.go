@@ -278,6 +278,12 @@ func checkSearch(ctx context.Context, cfg Config) Check {
 	switch {
 	case strings.EqualFold(cfg.SearXNGURL, "auto") && !tools.InlineText(cfg.SearchEngine):
 		c.Detail += " — a public instance: every query goes to a third party you did not pick"
+		// Public instances answer doctor's one query and then refuse a
+		// run's dozens, so a ✓ here promised what a run rarely gets.
+		if c.Fix == "" {
+			c.Warn = true
+			c.Fix = "public instances often refuse a run's searches partway; for reliable search, " + tools.SearchFix
+		}
 	case tools.InlineText(cfg.SearchEngine):
 		c.Detail += " — a hosted service: every query goes to it and spends credit"
 	}
@@ -293,7 +299,8 @@ func searchFix(err error) string {
 	case status == "unreachable" && tools.UnreachableService(err) != "SearXNG":
 		return "check this machine's network: the hosted engine did not answer"
 	case status == "unreachable":
-		return "check that SEARXNG_URL is right and that SearXNG is running there"
+		return "check that SEARXNG_URL is right and that SearXNG is running there" +
+			" (set up by init --docker: docker compose -f <config dir>/docker-compose.yml up -d)"
 	case status == "unauthorized" || status == "quota":
 		return "check the engine's API key (EXA_API_KEY or TAVILY_API_KEY) and its remaining credit"
 	}

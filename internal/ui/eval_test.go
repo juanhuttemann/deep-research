@@ -46,7 +46,6 @@ func TestEvalChecker(t *testing.T) {
 	cases := loadCheckerCases(t)
 	repeat, _ := strconv.Atoi(os.Getenv("EVAL_REPEAT"))
 	repeat = max(repeat, 1)
-	t.Chdir("../..") // config and .env are found from the repository root
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)

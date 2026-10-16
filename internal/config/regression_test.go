@@ -297,7 +297,7 @@ func TestInitDoesNotCreateWorldReadableSecrets(t *testing.T) {
 		path string
 		mode os.FileMode
 	}{
-		{".env", 0o600},
+		{filepath.Join(dir, ".env"), 0o600},
 		{filepath.Join(dockerDir, "searxng", "settings.yml"), 0o600},
 		{filepath.Join(dir, "config.yaml"), 0o644},
 		{filepath.Join(dockerDir, "docker-compose.yml"), 0o644},

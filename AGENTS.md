@@ -68,7 +68,10 @@ invariants:
   read-only and local; a question that needs new evidence is a new run.
 - Layering: `cli` → {agent, config, replay, store, ui}; `replay` → `agent`;
   `agent` → `tools`; `tools` is standalone HTTP clients. Don't import upward.
-- Config precedence is env > `config/config.yaml` > embedded defaults, and
+- Config precedence is env > the config dir's `config.yaml` > embedded
+  defaults (the config dir is `$DEEP_RESEARCH_CONFIG_DIR` or the user
+  config dir, never the working directory; repo `config/` is only the
+  embed source), and
   every `config.yaml` key is overridable as `DEEP_RESEARCH_<KEY>`. New config
   keys must work through all three channels, and be documented in
   [docs/configuration.md](docs/configuration.md).

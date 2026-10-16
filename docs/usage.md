@@ -382,7 +382,7 @@ deep-research list
 
 Shows each past run's findings, successfully fetched sources, and token
 usage, read back from the JSONL history file (`data_file` in
-`config/config.yaml`, default `~/.deep-research/research.jsonl`).
+`config.yaml`, default `~/.deep-research/research.jsonl`).
 
 History keeps each source's text bounded — the first 4000 characters, marked
 when cut — because the file is an append-only index that is read back whole.
@@ -401,18 +401,19 @@ stays unknown.
 deep-research init
 ```
 
-Writes `config.yaml` into the config directory and a `.env` into the working
-directory, and points at `deep-research login` and where to get a free API key. Existing
+Writes `config.yaml` and a `.env` into the config directory, and points at `deep-research login` and where to get a free API key. Existing
 files are never clobbered. The agent prompts are built into the binary, so
 no `agent.yaml` is written; create one only to override a prompt
 ([configuration](configuration.md#agent-prompts)).
 
 `init --docker` also writes a `docker-compose.yml` and `searxng/settings.yml`
-into the working directory: a SearXNG on `127.0.0.1:8888` with the JSON API
-enabled and a generated secret. Start it with `docker compose up -d` and set
-`SEARXNG_URL=http://localhost:8888`. Firecrawl is not included — it runs from
-its own repository ([services.md](services.md)). See [configuration.md](configuration.md) for where
-those files are looked up.
+into the config directory: a SearXNG on `127.0.0.1:8888` with the JSON API
+enabled and a generated secret. It adds `SEARXNG_URL=http://localhost:8888`
+to the config directory's `.env` unless that already sets one, and prints the
+one command left, `docker compose -f <config dir>/docker-compose.yml up -d`;
+Docker restarts the container from then on. This is the recommended search
+setup. Firecrawl is not included — it runs from its own repository
+([services.md](services.md)).
 
 ## `login`, `model`, `logout`
 
@@ -495,10 +496,13 @@ which leaves every claim checked against a search snippet instead of the
 page. When public SearXNG instances refuse the check, the `→` line names
 both ways out, a SearXNG of your own (`deep-research init --docker`) or a
 hosted engine (`DEEP_RESEARCH_SEARCH_ENGINE=exa` with `EXA_API_KEY`, or
-`tavily` with `TAVILY_API_KEY`). The `config` line says when the
-`config.yaml` it found is the working directory's `config/`, which runs
-started elsewhere do not read, and where `deep-research init` would write
-one when there is none. A doctor with no failures ends on `ready to run`.
+`tavily` with `TAVILY_API_KEY`). Public instances warn even when they answer,
+since they often refuse a run's later searches; the `→` line recommends
+`init --docker`. The `config` line names the `config.yaml` read, or where
+`deep-research init` would write one, and an `! config` line names a
+`config/config.yaml` or `.env` in the working directory that holds
+deep-research settings and is no longer read. A doctor with no failures ends
+on `ready to run`.
 
 ## `update`
 

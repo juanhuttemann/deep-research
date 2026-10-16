@@ -153,7 +153,8 @@ internal/
   cli       cobra commands (run / ask / serve / list / init / doctor /
             login / model / logout / update)
   config    config resolution (env > login's selection > config dir >
-            embedded defaults; stored key > env key) + .env
+            embedded defaults; stored key > env key) + the config dir's
+            .env; never the working directory
   setup     the Bubble Tea picker behind login and model: every
             provider's models in one searchable list, then the masked key
             when needed, then the check; returns the choice, saves nothing

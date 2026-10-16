@@ -861,3 +861,40 @@ func TestScraperRefusalKeepsASiteWithSnippets(t *testing.T) {
 		t.Errorf("check = %+v, want snippet-only naming the refusal", got)
 	}
 }
+
+// Public instances are read through their HTML page, which says its engines
+// failed in the engines_msg table rather than in JSON. Only the JSON form was
+// read, so an instance whose Google was suspended passed doctor with "0
+// results" and answered a run with nothing. The page is SearXNG's simple
+// theme with its engines down: the empty urls list, the no-results dialog
+// and one failed and one answering engine.
+func TestSearXNGEmptyPageWithFailedEnginesIsAnError(t *testing.T) {
+	page := `<html><body><div id="results"><div id="sidebar"><div id="engines_msg"><details open>` +
+		`<table class="engine-stats" id="engines_msg-table">` +
+		`<tr><td class="engine-name"><a href="/stats?engine=google">google</a></td><td class="response-error">Suspended: too many requests</td></tr>` +
+		`<tr><td class="engine-name"><a href="/stats?engine=wikipedia">wikipedia</a></td><td class="response-time"><div class="bar-chart-value">0.4</div></td></tr>` +
+		`</table></details></div></div><div id="urls" role="main"><div class="dialog-error-block" role="alert">` +
+		`<p><strong>Sorry!</strong></p><p>No results were found.</p></div></div></div></body></html>`
+	sv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("format") == "json" {
+			w.WriteHeader(http.StatusTooManyRequests) // as public instances answer JSON
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(page))
+	}))
+	t.Cleanup(sv.Close)
+	_, err := NewSearXNGClient(sv.URL, 0).Search(context.Background(), "q")
+	if err == nil || !strings.Contains(err.Error(), "google (Suspended: too many requests)") || strings.Contains(err.Error(), "wikipedia") {
+		t.Fatalf("err = %v, want only the failed engine named", err)
+	}
+	if s := SearchStatus(err); s != "rate-limited" {
+		t.Errorf("status = %q, want rate-limited", s)
+	}
+
+	// The same page with every engine answering is an honest empty answer.
+	page = strings.Replace(page, `<td class="response-error">Suspended: too many requests</td>`, `<td class="response-time">0.2</td>`, 1)
+	if res, err := NewSearXNGClient(sv.URL, 0).Search(context.Background(), "q"); err != nil || len(res) != 0 {
+		t.Errorf("an honest empty page = %v, %v", res, err)
+	}
+}

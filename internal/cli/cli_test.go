@@ -64,7 +64,7 @@ func TestInitReportsCreatedFiles(t *testing.T) {
 	if !strings.Contains(out, "https://openrouter.ai/keys") {
 		t.Errorf("init does not say where to get a key; got:\n%s", out)
 	}
-	env, err := os.ReadFile(filepath.Join(cwd, ".env"))
+	env, err := os.ReadFile(filepath.Join(cfgDir, ".env"))
 	if err != nil || !strings.Contains(string(env), "OPENAI_MODEL=openrouter/free") {
 		t.Errorf(".env template does not default to the free model: %v\n%s", err, env)
 	}

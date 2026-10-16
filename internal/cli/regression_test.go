@@ -284,9 +284,13 @@ func TestDoctorReportsProblemsAndBudget(t *testing.T) {
 	}
 }
 
+// init --docker wrote its files into whatever folder it ran in and left
+// SEARXNG_URL for the reader to add, so a run from anywhere else still went
+// to the public instances. It sets up in the config dir and points the
+// config at it, leaving one command to run.
 func TestInitDockerSaysWhatToRun(t *testing.T) {
-	cwd := t.TempDir()
-	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", t.TempDir())
+	cwd, cfgDir := t.TempDir(), t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
 	t.Chdir(cwd)
 	cmd := New(func() (Deps, error) { return Deps{}, nil })
 	var out bytes.Buffer
@@ -295,10 +299,14 @@ func TestInitDockerSaysWhatToRun(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"docker-compose.yml", "docker compose up -d", "SEARXNG_URL=http://localhost:8888", "docs/services.md"} {
+	for _, want := range []string{"docker compose -f " + filepath.Join(cfgDir, "docker-compose.yml") + " up -d",
+		filepath.Join(cfgDir, ".env") + ": SEARXNG_URL=http://localhost:8888", "docs/services.md"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("init --docker output lacks %q:\n%s", want, out.String())
 		}
+	}
+	if entries, _ := os.ReadDir(cwd); len(entries) > 0 {
+		t.Errorf("init --docker wrote into the folder it ran in: %v", entries)
 	}
 }
 
@@ -355,8 +363,9 @@ func TestJSONLEndsOnDone(t *testing.T) {
 }
 
 // init printed "wrote 3 file(s) to <config dir>:" above a list that included
-// the .env, which it writes to the working directory, so the reader was sent
-// looking for it in the wrong place.
+// the .env, which it wrote to the working directory, so the reader was sent
+// looking for it in the wrong place. Both now go to the config dir, which is
+// the only place a run reads them, and nothing is written where init ran.
 func TestInitSaysWhereTheEnvWent(t *testing.T) {
 	cfgDir, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
@@ -368,13 +377,13 @@ func TestInitSaysWhereTheEnvWent(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{filepath.Join(cfgDir, "config.yaml"), filepath.Join(cwd, ".env")} {
+	for _, want := range []string{filepath.Join(cfgDir, "config.yaml"), filepath.Join(cfgDir, ".env")} {
 		if !strings.Contains(out.String(), "  - "+want+"\n") {
 			t.Errorf("init output does not list %s:\n%s", want, out.String())
 		}
 	}
-	if strings.Contains(out.String(), "to \""+cfgDir) {
-		t.Errorf("init says every file went to the config dir:\n%s", out.String())
+	if entries, _ := os.ReadDir(cwd); len(entries) > 0 {
+		t.Errorf("init wrote into the folder it ran in: %v", entries)
 	}
 }
 
