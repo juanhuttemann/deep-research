@@ -61,7 +61,9 @@ run or the setting to change.
   sets it themselves.
 - **Search through public instances** (the `search` line says "a public
   instance"): recommend the user's own SearXNG in Docker. It is free, keeps
-  queries on their machine, and does not refuse a run partway. Setup is
+  queries on their machine, and queries more engines than public instances
+  usually allow. Search engines still rate-limit by IP address, so a long
+  run can be throttled even locally (see section 6). Setup is
   `deep-research init --docker`, which writes the files into the config
   directory and points the config at them, then the
   `docker compose -f ... up -d` command it prints. Offer to run both; they
@@ -181,6 +183,13 @@ reports. Resume it; finished searches are not repeated:
 ```bash
 deep-research --resume "$dir/<name>.<id>.partial.json" --jsonl --reports "$dir" > "$dir/events-resume.jsonl"
 ```
+
+An `incomplete` run whose `detail` names failed searches (`rate-limited`,
+`challenge`) also has a checkpoint. Search engines suspend a client for a
+few minutes, so a resume right away meets the same limits. Tell the user,
+and offer to resume after about ten minutes: only the failed searches run
+again, and the model phases run once more (`doctor`'s budget line gives
+their count).
 
 `--resume` takes no `-p`, `--plan`, `--mode`, `--sources` or `--domains`;
 the checkpoint carries them. Look for `*.partial.json` in the reports

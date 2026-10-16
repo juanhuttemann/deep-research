@@ -169,7 +169,12 @@ deep-research doctor          # confirms it answers
 ```
 
 This is the recommended setup: public instances often refuse a run's
-searches partway through.
+searches partway through. It also turns on more engines than SearXNG's
+default three. Engines rate-limit by IP address, so a local SearXNG can
+still be throttled after many searches; more engines means one engine's
+limit rarely leaves a search unanswered. A run cut short by a limit can be
+finished later with `--resume`, which repeats only the searches that
+failed.
 
 Firecrawl, for full page text, runs from its own repository:
 [docs/services.md](docs/services.md).

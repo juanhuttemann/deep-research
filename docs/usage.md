@@ -137,7 +137,9 @@ confirmed it saves a checkpoint after each step, beside its reports:
 leaves the previous one. It holds the question, the confirmed plan with its
 tier and budget, and every search that finished, with its page text. A run
 that completes in full removes it; one that is cancelled, fails or ends
-incomplete keeps it.
+incomplete keeps it, and an incomplete run's error names the `--resume`
+command for it. A run cut short by rate limits is best resumed a few minutes
+later: search engines suspend a client for that long.
 
 ```bash
 deep-research --resume reports/<name>.<id>.partial.json
@@ -412,7 +414,12 @@ enabled and a generated secret. It adds `SEARXNG_URL=http://localhost:8888`
 to the config directory's `.env` unless that already sets one, and prints the
 one command left, `docker compose -f <config dir>/docker-compose.yml up -d`;
 Docker restarts the container from then on. This is the recommended search
-setup. Firecrawl is not included — it runs from its own repository
+setup. Its settings turn on Bing, Google, Yahoo and Qwant beside SearXNG's
+default Brave, DuckDuckGo and Google CSE: engines rate-limit by IP address,
+so a local SearXNG is still throttled after many searches, and more engines
+keep one engine's limit from leaving a search unanswered. An existing
+`searxng/settings.yml` is never overwritten; add its `engines:` block by
+hand to get them. Firecrawl is not included — it runs from its own repository
 ([services.md](services.md)).
 
 ## `login`, `model`, `logout`

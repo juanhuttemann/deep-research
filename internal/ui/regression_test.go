@@ -1730,8 +1730,10 @@ func TestFollowUpRowsTakeTheAnalysisName(t *testing.T) {
 	if rows["f1"] != "LLM inference benchmarks" || rows["f2"] != unnamed {
 		t.Errorf("follow-up rows = %v, want the analysis's name, or the query when it gave none", rows)
 	}
-	if !slices.Contains(searched, named) || !slices.Contains(searched, anchoredQuery(plan.Question, "LLM inference benchmarks")) {
-		t.Errorf("searched %q, want the query itself and the question plus the name", searched)
+	// The follow-up's own query only: the question with the name glued on
+	// asked nothing the query had not, clipped mid-phrase.
+	if !slices.Contains(searched, named) || slices.Contains(searched, anchoredQuery(plan.Question, "LLM inference benchmarks")) {
+		t.Errorf("searched %q, want the query itself and no question-plus-name fallback", searched)
 	}
 }
 
@@ -2742,5 +2744,31 @@ func TestRunParsesTheDomainsItIsGiven(t *testing.T) {
 	}
 	if _, _, err := runWithDomains(t, a, []string{"localhost"}); !errors.Is(err, tools.ErrSearchConfig) {
 		t.Errorf("localhost: err = %v, want a search setting error", err)
+	}
+}
+
+// A single SearXNG never rests, so after its upstream engines suspended it a
+// run went on asking: each sub-agent sent its fallback query, then the whole
+// follow-up round ran, seven more queries into the same limit. A refused
+// search now ends its sub-agent's queries.
+func TestRefusedSearchStopsTheSubAgentsQueries(t *testing.T) {
+	sink := &MultiSink{}
+	d := NewDriver(failingSearch{&fakeAssistant{}}, sink, nil, 1)
+	sub := agent.SubTopic{ID: "1", Name: "A", Query: "widgetdb limits", Terms: []string{"widgetdb", "quota"}}
+	if n := len(subQueries("q", sub)); n != 2 {
+		t.Fatalf("the sub-topic plans %d queries; the test needs a fallback to skip", n)
+	}
+	_, _ = d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{sub}))
+	searches := 0
+	for _, e := range sink.TimelineSnapshot() {
+		if e.Type == Search {
+			searches++
+		}
+	}
+	if searches != 1 {
+		t.Errorf("sent %d queries after a rate limit, want 1", searches)
+	}
+	if !d.isSearchDown() {
+		t.Error("a rate-limited search left the run thinking search answers, so a follow-up round would run")
 	}
 }

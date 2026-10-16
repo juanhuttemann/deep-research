@@ -5,6 +5,33 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- `init --docker`'s SearXNG turns on Bing, Google, Yahoo and Qwant beside
+  the default Brave, DuckDuckGo and Google CSE. Engines rate-limit by IP
+  address, so a local SearXNG is throttled like any client. In a real run
+  the default three were all suspended within a dozen searches and the rest
+  of the run found nothing; with more engines, Yahoo and Bing still answer
+  after the default three refuse. An existing `settings.yml` is not
+  overwritten (docs/usage.md shows the block to add).
+- An incomplete run's error names the command that resumes it, `deep-research
+  --resume <checkpoint>`, which repeats only the searches that failed. The
+  checkpoint was already kept, but nothing said so.
+- The docs and the Agent Skill no longer say a local SearXNG cannot be
+  refused partway through a run. The skill offers a resume, after a few
+  minutes, for a run cut short by rate limits.
+
+### Fixed
+
+- A refused search (rate-limited, challenged or blocked) ends its
+  sub-agent's queries, and the follow-up round is skipped while search is
+  refusing. A single SearXNG never rests, so after its engines suspended it
+  each sub-agent still sent its fallback query, then the follow-up round
+  sent its own, seven more queries into the same limit.
+- A follow-up search no longer has a fallback query. The fallback was the
+  question with the follow-up's name glued on, clipped mid-phrase (`… (language,
+  toolchain, Language changes`), which asked nothing the follow-up had not.
+
 ## [0.14.0] - 2026-10-16
 
 ### Changed

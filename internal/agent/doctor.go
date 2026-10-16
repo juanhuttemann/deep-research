@@ -282,7 +282,7 @@ func checkSearch(ctx context.Context, cfg Config) Check {
 		// run's dozens, so a ✓ here promised what a run rarely gets.
 		if c.Fix == "" {
 			c.Warn = true
-			c.Fix = "public instances often refuse a run's searches partway; for reliable search, " + tools.SearchFix
+			c.Fix = "public instances often refuse a run's searches partway; for more reliable search, " + tools.SearchFix
 		}
 	case tools.InlineText(cfg.SearchEngine):
 		c.Detail += " — a hosted service: every query goes to it and spends credit"

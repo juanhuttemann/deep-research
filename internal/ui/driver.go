@@ -66,8 +66,9 @@ type Driver struct {
 	// searchesEmpty are answered searches with nothing on the subject in
 	// them: every result off-topic, or none at all.
 	searchesEmpty int
-	// searchDown is set while the last search asked nothing, every instance
-	// resting from a refusal: queries sent then fail without trying.
+	// searchDown is set while the last search was refused: asked nothing,
+	// every instance resting, or answered with a limit or a challenge.
+	// Queries sent then fail too, and push the limit further.
 	searchDown bool
 	// refusalHinted is set once the run has said what to do about public
 	// SearXNG instances refusing it. Every sub-agent hits the same wall, and
@@ -78,7 +79,7 @@ type Driver struct {
 // publicRefusalHint is what to do when the public SearXNG instances refuse
 // the run: they challenge scripted traffic by design, so retrying is no fix.
 const publicRefusalHint = "Public SearXNG instances challenge automated queries, so results will be thin. " +
-	"For reliable search, " + tools.SearchFix
+	"For more reliable search, " + tools.SearchFix
 
 func NewDriver(a agent.Assistant, sink *MultiSink, input Input, parallelism int) *Driver {
 	if parallelism <= 0 {
@@ -720,8 +721,8 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 		if q = strings.TrimSpace(q); q != "" && len(subs) < MaxFollowUps {
 			// A follow-up named after its query showed a row cut off at the
 			// name column, the query repeated in full beside it. The analysis
-			// names each one; an unnamed query is still its own name. Either
-			// way the fallback search is the question plus the name.
+			// names each one; an unnamed query is still its own name. A
+			// follow-up has no fallback search: see subQueries.
 			name := cmp.Or(strings.TrimSpace(analysis.FollowUpNames[q]), q)
 			subs = append(subs, SubTopic{ID: followUpPrefix + strconv.Itoa(len(subs)+1), Name: name, Query: q})
 		}
@@ -730,9 +731,9 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analy
 		return analysis, findings
 	}
 	if d.isSearchDown() {
-		// Every query of the round would fail without asking anything.
+		// Every query of the round would be refused too.
 		d.emit(Event{Type: Info, Phase: "Research", Detail: fmt.Sprintf(
-			"%d open questions not followed up: no search instance is answering", len(subs))})
+			"%d open questions not followed up: search is refusing queries (rate-limited or challenged)", len(subs))})
 		return analysis, findings
 	}
 	d.emit(Event{Type: Phase, Phase: "Research", Detail: fmt.Sprintf("Following up %d open questions", len(subs))})
@@ -817,6 +818,12 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 				// No instance would be asked for the remaining queries either:
 				// sending them only stacked up identical failures.
 				d.emit(Event{Type: Error, Detail: err.Error(), SubID: id, Status: status, Line: "no search available"})
+				break
+			}
+			if searchRefused(err) {
+				// The next query would meet the same limiter, and add to it.
+				d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
+					Status: status, Line: "search " + status + "; not trying another query"})
 				break
 			}
 			d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
@@ -922,6 +929,19 @@ func offTopicLine(det *agent.ResearchDetail) string {
 	return fmt.Sprintf("%d of %d results off-topic: %s%s", len(det.Skipped), total, strings.Join(domains, ", "), more)
 }
 
+// searchRefused reports a search the backend turned away: a limiter, a
+// challenge or a block. A single SearXNG never rests, so SearchResting never
+// says so for one; but its upstream engines suspend a client for minutes,
+// and a run that went on asking (the sub-agent's fallback, then the whole
+// follow-up round) sent seven more queries into the same refusal.
+func searchRefused(err error) bool {
+	switch tools.SearchStatus(err) {
+	case "rate-limited", "challenge", "blocked":
+		return true
+	}
+	return false
+}
+
 // noteSearch records the outcome of one search.
 func (d *Driver) noteSearch(err error, det *agent.ResearchDetail) {
 	d.mu.Lock()
@@ -938,7 +958,7 @@ func (d *Driver) noteSearch(err error, det *agent.ResearchDetail) {
 	default:
 		d.searchesOK++
 	}
-	d.searchDown = tools.SearchResting(err)
+	d.searchDown = tools.SearchResting(err) || searchRefused(err)
 	d.mu.Unlock()
 	if hint {
 		d.emit(Event{Type: Error, Detail: publicRefusalHint})
@@ -1060,6 +1080,13 @@ func subQueries(question string, sub agent.SubTopic) []string {
 	var out []string
 	if q := clipWords(sub.Query, maxQueryLen); q != "" {
 		out = append(out, q)
+	}
+	// A follow-up's query is the analysis's own search for one open
+	// question. Its fallback was the question with the follow-up's name glued
+	// on, clipped mid-phrase ("… (language, toolchain, Language changes"),
+	// which asked nothing the query had not.
+	if isFollowUp(sub.ID) && len(out) > 0 {
+		return out
 	}
 	fallback := anchoredQuery(question, sub.Name)
 	if len(sub.Terms) >= 2 {
