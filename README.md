@@ -163,10 +163,13 @@ With `auto`, every query goes to a third party you did not pick. To keep
 queries on your machine:
 
 ```bash
-deep-research init --docker   # docker-compose.yml + SearXNG settings
-docker compose up -d
-echo 'SEARXNG_URL=http://localhost:8888' >> .env
+deep-research init --docker   # sets up SearXNG and points the config at it
+docker compose -f ~/.config/deep-research/docker-compose.yml up -d
+deep-research doctor          # confirms it answers
 ```
+
+This is the recommended setup: public instances often refuse a run's
+searches partway through.
 
 Firecrawl, for full page text, runs from its own repository:
 [docs/services.md](docs/services.md).
@@ -241,9 +244,11 @@ Or copy `skills/deep-research/` into the agent's skills directory.
 ## Configuration
 
 Settings resolve environment > what `deep-research login` picked >
-`config/config.yaml` > embedded defaults, and every `config.yaml` key is also
+`config.yaml` > embedded defaults, and every `config.yaml` key is also
 settable as `DEEP_RESEARCH_<KEY>`. A key stored by `login` wins over the
-environment's.
+environment's. `config.yaml` and `.env` are read from one place,
+`~/.config/deep-research/` (`$DEEP_RESEARCH_CONFIG_DIR` when set), whatever
+folder a run starts in.
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |

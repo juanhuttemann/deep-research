@@ -136,40 +136,57 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if len(created) == 0 {
 		fmt.Fprintf(out, "config dir %q already configured; nothing to write\n", dir)
 	} else {
-		// Each file is listed by its absolute path: the yaml files go to the
-		// config dir and .env to the working directory, and a header naming
-		// only the config dir said the .env was written there too.
-		fmt.Fprintf(out, "wrote %d file(s):\n", len(created))
+		// Each file is listed by its absolute path, so the reader can open
+		// it from wherever they are.
+		fmt.Fprintln(out, "wrote:")
 		for _, f := range created {
 			if abs, err := filepath.Abs(f); err == nil {
 				f = abs
 			}
 			fmt.Fprintf(out, "  - %s\n", f)
 		}
-		if slices.Contains(created, ".env") {
-			fmt.Fprintln(out, "\nPick a provider and model, and store its key: ./deep-research login")
-			fmt.Fprintln(out, "(a free OpenRouter key, no card: "+keyURL+"; or add OPENAI_API_KEY=... to .env)")
-			fmt.Fprintln(out, "then run: ./deep-research -p \"your question\"")
-		}
 	}
 	if docker, _ := cmd.Flags().GetBool("docker"); docker {
-		return initDocker(out)
+		if err := initDocker(out, dir); err != nil {
+			return err
+		}
+	}
+	// The key comes last: it is the step every first run needs, so it is
+	// the one left on screen.
+	if envFile := filepath.Join(dir, ".env"); slices.Contains(created, envFile) {
+		fmt.Fprintln(out, "\nPick a provider and model, and store its key: deep-research login")
+		fmt.Fprintln(out, "(a free OpenRouter key, no card: "+keyURL+"; or add OPENAI_API_KEY=... to "+envFile+")")
+		fmt.Fprintln(out, "then run: deep-research -p \"your question\"")
 	}
 	return nil
 }
 
-// initDocker writes the local SearXNG setup and says how to use it.
-func initDocker(out io.Writer) error {
-	created, err := config.InitDocker(".")
+// initDocker writes the local SearXNG setup into the config dir, points the
+// config's .env at it, and says the one command left. It wrote into the
+// working directory and left the reader to edit a .env by hand, so a
+// project gained a docker-compose.yml and runs elsewhere still searched
+// the public instances.
+func initDocker(out io.Writer, dir string) error {
+	created, err := config.InitDocker(dir)
 	if err != nil {
 		return err
 	}
 	for _, f := range created {
 		fmt.Fprintf(out, "  - %s\n", f)
 	}
-	fmt.Fprintln(out, "\nLocal search (docker-compose.yml, searxng/settings.yml):")
-	fmt.Fprintln(out, "  docker compose up -d")
-	fmt.Fprintln(out, "  echo 'SEARXNG_URL=http://localhost:8888' >> .env")
+	pointed, err := config.UseLocalSearXNG(dir)
+	if err != nil {
+		return err
+	}
+	env := filepath.Join(dir, ".env")
+	if pointed {
+		fmt.Fprintf(out, "  - %s: SEARXNG_URL=%s\n", env, config.LocalSearXNG)
+	} else {
+		fmt.Fprintf(out, "  - %s already sets SEARXNG_URL; left as it is\n", env)
+	}
+	fmt.Fprintln(out, "\nStart the local search; Docker restarts it from then on:")
+	fmt.Fprintf(out, "  docker compose -f %s up -d\n", filepath.Join(dir, "docker-compose.yml"))
+	fmt.Fprintln(out, "then check it: deep-research doctor")
 	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: "+agent.ServicesDoc)
 	return nil
 }
@@ -739,12 +756,19 @@ func printResult(cmd *cobra.Command, result *agent.ResearchResult, printed bool)
 func runDoctor(cmd *cobra.Command, d Deps, domains []string) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "  config   %s\n", configSource())
+	warnings := 0
+	if dirs := config.Dirs(); len(dirs) > 0 {
+		for _, f := range config.StrayFiles() {
+			warnings++
+			fmt.Fprintf(out, "! config   %s is not read: settings come only from %s\n", f, dirs[0])
+			fmt.Fprintf(out, "  %-8s → move its deep-research settings to %s\n", "", filepath.Join(dirs[0], filepath.Base(f)))
+		}
+	}
 	problems := 0
 	checks := agent.Diagnose(cmd.Context(), d.Config.Config)
 	if len(domains) > 0 {
 		checks = append(checks, agent.DiagnoseDomains(cmd.Context(), d.Config.Config, domains)...)
 	}
-	warnings := 0
 	for _, c := range checks {
 		mark := "✓"
 		switch {
@@ -770,25 +794,17 @@ func runDoctor(cmd *cobra.Command, d Deps, domains []string) error {
 	return nil
 }
 
-// configSource names the config.yaml a run reads, or the embedded defaults.
+// configSource names the config.yaml a run reads, or the embedded defaults
+// and where init would write one.
 func configSource() string {
-	for _, dir := range config.Dirs() {
+	dirs := config.Dirs()
+	for _, dir := range dirs {
 		if p := filepath.Join(dir, "config.yaml"); fileExists(p) {
-			// The working directory's config/ is read first, so the same
-			// command run from another folder reads another config: say so,
-			// or a setting that "stopped working" there has no explanation.
-			if !filepath.IsAbs(p) {
-				return p + " (in this folder: runs started elsewhere do not read it)"
-			}
 			return p
 		}
 	}
-	// Where init would write: DEEP_RESEARCH_CONFIG_DIR, else the user's dir.
-	if dir := os.Getenv("DEEP_RESEARCH_CONFIG_DIR"); dir != "" {
-		return "embedded defaults (no config.yaml found; `deep-research init` writes one to " + dir + ")"
-	}
-	if dir, err := config.UserDir(); err == nil {
-		return "embedded defaults (no config.yaml found; `deep-research init` writes one to " + dir + ")"
+	if len(dirs) > 0 {
+		return "embedded defaults (no config.yaml found; `deep-research init` writes one to " + dirs[0] + ")"
 	}
 	return "embedded defaults (no config.yaml found)"
 }

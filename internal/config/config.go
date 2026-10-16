@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,16 +93,19 @@ const EnvPrefix = "DEEP_RESEARCH"
 // or a rate-limited model provider.
 const defaultParallelism = 3
 
-// Dirs returns the config directory chain.
+// Dirs returns the config directory: $DEEP_RESEARCH_CONFIG_DIR, else the
+// per-user one. It used to start with the working directory's config/, so a
+// run started inside any project with a config/config.yaml (a Rails app, a
+// Node service) read that project's file as its own settings, and the same
+// command behaved differently in every folder.
 func Dirs() []string {
 	if d := os.Getenv("DEEP_RESEARCH_CONFIG_DIR"); d != "" {
 		return []string{d}
 	}
-	dirs := []string{"config"}
 	if ud, err := os.UserConfigDir(); err == nil {
-		dirs = append(dirs, filepath.Join(ud, "deep-research"))
+		return []string{filepath.Join(ud, "deep-research")}
 	}
-	return dirs
+	return nil
 }
 
 // Init writes the default config files. It returns the config directory and
@@ -140,9 +144,10 @@ func Init() (dir string, created []string, err error) {
 		created = append(created, p)
 	}
 
-	// The .env file holds secrets, so it is written into the working
-	// directory (never inside the config dir).
-	envPath := filepath.Join(".env")
+	// The .env sits beside config.yaml, where every run reads it. It was
+	// written to the working directory, which a run started from anywhere
+	// else never read.
+	envPath := filepath.Join(dir, ".env")
 	if _, statErr := os.Stat(envPath); statErr == nil {
 		// existing .env left as-is
 	} else if !errors.Is(statErr, os.ErrNotExist) {
@@ -159,7 +164,8 @@ func Init() (dir string, created []string, err error) {
 // dockerCompose runs SearXNG on localhost only: it is a search endpoint for
 // this machine, not a public instance.
 const dockerCompose = `# Local SearXNG for deep-research. Start it with: docker compose up -d
-# Firecrawl (full page text) runs from its own repository: docs/services.md.
+# Firecrawl (full page text) runs from its own repository:
+# https://github.com/juanhuttemann/deep-research/blob/main/docs/services.md
 services:
   searxng:
     image: docker.io/searxng/searxng:latest
@@ -410,6 +416,10 @@ func Load() (Config, error) {
 	if err := loadDotEnv(dirs); err != nil {
 		return Config{}, err
 	}
+	for _, f := range StrayFiles() {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: %s holds deep-research settings, which are read only from %s now; move them there\n",
+			f, strings.Join(dirs, ", "))
+	}
 
 	_, cfgYAML, err := readFile(dirs, "config.yaml", embeddedConfig("config.yaml"))
 	if err != nil {
@@ -557,8 +567,11 @@ func embeddedConfig(name string) string {
 	return string(b)
 }
 
+// loadDotEnv reads the config directory's .env. A project's own .env is not
+// read: most hold an OPENAI_API_KEY of their own, which silently replaced
+// the one deep-research was set up with whenever a run started there.
 func loadDotEnv(dirs []string) error {
-	paths := findDotEnv()
+	var paths []string
 	for _, d := range dirs {
 		paths = append(paths, filepath.Join(d, ".env"))
 	}
@@ -573,41 +586,72 @@ func loadDotEnv(dirs []string) error {
 	return nil
 }
 
-// findDotEnv locates the project's .env by walking up from the working
-// directory. It returns the first one it finds and never climbs past the
-// project root (a directory holding .git or go.mod).
-//
-// Walking to the filesystem root instead loaded every ancestor's .env — an
-// unrelated one in $HOME or / is common in development — and each could
-// silently inject OPENAI_API_KEY, SEARXNG_URL and the rest into the run.
-func findDotEnv() []string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil
-	}
-	for {
-		p := filepath.Join(dir, ".env")
-		if _, err := os.Stat(p); err == nil {
-			return []string{p}
-		}
-		if isProjectRoot(dir) {
-			return nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return nil
-		}
-		dir = parent
-	}
+// strayKeys mark a working-directory file as deep-research's own: names no
+// other tool uses. OPENAI_API_KEY is not one of them, since a project's .env
+// holding it is the project's.
+var strayKeys = []string{
+	"DEEP_RESEARCH_", "SEARXNG_URL", "FIRECRAWL_URL", "FIRECRAWL_API_KEY", "EXA_API_KEY", "TAVILY_API_KEY",
+	"sources_per_topic", "searxng_url", "firecrawl_url", "model_call_timeout", "search_engine",
 }
 
-// isProjectRoot reports whether dir looks like the top of a checkout, which is
-// as far up as .env discovery is allowed to go.
-func isProjectRoot(dir string) bool {
-	for _, marker := range []string{".git", "go.mod"} {
-		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
-			return true
+// StrayFiles lists the working directory's config/config.yaml and .env when
+// they hold deep-research settings. Both were read before settings moved to
+// the config directory alone; dropping them without a word would leave a
+// setup that "stopped working" with nothing to say why.
+func StrayFiles() []string {
+	var out []string
+	for _, p := range []string{filepath.Join("config", "config.yaml"), ".env"} {
+		b, err := os.ReadFile(p)
+		// The repo's own config/config.yaml is the embedded defaults'
+		// source, not settings anyone wrote.
+		if err != nil || string(b) == embeddedConfig("config.yaml") {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			if slices.ContainsFunc(strayKeys, func(k string) bool { return strings.HasPrefix(line, k) }) {
+				if abs, err := filepath.Abs(p); err == nil {
+					p = abs
+				}
+				out = append(out, p)
+				break
+			}
 		}
 	}
-	return false
+	return out
+}
+
+// LocalSearXNG is the address init --docker's SearXNG answers at.
+const LocalSearXNG = "http://localhost:8888"
+
+// UseLocalSearXNG points dir's .env at the SearXNG init --docker sets up,
+// unless it already names one: the reader's own choice is left alone. It
+// reports whether it wrote the line.
+func UseLocalSearXNG(dir string) (bool, error) {
+	p := filepath.Join(dir, ".env")
+	b, err := os.ReadFile(p)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "SEARXNG_URL=") {
+			return false, nil
+		}
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false, err
+	}
+	prefix := ""
+	if len(b) > 0 && !strings.HasSuffix(string(b), "\n") {
+		prefix = "\n"
+	}
+	_, err = fmt.Fprintf(f, "%sSEARXNG_URL=%s\n", prefix, LocalSearXNG)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err == nil, err
 }

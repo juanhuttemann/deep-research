@@ -59,9 +59,19 @@ run or the setting to change.
   never ask them to paste a key into the conversation. The same goes for any
   `→` step that needs an API key (`EXA_API_KEY`, `TAVILY_API_KEY`): the user
   sets it themselves.
-- The `config` line names the `config.yaml` the run reads. A path under
-  `config/` in the working directory applies only to runs started there.
-  If a setting the user made seems ignored, this line is where to look.
+- **Search through public instances** (the `search` line says "a public
+  instance"): recommend the user's own SearXNG in Docker. It is free, keeps
+  queries on their machine, and does not refuse a run partway. Setup is
+  `deep-research init --docker`, which writes the files into the config
+  directory and points the config at them, then the
+  `docker compose -f ... up -d` command it prints. Offer to run both; they
+  change only deep-research's config directory and start a container, so
+  ask first.
+- Settings are read only from the config directory (the `config` line names
+  it), never from the folder a run starts in. An `! config` line names a
+  file in the working directory whose deep-research settings are no longer
+  read: tell the user to move them, and do not edit or move a file that
+  may hold their keys yourself.
 
 ## 2. Run
 

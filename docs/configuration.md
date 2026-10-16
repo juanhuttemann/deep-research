@@ -13,14 +13,19 @@ API keys resolve differently: a key stored by `deep-research login` wins, and
 the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) is the fallback, then
 `config.yaml`. See [Stored keys](#stored-keys-deep-research-login).
 
-The config directory is the first of these that exists:
-`$DEEP_RESEARCH_CONFIG_DIR`, `./config/`, `~/.config/deep-research/`.
-`deep-research init` writes a default `config.yaml` there. Newly created `.env` files
-use owner-only permissions (`0600`) on Unix; existing files are left alone.
+The config directory is `$DEEP_RESEARCH_CONFIG_DIR` when set, else
+`~/.config/deep-research/` (`%AppData%\deep-research` on Windows,
+`~/Library/Application Support/deep-research` on macOS). It is the only place
+`config.yaml` and `.env` are read from, so a run behaves the same whatever
+folder it starts in. A project's own `config/config.yaml` or `.env` is never
+read: most projects' `.env` holds an `OPENAI_API_KEY` of its own, which would
+replace yours. When the working directory has either file with deep-research
+settings in it (from a release that read them), every run warns and `doctor`
+names the file to move.
 
-`.env` is looked up from the working directory upwards, stopping at the first
-one found and never climbing past the project root (a directory holding
-`.git` or `go.mod`), so an unrelated `.env` in `$HOME` cannot leak into a run.
+`deep-research init` writes a default `config.yaml` and a `.env` template
+there. Newly created `.env` files use owner-only permissions (`0600`) on
+Unix; existing files are left alone.
 
 ## Stored keys (`deep-research login`)
 
@@ -28,8 +33,7 @@ one found and never climbing past the project root (a directory holding
 every provider's models and store the key when the provider needs one;
 `deep-research logout` removes one ([usage](usage.md#login-model-logout)).
 Two files, in `$DEEP_RESEARCH_CONFIG_DIR` when set, else
-`~/.config/deep-research/` (never the project's `config/`, which sits in a
-checkout):
+`~/.config/deep-research/`:
 
 - `auth.json` holds the keys, one per provider, each with the endpoint it was
   entered for. It is created `0600` in a `0700` directory and replaced

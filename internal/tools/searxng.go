@@ -274,13 +274,13 @@ func SearchResting(err error) bool {
 // not a repo path: most readers have the binary and no checkout to look in.
 const ServicesDoc = "https://github.com/juanhuttemann/deep-research/blob/main/docs/services.md"
 
-// SearchFix is the way out when public SearXNG will not answer: a search of
-// the reader's own, or a hosted engine. Each names the exact setting, since
-// "set search_engine" left the reader to find out where and to what.
-const SearchFix = "run your own SearXNG (deep-research init --docker, docker compose up -d," +
-	" then SEARXNG_URL=http://localhost:8888; " + ServicesDoc + ")," +
-	" or search through a hosted engine: DEEP_RESEARCH_SEARCH_ENGINE=exa with EXA_API_KEY," +
-	" or DEEP_RESEARCH_SEARCH_ENGINE=tavily with TAVILY_API_KEY"
+// SearchFix is the way out when public SearXNG will not answer: SearXNG of
+// the reader's own in Docker first, since it is free and keeps queries on
+// this machine, else a hosted engine. Each names the exact step, since "set
+// search_engine" left the reader to find out where and to what.
+const SearchFix = "run SearXNG in Docker: deep-research init --docker sets it up and prints the one command" +
+	" that starts it (" + ServicesDoc + "). Without Docker, search through a hosted engine:" +
+	" DEEP_RESEARCH_SEARCH_ENGINE=exa with EXA_API_KEY, or DEEP_RESEARCH_SEARCH_ENGINE=tavily with TAVILY_API_KEY"
 
 // PublicSearchRefused reports whether err is every public SearXNG instance
 // refusing a query with a challenge, a block or a limiter: not a fault to fix
@@ -561,13 +561,18 @@ func (c *SearXNGClient) limit(res []SearchResult) []SearchResult {
 // parseResultsHTML reads SearXNG's own result markup: each article.result
 // holds an h3 > a[href] with the title and a p.content with the snippet. A
 // page with no results list at all (id="urls") is not a search that found
-// nothing — it is a challenge or an error page.
+// nothing — it is a challenge or an error page. An empty list beside engines
+// that failed (engines_msg's td.response-error rows) is the HTML form of
+// JSON's unresponsive_engines, and fails the same way: read as "no results",
+// a public instance whose Google was suspended passed doctor with 0 results
+// and kept answering a run with nothing.
 func parseResultsHTML(r io.Reader) ([]SearchResult, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
 		return nil, fmt.Errorf("parse search page: %w", err)
 	}
 	var out []SearchResult
+	var unresponsive [][]string
 	found := false
 	for n := range doc.Descendants() {
 		if n.Type != html.ElementNode {
@@ -576,16 +581,45 @@ func parseResultsHTML(r io.Reader) ([]SearchResult, error) {
 		if attr(n, "id") == "urls" {
 			found = true
 		}
-		if n.Data == "article" && hasClass(n, "result") {
+		switch {
+		case n.Data == "article" && hasClass(n, "result"):
 			if res, ok := parseArticle(n); ok {
 				out = append(out, res)
+			}
+		case n.Data == "tr":
+			if row := engineFailure(n); row != nil {
+				unresponsive = append(unresponsive, row)
 			}
 		}
 	}
 	if !found {
 		return nil, errChallenge
 	}
+	if len(out) == 0 && len(unresponsive) > 0 {
+		return nil, newEnginesDown(unresponsive)
+	}
 	return out, nil
+}
+
+// engineFailure reads one engines_msg row naming an engine that failed, as
+// [name, reason]; rows of engines that answered carry a response time
+// instead and give nil.
+func engineFailure(tr *html.Node) []string {
+	var name, why string
+	failed := false
+	for td := tr.FirstChild; td != nil; td = td.NextSibling {
+		switch {
+		case td.Type != html.ElementNode || td.Data != "td":
+		case hasClass(td, "engine-name"):
+			name = text(td)
+		case hasClass(td, "response-error"):
+			why, failed = text(td), true
+		}
+	}
+	if !failed || name == "" {
+		return nil
+	}
+	return []string{name, why}
 }
 
 func parseArticle(article *html.Node) (SearchResult, bool) {

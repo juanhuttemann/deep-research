@@ -45,12 +45,12 @@ func TestInitReportsOnlyCreatedFiles(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// The only thing init should report is the .env in the working dir.
+	// The only thing init should report is the .env beside them.
 	if len(created) != 1 {
 		t.Fatalf("expected only 1 created file, got %d: %v", len(created), created)
 	}
-	if created[0] != filepath.Join(".env") {
-		t.Errorf("expected created[0] == %q, got %q (created = %v)", filepath.Join(".env"), created[0], created)
+	if want := filepath.Join(cfgDir, ".env"); created[0] != want {
+		t.Errorf("expected created[0] == %q, got %q (created = %v)", want, created[0], created)
 	}
 	// It must never claim to have written the already-present yaml files.
 	for _, c := range created {
@@ -83,7 +83,7 @@ func TestInitReportsFreshCreation(t *testing.T) {
 
 	want := map[string]bool{
 		filepath.Join(cfgDir, "config.yaml"): false,
-		filepath.Join(".env"):                false,
+		filepath.Join(cfgDir, ".env"):        false,
 	}
 	for _, c := range created {
 		if _, ok := want[c]; ok {
@@ -310,61 +310,65 @@ func TestAgentConfigDoesNotRequireTheDeadResearcherPrompt(t *testing.T) {
 	}
 }
 
-// .env discovery used to walk from the working directory all the way to the
-// filesystem root, so an unrelated .env in $HOME or / was loaded into the run
-// and could inject an API key or a search URL nobody meant to use.
-func TestDotEnvSearchStopsAtTheProjectRoot(t *testing.T) {
-	outside := t.TempDir()
-	writeFile(t, filepath.Join(outside, ".env"), "OPENAI_MODEL=leaked-from-above\n")
-	project := filepath.Join(outside, "project")
-	if err := os.MkdirAll(filepath.Join(project, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	sub := filepath.Join(project, "cmd", "app")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	oldWd, err := os.Getwd()
+// Settings were read from the working directory's config/ and the nearest
+// .env above it, so a run inside a project took that project's
+// config/config.yaml as its own and its .env's OPENAI_API_KEY over the key
+// deep-research was set up with. Only the config directory is read now, and
+// a project's files that hold deep-research settings are named, not dropped
+// in silence.
+func TestSettingsComeOnlyFromTheConfigDir(t *testing.T) {
+	// Set, then unset, so the test restores it while .env can still fill it
+	// in: godotenv never overrides a variable that exists, even empty.
+	t.Setenv("OPENAI_MODEL", "")
+	_ = os.Unsetenv("OPENAI_MODEL")
+	cfgDir := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	project := t.TempDir()
+	t.Chdir(project)
+	writeFile(t, filepath.Join(project, ".env"), "OPENAI_MODEL=from-the-project\nSEARXNG_URL=http://project:8888\n")
+	writeFile(t, filepath.Join(project, "config", "config.yaml"), "sources_per_topic: 99\n")
+	writeFile(t, filepath.Join(cfgDir, ".env"), "OPENAI_MODEL=from-the-config-dir\n")
+	cfg, err := Load()
 	if err != nil {
-		t.Fatalf("getwd: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-	if err := os.Chdir(sub); err != nil {
-		t.Fatalf("chdir: %v", err)
+	if cfg.OpenAIModel != "from-the-config-dir" {
+		t.Errorf("model = %q, want the config dir's", cfg.OpenAIModel)
 	}
-
-	got := findDotEnv()
-	for _, p := range got {
-		if strings.HasPrefix(p, outside) && !strings.HasPrefix(p, project) {
-			t.Errorf("loaded a .env from above the project root: %q (found %v)", p, got)
-		}
+	if cfg.SourcesPerTopic == 99 {
+		t.Error("the project's config/config.yaml was read")
+	}
+	if got := StrayFiles(); len(got) != 2 {
+		t.Errorf("StrayFiles() = %v, want the project's config.yaml and .env", got)
 	}
 }
 
-// A .env inside the project is still found from a subdirectory.
-func TestDotEnvIsFoundFromASubdirectory(t *testing.T) {
-	project := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(project, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+// A project's own .env (an API key, a database URL) is the project's, and
+// must not be reported as misplaced deep-research settings.
+func TestAProjectsOwnEnvIsNotStray(t *testing.T) {
+	t.Chdir(t.TempDir())
+	writeFile(t, ".env", "OPENAI_API_KEY=sk-project\nDATABASE_URL=postgres://x\n# SEARXNG_URL=commented\n")
+	// The deep-research repo's config/config.yaml is the embedded defaults'
+	// source; running from a checkout must not warn about it.
+	writeFile(t, filepath.Join("config", "config.yaml"), embeddedConfig("config.yaml"))
+	if got := StrayFiles(); len(got) != 0 {
+		t.Errorf("StrayFiles() = %v, want none", got)
 	}
-	writeFile(t, filepath.Join(project, ".env"), "OPENAI_MODEL=from-project\n")
-	sub := filepath.Join(project, "internal", "pkg")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
+// init --docker left the reader to add SEARXNG_URL to a .env by hand. It is
+// written for them, once, and a URL they chose is left alone.
+func TestUseLocalSearXNG(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".env"), "OPENAI_MODEL=m")
+	for i, want := range []bool{true, false} {
+		wrote, err := UseLocalSearXNG(dir)
+		if err != nil || wrote != want {
+			t.Fatalf("call %d: wrote=%v err=%v, want %v", i+1, wrote, err, want)
+		}
 	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-	if err := os.Chdir(sub); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-
-	want := filepath.Join(project, ".env")
-	if got := findDotEnv(); len(got) != 1 || got[0] != want {
-		t.Errorf("findDotEnv() = %v, want [%s]", got, want)
+	b, _ := os.ReadFile(filepath.Join(dir, ".env"))
+	if string(b) != "OPENAI_MODEL=m\nSEARXNG_URL="+LocalSearXNG+"\n" {
+		t.Errorf(".env = %q", b)
 	}
 }

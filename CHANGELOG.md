@@ -7,6 +7,25 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- **Settings are read only from the config directory**,
+  `~/.config/deep-research/` (`$DEEP_RESEARCH_CONFIG_DIR` when set),
+  whatever folder a run starts in. The working directory's
+  `config/config.yaml` and the nearest `.env` above it are no longer read.
+  A run inside a project took that project's `config/config.yaml` as its
+  own settings and its `.env`'s `OPENAI_API_KEY` over the key deep-research
+  was set up with, and the same command behaved differently in every
+  folder. `init` writes the `.env` template into the config directory too.
+  A working-directory file that holds deep-research settings is named in a
+  warning on every run and by `doctor`, so a setup that relied on one says
+  what to move instead of silently changing.
+- `init --docker` sets SearXNG up in the config directory and adds
+  `SEARXNG_URL=http://localhost:8888` to its `.env` (unless one is set).
+  It then prints the one command left, `docker compose -f
+  <config dir>/docker-compose.yml up -d`. It used to write into whatever
+  folder it ran in and leave the `.env` line to the reader. It is now the
+  first fix every search failure names, and `doctor` warns on public
+  instances even when they answer, recommending it.
+
 - `doctor` says what to do next. A failed or weak check is followed by an
   `→` line with the command to run or the setting to change. When public
   SearXNG instances refuse, it names both fixes, `deep-research init
@@ -19,12 +38,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   nothing.
 - `doctor`'s budget line says "at most 7, in every --mode" with web search.
   It used to read "quick 7, standard 7, deep 7", which looked like a bug.
-  Its `config` line says when the file found is the working directory's
-  `config/`, which runs started elsewhere do not read, and where `init`
-  would write one when there is none.
+  Its `config` line says where `init` would write a config when there is
+  none.
 - A run's advice when public SearXNG refuses it now names the exact
   settings, and links `docs/services.md` instead of giving a repo path that
   binary installs do not have.
+
+### Fixed
+
+- A public SearXNG instance whose own engines failed (Google suspended,
+  say) served its HTML page with an empty result list. That was read as a
+  search that found nothing, so the instance passed `doctor` with
+  "0 results" and answered a run with nothing. The page's engine-error
+  table is now read like the JSON API's `unresponsive_engines`: the search
+  fails, names the engines, and the next instance is tried.
 - The Agent Skill asks for the question when it is invoked without one. It
   requires 0.13.0 or newer and upgrades an older binary with
   `deep-research update`. It reads doctor's `✓`/`!`/`✗` marks and `→`

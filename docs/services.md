@@ -184,7 +184,9 @@ starting usually means the API is still booting; retry before investigating.
 
 ## 3. Point deep-research at them
 
-Add the URLs to the `.env` that `deep-research init` writes:
+Add the URLs to the `.env` that `deep-research init` writes in the config
+directory (`~/.config/deep-research/.env`; `init --docker` adds the
+SearXNG line for you):
 
 ```sh
 SEARXNG_URL=http://localhost:8888
