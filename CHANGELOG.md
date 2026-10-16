@@ -5,6 +5,31 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- `doctor` says what to do next. A failed or weak check is followed by an
+  `→` line with the command to run or the setting to change. When public
+  SearXNG instances refuse, it names both fixes, `deep-research init
+  --docker` with `SEARXNG_URL`, or `DEEP_RESEARCH_SEARCH_ENGINE=exa`/`tavily`
+  with its key. Before, it printed the failure and stopped there. A doctor
+  with no failures ends on `ready to run`.
+- `doctor` warns (`!`) instead of passing when there is no scraper, since
+  every claim is then checked against a snippet, and when the search
+  answers a common query with no results, since the run would then find
+  nothing.
+- `doctor`'s budget line says "at most 7, in every --mode" with web search.
+  It used to read "quick 7, standard 7, deep 7", which looked like a bug.
+  Its `config` line says when the file found is the working directory's
+  `config/`, which runs started elsewhere do not read, and where `init`
+  would write one when there is none.
+- A run's advice when public SearXNG refuses it now names the exact
+  settings, and links `docs/services.md` instead of giving a repo path that
+  binary installs do not have.
+- The Agent Skill asks for the question when it is invoked without one. It
+  requires 0.13.0 or newer and upgrades an older binary with
+  `deep-research update`. It reads doctor's `✓`/`!`/`✗` marks and `→`
+  lines, stopping on a failure and passing on a warning's cost.
+
 ## [0.13.0] - 2026-10-15
 
 ### Added

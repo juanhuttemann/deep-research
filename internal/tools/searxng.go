@@ -270,6 +270,18 @@ func SearchResting(err error) bool {
 	return ok && pe.skipped == pe.total
 }
 
+// ServicesDoc is where running SearXNG and Firecrawl is explained. A link,
+// not a repo path: most readers have the binary and no checkout to look in.
+const ServicesDoc = "https://github.com/juanhuttemann/deep-research/blob/main/docs/services.md"
+
+// SearchFix is the way out when public SearXNG will not answer: a search of
+// the reader's own, or a hosted engine. Each names the exact setting, since
+// "set search_engine" left the reader to find out where and to what.
+const SearchFix = "run your own SearXNG (deep-research init --docker, docker compose up -d," +
+	" then SEARXNG_URL=http://localhost:8888; " + ServicesDoc + ")," +
+	" or search through a hosted engine: DEEP_RESEARCH_SEARCH_ENGINE=exa with EXA_API_KEY," +
+	" or DEEP_RESEARCH_SEARCH_ENGINE=tavily with TAVILY_API_KEY"
+
 // PublicSearchRefused reports whether err is every public SearXNG instance
 // refusing a query with a challenge, a block or a limiter: not a fault to fix
 // in the reader's setup, but the sign that the public pool will not serve

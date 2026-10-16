@@ -20,7 +20,17 @@ type Check struct {
 	Name   string
 	OK     bool
 	Detail string
+	// Warn marks a check that passed on a setup that costs the run quality,
+	// such as no scraper: nothing to fail on, but worth fixing.
+	Warn bool
+	// Fix is the next step when the check failed or warned: the setting to
+	// change or the command to run. Before it, a failed search printed what
+	// broke and left the reader to work out the way out.
+	Fix string
 }
+
+// ServicesDoc is where running SearXNG and Firecrawl is explained.
+const ServicesDoc = tools.ServicesDoc
 
 // diagnoseTimeout bounds each check: doctor is for finding out quickly.
 const diagnoseTimeout = 20 * time.Second
@@ -253,10 +263,18 @@ func checkSearch(ctx context.Context, cfg Config) Check {
 	res, err := engine.Search(ctx, "open source metasearch engine")
 	if err != nil {
 		c.Detail = fmt.Sprintf("%s: %v", tools.SearchStatus(err), err)
+		c.Fix = searchFix(err)
 		return c
 	}
 	c.OK = true
 	c.Detail = fmt.Sprintf("%s answered (%d %s)", searchEndpoint(engine), len(res), pick(len(res), "result", "results"))
+	if len(res) == 0 {
+		// Nothing for a query every index has pages on is a backend that
+		// answers and does not search; it passed as ✓ and the run then
+		// found nothing.
+		c.Warn = true
+		c.Fix = "a search for a common subject came back empty, so a run may find nothing; " + tools.SearchFix
+	}
 	switch {
 	case strings.EqualFold(cfg.SearXNGURL, "auto") && !tools.InlineText(cfg.SearchEngine):
 		c.Detail += " — a public instance: every query goes to a third party you did not pick"
@@ -264,6 +282,22 @@ func checkSearch(ctx context.Context, cfg Config) Check {
 		c.Detail += " — a hosted service: every query goes to it and spends credit"
 	}
 	return c
+}
+
+// searchFix is the next step after a failed search check, by how it failed.
+// It matches the advice a run gives after the same failure.
+func searchFix(err error) string {
+	switch status := tools.SearchStatus(err); {
+	case tools.PublicSearchRefused(err):
+		return "public instances refuse automated queries; retrying will not help. " + upperFirst(tools.SearchFix)
+	case status == "unreachable" && tools.UnreachableService(err) != "SearXNG":
+		return "check this machine's network: the hosted engine did not answer"
+	case status == "unreachable":
+		return "check that SEARXNG_URL is right and that SearXNG is running there"
+	case status == "unauthorized" || status == "quota":
+		return "check the engine's API key (EXA_API_KEY or TAVILY_API_KEY) and its remaining credit"
+	}
+	return ""
 }
 
 // searchEndpoint names who answered: the SearXNG instance, or the hosted API.
@@ -292,10 +326,18 @@ func checkScraper(ctx context.Context, cfg Config) Check {
 		return c
 	}
 	if scraper == nil {
-		c.OK, c.Detail = true, "none — sources are search snippets, labelled snippet only"
+		c.OK = true
 		if tools.InlineText(cfg.SearchEngine) {
 			c.Detail = "none needed — " + strings.ToLower(cfg.SearchEngine) + " returns page text with each result"
+			return c
 		}
+		// Not a failure, but every claim is then checked against a search
+		// snippet of a page, never the page: the default setup said ✓ for
+		// the weakest evidence a run can have.
+		c.Warn = true
+		c.Detail = "none — sources are search snippets only, never the full page"
+		c.Fix = "for full page text set FIRECRAWL_URL (" + ServicesDoc + ")," +
+			" or DEEP_RESEARCH_SCRAPER=exa with EXA_API_KEY, or tavily with TAVILY_API_KEY"
 		return c
 	}
 	where := scraperName(cfg, scraper)

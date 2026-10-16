@@ -170,7 +170,7 @@ func initDocker(out io.Writer) error {
 	fmt.Fprintln(out, "\nLocal search (docker-compose.yml, searxng/settings.yml):")
 	fmt.Fprintln(out, "  docker compose up -d")
 	fmt.Fprintln(out, "  echo 'SEARXNG_URL=http://localhost:8888' >> .env")
-	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: docs/services.md")
+	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: "+agent.ServicesDoc)
 	return nil
 }
 
@@ -744,17 +744,29 @@ func runDoctor(cmd *cobra.Command, d Deps, domains []string) error {
 	if len(domains) > 0 {
 		checks = append(checks, agent.DiagnoseDomains(cmd.Context(), d.Config.Config, domains)...)
 	}
+	warnings := 0
 	for _, c := range checks {
 		mark := "✓"
-		if !c.OK {
+		switch {
+		case !c.OK:
 			mark, problems = "✗", problems+1
+		case c.Warn:
+			mark, warnings = "!", warnings+1
 		}
 		fmt.Fprintf(out, "%s %-8s %s\n", mark, c.Name, c.Detail)
+		if c.Fix != "" && (!c.OK || c.Warn) {
+			fmt.Fprintf(out, "  %-8s → %s\n", "", c.Fix)
+		}
 	}
 	fmt.Fprintf(out, "  budget   %s\n", callBudget(d.Config.SearchEnabled()))
 	if problems > 0 {
 		return fmt.Errorf("doctor found %d problem(s)", problems)
 	}
+	if warnings > 0 {
+		fmt.Fprintf(out, "ready to run, with %d warning(s) above\n", warnings)
+		return nil
+	}
+	fmt.Fprintln(out, "ready to run")
 	return nil
 }
 
@@ -762,8 +774,21 @@ func runDoctor(cmd *cobra.Command, d Deps, domains []string) error {
 func configSource() string {
 	for _, dir := range config.Dirs() {
 		if p := filepath.Join(dir, "config.yaml"); fileExists(p) {
+			// The working directory's config/ is read first, so the same
+			// command run from another folder reads another config: say so,
+			// or a setting that "stopped working" there has no explanation.
+			if !filepath.IsAbs(p) {
+				return p + " (in this folder: runs started elsewhere do not read it)"
+			}
 			return p
 		}
+	}
+	// Where init would write: DEEP_RESEARCH_CONFIG_DIR, else the user's dir.
+	if dir := os.Getenv("DEEP_RESEARCH_CONFIG_DIR"); dir != "" {
+		return "embedded defaults (no config.yaml found; `deep-research init` writes one to " + dir + ")"
+	}
+	if dir, err := config.UserDir(); err == nil {
+		return "embedded defaults (no config.yaml found; `deep-research init` writes one to " + dir + ")"
 	}
 	return "embedded defaults (no config.yaml found)"
 }
@@ -784,6 +809,12 @@ func callBudget(webSearch bool) string {
 			n += 2 * (m.SubTopics + ui.MaxFollowUps)
 		}
 		parts[i] = fmt.Sprintf("%s %d", m.Key, n)
+	}
+	// With web search every tier spends the same: the tiers differ in
+	// searches, not model calls. "quick 7, standard 7, deep 7" read as a
+	// bug, so a uniform budget is said once.
+	if webSearch {
+		return "model requests per run: at most 7, in every --mode (the modes differ in searches)"
 	}
 	return "model requests per run: " + strings.Join(parts, ", ")
 }

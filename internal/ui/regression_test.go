@@ -2195,7 +2195,7 @@ func TestPublicSearchRefusalIsExplainedOnce(t *testing.T) {
 	if hints != 1 {
 		t.Errorf("the refusal advice was given %d times, want once", hints)
 	}
-	if got := d.searchFailure(nil).Error(); !strings.Contains(got, "search_engine") {
+	if got := d.searchFailure(nil).Error(); !strings.Contains(got, "DEEP_RESEARCH_SEARCH_ENGINE=exa") {
 		t.Errorf("run error gives no way out: %q", got)
 	}
 }
