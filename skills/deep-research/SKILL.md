@@ -12,6 +12,13 @@ evidence, fact-checks every claim against the fetched page text, and writes a
 report. One run takes minutes and spends model requests; run it once per
 question, not as a quick lookup.
 
+## 0. The question
+
+If the skill was invoked without a question, run the preflight below and
+then ask for one, along with any constraints that change the answer (dates,
+region, versions, budget). Do not invent a question to test the setup; a run
+spends the user's model requests.
+
 ## 1. Preflight
 
 ```bash
@@ -23,16 +30,38 @@ If it is not installed, tell the user and offer the installer:
 - Linux, macOS, WSL2: `curl -fsSL https://raw.githubusercontent.com/juanhuttemann/deep-research/main/scripts/install.sh | bash`
 - Windows: `iex (irm https://raw.githubusercontent.com/juanhuttemann/deep-research/main/scripts/install.ps1)`
 
-Then check the model, key and search backend (no model tokens spent):
+This skill needs version 0.13.0 or newer: older releases lack flags it uses
+(`--domains`) and fail with "unknown flag". If the version is older, run
+`deep-research update` (it verifies the release checksum and replaces the
+binary in place; no key or config needed), then check the version again.
+`update` refuses a binary built from source (`dev` or a `git describe`
+version); say so and leave that build alone.
+
+Then check the model, key, search and scraper (no model tokens spent; the
+search check can take up to a minute):
 
 ```bash
 deep-research doctor
 ```
 
-It exits non-zero when a check fails. Show the user the failing line and
-stop. A missing key is fixed by the user running `deep-research login`,
-which is interactive: do not run it for them, and never ask them to paste a
-key into the conversation.
+Each line starts with `✓` (fine), `!` (works, at lower quality) or `✗`
+(broken). A `→` line under a `!` or `✗` gives the next step: the command to
+run or the setting to change.
+
+- **Exit status non-zero (a `✗`)**: show the user each `✗` line and the `→`
+  line under it, and stop. Do not start a run.
+- **Exit status zero with `!` lines**: the run will work, but say what each
+  warning costs (for example, no scraper means every claim is checked
+  against a search snippet, not the page) and pass on its `→` line, then go
+  on.
+- A missing or rejected model key is fixed by the user running
+  `deep-research login`, which is interactive: do not run it for them, and
+  never ask them to paste a key into the conversation. The same goes for any
+  `→` step that needs an API key (`EXA_API_KEY`, `TAVILY_API_KEY`): the user
+  sets it themselves.
+- The `config` line names the `config.yaml` the run reads. A path under
+  `config/` in the working directory applies only to runs started there.
+  If a setting the user made seems ignored, this line is where to look.
 
 ## 2. Run
 

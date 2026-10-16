@@ -413,3 +413,27 @@ func TestResumedDomainListIsParsedLikeATypedOne(t *testing.T) {
 		t.Errorf("checkpoint with GO.DEV: err=%v scoped=%v, want it normalised to go.dev", err, scoped)
 	}
 }
+
+// doctor printed what broke and stopped; the next step now follows a failed
+// line, and a doctor that passes says the run is ready. The budget read
+// "quick 7, standard 7, deep 7", which looked like a bug, so a budget that is
+// the same in every mode is said once.
+func TestDoctorSaysWhatToDoNext(t *testing.T) {
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", t.TempDir())
+	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIModel: "m", ModelCallTimeout: time.Second}}}
+	cmd := New(func() (Deps, error) { return deps, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"doctor"})
+	_ = cmd.Execute()
+	if strings.Contains(out.String(), "ready to run") {
+		t.Errorf("a doctor with a problem said ready:\n%s", out.String())
+	}
+	if got := callBudget(true); !strings.Contains(got, "at most 7, in every --mode") {
+		t.Errorf("web-search budget = %q", got)
+	}
+	if got := configSource(); !strings.Contains(got, "deep-research init") {
+		t.Errorf("no config found, and no word on how to make one: %q", got)
+	}
+}

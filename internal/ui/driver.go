@@ -78,8 +78,7 @@ type Driver struct {
 // publicRefusalHint is what to do when the public SearXNG instances refuse
 // the run: they challenge scripted traffic by design, so retrying is no fix.
 const publicRefusalHint = "Public SearXNG instances challenge automated queries, so results will be thin. " +
-	"For reliable search, run SearXNG locally and set SEARXNG_URL (docs/services.md), " +
-	"or set search_engine to exa or tavily with its API key"
+	"For reliable search, " + tools.SearchFix
 
 func NewDriver(a agent.Assistant, sink *MultiSink, input Input, parallelism int) *Driver {
 	if parallelism <= 0 {

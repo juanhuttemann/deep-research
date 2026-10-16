@@ -487,6 +487,19 @@ each `--mode` tier spends. With `--domains`, one more line per site says
 whether a run could search and read it (see "Researching only your own
 sites"). It exits non-zero when any check fails.
 
+Each line is marked `✓` (fine), `!` (works, at lower quality) or `✗`
+(broken), and an `→` line under a `!` or `✗` gives the next step: the
+command to run or the setting to change. Two setups warn rather than pass:
+a search that answers with no results for a common query, and no scraper,
+which leaves every claim checked against a search snippet instead of the
+page. When public SearXNG instances refuse the check, the `→` line names
+both ways out, a SearXNG of your own (`deep-research init --docker`) or a
+hosted engine (`DEEP_RESEARCH_SEARCH_ENGINE=exa` with `EXA_API_KEY`, or
+`tavily` with `TAVILY_API_KEY`). The `config` line says when the
+`config.yaml` it found is the working directory's `config/`, which runs
+started elsewhere do not read, and where `deep-research init` would write
+one when there is none. A doctor with no failures ends on `ready to run`.
+
 ## `update`
 
 ```bash

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
 func checkNamed(t *testing.T, checks []Check, name string) Check {
@@ -195,5 +197,52 @@ func TestClaudeCheckFallsBackToTheModelList(t *testing.T) {
 	cfg.AnthropicAPIKey = "wrong"
 	if c := CheckModel(context.Background(), cfg); c.OK || !strings.Contains(c.Detail, "401") {
 		t.Errorf("rejected key passed: %+v", c)
+	}
+}
+
+// A failed search said what broke and nothing about the way out, so the
+// reader stopped there. Each failure now carries the next step, matched to
+// how it failed.
+func TestDiagnoseSaysHowToFixSearch(t *testing.T) {
+	challenge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><title>Making sure you're not a bot!</title></html>`)
+	}))
+	defer challenge.Close()
+	pool := tools.NewSearXNGClient(challenge.URL+","+challenge.URL+"/x", 0)
+	pool.Public = true
+	_, err := pool.Search(context.Background(), "q")
+	if fix := searchFix(err); !strings.Contains(fix, "retrying will not help") ||
+		!strings.Contains(fix, "init --docker") || !strings.Contains(fix, "DEEP_RESEARCH_SEARCH_ENGINE=exa") {
+		t.Errorf("public refusal fix = %q", fix)
+	}
+
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	c := checkSearch(context.Background(), Config{SearXNGURL: dead.URL, ModelCallTimeout: time.Second})
+	if c.OK || !strings.Contains(c.Fix, "SEARXNG_URL") {
+		t.Errorf("an unreachable SearXNG gave no fix: %+v", c)
+	}
+}
+
+// A search that answers with nothing for a common subject passed as ✓, and
+// the run then found nothing; no scraper passed as ✓ too, though every claim
+// is then checked against a snippet. Both are warnings with a way out.
+func TestDiagnoseWarnsAboutWeakSetups(t *testing.T) {
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"results":[]}`)
+	}))
+	defer empty.Close()
+	cfg := Config{SearXNGURL: empty.URL, ModelCallTimeout: time.Second}
+	if c := checkSearch(context.Background(), cfg); !c.OK || !c.Warn || c.Fix == "" {
+		t.Errorf("an empty search answer did not warn: %+v", c)
+	}
+	if c := checkScraper(context.Background(), cfg); !c.OK || !c.Warn || !strings.Contains(c.Fix, "FIRECRAWL_URL") {
+		t.Errorf("no scraper did not warn: %+v", c)
+	}
+	cfg.SearchEngine, cfg.ExaAPIKey = "exa", "k"
+	if c := checkScraper(context.Background(), cfg); c.Warn {
+		t.Errorf("a hosted engine needs no scraper, yet it warned: %+v", c)
 	}
 }
