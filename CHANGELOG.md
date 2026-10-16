@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-16
+
 ### Changed
 
 - **Settings are read only from the config directory**,
