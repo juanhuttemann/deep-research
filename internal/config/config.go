@@ -184,7 +184,12 @@ services:
       - ./searxng:/etc/searxng:z
 `
 
-// searxngSettings enables the JSON API, which SearXNG ships disabled.
+// searxngSettings enables the JSON API, which SearXNG ships disabled, and
+// more web engines than its default three (Brave, DuckDuckGo, Google CSE).
+// Engines limit by IP address, so a local SearXNG is throttled like any
+// client: with three, a run's searches suspended all of them within a dozen
+// queries and the rest of the run found nothing, while with these Yahoo and
+// Bing still answered once the default three refused.
 const searxngSettings = `use_default_settings: true
 
 server:
@@ -194,6 +199,18 @@ search:
   formats:
     - html
     - json
+
+# More engines spread a run's queries, so one engine's rate limit does not
+# leave a search with no answer. Each is SearXNG's own definition, switched on.
+engines:
+  - name: bing
+    disabled: false
+  - name: google
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: qwant
+    disabled: false
 `
 
 // InitDocker writes a docker-compose.yml and searxng/settings.yml into dir

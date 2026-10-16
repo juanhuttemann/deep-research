@@ -258,6 +258,12 @@ func TestIncompleteRunIsSavedAndFails(t *testing.T) {
 	if _, statErr := os.Stat(history); statErr != nil {
 		t.Errorf("incomplete run was not saved to history: %v", statErr)
 	}
+	// It keeps its checkpoint, and says how to resume it: the reader re-ran
+	// the whole question, paying again for every search that had worked.
+	cps, _ := filepath.Glob(filepath.Join(dir, "*.partial.json"))
+	if len(cps) != 1 || err == nil || !strings.Contains(err.Error(), "deep-research --resume "+cps[0]) {
+		t.Errorf("checkpoints %v; err = %v, want the resume command naming it", cps, err)
+	}
 	if mds, _ := filepath.Glob(filepath.Join(dir, "*.md")); len(mds) != 1 {
 		t.Errorf("incomplete run wrote %d .md artifacts, want 1", len(mds))
 	}

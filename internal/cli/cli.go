@@ -488,6 +488,14 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 // run keeps it. A run watched in the terminal then takes questions about it.
 func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, res ui.RunResult, save, silent, jsonl bool) error {
 	if err := deliver(cmd, d, res.Report, save, silent || jsonl); err != nil {
+		// An incomplete run keeps its checkpoint, and nothing said so: the
+		// reader re-ran the whole question, paying again for every search
+		// that had worked. Searches refused by a limit are retried by a
+		// resume; the limit itself lifts in minutes.
+		if p := rec.CheckpointPath(); p != "" && res.Report != nil && res.Report.Error != "" {
+			return fmt.Errorf("%w. Retry only what failed with: deep-research --resume %s"+
+				" (if searches were rate-limited, wait a few minutes first)", err, p)
+		}
 		return err
 	}
 	if err := rec.Discard(); err != nil {
