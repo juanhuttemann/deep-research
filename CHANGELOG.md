@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-16
+
 ### Changed
 
 - `init --docker`'s SearXNG turns on Bing, Google, Yahoo and Qwant beside
@@ -806,7 +808,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/juanhuttemann/deep-research/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/juanhuttemann/deep-research/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/juanhuttemann/deep-research/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/juanhuttemann/deep-research/compare/v0.11.0...v0.12.0
