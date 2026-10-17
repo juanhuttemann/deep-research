@@ -211,7 +211,7 @@ func TestRelevanceMatchesAcrossAccents(t *testing.T) {
 		"Cuales Son Las Ventajas De La Energia Nuclear En Espana",
 		"ENERGÍA NUCLEAR EN ESPAÑA",
 	} {
-		if got := relevance(terms, title, ""); got != 1 {
+		if got := relevance(foldAll(terms), title, ""); got != 1 {
 			t.Errorf("%q scored %.2f against %q, want 1", title, got, terms)
 		}
 	}

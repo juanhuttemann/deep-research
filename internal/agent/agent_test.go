@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kaptinlin/jsonrepair"
 	"github.com/microsoft/agent-framework-go/agent"
 	"github.com/microsoft/agent-framework-go/message"
 	"github.com/microsoft/agent-framework-go/tool"
@@ -653,5 +654,47 @@ func TestCollectResponseProgressMatchesResponseText(t *testing.T) {
 	}
 	if resp.String() != got[len(got)-1] {
 		t.Errorf("collected %q, last progress %q", resp.String(), got[len(got)-1])
+	}
+}
+
+// eagerJSONPayloads is jsonPayloads as it was before it became lazy, kept as
+// the reference for the order and the set of candidates.
+func eagerJSONPayloads(out string) []string {
+	payloads := []string{out}
+	if i := strings.Index(out, "["); i >= 0 {
+		if j := strings.LastIndex(out, "]"); j > i {
+			payloads = append(payloads, out[i:j+1])
+		}
+	}
+	if i := strings.Index(out, "{"); i >= 0 {
+		if j := strings.LastIndex(out, "}"); j > i {
+			payloads = append(payloads, out[i:j+1])
+		}
+	}
+	for _, p := range payloads {
+		if fixed, err := jsonrepair.Repair(p); err == nil && fixed != p {
+			payloads = append(payloads, fixed)
+		}
+	}
+	return payloads
+}
+
+// jsonPayloads makes its repaired copies only when they are reached; what it
+// yields, and in what order, must be what the eager list held, or a parse
+// that used to find its payload would find another one first.
+func TestJSONPayloadsYieldsTheEagerCandidatesInOrder(t *testing.T) {
+	for _, out := range []string{
+		`{"answer":"yes","claims":[{"id":"c1"}]}`,
+		"Here it is:\n```json\n{\"answer\":\"yes\",\"claims\":[1,2,]}\n```\nDone.",
+		`[{"title":"T","content":"x"},]`,
+		`{"answer": "unterminated`,
+		"prose with no JSON at all",
+		`] backwards [`,
+		"",
+	} {
+		got := slices.Collect(jsonPayloads(out))
+		if want := eagerJSONPayloads(out); !slices.Equal(got, want) {
+			t.Errorf("jsonPayloads(%q)\n got %q\nwant %q", out, got, want)
+		}
 	}
 }

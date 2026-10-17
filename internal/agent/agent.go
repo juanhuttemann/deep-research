@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"net"
 	"net/http"
@@ -1637,7 +1638,7 @@ func defaultSubTopics(question string) []SubTopic {
 // {"results":...}, or JSON buried in prose — so several shapes are tried
 // before returning no findings. Prose and error messages are not evidence.
 func parseSearchResults(out string, query string) []Finding {
-	for _, payload := range jsonPayloads(out) {
+	for payload := range jsonPayloads(out) {
 		if findings := tryUnmarshalFindings(payload, query); len(findings) > 0 {
 			return findings
 		}
@@ -1645,31 +1646,40 @@ func parseSearchResults(out string, query string) []Finding {
 	return nil
 }
 
-// jsonPayloads returns the whole output plus its outermost JSON array and
+// jsonPayloads yields the whole output, then its outermost JSON array and
 // object substrings, so a payload wrapped in prose is still found, and then
 // repaired copies of each.
-func jsonPayloads(out string) []string {
-	payloads := []string{out}
-	if i := strings.Index(out, "["); i >= 0 {
-		if j := strings.LastIndex(out, "]"); j > i {
-			payloads = append(payloads, out[i:j+1])
+func jsonPayloads(out string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		payloads := []string{out}
+		if i := strings.Index(out, "["); i >= 0 {
+			if j := strings.LastIndex(out, "]"); j > i {
+				payloads = append(payloads, out[i:j+1])
+			}
+		}
+		if i := strings.Index(out, "{"); i >= 0 {
+			if j := strings.LastIndex(out, "}"); j > i {
+				payloads = append(payloads, out[i:j+1])
+			}
+		}
+		for _, p := range payloads {
+			if !yield(p) {
+				return
+			}
+		}
+		// Repaired copies come last, and each is made only when every
+		// candidate before it has failed: made up front, the repairs were 98%
+		// of a structured parse's CPU on answers that parsed as written. The
+		// analysis and the fact-check are not sent in JSON mode, so a
+		// trailing comma or an unescaped quote in a claim no longer costs the
+		// whole answer. A cut-off answer never gets here: errCutOff stops it
+		// first.
+		for _, p := range payloads {
+			if fixed, err := jsonrepair.Repair(p); err == nil && fixed != p && !yield(fixed) {
+				return
+			}
 		}
 	}
-	if i := strings.Index(out, "{"); i >= 0 {
-		if j := strings.LastIndex(out, "}"); j > i {
-			payloads = append(payloads, out[i:j+1])
-		}
-	}
-	// Repaired copies come last, tried only once every candidate as written
-	// has failed. The analysis and the fact-check are not sent in JSON mode,
-	// so a trailing comma or an unescaped quote in a claim no longer costs the
-	// whole answer. A cut-off answer never gets here: errCutOff stops it first.
-	for _, p := range payloads {
-		if fixed, err := jsonrepair.Repair(p); err == nil && fixed != p {
-			payloads = append(payloads, fixed)
-		}
-	}
-	return payloads
 }
 
 // tryUnmarshalFindings decodes a payload as a findings array directly or as
@@ -1841,7 +1851,7 @@ func parseConflicts(v any) []Conflict {
 // Structured phases may wrap their JSON in explanatory prose. Decode those
 // payloads separately from report fence cleanup, which must preserve prose.
 func parseJSONObject(out string) (map[string]any, bool) {
-	for _, payload := range jsonPayloads(out) {
+	for payload := range jsonPayloads(out) {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(payload), &m); err == nil {
 			return m, true
