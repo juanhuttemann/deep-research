@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/transform"
 )
 
 // qPrefix is the research question every sub-agent query is anchored on.
@@ -103,7 +105,7 @@ var noiseCorpus = []struct {
 func TestRelevanceSeparatesSignalFromNoise(t *testing.T) {
 	for _, f := range noiseCorpus {
 		for _, r := range f.results {
-			got := relevance(f.terms, r.title, r.snippet)
+			got := relevance(foldAll(f.terms), r.title, r.snippet)
 			if r.relevant && got < minRelevance {
 				t.Errorf("relevant source scored %.3f (floor %.2f): %s", got, minRelevance, r.url)
 			}
@@ -207,12 +209,12 @@ func TestRelevanceRejectsAnAllNoiseResultSet(t *testing.T) {
 // bare: the sync package's own documentation scored zero against them.
 func TestRelevanceMatchesQualifiedIdentifiersBare(t *testing.T) {
 	terms := []string{"sync.Mutex", "sync.RWMutex"}
-	if got := relevance(terms, "sync package - sync - Go Packages",
+	if got := relevance(foldAll(terms), "sync package - sync - Go Packages",
 		"A RWMutex.RLock cannot be upgraded into a RWMutex.Lock"); got != 1 {
 		t.Errorf("bare identifiers scored %.2f, want 1", got)
 	}
 	// A short last segment is not a stand-in for the whole term.
-	if got := relevance([]string{"google.com", "node.js"}, "Comments on JSON", ""); got != 0 {
+	if got := relevance(foldAll([]string{"google.com", "node.js"}), "Comments on JSON", ""); got != 0 {
 		t.Errorf("short segments matched: %.2f", got)
 	}
 }
@@ -232,11 +234,11 @@ func TestRelevanceIgnoresTermsTooShortToMatch(t *testing.T) {
 // on "Ventajas de la energía nuclear". A phrase matches on all of its words.
 func TestRelevanceMatchesPhrasesByTheirWords(t *testing.T) {
 	terms := []string{"ventajas energía nuclear", "residuos radiactivos"}
-	if got := relevance(terms, "Ventajas de la energía nuclear", "Los residuos son radiactivos durante siglos."); got != 1 {
+	if got := relevance(foldAll(terms), "Ventajas de la energía nuclear", "Los residuos son radiactivos durante siglos."); got != 1 {
 		t.Errorf("phrase terms scored %.2f, want 1", got)
 	}
 	// Every word must be there: sharing one word is not mentioning the phrase.
-	if got := relevance(terms, "Ventajas de viajar en tren", ""); got != 0 {
+	if got := relevance(foldAll(terms), "Ventajas de viajar en tren", ""); got != 0 {
 		t.Errorf("a page sharing one word of each phrase scored %.2f", got)
 	}
 }
@@ -300,5 +302,28 @@ func TestExcerptForPutsTheCitingClaimFirst(t *testing.T) {
 	got := ExcerptFor(b.String(), []string{"dual-fuel load 40,000 BTU/hr design temperature 5F"}, others, 500)
 	if !strings.Contains(got, "Dual-fuel is indicated") {
 		t.Errorf("the citing claim's passage was pushed out:\n%s", got)
+	}
+}
+
+// foldWith skips the Unicode transform when the lowered text is ASCII, on the
+// assumption that the transform hands ASCII back unchanged. This holds it to
+// the transform-always fold it replaced, including text that lowering turns
+// into ASCII (the Kelvin sign) or out of it (a dotted capital I).
+func TestFoldMatchesTheFullTransform(t *testing.T) {
+	full := func(s string) string {
+		out, _, err := transform.String(newFolder(), strings.ToLower(s))
+		if err != nil {
+			t.Fatalf("transform %q: %v", s, err)
+		}
+		return out
+	}
+	for _, s := range []string{
+		"", "Iterator", "sync.RWMutex", "Go 1.23 range-over-func\n\ttabs",
+		"Energía Nuclear", "naïve café", "K", "İstanbul", "ＡＢＣ",
+		"日本語のテキスト", "ガギグ", "Ünïcödé and ASCII", "\x7f\x00",
+	} {
+		if got, want := fold(s), full(s); got != want {
+			t.Errorf("fold(%q) = %q, the full transform gives %q", s, got, want)
+		}
 	}
 }

@@ -51,7 +51,14 @@ const minDistinctiveTerms = 2
 // "Energia" a page title spelled without accents. It is the folding search
 // analyzers apply, and like theirs it runs on both sides of a match: a script
 // it alters (Japanese voiced kana lose their marks too) still matches itself.
-func fold(s string) string { return foldWith(newFolder(), s) }
+func fold(s string) string {
+	// Checked before newFolder, whose buffers are the cost asciiFold avoids.
+	lower, ok := asciiFold(s)
+	if ok {
+		return lower
+	}
+	return transformFold(newFolder(), lower)
+}
 
 // newFolder is the transformer fold applies. Building one allocates its
 // buffers, which costs more than folding a paragraph, so a caller folding a
@@ -63,10 +70,33 @@ func newFolder() transform.Transformer {
 
 // foldWith is fold with the transformer t, which transform.String resets.
 func foldWith(t transform.Transformer, s string) string {
-	if out, _, err := transform.String(t, strings.ToLower(s)); err == nil {
+	lower, ok := asciiFold(s)
+	if ok {
+		return lower
+	}
+	return transformFold(t, lower)
+}
+
+// transformFold strips the combining marks from lower, already lower-cased.
+func transformFold(t transform.Transformer, lower string) string {
+	if out, _, err := transform.String(t, lower); err == nil {
 		return out
 	}
-	return strings.ToLower(s)
+	return lower
+}
+
+// asciiFold is s lower-cased, and whether that is already its fold. ASCII has
+// no combining marks, so the transform would hand it back unchanged: most
+// terms, snippets and English paragraphs skip it. Folding an eight-letter
+// word through it cost 8 KB in seven allocations.
+func asciiFold(s string) (string, bool) {
+	lower := strings.ToLower(s)
+	for i := range len(lower) {
+		if lower[i] >= utf8.RuneSelf {
+			return lower, false
+		}
+	}
+	return lower, true
 }
 
 // ScoredResult pairs a search result with its relevance to the query, so the
@@ -80,6 +110,10 @@ type ScoredResult struct {
 // mention. Substring matching is intentional: it costs nothing, absorbs
 // morphology ("mutexes", "read-heavy") and needs no word boundaries, which
 // CJK text does not mark.
+//
+// The terms come folded (see foldAll): a query's terms are folded once for
+// all of its results, and folding them again for every result was most of
+// ranking's cost.
 func relevance(terms []string, title, snippet string) float64 {
 	if len(terms) == 0 {
 		return 1 // nothing to judge against: keep the result
@@ -87,15 +121,23 @@ func relevance(terms []string, title, snippet string) float64 {
 	text := fold(title + " " + snippet)
 	matched := 0
 	for _, t := range terms {
-		if mentions(text, fold(t)) {
+		if mentions(text, t) {
 			matched++
 		}
 	}
 	return float64(matched) / float64(len(terms))
 }
 
+func foldAll(terms []string) []string {
+	out := make([]string, len(terms))
+	for i, t := range terms {
+		out[i] = fold(t)
+	}
+	return out
+}
+
 // PageRelevance is the share of query's words that page mentions, judged as
-// a search result is.
+// a search result is. queryWords folds them already.
 func PageRelevance(query, page string) float64 {
 	return relevance(queryWords(newFolder(), query), "", page)
 }
@@ -153,9 +195,10 @@ func rankByRelevance(in []SearchResult, terms []string) (kept, skipped []ScoredR
 		}
 		return kept, nil
 	}
+	folded := foldAll(terms)
 	scored := make([]ScoredResult, len(in))
 	for i, r := range in {
-		scored[i] = ScoredResult{SearchResult: r, Score: relevance(terms, r.Title, r.Content)}
+		scored[i] = ScoredResult{SearchResult: r, Score: relevance(folded, r.Title, r.Content)}
 	}
 	sort.SliceStable(scored, func(i, j int) bool { return scored[i].Score > scored[j].Score })
 	for _, r := range scored {
