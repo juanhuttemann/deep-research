@@ -51,9 +51,23 @@ run or the setting to change.
 - **Exit status non-zero (a `✗`)**: show the user each `✗` line and the `→`
   line under it, and stop. Do not start a run.
 - **Exit status zero with `!` lines**: the run will work, but say what each
-  warning costs (for example, no scraper means every claim is checked
-  against a search snippet, not the page) and pass on its `→` line, then go
-  on.
+  warning costs and pass on its `→` line, then go on. The scraper is the
+  exception below.
+- **No scraper** (the `scraper` line says "none"): do not start the run yet.
+  Without one, every claim is checked against a search snippet, not the
+  page, every source is marked degraded, and the report's confidence drops.
+  Ask the user to choose, as a multiple-choice question when the client
+  offers one:
+  1. Self-hosted Firecrawl: free, no key, about 6 GB of Docker images. Offer
+     to set it up following
+     [docs/services.md](https://github.com/juanhuttemann/deep-research/blob/main/docs/services.md),
+     and ask before running the commands.
+  2. Exa or Tavily: the user sets `DEEP_RESEARCH_SCRAPER` and
+     `EXA_API_KEY` or `TAVILY_API_KEY` themselves.
+  3. Run with snippets only, accepting lower confidence.
+
+  Start only after they choose. With no one to ask (a non-interactive
+  session), go on and say in the answer that no scraper was used.
 - A missing or rejected model key is fixed by the user running
   `deep-research login`, which is interactive: do not run it for them, and
   never ask them to paste a key into the conversation. The same goes for any

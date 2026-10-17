@@ -5,6 +5,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The Agent Skill asks before running without a scraper: set up Firecrawl,
+  set an Exa or Tavily key, or accept snippets only. It used to mention the
+  warning and go on, and the run came back with every source degraded and
+  low confidence, which the user only learned from the report.
+
 ## [0.14.1] - 2026-10-16
 
 ### Changed
