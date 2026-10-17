@@ -267,7 +267,8 @@ structured result: analysis, fact-check, sources and the whole timeline.
 
 For a coding agent, [`skills/deep-research`](../skills/deep-research/SKILL.md)
 is an [Agent Skill](https://agentskills.io) that follows this contract: it
-checks the install with `doctor`, runs with `--jsonl` into a fresh
+checks the install with `doctor`, asks before running without a scraper,
+runs with `--jsonl` into a fresh
 `--reports` directory, waits for `done`, answers from the artifacts, and
 uses `ask` and `--resume`. Install it with
 `/plugin install deep-research --marketplace juanhuttemann/deep-research` in
