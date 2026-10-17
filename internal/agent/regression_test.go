@@ -1061,3 +1061,165 @@ func TestPlannerFallbackInstructionsAreComplete(t *testing.T) {
 		}
 	}
 }
+
+// slowStream is an OpenAI-compatible server that streams n deltas of kind
+// (content or reasoning_content), one every gap, then a closing answer: a
+// model that is working the whole time, just for longer than the timeout.
+// With n < 0 it streams until the client goes away.
+func slowStream(t *testing.T, kind string, n int, gap time.Duration) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		send := func(field, s string) {
+			fmt.Fprintf(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",%q:%q}}]}\n\n", field, s)
+			flusher.Flush()
+		}
+		for i := 0; n < 0 || i < n; i++ {
+			send(kind, "step ")
+			select {
+			case <-time.After(gap):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		send("content", "the report")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &requests
+}
+
+// A streamed call that was still sending its answer was killed at a fixed
+// deadline and started over: a fact-check two minutes in, reasoning seconds
+// earlier, ran its whole second attempt again. The timeout is silence, not
+// duration, for both the answer and the reasoning before it.
+func TestStreamedCallIsNotCutOffWhileItStreams(t *testing.T) {
+	for _, kind := range []string{"content", "reasoning_content"} {
+		t.Run(kind, func(t *testing.T) {
+			srv, requests := slowStream(t, kind, 8, 40*time.Millisecond)
+			a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+				ModelCallTimeout: 100 * time.Millisecond, ModelCallRetries: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := a.Summarize(context.Background(), "p")
+			if err != nil {
+				t.Fatalf("a call streaming for 320ms under a 100ms timeout failed: %v", err)
+			}
+			if !strings.Contains(got.Report, "the report") {
+				t.Errorf("report = %q", got.Report)
+			}
+			if n := requests.Load(); n != 1 {
+				t.Errorf("a call that never went quiet was sent %d times, want once", n)
+			}
+		})
+	}
+}
+
+// Anthropic's thinking reaches the run through the body sniffer; it has to
+// count as the model being heard from, or a long think before the first word
+// is a stall.
+func TestStreamedThinkingKeepsAnAnthropicCallAlive(t *testing.T) {
+	noClaudeCode(t)
+	var requests atomic.Int64
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		event := func(v map[string]any) {
+			b, _ := json.Marshal(v)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", v["type"], b)
+			flusher.Flush()
+		}
+		event(map[string]any{"type": "message_start", "message": map[string]any{
+			"id": "msg_1", "type": "message", "role": "assistant", "model": "m", "content": []any{},
+			"usage": map[string]any{"input_tokens": 10, "output_tokens": 1}}})
+		event(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "thinking", "thinking": "", "signature": ""}})
+		for range 8 {
+			event(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": "weigh c3 "}})
+			time.Sleep(40 * time.Millisecond)
+		}
+		event(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "signature_delta", "signature": "sig"}})
+		event(map[string]any{"type": "content_block_stop", "index": 0})
+		event(map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "text", "text": ""}})
+		event(map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "text_delta", "text": "the report"}})
+		event(map[string]any{"type": "content_block_stop", "index": 1})
+		event(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}, "usage": map[string]any{"output_tokens": 20}})
+		event(map[string]any{"type": "message_stop"})
+	}))
+	t.Cleanup(api.Close)
+	a, err := New(Config{Provider: "claude", ClaudeModel: "claude-opus-5-5", AnthropicAPIKey: "sk",
+		AnthropicBaseURL: api.URL, ModelCallTimeout: 100 * time.Millisecond, ModelCallRetries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.Summarize(context.Background(), "p")
+	if err != nil {
+		t.Fatalf("a call thinking for 320ms under a 100ms timeout failed: %v", err)
+	}
+	if !strings.Contains(got.Report, "the report") {
+		t.Errorf("report = %q", got.Report)
+	}
+	if n := requests.Load(); n != 1 {
+		t.Errorf("a call that kept thinking was sent %d times, want once", n)
+	}
+}
+
+// With silence as the timeout, a model that never goes quiet — one repeating
+// itself, on a server sent no output limit — would hold a phase for as long
+// as it streamed. The ceiling stops it, once: the same prompt runs as long
+// again, so it is not retried.
+func TestStreamedCallStopsAtTheCeiling(t *testing.T) {
+	srv, requests := slowStream(t, "content", -1, 10*time.Millisecond)
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+		ModelCallTimeout: 40 * time.Millisecond, ModelCallRetries: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err = a.Summarize(context.Background(), "p")
+	if !errors.Is(err, errStillStreaming) {
+		t.Fatalf("err = %v, want the ceiling", err)
+	}
+	if !strings.Contains(err.Error(), "model_call_timeout") {
+		t.Errorf("the error must name the setting that raises the ceiling: %v", err)
+	}
+	if n := requests.Load(); n != 1 {
+		t.Errorf("a call stopped at the ceiling was sent %d times, want once", n)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("a 200ms ceiling took %s", elapsed)
+	}
+}
+
+// A stream that goes quiet is a timeout: retried with a longer wait, and
+// reported as a deadline. Never as context.Canceled, which the run reports as
+// the reader pressing Esc, a stop rather than a failure.
+func TestSilentStreamIsADeadlineNotACancel(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m",
+		ModelCallTimeout: 20 * time.Millisecond, ModelCallRetries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Summarize(context.Background(), "p")
+	if !errors.Is(err, errSilent) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want silence reported as a deadline", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Errorf("a timeout must not read as a cancellation: %v", err)
+	}
+	if n := requests.Load(); n != 2 {
+		t.Errorf("want one silent attempt and one retry, got %d requests", n)
+	}
+}

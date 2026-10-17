@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/microsoft/agent-framework-go/agent"
+	"github.com/microsoft/agent-framework-go/message"
 	"github.com/microsoft/agent-framework-go/tool"
 	"github.com/microsoft/agent-framework-go/tool/functool"
 )
@@ -610,5 +612,46 @@ func TestChatOnAModelWithoutToolsSaysWhatToChange(t *testing.T) {
 				t.Errorf("%d requests for a refusal no retry can change, want 1", n)
 			}
 		})
+	}
+}
+
+// TestCollectResponseProgressMatchesResponseText pins the streamed text that
+// progress sees to what Response.String would say after the same updates.
+// collectResponse keeps that text itself instead of asking Response for it on
+// every token; the cases are where the two could part: a second message,
+// a message with no text, reasoning with no text, and an empty first update.
+func TestCollectResponseProgressMatchesResponseText(t *testing.T) {
+	text := func(s string) message.Contents { return message.Contents{&message.TextContent{Text: s}} }
+	updates := []*agent.ResponseUpdate{
+		{Role: message.RoleAssistant},
+		{Role: message.RoleAssistant, MessageID: "m1", Contents: message.Contents{&message.TextReasoningContent{Text: "hmm"}}},
+		{Role: message.RoleAssistant, MessageID: "m1", Contents: text(`{"answer":`)},
+		{Role: message.RoleAssistant, Contents: text(` "yes"}`)},
+		{Role: message.RoleAssistant, MessageID: "m2"},
+		{Role: message.RoleAssistant, MessageID: "m3", Contents: text("second")},
+		{Role: message.RoleAssistant, MessageID: "m3", Contents: message.Contents{&message.TextContent{Text: ""}, &message.TextContent{Text: " part"}}},
+		{Role: message.RoleTool, Contents: text("third")},
+	}
+	var want agent.Response
+	var got []string
+	stream := agent.ResponseStream(func(yield func(*agent.ResponseUpdate, error) bool) {
+		for _, u := range updates {
+			if !yield(u, nil) {
+				return
+			}
+		}
+	})
+	resp, err := collectResponse(stream, func(p string) { got = append(got, p) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, u := range updates {
+		want.Update(u)
+		if got[i] != want.String() {
+			t.Errorf("after update %d progress saw %q, Response.String is %q", i, got[i], want.String())
+		}
+	}
+	if resp.String() != got[len(got)-1] {
+		t.Errorf("collected %q, last progress %q", resp.String(), got[len(got)-1])
 	}
 }

@@ -179,11 +179,11 @@ the call at once, and the error says when it resets.
 deep-research's own tools, which `claude -p` cannot reach.
 
 Opus can think for more than two minutes before the first word of a large
-analysis or fact-check. Claude Code sends that thinking without its text,
-so the status reads "waiting for the model to start". At the default
-`model_call_timeout` of `120s` such a call is cut off and retried with twice
-the time, and on a subscription the cut-off attempt still counts against the
-plan. Set `model_call_timeout: 300s` to avoid that.
+analysis or fact-check. Claude Code shows none of that thinking, so the
+status reads "waiting for the model to start". If nothing at all arrives for
+the default `model_call_timeout` of `120s`, the call is cut off and retried
+with twice the time, and on a subscription the cut-off attempt still counts
+against the plan. Set `model_call_timeout: 300s` to avoid that.
 
 | Key | Env var | Default |
 | --- | ------- | ------- |
@@ -215,7 +215,7 @@ API: they reject adaptive thinking.
 | Key | Default | Meaning |
 | --- | ------- | ------- |
 | `data_file` | `~/.deep-research/research.jsonl` | append-only run history |
-| `model_call_timeout` | `120s` | one attempt at one model call |
+| `model_call_timeout` | `120s` | one attempt at one model call. For the streamed phases (plan, analysis, fact-check, report) it is how long the model may send nothing: each piece of reasoning or answer restarts it, so a model still working is not cut off. A streamed attempt stops at five times this (10 minutes at the default) however steadily it streams, and is not retried: the same prompt would run as long again |
 | `model_call_retries` | `2` | extra attempts for a failed call; each retry doubles that timeout. A rejected key (401) is not retried |
 | `run_timeout` | `30m` | the whole run, including search and scraping |
 | `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works |
