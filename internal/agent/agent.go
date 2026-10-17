@@ -590,10 +590,11 @@ func (a *impl) call(ctx context.Context, ag *agent.Agent, prompt string, opts ..
 	return a.callWith(ctx, ag, prompt, nil, opts...)
 }
 
-// callWith runs one model call under its own deadline, retrying a failure with
-// a longer one. A timeout here is usually a model that needed more time than
-// the budget — writing the report is the slow call — so each attempt doubles
-// the budget rather than repeating a deadline that was already too short.
+// callWith runs one model call under its own budget (see attempt), retrying a
+// failure with a longer one. A timeout here is usually a model that needed
+// more time than the budget — writing the report is the slow call — so each
+// attempt doubles the budget rather than repeating one that was already too
+// short.
 //
 // When progress is non-nil the response stream is drained update by update so
 // the partial text can be reported; otherwise it is collected in one step.
@@ -612,9 +613,12 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 				return "", fmt.Errorf("agent %s call failed: %w", ag.Name(), err)
 			}
 		}
-		callCtx, cancel := context.WithTimeout(ctx, budget)
-		out, callErr := collectResponse(ag.RunText(callCtx, prompt, opts...), progress)
-		cancel()
+		out, callErr := a.attempt(ctx, ag, prompt, budget, progress, opts)
+		if errors.Is(callErr, errStillStreaming) {
+			// The same prompt runs as long again, or loops again: a retry
+			// would only double the wait for the same failure.
+			return "", fmt.Errorf("agent %s call failed: %w", ag.Name(), callErr)
+		}
 		if callErr == nil {
 			a.addUsage(out)
 			switch out.FinishReason {
@@ -641,6 +645,69 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 		}
 	}
 }
+
+// attempt is one try at a call. An unstreamed one has budget for the whole
+// call. A streamed one has budget of silence: every update and every piece of
+// reasoning restarts the clock. A fixed deadline cut off models that were
+// visibly working — a fact-check sending its reasoning five seconds before
+// its two minutes ran out was killed and started over, and the second
+// attempt took as long again, a quarter of that run's time spent twice.
+// streamCeiling still bounds the attempt as a whole.
+func (a *impl) attempt(ctx context.Context, ag *agent.Agent, prompt string, budget time.Duration,
+	progress func(string), opts []agent.Option) (*agent.Response, error) {
+	if progress == nil {
+		callCtx, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
+		return collectResponse(ag.RunText(callCtx, prompt, opts...), nil)
+	}
+	callCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	silence := time.AfterFunc(budget, func() { cancel(fmt.Errorf("%w for %s", errSilent, budget)) })
+	defer silence.Stop()
+	ceiling := streamCeiling * a.timeout
+	whole := time.AfterFunc(ceiling, func() {
+		cancel(fmt.Errorf("%w after %s, the most one attempt is given (%d × model_call_timeout)",
+			errStillStreaming, ceiling, streamCeiling))
+	})
+	defer whole.Stop()
+	// Every provider path yields an update per streamed event, reasoning
+	// included even where it carries no text, so the stream alone says
+	// when the model was last heard from.
+	out, err := collectResponse(ag.RunText(callCtx, prompt, opts...), func(p string) {
+		silence.Reset(budget)
+		progress(p)
+	})
+	// The provider's error for a cancelled request is "context canceled";
+	// which timer cancelled it is the part worth reporting.
+	if cause := context.Cause(callCtx); err != nil && (errors.Is(cause, errSilent) || errors.Is(cause, errStillStreaming)) {
+		return nil, cause
+	}
+	return out, err
+}
+
+// streamCeiling bounds one streamed attempt however steadily it streams, as a
+// multiple of model_call_timeout. The silence timer cannot stop a model that
+// never goes quiet, one repeating itself, and an OpenAI-compatible server is
+// sent no output limit: vLLM's default is the rest of the context window, an
+// hour of "thinking" at a local model's speed. Five times the timeout, ten
+// minutes at the default, is five times the longest phase seen in real runs.
+const streamCeiling = 5
+
+// streamDeadline is a streamed attempt's timer running out. It is a deadline
+// to every caller that tests for one, and never context.Canceled, which the
+// run reports as the reader pressing Esc.
+type streamDeadline string
+
+func (e streamDeadline) Error() string { return string(e) }
+func (streamDeadline) Unwrap() error   { return context.DeadlineExceeded }
+
+// errSilent is a streamed attempt that received nothing for its budget: a
+// stalled stream, or a model that took longer to start than the budget.
+// Either may clear on a retry with a longer one.
+var errSilent error = streamDeadline("the model sent nothing")
+
+// errStillStreaming is a streamed attempt stopped at streamCeiling.
+var errStillStreaming error = streamDeadline("the model was still streaming")
 
 // finalError is err as reported to the caller when a retry cannot help it, or
 // nil when one might.
@@ -918,7 +985,7 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 			lastLog, logged = t, true
 		}
 		switch {
-		case strings.TrimSpace(partial+thinking) == "":
+		case blank(partial, thinking):
 			if due {
 				say(fmt.Sprintf("waiting for the model to start (%ds)", int(t.Sub(start).Seconds())))
 			}
@@ -931,10 +998,12 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 				}
 				return
 			}
-			n, text := unit(partial)
+			// Throttled first: unit scans the whole answer so far, and most
+			// updates print nothing.
 			if texted && !due {
 				return
 			}
+			n, text := unit(partial)
 			delta := ""
 			if texted && n > shown {
 				delta = fmt.Sprintf(" (+%d in %ds)", n-shown, int(t.Sub(lastLog).Seconds()))
@@ -945,6 +1014,14 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 			say(fmt.Sprintf("no new output for %ds · %s", int(t.Sub(lastGrowth).Seconds()), clockTime(t.Sub(start))))
 		}
 	}
+}
+
+// blank reports whether nothing but whitespace has arrived. Each half is
+// checked on its own: the reporter runs once per streamed token, and joining
+// them copied the whole answer and the whole reasoning every time, quadratic
+// over a phase.
+func blank(partial, thinking string) bool {
+	return strings.TrimSpace(partial) == "" && strings.TrimSpace(thinking) == ""
 }
 
 // thinkingStatus is the status while the model reasons: one status line, then
@@ -1008,16 +1085,47 @@ func collectResponse(stream agent.ResponseStream, progress func(string)) (*agent
 	if progress == nil {
 		return stream.Collect()
 	}
-	var resp agent.Response
+	var (
+		resp agent.Response
+		text partialText
+	)
 	for update, err := range stream {
 		if err != nil {
 			return nil, err
 		}
 		resp.Update(update)
-		progress(resp.String())
+		progress(text.add(len(resp.Messages), update.String()))
 	}
 	resp.Coalesce()
 	return &resp, nil
+}
+
+// partialText is a streamed response's text so far, kept as it arrives.
+// Response.String rebuilds it from every content part received, and progress
+// wants it after each token: called per update, that was quadratic in the
+// answer — a 16 KB analysis spent most of a phase's CPU re-joining itself.
+// It matches Response.String: the text of each message, with a newline
+// between messages that have any.
+type partialText struct {
+	b        strings.Builder
+	messages int
+	newline  bool
+}
+
+// add appends one update's text, messages being how many the response holds
+// once the update is in: Response.Update starts a message or extends the last.
+func (p *partialText) add(messages int, s string) string {
+	if messages > p.messages {
+		p.messages, p.newline = messages, p.b.Len() > 0
+	}
+	if s != "" {
+		if p.newline {
+			p.b.WriteByte('\n')
+			p.newline = false
+		}
+		p.b.WriteString(s)
+	}
+	return p.b.String()
 }
 
 // addUsage folds one response's provider-reported token usage into the running

@@ -1,0 +1,441 @@
+[Skip to content](#start-of-content)   
+ 
+ 
+
+## Navigation Menu
+
+[Sign in](/login?return_to=https%3A%2F%2Fgithub.com%2Fgolang%2Fgo%2Fdiscussions%2F56413)
+
+Appearance settings
+
+[Sign in](/login?return_to=https%3A%2F%2Fgithub.com%2Fgolang%2Fgo%2Fdiscussions%2F56413)
+
+[Sign up](/signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2F%3Cuser-name%3E%2F%3Crepo-name%3E%2Fvoltron%2Fdiscussions_fragments%2Fdiscussion_layout&source=header-repo&source_repo=golang%2Fgo)
+
+Appearance settings
+
+You signed in with another tab or window. Reload to refresh your session. You signed out in another tab or window. Reload to refresh your session. You switched accounts on another tab or window. Reload to refresh your session. Dismiss alert
+
+{{ message }}
+
+[golang](/golang)   /  **[go](/golang/go)**  Public
+
+* [Notifications](/login?return_to=%2Fgolang%2Fgo)  You must be signed in to change notification settings
+* [Fork 21.4k](/login?return_to=%2Fgolang%2Fgo)
+* [Star  139k](/login?return_to=%2Fgolang%2Fgo)
+
+# user-defined iteration using range over func values #56413
+
+Closed   Locked 
+
+[rsc](/rsc)  announced in [Discussions](/golang/go/discussions/categories/discussions)
+
+[user-defined iteration using range over func values](#top)  #56413
+
+Oct 25, 2022 · 53 comments · 330 replies
+
+[Return to top](#top)
+
+Discussion options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+## [rsc](/rsc) [Oct 25, 2022](#discussion-4502905)
+
+|  |
+| --- |
+| There is no standard way to iterate over a sequence of values in Go. For lack of any convention, we have ended up with a wide variety of approaches. Each implementation has done what made the most sense in that context, but decisions made in isolation have resulted in confusion for users.  In the standard library alone, we have [archive/tar.Reader.Next](https://pkg.go.dev/archive/tar/#Reader.Next), [bufio.Reader.ReadByte](https://pkg.go.dev/bufio/#Reader.ReadByte), [bufio.Scanner.Scan](https://pkg.go.dev/bufio/#Scanner.Scan), [container/ring.Ring.Do](https://pkg.go.dev/container/ring/#Ring.Do), [database/sql.Rows](https://pkg.go.dev/database/sql#Rows), [expvar.Do](https://pkg.go.dev/expvar/#Do), [flag.Visit](https://pkg.go.dev/flag/#Visit), [go/token.FileSet.Iterate](https://pkg.go.dev/go/token/#FileSet.Iterate), [path/filepath.Walk](https://pkg.go.dev/path/filepath/#Walk), [go/token.FileSet.Iterate](https://pkg.go.dev/go/token/#FileSet.Iterate), [runtime.Frames.Next](https://pkg.go.dev/runtime/#Frames.Next), and [sync.Map.Range](https://pkg.go.dev/sync/#Map.Range), hardly any of which agree on the exact details of iteration. Even the functions that agree on the signature don’t always agree about the semantics. For example, most iteration functions that return (T, bool) follow the usual Go convention of having the bool indicate whether the T is valid. In contrast, the bool returned from [runtime.Frames.Next](https://pkg.go.dev/runtime/#Frames.Next) indicates whether the *next* call will return something valid.  When you want to iterate over something, you first have to learn how the specific code you are calling handles iteration. This lack of uniformity hinders Go’s goal of making it easy to easy to move around in a large code base. People often mention as a strength that all Go code looks about the same. That’s simply not true for code with custom iteration.  We should converge on a standard way to handle iteration in Go, and one way to incentivize that is to support it directly in range syntax. Specifically, the idea is to allow range over function values of certain types. If any kind of code providing iteration implements such a function, then users can write the same kind of range loop they use for slices and maps and stop worrying about whether they are using a bespoke iteration API correctly.  This GitHub Discussion is about this idea of allowing range over function values. This is obviously related to the iterator discussion ([#54245](https://github.com/golang/go/discussions/54245)), but one aim of this discussion is to separate out just the idea of a language change for customized range behavior, which should probably be done independently of an iterator library. A library for iterators can then be built using and augmenting the range change, not being the cause of it.  To date, range's behavior has depended only on the type of its argument, not methods the argument has, nor any other details of the argument. Range currently handles slice, (pointer to) array, map, chan, and string arguments. We can extend range to support user-defined behavior by adding certain forms of func arguments.  There are two natural kinds of func arguments we might want to support in range: *push functions* and *pull functions* (definitions below). These kinds of funcs are duals of each other, and while push functions are more suited to range loops, both are useful in different contexts.  **This posts suggests that for loops allow range over both push functions and pull functions. The end of the post also suggests range over int.**  The rest of this post explains all this in more detail. Push functions A *push function* is a function with a type of one of these forms:  ``` func(yield func(...) bool) func(yield func(...) bool) bool  ```  That is, a push function takes a single argument, here named yield, although that exact name is not a requirement. The yield argument is itself a function taking N arguments (0 ≤ N ≤ 2) (denoted by `...` in the pseudo-syntax above) and returning a single bool. The push function itself must return nothing at all or else a single bool. The optional bool allows the push function to indicate whether it stopped early, which can be useful when composing push functions; when called using range syntax, the compiled code would ignore the result.  The push function enumerates a sequence of values by calling yield repeatedly. The bool result from yield indicates whether to keep yielding operations (true means continue running, false means stop). Each call to yield runs the range loop body once and then returns. When there are no more values to pass to yield, or if yield returns false, the push function returns.  In short, a push function pushes a sequence of values into the yield function.  For example, here is a method to traverse a binary tree:  ``` func (t *Tree[K, V]) All(f func(key K, val V) bool) bool { if t == nil { return true } return t.left.All(f) && f(t.key, t.value) && t.right.All(f) }  ```  The method value `t.All` is a push function: it has signature `func(func(K, V) bool) bool`.  With that method, one can write today:  ``` t.All(func(k K, v V) bool { fmt.Println(k, v) return true })  ```  (In this usage, the caller doesn’t care about the boolean result from t.All, only the fact that it calls f on every key-value pair.)  **Adding support for push functions to range would allow writing this equivalent code**:  ``` for k, v := range t.All { fmt.Println(k, v) }  ```  In fact, the Go compiler would effectively rewrite the second form into the first form, turning the loop body into a synthesized function to pass to t.All. However, that rewrite would also preserve the “on the page” semantics of code inside the loop like `break`, `continue`, `defer`, `goto`, and `return`, so that all those constructs would execute the same as in a range over a slice or map.  If you are worried about the subtle variable scoping difference, consider the change discussed in [#56010](https://github.com/golang/go/discussions/56010) a prerequisite of adding func support to range.  Note that the results of the push function (if any) are discarded when using the range form. Most often a push function will return nothing at all, or else a bool indicating whether the loop stopped early, as the All method does to make recursion easier.  A method x.All(f), which may become a common pattern, has two different, equally valid interpretations. One is that f is a yield function and All passes all the tree's contents to f. The other is that f is a condition function and All reports whether the condition is true for all the contents of the tree, stopping the traversal once it determines the result. Pull functions A *pull function* is a function with a type of the form  ``` func() (values, bool)  ```  That is, a pull function takes no arguments and returns the next set of N values (0 ≤ N ≤ 2) from the sequence. Each valid set of values comes with a final true bool result. When there are no more values, the pull function returns arbitrary values and a false bool.  A pull function must maintain internal state, so that repeated calls return successive values.  In short, a pull function lets the caller pull successive elements from the sequence, one at a time.  For example, here is a method that returns a pull function to traverse a linked list:  ``` func (l *List[V]) Iter() func() (V, bool) { cur := l return func() (v V, ok bool) { if cur == nil { return v, false } v, ok = cur.value, true cur = cur.next return } }  ```  The method value `l.Iter` is not a pull function, but it returns one.  With that method, one can write today:  ``` next := l.Iter() for v, ok := next(); ok; v, ok = next() { fmt.Println(v) }  ```  **Adding support for pull functions to range would allow writing this equivalent code**:  ``` for v := range l.Iter() { fmt.Println(v) }  ```  In fact, the Go compiler would effectively rewrite the second form into the first form. Again, consider the scope change in [#56010](https://github.com/golang/go/discussions/56010) a prerequisite.  If some iterator-like value had a Next method that returned (value, bool), we could write:  ``` for v := range it.Next { ... }  ```  Note that range over pull functions has been proposed by itself as [#43557](https://github.com/golang/go/issues/43557), and the discussion also considered push functions (for example, [#43557 (comment)](https://github.com/golang/go/issues/43557#issuecomment-895211452)). Both can be appropriate at different times. Duality of push and pull functions Any push function can be converted into a pull function and vice versa.  Converting a pull function into a push function is a few lines of code:  ``` func push(next func() (V, bool)) func(func(V)bool) { return func(yield func(V) bool) { for { v, ok := next() if !ok || !yield(v) { break } } } }  ```  Converting a push function into a pull function is more involved. Because the push function has its own state maintained in its stack (like in the binary tree traversal), that code must run in a separate goroutine in order to give it a stack that persists across calls to the next function. The full code is in [this playground snippet](https://go.dev/play/p/-k1fhDhMIOj).  It can be arranged that the separate goroutine executes with its own stack but not actually running in parallel with the caller. With a bit of smarts in the compiler and runtime, but no changes to the Go language or any of its semantics, that lack of parallelism allows the separate goroutine to be optimized into a coroutine, so that switches between the caller and the push function are fairly cheap. The details of the optimization are beyond the scope of this discussion but [are posted in the “Appendix” of #54245](https://github.com/golang/go/discussions/54245).  The signature for converting a push function to a pull function is  ``` func pull(push func(yield func(V) bool)) (next func() (V, bool), stop func())  ```  The conversion must return two functions: the pull function `next` and a cleanup function `stop`, which shuts down the goroutine.  Although push and pull functions are duals, they have important differences. Push functions are easier to write and somewhat more powerful to invoke, because they can store state on the stack and can automatically clean up when the traversal is over. That cleanup is made explicit by the `stop` callback when converting to the pull form.  For example, the binary tree traversal above was made very easy by being able to use recursion in its implementation. A direct implementation of a pull form would need to maintain its own explicit stack instead, like:  ``` func (t *Tree[K, V]) Iter() func() (K, V, bool) { var stk []*Tree[K, V] for ; t != nil; t = t.left { stk = append(stk, t) } next := func() (k K, v V, ok bool) { if len(stk) == 0 { return k, v, false } t := stk[len(stk)-1] stk = stk[:len(stk)-1] for r := t.right; r != nil; r = r.left { stk = append(stk, r) } return t.key, t.value, true } return next }  ```  That implementation is much harder to reason about and probably contains a bug.  As another example of the power of push functions and automatic cleanup, consider this function that allows ranging over the lines from a file:  ``` func Lines(file string) func(func(string, error) bool) { return func(yield func(string, error) bool) { f, err := os.Open(file) if err != nil { yield("", err) return } defer f.Close() b := bufio.NewReader(f) for { line, err := b.ReadString('\n') if err != nil { if err != io.EOF { yield("", err) } break } if !yield(line, nil) { break } } } }  ```  This could be used as:  ``` for line, err := range Lines("motd.txt") { if err != nil { log.Fatal(err) } fmt.Print(strings.ToUpper(line)) }  ```  Note that the implementation of Lines can use defer to clean up automatically when the loop is done. An implementation using a pull function would need a separate stop function to close the file.  A push function usually represents an entire sequence of values, so that it can be called multiple times to traverse the sequence multiple times. It can usually also be called simultaneously from different goroutines if they both want to traverse the sequence, without any synchronization. In contrast, a pull function always represents a specific point in one traversal of the sequence. It can be advanced to the end of the sequence, but then it can't be reused. Goroutines cannot share a pull function without synchronization, but a pull function can be used from multiple call sites in a single goroutine, such as a lexer pulling bytes from an input source.  In terms of concepts in other languages, a push function can be thought of as representing an entire collection. The implementation of the push function maintains iterator state implicitly on its stack, so that multiple uses of the push function use separate instances of the iterator state. In contrast, a pull function can be thought of as representing an iterator, not an entire collection.  Push and pull functions represent different ways of interacting with data, and one way may be more appropriate than the other depending on the data. For example, many programs process the lines in a file in a single loop, so a push function is appropriate for lines in a file. In contrast, it is difficult to imagine any programs that would process the bytes in a file with a single loop (except maybe wc), while many process bytes in a file incrementally from many call sites (again, lexers are an example), so a pull function is more appropriate for bytes in a file.  Because both forms are appropriate in different contexts, range loops should support functions of both types. Note that there is no overlap between the two function kinds: push functions always have one argument, while pull functions always have no arguments. Alternatives An alternative would be to extend range by recognizing special methods. For example if range knew to call a .Range method, then we could define (\*Tree).Range and then use  ``` for k, v := range t { ... }  ```  instead of  ``` for k, v := range t.All { ... }  ```  One aesthetic reason not to do this is that range today uses types to make the decision, and it seems cleaner to continue to do that. In fact, there is nothing in the language today that calls specially defined methods. (The closest to that is the definition of the error interface, but no language construct calls the Error method.) Aesthetic reasons aside, though, there are two practical problems with a method-based decision.  The first problem with a method-based decision is that only a single method can implement the behavior. Using functions, other methods can be called instead simply by naming them. For example we might define t.AllReverse that enumerates the tree in reverse order, and then a loop can use  ``` for k, v := range t.AllReverse { ... }  ```  Similarly, an iterator that defines Next might also define Prev, allowing  ``` for v := range it.Prev { ... }  ```  The second problem with a method-based decision is that it can conflict with the type-based decision. For example if the loop calls the Range method, what happens in a range over a channel value that also has a Range method? Is it treated like other channels, ignoring the Range method? It would seem that must be the case, for backwards compatibility. But then it's confusing that the Range method doesn't win.  Continuing the type-based decision instead of introducing a new method-based decision rule avoids these problems. Range over ints One common problem for developers not coming from the C family of languages is puzzling through the Go idiom  ``` for i := 0; i < n; i++ { ... }  ```  When you stop to explain it, that’s a lot of machinery to say “count to n”.  One common use case that people have mentioned for user-defined range behaviors is to have a standard function to simplify that pattern, like:  ``` func count(n int) func(yield func(i int) bool) { return func(yield func(i int) bool) { i := 0 for i < n && yield(i) { i++ } } }  ```  used as:  ``` for i := range count(n) { ... }  ```  If this will become the new idiom for counting to n, it's unclear where the count function would be defined. Some package that essentially every program imports?  Counting from 0 to n is so incredibly common that it could merit a predefined function, but at that point we’re talking about a language change. And if we’re talking about a language change, it makes sense to continue to extend range in a type-based way, namely by ranging over ints.  **Adding support for ints to range would allow writing this code**:  ``` for i := range n { ... }  ```  instead of:  ``` for i := 0; i < n; i++ { ... }  ```  For former C, C++, and Java programmers, the idea of not writing the 3-clause for loop may seem foreign. It did to me at first too. But if we adopt this change, the range form would quickly become idiomatic, and the 3-clause loop would seem as archaic as ending statements with semicolons. Discussion What do people think about this idea?  Should we stop at push functions and not allow pull functions in range?  Should we add range over int too? |
+
+You must be logged in to vote
+
+All reactions  
+
+* 👍 219
+* 👎 14
+* 🎉 9
+* 😕 14
+* ❤️ 18
+* 🚀 40
+* 👀 8
+
+## Replies: 53 comments · 330 replies
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### [nachtjasmin](/nachtjasmin) [Oct 25, 2022](#discussioncomment-3961323)
+
+|  |
+| --- |
+| At first, I'd like to note that a general idea of something iterator-related is a welcome addition to the language.  When I started with Go (coming from a C# background), the differences between the ways of iteration were quite confusing. And they still are! C# has this notion of: everything that is an `IEnumerable` can be accessed and manipulated with LINQ.  However, LINQ is a beast itself and introducing something like that is definitely not suitable for the goals of the Go programming language. And I would even argue that it's not needed.  The concept of pull and push functions is clear. Incorporating this even further into the language, e.g. by defining a `Range()` method as considered in the alternatives would decrease the readability. Developers would need to know about this concept, because it definitely hides something. So I'd would consider this a no-go. Explicit readable code is the preferred way.  As for the range over ints proposal: Python has something similar, therefore this new pattern could improve the adoptability across Python developers. I, for one, don't have a strong opinion for or against it, as I'm already too used to the C-way.  Edit: fixed some minor grammar corrections, simply because English is not my first language. |
+
+You must be logged in to vote
+
+All reactions  
+
+* 👍 10
+* 👎 1
+
+1 reply
+
+[![@nemith](https://avatars.githubusercontent.com/u/349360?s=60&v=4)](/nemith)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [nemith](/nemith) [Oct 26, 2022](#discussioncomment-3970968)
+
+|  |
+| --- |
+| Incorporating this even further into the language, e.g. by defining a Range() method as considered in the alternatives would decrease the readability. Developers would need to know about this concept, because it definitely hides something.  I actually don't entirely agree with that. Yes it is a new concept, but it keeps the idea that a function is a function and has computational weight.  When doing a `for x := range x.Range()` you know should be able to know that it's a function call and that the `range` will produce values from it. This seems to fit more with the Go theme than having predefined interfaces that an object must implement to get range functionality. It really doesn't seem to be hiding anything, cards are out in the open. In other words you can read this as `range` (produce values) from x.Range() calling it every iteration. The only implicit part is the function signature which shouldn't be foreign to anyone who is familiar with a `HandlerFunc` or other similar APIs in go.  So this actually seems pretty explicit and actually far more readable as there would be one way of iterating through objects vs consulting the documentation on the specific iterator semantics. |
+
+All reactions  
+
+* 👍 5
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### [evanphx](/evanphx) [Oct 25, 2022](#discussioncomment-3962483) Collaborator
+
+|  |
+| --- |
+| I'm really interested in what the transform for push functions will be to allow flow control statements would be. This would effectively add a form of non-local return to Go, which other languages use to make these sorts of internal iterators feel nice. |
+
+You must be logged in to vote
+
+All reactions
+
+6 replies
+
+[![@rsc](https://avatars.githubusercontent.com/u/104030?s=60&v=4)](/rsc)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [rsc](/rsc) [Oct 25, 2022](#discussioncomment-3962955) Collaborator Author
+
+|  |
+| --- |
+| Yes, I believe the yield function will panic if it is called after the loop is done or from the wrong goroutine. |
+
+All reactions  
+
+* 👍 5
+
+[![@prattmic](https://avatars.githubusercontent.com/u/1293187?s=60&v=4)](/prattmic)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [prattmic](/prattmic) [Oct 25, 2022](#discussioncomment-3963922) Maintainer
+
+|  |
+| --- |
+| or from the wrong goroutine.  This is an unfortunate limitation, do we need it? I don't think we want to allow racy calls to yield, but I can imagine push functions that e.g., start worker goroutines to walk a data structure and call yield on all elements. Provided there is synchronization around yield calls, it feels like that should be fine.  This could always be worked around by having workers send values back to the original goroutine, which calls yield, but this feels like an awkward requirement in the language. I can't think of other functions that *must* be called from the correct goroutine (`t.FailNow()` is the closest I can think of), so this seems odd.  That said, I'm not sure how to reconcile this with what should happen if the loop body panics.  ~~yield just returns false, I suppose? (This would imply that the yield implementation would use some internal communication mechanism to make the loop body run in the original goroutine)~~ Edit: this doesn't make sense, as the original goroutine is likely blocked in something like `sync.WaitGroup.Wait`. |
+
+All reactions  
+
+* 👍 3
+
+[![@rsc](https://avatars.githubusercontent.com/u/104030?s=60&v=4)](/rsc)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [rsc](/rsc) [Oct 26, 2022](#discussioncomment-3966056) Collaborator Author
+
+|  |
+| --- |
+| Indeed, a panic or a call to defer is the main reason the goroutine limitation exists. I doubt it will be much of a problem in practice. We can also always lift it later. |
+
+All reactions
+
+[![@evanphx](https://avatars.githubusercontent.com/u/7?s=60&v=4)](/evanphx)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [evanphx](/evanphx) [Oct 26, 2022](#discussioncomment-3972087) Collaborator
+
+|  |
+| --- |
+| Ah great thanks for all that info, that makes sense! |
+
+All reactions
+
+[![@pat42smith](https://avatars.githubusercontent.com/u/12960541?s=60&v=4)](/pat42smith)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [pat42smith](/pat42smith) [Oct 29, 2022](#discussioncomment-3999385)
+
+|  |
+| --- |
+| [@rsc](https://github.com/rsc)  Yes, I believe the yield function will panic if it is called after the loop is done or from the wrong goroutine.  What do we expect the push function to do if the yield function panics, either for the reason above, or because of a call to `panic` within the loop body? I imagine we expect it to stop and not call the yield function any more; is that right?  If the push function uses defer to recover from the panic and call the yield function, it seems there is potential for an infinite loop of panics. Perhaps the yield function should check for this and after some number of panics do something else? Maybe exit the goroutine or exit the process? |
+
+All reactions
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### [cespare](/cespare) [Oct 25, 2022](#discussioncomment-3962942) Collaborator
+
+|  |
+| --- |
+| A few assorted thoughts.   1. The conventional names I've heard before are *internal iterators* ("push functions") and *external iterators* ("pull functions"). I'm not sure if you were avoiding these terms on purpose, but this may be helpful when comparing to what other languages are doing. 2. When using a few generic containers (sets, ordered maps, etc) the lack of native `range` iteration is, I think, the biggest point of friction that makes them feel like second-class collection types. So I'm cautiously optimistic that this idea would solve that problem. 3. If the iterator function doesn't get inlined (how likely is that, particularly for push functions?), then the call-per-iteration seems like it would make this fairly slow in some contexts (performance-optimized data structures). 4. The iteration on ints seems wholly unnecessary to me. It makes two ways to do a very common task (decreasing code readability) while saving hardly any typing. Concern (3) is also significant here: if the "nice" way to do it is 10x slower, then the choice of which form to use is more of a burden. |
+
+You must be logged in to vote
+
+All reactions  
+
+* 👍 3
+* ❤️ 1
+
+3 replies
+
+[![@rsc](https://avatars.githubusercontent.com/u/104030?s=60&v=4)](/rsc)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [rsc](/rsc) [Oct 25, 2022](#discussioncomment-3962994) Collaborator Author
+
+|  |
+| --- |
+| A few assorted replies.   1. I wasn't aware of those terms. At first glance I'm not sure what would make something internal or external, so I think I will stick with pull or push, but thanks for the mapping for people who are already familiar with them. 2. 👍 3. I believe that the most trivial push iterators will get inlined. Clearly we can't land this feature with terrible performance: we will do the work needed to make it perform well (or else rethink). 4. I'm not convinced that `for i := range n` decreases code readability, but that will depend on how quickly everyone moves to the new syntax. Regardless, it won't be 10X slower. It will be exactly the same speed.   Thanks for the comments! |
+
+All reactions  
+
+* 👍 6
+
+[![@srikarplus](https://avatars.githubusercontent.com/u/10133174?s=60&v=4)](/srikarplus)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [srikarplus](/srikarplus) [Oct 27, 2022](#discussioncomment-3982453)
+
+|  |
+| --- |
+| I actually like `for i := range n` syntax. I've faced error numerous times in Go writing that line. Coming from Python world where we are habituated to writing `for i in range(n)`, this should be a welcome change. |
+
+All reactions  
+
+* 👍 5
+
+[![@jbduncan](https://avatars.githubusercontent.com/u/2482228?s=60&v=4)](/jbduncan)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [jbduncan](/jbduncan) [Feb 13, 2023](#discussioncomment-4958634)
+
+|  |
+| --- |
+| [@rsc](https://github.com/rsc) For your reference, I've found this article by Robert Nystrom (of craftinginterpreters.com fame) on internal and external iteration useful: <https://journal.stuffwithstuff.com/2013/01/13/iteration-inside-and-out/>.  **tl;dr**: External iteration is when the user's code "calls" the iteration, as with iterator types and `for` loops. Internal iteration is when the iteration "calls" the user's code, as with `forEach`-like functions in JavaScript, Ruby et al. |
+
+All reactions
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### [seebs](/seebs) [Oct 25, 2022](#discussioncomment-3962977)
+
+|  |
+| --- |
+| The push function case has a weird quality that I think is novel. The `yield()` function the compiler passes to it is a function that you *can't* write in Go, because it's a function which, when called, can execute a defer in a caller's context. I'm mildly afraid of that, not least because I have often wanted the ability to write "defer-but-in-parent" and also I would be absolutely miserable if anyone else (including "me three months ago") had access to it.  I don't think we could entirely dispose of the three-clause loop, but I do agree that I'd be fine with not needing it in the "count to n" case.  Anyway, as a person who's repeatedly wanted to request iterator support in the language, I will say that I like this a lot, and at least so far, this feels like something that I'd use and not hate, which is pretty high praise for programming languages. |
+
+You must be logged in to vote
+
+All reactions  
+
+* ❤️ 1
+
+1 reply
+
+[![@bcmills](https://avatars.githubusercontent.com/u/5200974?s=60&v=4)](/bcmills)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [bcmills](/bcmills) [Oct 25, 2022](#discussioncomment-3963751)
+
+|  |
+| --- |
+| FWIW, I think of the `yield` magic as being more about optimizing away a goroutine than about running things in the caller's stack.  (<https://go.dev/play/p/bB1-_JempqG>) |
+
+All reactions
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### [ConradIrwin](/ConradIrwin) [Oct 25, 2022](#discussioncomment-3963560)
+
+|  |
+| --- |
+| Thanks for writing this up [@rsc](https://github.com/rsc), and for providing a clear mental model around push and pull based iteration! I really like the direction this is going.  One thing that seemed a bit nuanced in the description was the push pull distinction apparently requiring different parenthesis.  ``` for k, v := range t.All for k, v := range t.Iter()  ```  This I likely an artifact of your example having Iter() return a function instead of an intermediate value (as in the [discussion](https://github.com/golang/go/discussions/54245)), because I think that this clears up the nuance (despite being more verbose):  ``` for k, v := range t.All for k, v := range t.Iter().Next  ```  I also think the decision to pass a function to `range` instead of passing a value that has a given method is a good one; although it adds a bit of syntactic noise, it makes it very clear how the feature works, and (although you don't call this out) allows people who are navigating a new code-base to click on a method to see where it's implemented as they would for a function call.  The biggest concern I can think of is not really a concern with the proposed changes to `range` itself, but with how it would interact with the rest of the language. In particular, if so many things are allowed, there's no way to specify that my function takes "something it can pass to range". This may not be a problem in practice (the examples I can think of are fairly mundane) but it might be irritating to have to write ~6 implementations of the same thing for various different push and pull function signatures.  This could be solved with some syntax in interface definitions (for example):  ``` type Aller interface { All range[K, V] AllKeys range[K] }  ```  This is similar to the operator based approach that was decided against for type parameters (in favor of the named types approach) so there may be issues there that led to that decision that I don't know about. It also has the downside that you lose information (once you have an `Aller` you cannot call it's All() method directly because you don't know what its signature actually is).  Alternatively it could be solved by heavily restricting the proposal so that range only accepts functions with one signature (probably `(func (k K, v V) bool) bool`). Although it seems reasonable to require All to always return a `bool` (just as `Close()` always returns an error), I'm not sure how reasonable it is to require two callback parameters - implementors could always pass nil as a second value, but seems a bit meh. This would also mean that pull-iterators are not directly supported, and possibly the `push` function is made available so people can convert between the two. (I do think it would be reasonable to support `i := range n` if n is an integer type even if there was no way to pass "either an integer or a function with the right syntax).  ``` type Aller interface { All func(func(k K, v V) bool) AllKeys func(func(k K, v V) bool) }  ```  A third option is to split the difference, allow some number of types (more than one and fewer than six) so that if you want to write code that takes something that can be passed to range, you only need a couple of different copies.  In any case it would be nice to be able to write code like this and pass anything that could be passed to range to a function (but probably not a deal breaker if you can't):  ``` func benchmarkAll(t Aller) { time := t.Now() for k, v := range t.All { fmt.Println(t.Now().Sub(time), k, v) time = t.Now() } }  ``` |
+
+You must be logged in to vote
+
+All reactions  
+
+* 👎 3
+
+4 replies
+
+[![@magical](https://avatars.githubusercontent.com/u/175539?s=60&v=4)](/magical)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [magical](/magical) [Oct 25, 2022](#discussioncomment-3964813)
+
+|  |
+| --- |
+| Thanks for writing this up [@rsc](https://github.com/rsc), and for providing a clear mental model around push and pull based iteration! I really like the direction this is going.  Totally agree.  One thing that seemed a bit nuanced in the description was the push pull distinction apparently requiring different parenthesis.  ``` for k, v := range t.All for k, v := range t.Iter()  ```  I noticed this too and i'm a little conflicted about it.   * On the one hand, i don't want to have to remember whether any given loop needs the parentheses or not. Sounds like a great source of frustration while coding. * On the other hand, it could be nice to have a visual indicator of whether a loop is over a push-type (repeatable) or pull-type (consumable) value. (Attempting to reuse a spent iterator is a mistake that i still occasionally make in Python.)  Parenthesis would probably not be my first choice for that visual indicator. A different keyword, maybe. Or perhaps a naming convention would be sufficient.  That said, I guess this confusion already exists today - channels are consumable, but maps and slices are reusable - so maybe it's too late to do anything about it. |
+
+All reactions  
+
+* 👍 1
+
+[![@firelizzard18](https://avatars.githubusercontent.com/u/879055?s=60&v=4)](/firelizzard18)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [firelizzard18](/firelizzard18) [Oct 26, 2022](#discussioncomment-3965471) Collaborator
+
+|  |
+| --- |
+| `range t.Iter()` would require `Next()` to be a magic method name so I think that was an oversight. If you assume magic methods are forbidden, ranging over an iterable must be `range t.Iter().Next`. |
+
+All reactions
+
+[![@robaho](https://avatars.githubusercontent.com/u/4958833?s=60&v=4)](/robaho)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [robaho](/robaho) [Oct 26, 2022](#discussioncomment-3965497)
+
+|  |
+| --- |
+| `range t.Iter()` would require `Next()` to be a magic method name so I think that was an oversight. If you assume magic methods are forbidden, ranging over an iterable must be `range t.Iter().Next`.  I believe t.Iter() returns a func - the name is immaterial - only the signature needs to match. |
+
+All reactions
+
+[![@Merovius](https://avatars.githubusercontent.com/u/720787?s=60&v=4)](/Merovius)
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+#### [Merovius](/Merovius) [Nov 5, 2022](#discussioncomment-4062547)
+
+|  |
+| --- |
+| `t.All` could return a `func` as well. I think whether or not `Iter()` returning a `func` is more plausible depends on a) whether it was written before this proposal is implemented (it would most likely return a mundane iterator type), and b) whether we have an iterator library (it will likely return a canonical iterator type). In the space between implementing this proposal and us getting an iterator library, I could see an argument that returning a pull func from `Iter()` is easier in some cases.  Either way, whether you have to put a call expression into `range` doesn't *actually* depend on whether or not you use push or pull. It depends on what the type of range expression is. That's, FTR, the same as today - a range expression can be a function call, or it can not be. |
+
+All reactions  
+
+* 👍 1
+
+Comment options
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### Uh oh!
+
+There was an error while loading. Please reload this page.
+
+### [Merovius](/Merovius) [Oct 25, 2022](#discussioncomment-3963589)
+
+|  |
+| --- |
+| What is the intent for using these as iterators? I know that the discussion here splits, but to me, if these are not usable to write an iterator library, I don't really see the point for a relatively invasive language change.  From what I can tell, there is no realistic way to write a function which takes "either a push or a pull function". There isn't even a way to write one which can take a push function, due to that having 6 (?) different forms. I mean, you can write a type-constraint for "it has to be any of these" and use a type-switch, but that isn't exactly ergonomic.  So all I could think of is iterator-compositions taking a form they need and returning a form they find convenient. With the user being expected to use the appropiate glue code to transform them back-and-forth. Especially given that some of these need a separate `stop` function, that sounds like a pain to manage.  So w...

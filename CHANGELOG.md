@@ -7,6 +7,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- A streamed phase (plan, analysis, fact-check, report) is no longer cut off
+  while the model is still sending it. `model_call_timeout` counts the time
+  with nothing arriving, and every piece of reasoning or answer restarts it.
+  As a fixed deadline it killed working calls: a real run's fact-check was
+  stopped at 120 seconds, five seconds after its last reasoning, and its
+  retry took as long again, a quarter of the run spent twice. One attempt
+  still stops at five times the timeout (10 minutes at the default), and that
+  is not retried, so a model repeating itself on a server with no output
+  limit cannot hold a phase for good. Unstreamed calls keep the fixed
+  deadline.
+- Streamed phases spend about 98% less CPU and 99% less memory on their
+  progress line: it rebuilt the whole answer and the whole reasoning on every
+  token, about 185 ms and 425 MB per phase on a 16 KB analysis.
+
 - The Agent Skill asks before running without a scraper: set up Firecrawl,
   set an Exa or Tavily key, or accept snippets only. It used to mention the
   warning and go on, and the run came back with every source degraded and

@@ -8,9 +8,11 @@
 
 data_file: ~/.deep-research/research.jsonl
 
-# Timeout for a single model call, and the deadline for a whole run. The run
-# deadline covers searching and scraping too, which dominate wall-clock time
-# on a wide plan, so it is set here rather than derived from the call timeout.
+# Timeout for a single model call, and the deadline for a whole run. A
+# streamed phase's timeout counts silence: every piece of reasoning or answer
+# restarts it, and five times it caps the attempt. The run deadline covers
+# searching and scraping too, which dominate wall-clock time on a wide plan,
+# so it is set here rather than derived from the call timeout.
 model_call_timeout: 120s
 run_timeout: 30m
 # Extra attempts for a failed model call; each retry doubles the call timeout,
