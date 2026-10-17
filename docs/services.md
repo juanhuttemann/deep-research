@@ -111,6 +111,14 @@ USE_DB_AUTHENTICATION=false
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=postgres
+COMPOSE_PROJECT_NAME=deep-research-firecrawl
+YAML
+
+cat > docker-compose.override.yaml <<'YAML'
+services:
+  api:
+    ports: !override
+      - "127.0.0.1:3002:3002"
 YAML
 ```
 
@@ -118,7 +126,16 @@ Check out a release tag rather than tracking `main`; the compose file and its
 services change between releases.
 
 `USE_DB_AUTHENTICATION=false` is what lets a self-hosted instance accept
-requests with no API key, which is how this CLI calls it by default.
+requests with no API key, which is how this CLI calls it by default. That
+also means anyone who can reach the port can scrape through it, and
+Firecrawl's own compose file publishes it on every interface. The override
+binds it to localhost, as `init --docker` does for SearXNG.
+
+Compose names a stack after its directory, so without `COMPOSE_PROJECT_NAME`
+every checkout called `firecrawl` is the same stack. A second checkout
+(an old test, a different release) then adopts the first one's containers,
+and the recreated Postgres keeps its old data and password: the API exits
+with `password authentication failed for user "postgres"`.
 
 ### Start the stack
 
@@ -133,8 +150,8 @@ dependency on the database, so bringing it up on its own leaves it unable to
 reach Postgres and it exits.
 
 By default this builds the API and browser images from source, which takes
-a while. To pull prebuilt images instead, add this file next to
-`docker-compose.yaml` before starting:
+a while. To pull prebuilt images instead, replace the override file before
+starting (it keeps the localhost binding):
 
 ```sh
 cat > docker-compose.override.yaml <<'YAML'
@@ -142,6 +159,8 @@ services:
   api:
     image: ghcr.io/firecrawl/firecrawl:latest
     build: !reset null
+    ports: !override
+      - "127.0.0.1:3002:3002"
   playwright-service:
     image: ghcr.io/firecrawl/playwright-service:latest
     build: !reset null
@@ -257,6 +276,7 @@ company and spends its credit; costs are in
 | SearXNG returns an HTML `403 Forbidden` for `format=json` | The `search.formats` block is not in effect. Confirm the file you edited is the one mounted at `/etc/searxng/settings.yml`, then `docker restart searxng` |
 | `permission denied` when editing `settings.yml` | The container took ownership. Edit with `sudo`, or recreate the container with `-e FORCE_OWNERSHIP=false` |
 | Firecrawl API container exits; logs show `EAI_AGAIN nuq-postgres` | It was started without its database. Run `docker compose up -d` for the whole stack |
+| Firecrawl API container exits; logs show `password authentication failed for user "postgres"` | Another stack with the same Compose project name supplied the database. Stop it (`docker compose -p firecrawl stop`), set `COMPOSE_PROJECT_NAME` in Firecrawl's `.env` as in section 2, then `docker compose up -d` |
 | Every source is `unverified` | The run used LLM search: `SEARXNG_URL` is `off` |
 | `no search answered: cannot reach SearXNG at …` | Nothing is listening at `SEARXNG_URL`. Start it (`docker compose up -d`, or `docker start searxng`) or fix the URL; `deep-research doctor` checks it |
 | `no search answered (rate-limited)` | Every instance refused. With `auto`, public instances limit bursts; retry later, or run your own SearXNG |
