@@ -158,8 +158,9 @@ func (s *Server) Handler() http.Handler {
 
 // Serve listens on addr and serves the reports directory read-only. It
 // returns only when the listener fails: ctx bounds the runs, not the server,
-// which stops with the process.
-func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, info InfoFunc, log io.Writer) error {
+// which stops with the process. ready, when set, is given the page's URL
+// once the listener is bound, so a browser opened on it finds the server.
+func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, info InfoFunc, log io.Writer, ready func(url string)) error {
 	if err := os.MkdirAll(reports, 0o755); err != nil {
 		return err
 	}
@@ -174,12 +175,16 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, 
 		return err
 	}
 	// localhost, whatever the bind: the Host check refuses any other name.
-	_, _ = fmt.Fprintf(log, "serving on http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
+	url := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
+	_, _ = fmt.Fprintf(log, "serving on %s\n", url)
 	s := New(ctx, root.FS(), run)
 	s.remove = root.Remove
 	s.Ask = ask
 	s.Info = info
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	if ready != nil {
+		ready(url)
+	}
 	return srv.Serve(ln)
 }
 

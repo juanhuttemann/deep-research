@@ -48,9 +48,9 @@ jobs:
       # go test stays green. The pipeline itself is covered by the cli tests.
       - name: Smoke test built binary
         run: |
-          go build -o deep-research ./cmd/deep-research
-          ./deep-research --version
-          DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" ./deep-research list
+          go build -o drsh ./cmd/drsh
+          ./drsh --version
+          DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" ./drsh list
 
   lint:
     name: Lint

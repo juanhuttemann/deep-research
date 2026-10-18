@@ -47,7 +47,7 @@ func runUpdate(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", result.Warning)
 		}
 	case result.State == update.UpgradeAvailable:
-		fmt.Fprintf(out, "update available: %s (current: %s); run `deep-research update` to install it\n", result.Latest, result.Current)
+		fmt.Fprintf(out, "update available: %s (current: %s); run `drsh update` to install it\n", result.Latest, result.Current)
 	case result.State == update.NewerInstalled:
 		fmt.Fprintf(out, "%s is newer than the latest release %s\n", result.Current, result.Latest)
 	default:

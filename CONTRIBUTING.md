@@ -17,7 +17,7 @@ into `$(go env GOPATH)/bin`.
 Other targets:
 
 ```bash
-make build                  # stamps the version into the deep-research binary
+make build                  # stamps the version into the drsh binary
 make test                   # go test -race ./...
 go test -race ./internal/ui # a single package
 make fmt                    # apply gofmt fixes

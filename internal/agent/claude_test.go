@@ -613,7 +613,7 @@ func TestStreamedReasoningReadsAnthropicThinking(t *testing.T) {
 }
 
 // TestClaudeAPIOnlySkipsTheSubscription: a provider picked by key in
-// `deep-research login` — Anthropic's API, or Kimi or MiniMax, which speak the
+// `drsh login` — Anthropic's API, or Kimi or MiniMax, which speak the
 // Messages API at their own URL — must not be answered through Claude Code
 // because the user happens to be signed in to it. For Kimi, claude -p would
 // have sent a Kimi model name to Anthropic.
@@ -639,7 +639,7 @@ func TestClaudeAPIOnlySkipsTheSubscription(t *testing.T) {
 	}
 	// Without a key there is no subscription to fall back on.
 	if _, err := New(Config{Provider: "claude", ClaudeModel: "k3", ClaudeAPIOnly: true,
-		AnthropicBaseURL: api.URL}); err == nil || !strings.Contains(err.Error(), "deep-research login") {
+		AnthropicBaseURL: api.URL}); err == nil || !strings.Contains(err.Error(), "drsh login") {
 		t.Errorf("no key: err = %v", err)
 	}
 }

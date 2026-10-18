@@ -15,7 +15,7 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
-// Check is one line of `deep-research doctor`.
+// Check is one line of `drsh doctor`.
 type Check struct {
 	Name   string
 	OK     bool
@@ -70,7 +70,7 @@ func checkModel(ctx context.Context, cfg Config) Check {
 	}
 	c := Check{Name: "model"}
 	if strings.TrimSpace(cfg.OpenAIAPIKey) == "" {
-		c.Detail = "no API key — run `deep-research login`, or get a free one (no card): https://openrouter.ai/keys"
+		c.Detail = "no API key — run `drsh login`, or get a free one (no card): https://openrouter.ai/keys"
 		return c
 	}
 	base := strings.TrimRight(cfg.OpenAIBaseURL, "/")
@@ -112,10 +112,10 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 	}
 	key := strings.TrimSpace(cfg.AnthropicAPIKey)
 	if key == "" {
-		c.Detail = "no API key — run `deep-research login`, or set ANTHROPIC_API_KEY"
+		c.Detail = "no API key — run `drsh login`, or set ANTHROPIC_API_KEY"
 		if useClaudeCode(cfg) {
 			c.Detail = "Claude Code is not signed in to a subscription (run `claude auth login`)," +
-				" and there is no API key (`deep-research login`, or ANTHROPIC_API_KEY)"
+				" and there is no API key (`drsh login`, or ANTHROPIC_API_KEY)"
 		}
 		return c
 	}
@@ -161,7 +161,7 @@ func keyFrom(cfg Config) string {
 }
 
 // CheckModel is doctor's model check alone: one free request that proves the
-// endpoint answers and accepts the key. `deep-research login` runs it on a
+// endpoint answers and accepts the key. `drsh login` runs it on a
 // pasted key before saving it.
 func CheckModel(ctx context.Context, cfg Config) Check { return checkModel(ctx, cfg) }
 

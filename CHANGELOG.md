@@ -5,6 +5,38 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The command is `drsh`, not `deep-research`, which was long to type for
+  every run. The project, its config directory, its `DEEP_RESEARCH_*`
+  settings, stored keys, history and release archives keep their names, so
+  nothing set up before is lost. An install from before this release cannot
+  update itself to it (its `update` stops with "archive must contain only
+  the deep-research binary"): run the installer again, which installs `drsh`
+  and removes the old `deep-research` binary beside it.
+- `serve` opens its page in the default browser once it is listening:
+  `$BROWSER` if set, `wslview` or Windows' browser under WSL, nothing on a
+  Linux session with no display. `--no-open` turns it off.
+- The page's plan review shows each sub-topic's search query and lets you
+  edit it, including on sub-topics you add. The description under the name
+  was what the review showed before, and research never reads it: the query
+  is what a sub-agent searches. A changed query drops the planner's terms
+  for the old one, as a rename already did.
+
+- The report's Citations and Other Sources Retrieved lists no longer end
+  nearly every source in "— ok". A page read in full is left unmarked, and
+  the rest say `snippet only` or `never fetched`, the page audit's words,
+  where they said `degraded` or `unverified`. The `.json` keeps the status
+  values as they were.
+
+### Added
+
+- The page's live frame has a thinking row, collapsed like Activity, that
+  holds the model's whole reasoning, a section per model call. The status row
+  showed only its last 150 words, rewritten every five seconds, which was
+  too short a window to follow an analysis by. `--jsonl` carries the
+  reasoning as `thinking` events.
+
 ## [0.14.2] - 2026-10-17
 
 ### Changed

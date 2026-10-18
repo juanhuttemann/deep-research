@@ -9,7 +9,7 @@
     {
       "name": "deep-research",
       "source": "./",
-      "description": "Teaches the agent to run the deep-research CLI, wait for its result and report the fact-checked answer with its sources",
+      "description": "Teaches the agent to run the deep-research CLI (drsh), wait for its result and report the fact-checked answer with its sources",
       "license": "MIT",
       "homepage": "https://github.com/juanhuttemann/deep-research",
       "repository": "https://github.com/juanhuttemann/deep-research",

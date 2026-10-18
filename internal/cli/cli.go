@@ -34,12 +34,12 @@ type Deps struct {
 // New builds the root CLI command.
 func New(load func() (Deps, error)) *cobra.Command {
 	root := &cobra.Command{
-		Use:          "deep-research",
+		Use:          "drsh",
 		Short:        "AI-powered deep research agent",
 		SilenceUsage: true,
 	}
 
-	// A question is a flag on the root, not a subcommand: `deep-research -p "..."`.
+	// A question is a flag on the root, not a subcommand: `drsh -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only", "resume"}, cmd.Flags().Changed) {
 			return cmd.Help()
@@ -154,9 +154,9 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	// The key comes last: it is the step every first run needs, so it is
 	// the one left on screen.
 	if envFile := filepath.Join(dir, ".env"); slices.Contains(created, envFile) {
-		fmt.Fprintln(out, "\nPick a provider and model, and store its key: deep-research login")
+		fmt.Fprintln(out, "\nPick a provider and model, and store its key: drsh login")
 		fmt.Fprintln(out, "(a free OpenRouter key, no card: "+keyURL+"; or add OPENAI_API_KEY=... to "+envFile+")")
-		fmt.Fprintln(out, "then run: deep-research -p \"your question\"")
+		fmt.Fprintln(out, "then run: drsh -p \"your question\"")
 	}
 	return nil
 }
@@ -186,7 +186,7 @@ func initDocker(out io.Writer, dir string) error {
 	}
 	fmt.Fprintln(out, "\nStart the local search; Docker restarts it from then on:")
 	fmt.Fprintf(out, "  docker compose -f %s up -d\n", filepath.Join(dir, "docker-compose.yml"))
-	fmt.Fprintln(out, "then check it: deep-research doctor")
+	fmt.Fprintln(out, "then check it: drsh doctor")
 	fmt.Fprintln(out, "For full page text add Firecrawl, which runs from its own repository: "+agent.ServicesDoc)
 	return nil
 }
@@ -227,12 +227,27 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 			}
 			addr, _ := cmd.Flags().GetString("addr")
 			reports, _ := cmd.Flags().GetString("reports")
-			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), webInfo(load), cmd.ErrOrStderr())
+			var ready func(string)
+			if noOpen, _ := cmd.Flags().GetBool("no-open"); !noOpen {
+				ready = func(url string) { openPage(url, cmd.ErrOrStderr()) }
+			}
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), webInfo(load), cmd.ErrOrStderr(), ready)
 		},
 	}
 	cmd.Flags().String("addr", "127.0.0.1:7777", "address to listen on")
 	cmd.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts, served read-only")
+	cmd.Flags().Bool("no-open", false, "do not open the page in the default browser")
 	return cmd
+}
+
+// openPage opens the page in the browser. Failing to is not serve failing:
+// the URL is on the line above, for the reader to open by hand.
+func openPage(url string, log io.Writer) {
+	if opened, err := openBrowser(url); err != nil {
+		_, _ = fmt.Fprintf(log, "could not open a browser (%v); open %s\n", err, url)
+	} else if !opened {
+		_, _ = fmt.Fprintf(log, "no display to open a browser on; open %s\n", url)
+	}
 }
 
 // webInfo describes the setup from the same load a launch makes. serve loads
@@ -249,7 +264,7 @@ func webInfo(load func() (Deps, error)) web.InfoFunc {
 }
 
 // webRun is a launch from the page: the same command as
-// `deep-research --jsonl -p ...`, run in-process with the stream going to the
+// `drsh --jsonl -p ...`, run in-process with the stream going to the
 // page. Reusing the command keeps one path for validation, the run deadline,
 // the history record and the done line on every outcome.
 func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.RunFunc {
@@ -312,7 +327,7 @@ func (w *wroteTo) Write(p []byte) (int, error) {
 
 // keyURL is where a first-time user gets a free OpenRouter key.
 //
-// The hint leads with `deep-research login`, which stores the key; the .env
+// The hint leads with `drsh login`, which stores the key; the .env
 // line stays for those who keep keys in the environment.
 const keyURL = "https://openrouter.ai/keys"
 
@@ -334,7 +349,7 @@ func keyHint(d Deps, err error) error {
 	if d.Config.Provider == "claude" || errors.Is(err, agent.ErrSearchConfig) {
 		return err
 	}
-	return fmt.Errorf("%w\n  Pick a provider and store its key: deep-research login\n"+
+	return fmt.Errorf("%w\n  Pick a provider and store its key: drsh login\n"+
 		"  (free OpenRouter key, no card: %s; or set OPENAI_API_KEY in .env)", err, keyURL)
 }
 
@@ -493,7 +508,7 @@ func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, res ui.RunResult, 
 		// that had worked. Searches refused by a limit are retried by a
 		// resume; the limit itself lifts in minutes.
 		if p := rec.CheckpointPath(); p != "" && res.Report != nil && res.Report.Error != "" {
-			return fmt.Errorf("%w. Retry only what failed with: deep-research --resume %s"+
+			return fmt.Errorf("%w. Retry only what failed with: drsh --resume %s"+
 				" (if searches were rate-limited, wait a few minutes first)", err, p)
 		}
 		return err
@@ -812,7 +827,7 @@ func configSource() string {
 		}
 	}
 	if len(dirs) > 0 {
-		return "embedded defaults (no config.yaml found; `deep-research init` writes one to " + dirs[0] + ")"
+		return "embedded defaults (no config.yaml found; `drsh init` writes one to " + dirs[0] + ")"
 	}
 	return "embedded defaults (no config.yaml found)"
 }

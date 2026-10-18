@@ -1,5 +1,5 @@
-// Package setup is the terminal picker behind `deep-research login` and
-// `deep-research model`: one searchable list of every model of every
+// Package setup is the terminal picker behind `drsh login` and
+// `drsh model`: one searchable list of every model of every
 // provider, each row naming its provider; then the key, behind a mask of
 // asterisks, when that provider has none; then one free request to check it.
 //

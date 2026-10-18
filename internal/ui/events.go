@@ -41,6 +41,11 @@ const (
 	Info EventType = "info"
 	// Error surfaces a fatal or non-fatal failure.
 	Error EventType = "error"
+	// Thinking is a streamed call's reasoning: Detail holds what arrived
+	// since the last one, so the events of a call joined are its whole
+	// reasoning, and Status is "start" on a call's first. The transient
+	// status carries only the latest of it, a window too short to follow.
+	Thinking EventType = "thinking"
 	// PlanReady carries the plan the driver is about to run, whole: what was
 	// confirmed in the brief, or handed in with --plan. A caller can keep it,
 	// edit it and hand it back.

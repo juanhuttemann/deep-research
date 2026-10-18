@@ -156,12 +156,21 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .topic-name:focus { outline: none; border-color: var(--cyan); }
 .topic-meta { color: var(--dim); overflow-wrap: anywhere; }
 .topic-meta.renamed { color: var(--yellow); }
+/* The search a sub-topic runs, editable in place like its name: the
+   description above it is the planner's note, which research never reads. */
+.topic-query { display: flex; align-items: baseline; gap: 1ch; }
+.topic-query .k { flex-shrink: 0; }
+.topic-query input { flex: 1; min-width: 0; background: transparent; border: 1px solid transparent; padding: 1px 1ch; margin-left: -1ch; }
+.topic-query input:hover { border-color: var(--rule); }
+.topic-query input:focus { outline: none; border-color: var(--cyan); }
 .icon-btn { min-width: 30px; height: 30px; border: 1px solid transparent; background: none; color: var(--dim); cursor: pointer; }
 .icon-btn:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
 .icon-btn:disabled { opacity: .3; cursor: default; }
 .add-topic { display: flex; align-items: center; gap: 1ch; padding: 8px 1ch 12px 2ch; }
 .add-topic::before { content: "+"; color: var(--magenta); width: 3ch; text-align: right; flex-shrink: 0; }
 .add-topic input { flex: 1; min-width: 0; }
+.add-topic #new-query { flex: 1.4; }
+@media (max-width: 640px) { .add-topic { flex-wrap: wrap; } .add-topic input { flex-basis: calc(100% - 4ch); } }
 .brief-foot { display: flex; align-items: center; gap: 1ch; padding: 10px 2ch; border-top: 1px solid var(--rule); }
 .brief-foot .btn.primary { margin-left: auto; }
 
@@ -228,6 +237,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .activity summary::before { content: "▸"; }
 .activity[open] summary::before { content: "▾"; }
 .log { max-height: 320px; overflow: auto; margin: 0; padding: 0 2ch 12px; list-style: none; }
+.activity + .activity { margin-top: 0; }
+/* The model's reasoning, whole, a section per call: the status row shows only
+   its latest words, rewrapped every five seconds, too short a window to
+   follow. Open, the block makes that tail a repeat, so it goes. */
+.thought-log { max-height: 360px; overflow: auto; padding: 0 2ch 12px; }
+.thought-head { color: var(--cyan); font-weight: 700; margin: 10px 0 2px; }
+.thought-head:first-child { margin-top: 0; }
+.thought-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+#live:has(#thinking[open]) #status-thought { display: none; }
 .log li { display: grid; grid-template-columns: 5ch 2ch minmax(0, 1fr); gap: 1ch; }
 .log li span:last-child { overflow-wrap: anywhere; }
 .log .t, .log .s { color: var(--dim); }
@@ -426,7 +444,7 @@ mark { background: var(--yellow); color: var(--bg); }
       <div class="brief-head">
         <h2 class="heading">Review the plan</h2>
         <h1 id="brief-question"></h1>
-        <p>Each sub-topic is researched by its own agent. Rename, add or remove them before research starts.</p>
+        <p>Each sub-topic is researched by its own agent. Rename, add or remove them, or change what they search, before research starts.</p>
         <p id="brief-domains" class="muted" hidden></p>
       </div>
       <div class="brief-bar">
@@ -442,6 +460,7 @@ mark { background: var(--yellow); color: var(--bg); }
       <ol id="topics" class="topics"></ol>
       <form id="add-topic" class="add-topic">
         <input id="new-topic" placeholder="add a sub-topic…" aria-label="New sub-topic" maxlength="200">
+        <input id="new-query" placeholder="its search (optional)" aria-label="New sub-topic's search" maxlength="200">
         <button class="btn sm" type="submit">add</button>
       </form>
       <div class="brief-foot">
@@ -472,6 +491,7 @@ mark { background: var(--yellow); color: var(--bg); }
         <div id="status" class="status" hidden><div class="now"><span class="spin"></span><span id="status-now"></span></div><div id="status-thought" class="thought"></div></div>
         <div id="sources-check" class="sources" hidden></div>
         <div id="agents" class="agents"></div>
+        <details id="thinking" class="activity" hidden><summary>thinking <span id="n-thought"></span></summary><div id="thought-log" class="thought-log"></div></details>
         <details class="activity"><summary>activity <span id="n-events"></span></summary><ol id="log" class="log"></ol></details>
       </div>
     </div>
@@ -640,7 +660,7 @@ function meter(p) {
 
 const PIPELINE = ["Plan", "Research", "Analyze", "Fact-Check", "Summarize"];
 const loadedAt = Date.now();
-let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, agents = new Map(), events = 0;
+let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, agents = new Map(), events = 0, thoughts = [];
 // A plan-only run (the first half of Research) ends in the plan review, not
 // in an outcome; its plan arrives as the plan event before its done line.
 let planning = false, madePlan = null, planStamp = "";
@@ -657,9 +677,9 @@ function setRunning(on) {
   if (!on && !endedAt) endedAt = Date.now();
 }
 function reset() {
-  agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0;
-  for (const id of ["question", "agents", "sources-check", "log", "files", "exports", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
-  $("sources-check").hidden = true;
+  agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0; thoughts = [];
+  for (const id of ["question", "agents", "sources-check", "log", "thought-log", "n-thought", "files", "exports", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
+  $("sources-check").hidden = $("thinking").hidden = true;
   $("n-sources").textContent = "0"; $("n-tokens").textContent = "0"; $("n-events").textContent = "";
   $("note").hidden = $("status").hidden = $("outcome").hidden = $("audit").hidden = true;
   $("live").hidden = false;
@@ -727,6 +747,33 @@ function source(e) {
   $("sources-check").hidden = false;
   log(e, (kind === "error" ? "✗ " : "✓ ") + (c.domain || "") + " " + c.status, kind === "error" ? "error" : "ok");
 }
+// think adds a piece of a streamed call's reasoning to the thinking block: a
+// call's first piece opens its section, headed by the phase it thinks for.
+function think(e) {
+  // A reader scrolled up to read stays where they are; one at the bottom
+  // follows the reasoning as it arrives. Measured before a section is added.
+  const box = $("thought-log"), follow = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  const ph = e.phase || "model";
+  let s = thoughts[thoughts.length - 1];
+  if (!s || e.status === "start" || s.phase !== ph) {
+    // An analysis asked again is a second call in the same phase.
+    const n = thoughts.filter(t => t.phase === ph).length + 1;
+    s = { phase: ph, text: document.createTextNode("") };
+    const body = el("div", "thought-text");
+    body.append(s.text);
+    box.append(el("div", "thought-head", ph + (n > 1 ? " · call " + n : "")), body);
+    thoughts.push(s);
+  }
+  s.text.appendData(s.text.length ? e.detail || "" : (e.detail || "").replace(/^\s+/, ""));
+  if (follow) box.scrollTop = box.scrollHeight;
+  s.words = (s.text.data.match(/\S+/g) || []).length;
+  const words = thoughts.reduce((n, t) => n + (t.words || 0), 0);
+  $("n-thought").textContent = "· " + ph.toLowerCase() + " · " + fmtNum(words) + (words === 1 ? " word" : " words");
+  $("thinking").hidden = false;
+}
+// Opened, the block starts at the latest reasoning, which is what the status
+// row was showing; closed, it could not follow.
+$("thinking").ontoggle = () => { if ($("thinking").open) $("thought-log").scrollTop = $("thought-log").scrollHeight; };
 function log(e, text, cls) {
   events++;
   $("n-events").textContent = "· " + events;
@@ -777,6 +824,7 @@ function handle(e) {
     if (e.transient) status(e.detail); else log(e, e.detail);
     break;
   case "subagent": agent(e); break;
+  case "thinking": think(e); break;
   case "citation": {
     log(e, "+ " + (e.source_title || e.url), "ok");
     const a = agents.get(e.sub_id);
@@ -859,9 +907,10 @@ let brief = null;
 
 function showBrief(plan) {
   brief = structuredClone(plan);
-  // The planner wrote each query and its terms for the name it gave; a
-  // renamed sub-topic drops them, as the CLI brief does.
-  for (const t of brief.sub_topics) t.planned = t.name;
+  // The planner wrote each query and its terms for the name it gave. A
+  // renamed sub-topic drops both, as the CLI brief does, unless its query
+  // was typed here; an edited query drops the terms written for the old one.
+  for (const t of brief.sub_topics) { t.planned = t.name; t.plannedQuery = t.query || ""; t.query = t.plannedQuery; }
   $("brief-question").textContent = brief.question;
   const sites = brief.domains || [];
   $("brief-domains").textContent = sites.length ? "Only on: " + sites.join(", ") : "";
@@ -876,11 +925,12 @@ function perTopic() {
   const n = brief.sub_topics.length, per = brief.pinned_per_topic || TIER_SOURCES[brief.depth.key] || 4;
   return Math.max(1, Math.floor(Math.min(per * n, RUN_SOURCES) / n));
 }
+function renamed(t) { return t.planned !== undefined && t.name.trim() !== t.planned; }
 function topicMeta(t, meta) {
-  const renamed = t.planned !== undefined && t.name.trim() !== t.planned;
-  meta.className = "topic-meta" + (renamed ? " renamed" : "");
-  meta.textContent = renamed ? "Renamed: searched by its new name"
-    : [t.notes, t.query ? "searches “" + t.query + "”" : ""].filter(Boolean).join(" · ");
+  const r = renamed(t) && !t.queryEdited;
+  meta.className = "topic-meta" + (r ? " renamed" : "");
+  meta.textContent = r ? "Renamed: the planner's search was for the old name" : t.notes || "";
+  meta.hidden = !meta.textContent;
 }
 function renderTopics() {
   const n = brief.sub_topics.length;
@@ -889,9 +939,21 @@ function renderTopics() {
     const name = el("input", "topic-name");
     name.value = t.name; name.maxLength = 200;
     name.setAttribute("aria-label", "Sub-topic " + (i + 1));
-    name.oninput = () => { t.name = name.value; topicMeta(t, meta); };
+    const row = el("label", "topic-query"), query = el("input");
+    query.value = t.query || ""; query.maxLength = 200;
+    query.placeholder = "the question + this name";
+    query.setAttribute("aria-label", "Search for sub-topic " + (i + 1));
+    row.append(el("span", "k", "searches"), query);
+    name.oninput = () => {
+      t.name = name.value;
+      // An untouched planner query follows the name: dropped on a rename,
+      // back when the name is.
+      if (!t.queryEdited && t.planned !== undefined) query.value = t.query = renamed(t) ? "" : t.plannedQuery;
+      topicMeta(t, meta);
+    };
+    query.oninput = () => { t.query = query.value; t.queryEdited = true; topicMeta(t, meta); };
     topicMeta(t, meta);
-    body.append(name, meta);
+    body.append(name, meta, row);
     const rm = el("button", "icon-btn", "✕");
     rm.type = "button"; rm.title = "Remove"; rm.setAttribute("aria-label", "Remove sub-topic " + (i + 1));
     // A plan with no sub-topics has nothing to research.
@@ -909,10 +971,13 @@ function editedPlan() {
     pinned_per_topic: brief.pinned_per_topic || 0,
     domains: brief.domains || [],
     sub_topics: brief.sub_topics.filter(t => t.name.trim()).map(t => {
-      const name = t.name.trim();
-      return t.planned === undefined || name !== t.planned
-        ? { name, notes: t.notes || "" }
-        : { name, notes: t.notes || "", query: t.query, terms: t.terms };
+      const name = t.name.trim(), query = (t.query || "").trim(), notes = t.notes || "";
+      // The planner's terms judge results for the planner's query, so they
+      // go only with it, under its name.
+      if (t.planned !== undefined && name === t.planned && query === t.plannedQuery) return { name, notes, query, terms: t.terms };
+      // No query searches the question with the name, as the run does for
+      // any sub-topic without one.
+      return query ? { name, notes, query } : { name, notes };
     }),
   };
 }
@@ -925,10 +990,10 @@ for (const r of document.querySelectorAll("input[name=bdepth]")) {
 }
 $("add-topic").onsubmit = ev => {
   ev.preventDefault();
-  const name = $("new-topic").value.trim();
+  const name = $("new-topic").value.trim(), query = $("new-query").value.trim();
   if (!name) return;
-  brief.sub_topics.push({ name, notes: "added by you" });
-  $("new-topic").value = "";
+  brief.sub_topics.push({ name, notes: "added by you", query, queryEdited: !!query });
+  $("new-topic").value = $("new-query").value = "";
   renderTopics();
 };
 $("discard").onclick = () => {

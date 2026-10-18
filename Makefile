@@ -11,7 +11,7 @@ test:
 # free models cap per day, and public SearXNG can refuse it on any given day.
 # Needs OPENAI_API_KEY; without one only the rejected-key test runs.
 e2e:
-	go test -tags e2e -count=1 -timeout 15m -v ./cmd/deep-research/
+	go test -tags e2e -count=1 -timeout 15m -v ./cmd/drsh/
 
 # The checker eval runs the live fact-check and the governance code on
 # frozen analyses whose right outcome is known (internal/ui/testdata/checker)
@@ -22,7 +22,7 @@ e2e:
 eval-replay:
 	go test -tags eval -count=1 -timeout 30m -run TestEvalChecker -v ./internal/ui/
 
-# The provider/model list `deep-research login` shows offline: Catwalk's
+# The provider/model list `drsh login` shows offline: Catwalk's
 # catalog (MIT), kept to the provider types deep-research has a client for and
 # the fields it reads. The binary refreshes it at login when online; this
 # updates the copy built in. Not part of verify: it needs the network.
@@ -42,10 +42,10 @@ catalog:
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o deep-research ./cmd/deep-research
+	go build -ldflags "-X main.version=$(VERSION)" -o drsh ./cmd/drsh
 
 run:
-	go run ./cmd/deep-research
+	go run ./cmd/drsh
 
 fmt:
 	gofmt -l -w .
@@ -104,7 +104,7 @@ ignored-go:
 	@ignored=$$(git ls-files --others --ignored --exclude-standard | grep '\.go$$' || true); \
 	if [ -n "$$ignored" ]; then \
 		echo "gitignored .go files:"; echo "$$ignored"; \
-		echo "anchor the .gitignore pattern (e.g. /deep-research, not deep-research)"; exit 1; fi
+		echo "anchor the .gitignore pattern (e.g. /drsh, not drsh)"; exit 1; fi
 
 lint: fmt-check vet cyclo ineffassign golangci deadcode
 

@@ -54,7 +54,7 @@ type Config struct {
 	ClaudeModel      string
 	AnthropicAPIKey  string
 	AnthropicBaseURL string
-	// KeySource says where the key came from — "auth.json" (deep-research
+	// KeySource says where the key came from — "auth.json" (drsh
 	// login), "environment" or "config.yaml" — so a rejected key's error can
 	// say which one to fix. Never the key.
 	KeySource string
@@ -533,7 +533,10 @@ type impl struct {
 	// history: the live UI shows it in one row replaced in place. Unset, it
 	// falls back to logf.
 	statusf func(string)
-	model   string
+	// thinkf receives a streamed call's reasoning as it grows, whole rather
+	// than the tail a status carries; first marks a call's first piece.
+	thinkf func(text string, first bool)
+	model  string
 	// baseURL is kept so a transport failure can name the endpoint that was
 	// actually tried, which is the one thing the reader has to check.
 	baseURL string
@@ -570,10 +573,14 @@ type impl struct {
 func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string, progress func(partial, thinking string), opts ...agent.Option) (string, error) {
 	streamOpts := slices.Concat([]agent.Option{agent.Stream(true)}, a.streamOpts, opts)
 	var th thoughts
-	report, stop := tickProgress(func(p string) { progress(p, th.String()) }, progressTick)
+	report, stop := tickProgress(func(p string) {
+		progress(p, th.String())
+		a.thinking(th.fresh(time.Now(), false))
+	}, progressTick)
 	report("") // the wait starts now, before the first byte arrives
 	out, err := a.callWith(context.WithValue(ctx, reasoningKey{}, th.add), ag, prompt, report, streamOpts...)
 	stop()
+	a.thinking(th.fresh(time.Now(), true))
 	// Not every OpenAI-compatible server honours stream:true — proxies and
 	// older local servers answer with a whole JSON body, the stream yields
 	// nothing, and the phase would hand back an empty answer with no error at
@@ -842,7 +849,7 @@ func (a *impl) rejectedKey(reason string) error {
 		reason = " (" + reason + ")"
 	}
 	if a.keySource == KeyFromLogin {
-		return fmt.Errorf("the provider rejected the API key%s — replace the stored key with: deep-research login --new-key", reason)
+		return fmt.Errorf("the provider rejected the API key%s — replace the stored key with: drsh login --new-key", reason)
 	}
 	hint := ""
 	if a.keyEnv == "OPENAI_API_KEY" {
@@ -1241,6 +1248,9 @@ func streamedReasoning(line []byte) string {
 type thoughts struct {
 	mu sync.Mutex
 	b  strings.Builder
+	// sent is how much of b fresh has handed out, and at when it last did.
+	sent int
+	at   time.Time
 }
 
 func (t *thoughts) add(s string) {
@@ -1253,6 +1263,25 @@ func (t *thoughts) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.b.String()
+}
+
+// thinkingInterval is how often the reasoning goes out while it grows. The
+// reporter runs on every streamed token, and a line per token would bury
+// the event stream; a second keeps a reader's view of it live.
+const thinkingInterval = time.Second
+
+// fresh returns the reasoning added since it last returned any, and whether
+// that is the call's first: at most once per thinkingInterval, or whatever
+// is left when last is set, at the end of the call.
+func (t *thoughts) fresh(now time.Time, last bool) (text string, first bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.b.Len() == t.sent || !last && now.Sub(t.at) < thinkingInterval {
+		return "", false
+	}
+	text, first = t.b.String()[t.sent:], t.sent == 0
+	t.sent, t.at = t.b.Len(), now
+	return text, first
 }
 
 func (a *impl) addServed(model string) {
@@ -1347,6 +1376,17 @@ func (a *impl) log(msg string) {
 // Assistant: a caller that has no status row simply never sets it, and the
 // lines reach the progress logger instead.
 func (a *impl) SetStatus(f func(string)) { a.statusf = f }
+
+// SetThinking wires the channel for a streamed call's reasoning, sent whole
+// as it grows. Like SetStatus it is not part of Assistant: unset, the
+// reasoning shows only as the tail each status carries.
+func (a *impl) SetThinking(f func(text string, first bool)) { a.thinkf = f }
+
+func (a *impl) thinking(text string, first bool) {
+	if text != "" && a.thinkf != nil {
+		a.thinkf(text, first)
+	}
+}
 
 func (a *impl) status(msg string) {
 	if a.statusf != nil {

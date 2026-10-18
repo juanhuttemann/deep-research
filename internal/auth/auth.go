@@ -1,4 +1,4 @@
-// Package auth stores the API keys `deep-research login` was given, and the
+// Package auth stores the API keys `drsh login` was given, and the
 // provider and model it picked, in the user's config directory.
 //
 // Keys live in auth.json, created 0600 in a 0700 directory and replaced
@@ -79,7 +79,7 @@ func Load(dir string, warn io.Writer) (*Store, error) {
 	}
 	if err := json.Unmarshal(b, &s.creds); err != nil {
 		// The error never quotes the file: its text is the keys.
-		return nil, fmt.Errorf("%s is not valid JSON; fix or delete it and run `deep-research login`", p)
+		return nil, fmt.Errorf("%s is not valid JSON; fix or delete it and run `drsh login`", p)
 	}
 	if s.creds == nil { // the file said null
 		s.creds = map[string]Credential{}

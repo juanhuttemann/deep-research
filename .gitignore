@@ -1,8 +1,10 @@
 # Local secrets / machine-specific overrides
-# Created by `deep-research init`; the real secrets file lives at the repo root.
+# Created by `drsh init`; the real secrets file lives at the repo root.
 .env
 
 # Build artifacts
+/drsh
+# The binary before it was renamed drsh.
 /deep-research
 /bin/
 dist/

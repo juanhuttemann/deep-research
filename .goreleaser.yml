@@ -1,6 +1,9 @@
 version: 2
 builds:
-  - main: ./cmd/deep-research
+  - main: ./cmd/drsh
+    # The command is drsh; the project, its archives and its checksums keep
+    # the repo's name, which is what the installers and update look for.
+    binary: drsh
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{.Version}}"]

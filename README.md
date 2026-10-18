@@ -14,7 +14,7 @@
 An AI-powered deep research agent for the terminal and the browser. It plans
 a question into sub-topics, researches them in parallel on the web, then runs
 **research → analyze → fact-check → summarize** and writes a cited report as
-Markdown, PDF and JSON. `deep-research serve` opens the same run on a local
+Markdown, PDF and JSON. `drsh serve` opens the same run on a local
 web page, with the plan to edit, the live progress, and an audit of every
 claim the fact-check passed or blocked.
 
@@ -42,7 +42,7 @@ iex (irm https://raw.githubusercontent.com/juanhuttemann/deep-research/main/scri
 
 Both fetch the latest release binary and verify its checksum; see
 [releases](https://github.com/juanhuttemann/deep-research/releases). After
-that, `deep-research update` replaces it with each new release.
+that, `drsh update` replaces it with each new release.
 
 From source (Go 1.26+):
 
@@ -52,8 +52,8 @@ cd deep-research
 make build
 ```
 
-The build stamps the version into a `deep-research` binary in the repo root.
-Move it onto your `PATH` (or run it as `./deep-research`) for the examples
+The build stamps the version into a `drsh` binary in the repo root.
+Move it onto your `PATH` (or run it as `./drsh`) for the examples
 below.
 
 The live terminal UI is unix-only. Windows binaries work, but the run
@@ -62,21 +62,21 @@ degrades to headless output — one log line per event, then the report.
 ## Quick start
 
 ```bash
-deep-research init          # config files, a .env template, where to get a key
+drsh init          # config files, a .env template, where to get a key
 ```
 
 Pick a provider and model, and paste the key (shown as `*`, stored readable
 only by you). A free OpenRouter key (no card) is at <https://openrouter.ai/keys>:
 
 ```bash
-deep-research login
-deep-research -p "What are the latest advances in fusion energy?"
+drsh login
+drsh -p "What are the latest advances in fusion energy?"
 ```
 
-`deep-research model` switches later. Environment variables still work as
+`drsh model` switches later. Environment variables still work as
 the fallback: `export OPENAI_API_KEY="sk-or-..."`.
 
-Something off? `deep-research doctor` checks the model endpoint and key,
+Something off? `drsh doctor` checks the model endpoint and key,
 the search backend and the scraper — one cheap request each, no tokens — and
 prints how many model requests a run spends.
 
@@ -108,8 +108,9 @@ The **report** is rendered in the terminal and saved to `reports/` as `.md`,
 - the fact-check: how many claims were confirmed, and each one that was not
   confirmed or was contradicted;
 - citations split into sources the report cites and sources it only read,
-  each labelled `ok` (page fetched), `degraded` (search snippet only) or
-  `unverified` (model-supplied, never fetched).
+  each source not read in full marked `snippet only` (the search snippet was
+  all it gave) or `never fetched` (model-supplied); a page read in full is
+  left unmarked.
 
 If the analysis or the report call fails late in a run — a provider error, or
 the run deadline — what was gathered is still saved and exported, marked
@@ -121,15 +122,18 @@ stops before the analysis instead, saying why.
 
 ### In the browser
 
-`deep-research serve` runs the same pipeline from a page on localhost, styled
-after the terminal UI, in a light or a dark theme. You type the question and
-pick the depth, then edit the plan before anything is searched:
+`drsh serve` runs the same pipeline from a page on localhost, styled
+after the terminal UI, in a light or a dark theme, and opens it in your
+browser. You type the question and pick the depth, then edit the plan before
+anything is searched: rename, add or remove sub-topics, and change the search
+each one runs:
 
 ![The serve page's plan review for "How close are we to a room-temperature superconductor after LK-99?": four sub-topics, each with the search it will run](docs/images/web-plan.jpg)
 
 The live frame shows the pipeline, each sub-agent with its sources, the
 follow-up searches the analysis asked for, and the model's reasoning as it
-streams:
+streams: its latest lines under the status, and all of it, call by call, in a
+thinking block you can open:
 
 ![The live frame mid-analysis: Plan and Research done, seven sub-agents complete including three follow-ups, and the model's reasoning streaming above them](docs/images/web-live.jpg)
 
@@ -163,9 +167,9 @@ With `auto`, every query goes to a third party you did not pick. To keep
 queries on your machine:
 
 ```bash
-deep-research init --docker   # sets up SearXNG and points the config at it
+drsh init --docker   # sets up SearXNG and points the config at it
 docker compose -f ~/.config/deep-research/docker-compose.yml up -d
-deep-research doctor          # confirms it answers
+drsh doctor          # confirms it answers
 ```
 
 This is the recommended setup: public instances often refuse a run's
@@ -192,7 +196,7 @@ as printed by `doctor`. Hitting the daily cap fails at once with a message
 instead of burning retries; a per-minute limit waits for the provider's
 `Retry-After`.
 
-`deep-research login` lists the providers it can drive — OpenRouter, OpenAI,
+`drsh login` lists the providers it can drive — OpenRouter, OpenAI,
 Anthropic and some thirty OpenAI- or Anthropic-compatible ones, from
 [Catwalk](https://github.com/charmbracelet/catwalk)'s catalog — and a custom
 endpoint for a local vLLM, llama.cpp or LM Studio server, which needs no key.
@@ -206,18 +210,18 @@ See [Claude](docs/configuration.md#claude).
 ## Common commands
 
 ```bash
-deep-research -p "question" --mode deep          # quick | standard | deep
-deep-research -p "question" --output report.md   # also save to a file
-deep-research -p "question" --silent             # just the report
-deep-research -p "question" --jsonl              # machine-readable events
-deep-research serve                               # launch and audit runs in the browser
-deep-research --resume reports/<run>.partial.json # continue an interrupted run
-deep-research list                                # past runs
-deep-research login                               # pick provider + model, store the key
-deep-research model                               # switch provider or model
-deep-research doctor                              # check model, key, search
-deep-research init --docker                       # local SearXNG setup
-deep-research update                              # install the latest release
+drsh -p "question" --mode deep          # quick | standard | deep
+drsh -p "question" --output report.md   # also save to a file
+drsh -p "question" --silent             # just the report
+drsh -p "question" --jsonl              # machine-readable events
+drsh serve                               # launch and audit runs in the browser
+drsh --resume reports/<run>.partial.json # continue an interrupted run
+drsh list                                # past runs
+drsh login                               # pick provider + model, store the key
+drsh model                               # switch provider or model
+drsh doctor                              # check model, key, search
+drsh init --docker                       # local SearXNG setup
+drsh update                              # install the latest release
 ```
 
 Full flag reference, key bindings and export details: [docs/usage.md](docs/usage.md).
@@ -225,7 +229,7 @@ Full flag reference, key bindings and export details: [docs/usage.md](docs/usage
 ## Use it from an agent
 
 The repo ships an [Agent Skill](skills/deep-research/SKILL.md) that teaches a
-coding agent to run `deep-research`, wait for the result and report the
+coding agent to run `drsh`, wait for the result and report the
 fact-checked answer with its sources. The binary must be installed first.
 
 Claude Code:
@@ -248,7 +252,7 @@ Or copy `skills/deep-research/` into the agent's skills directory.
 
 ## Configuration
 
-Settings resolve environment > what `deep-research login` picked >
+Settings resolve environment > what `drsh login` picked >
 `config.yaml` > embedded defaults, and every `config.yaml` key is also
 settable as `DEEP_RESEARCH_<KEY>`. A key stored by `login` wins over the
 environment's. `config.yaml` and `.env` are read from one place,

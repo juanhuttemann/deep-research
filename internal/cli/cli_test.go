@@ -90,7 +90,7 @@ func TestMissingKeyIsAHardError(t *testing.T) {
 	if err == nil {
 		t.Fatal("a run with no API key succeeded")
 	}
-	for _, want := range []string{"deep-research login", "https://openrouter.ai/keys"} {
+	for _, want := range []string{"drsh login", "https://openrouter.ai/keys"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not say %q: %v", want, err)
 		}
@@ -895,4 +895,61 @@ func hasFlag(root *cobra.Command, name string) bool {
 	return slices.ContainsFunc(append(root.Commands(), root), func(c *cobra.Command) bool {
 		return c.Flags().Lookup(name) != nil
 	})
+}
+
+// serve opens the page with whatever opens a URL where it runs, and with
+// nothing where nothing could show it.
+func TestBrowserCommand(t *testing.T) {
+	const url = "http://localhost:7777"
+	found := func(string) (string, error) { return "/usr/bin/wslview", nil }
+	missing := func(string) (string, error) { return "", errors.New("not found") }
+	for _, tc := range []struct {
+		name string
+		goos string
+		env  map[string]string
+		look func(string) (string, error)
+		want []string
+	}{
+		{"macOS", "darwin", nil, missing, []string{"open", url}},
+		{"Windows", "windows", nil, missing, []string{"rundll32", "url.dll,FileProtocolHandler", url}},
+		{"Linux desktop", "linux", map[string]string{"DISPLAY": ":0"}, missing, []string{"xdg-open", url}},
+		{"Wayland", "linux", map[string]string{"WAYLAND_DISPLAY": "wayland-0"}, missing, []string{"xdg-open", url}},
+		{"SSH session", "linux", nil, missing, nil},
+		{"WSL with wslu", "linux", map[string]string{"WSL_DISTRO_NAME": "Ubuntu"}, found, []string{"wslview", url}},
+		{"WSL without wslu", "linux", map[string]string{"WSL_INTEROP": "/run/WSL/1_interop"}, missing, []string{"explorer.exe", url}},
+		{"BROWSER first of a list", "linux", map[string]string{"BROWSER": "firefox:chromium"}, missing, []string{"firefox", url}},
+		{"FreeBSD desktop", "freebsd", nil, missing, []string{"xdg-open", url}},
+	} {
+		name, args := browserCommand(tc.goos, func(k string) string { return tc.env[k] }, tc.look, url)
+		var got []string
+		if name != "" {
+			got = append([]string{name}, args...)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A browser that cannot be opened leaves serve running and says where the
+// page is.
+func TestOpenPageFailureNamesTheURL(t *testing.T) {
+	saved := openBrowser
+	t.Cleanup(func() { openBrowser = saved })
+	for _, tc := range []struct {
+		opened bool
+		err    error
+		want   string
+	}{
+		{true, nil, ""},
+		{false, nil, "no display to open a browser on; open http://localhost:1\n"},
+		{false, errors.New("exec: \"xdg-open\": not found"), "could not open a browser (exec: \"xdg-open\": not found); open http://localhost:1\n"},
+	} {
+		openBrowser = func(string) (bool, error) { return tc.opened, tc.err }
+		var log strings.Builder
+		openPage("http://localhost:1", &log)
+		if log.String() != tc.want {
+			t.Errorf("logged %q, want %q", log.String(), tc.want)
+		}
+	}
 }

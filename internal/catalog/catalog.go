@@ -1,4 +1,4 @@
-// Package catalog lists the providers and models `deep-research login` offers.
+// Package catalog lists the providers and models `drsh login` offers.
 //
 // The data is Catwalk's (https://github.com/charmbracelet/catwalk, MIT), the
 // community catalog Crush reads: endpoints, key variable names, models with
