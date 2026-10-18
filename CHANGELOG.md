@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-18
+
 ### Changed
 
 - A run limited to a list of sites stopped on "None of the listed domains
@@ -884,7 +886,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/juanhuttemann/deep-research/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/juanhuttemann/deep-research/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/juanhuttemann/deep-research/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/juanhuttemann/deep-research/compare/v0.14.0...v0.14.1
