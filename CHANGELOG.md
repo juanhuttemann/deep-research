@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-17
+
 ### Changed
 
 - A streamed phase (plan, analysis, fact-check, report) is no longer cut off
@@ -20,7 +22,6 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - Streamed phases spend about 98% less CPU and 99% less memory on their
   progress line: it rebuilt the whole answer and the whole reasoning on every
   token, about 185 ms and 425 MB per phase on a 16 KB analysis.
-
 - The Agent Skill asks before running without a scraper: set up Firecrawl,
   set an Exa or Tavily key, or accept snippets only. It used to mention the
   warning and go on, and the run came back with every source degraded and
