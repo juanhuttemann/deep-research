@@ -160,7 +160,21 @@ type DomainCheck struct {
 	Chars  int    `json:"chars,omitempty"`
 	// Detail says why a domain failed, in the reader's terms.
 	Detail string `json:"detail,omitempty"`
+	// searchErr is the search's own error on a search-failed check. When
+	// every domain has one, the search is what is down, and the run says
+	// that rather than blaming each site.
+	searchErr error
 }
+
+// SearchFailedCheck is the check of a domain whose search did not answer.
+func SearchFailedCheck(domain string, err error) DomainCheck {
+	return DomainCheck{Domain: domain, Status: DomainSearchFail,
+		Detail: fmt.Sprintf("%s: %v", SearchStatus(err), err), searchErr: err}
+}
+
+// SearchErr is the search's error behind a search-failed check, nil on any
+// other.
+func (c DomainCheck) SearchErr() error { return c.searchErr }
 
 // Usable reports whether a run can research the domain: the engine finds
 // pages on it and they can be read, in full or from their snippet.
@@ -219,8 +233,7 @@ func (s *SearchTools) checkDomain(ctx context.Context, domain string) DomainChec
 		}
 	}
 	if err != nil {
-		c.Status, c.Detail = DomainSearchFail, fmt.Sprintf("%s: %v", SearchStatus(err), err)
-		return c
+		return SearchFailedCheck(domain, err)
 	}
 	c.Pages = len(on)
 	if len(on) == 0 {

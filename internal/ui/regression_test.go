@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2803,5 +2804,46 @@ func TestSourceListsMarkOnlySourcesNotReadInFull(t *testing.T) {
 		if strings.Contains(md, bad) {
 			t.Errorf("source list says %q:\n%s", bad, md)
 		}
+	}
+}
+
+// With SearXNG not running, a run confined to wikipedia.org stopped on "None
+// of the listed domains can be researched: wikipedia.org search-failed",
+// which blamed the site. No site was asked about: the search was down, and
+// the run now says so and what to check, as a run with no domain list does.
+func TestSiteCheckWithSearchDownBlamesTheSearch(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := "http://" + ln.Addr().String()
+	_ = ln.Close()
+	_, searchErr := tools.NewSearXNGClient(addr, time.Second).Search(context.Background(), "q")
+
+	down := map[string]string{"wikipedia.org": tools.DomainSearchFail, "britannica.com": tools.DomainSearchFail}
+	a := &scopingAssistant{fakeAssistant: &fakeAssistant{}, statuses: down, searchErr: searchErr}
+	_, _, err = runWithDomains(t, a, []string{"wikipedia.org", "britannica.com"})
+	if err == nil {
+		t.Fatal("the run went on with no search")
+	}
+	for _, want := range []string{"no search answered while checking the listed sites", "cannot reach SearXNG at " + addr, "SEARXNG_URL", "doctor"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("run error %q does not mention %q", err, want)
+		}
+	}
+	if errors.Is(err, ErrNoUsableSources) || strings.Contains(err.Error(), "wikipedia.org") {
+		t.Errorf("run error %q still blames the sites", err)
+	}
+	if a.planned != 0 {
+		t.Errorf("planner called %d times; the run should stop before it", a.planned)
+	}
+
+	// A site the search did answer about is the list's fault, not the
+	// search's: the run names each site and why.
+	mixed := map[string]string{"wikipedia.org": tools.DomainSearchFail, "nowhere.example": tools.DomainUnindexed}
+	a = &scopingAssistant{fakeAssistant: &fakeAssistant{}, statuses: mixed, searchErr: searchErr}
+	_, _, err = runWithDomains(t, a, []string{"wikipedia.org", "nowhere.example"})
+	if !errors.Is(err, ErrNoUsableSources) || !strings.Contains(err.Error(), "nowhere.example unindexed") {
+		t.Errorf("mixed failures: err = %v, want each site and why named", err)
 	}
 }

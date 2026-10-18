@@ -115,10 +115,19 @@ COMPOSE_PROJECT_NAME=deep-research-firecrawl
 YAML
 
 cat > docker-compose.override.yaml <<'YAML'
+x-restart: &restart
+  restart: unless-stopped
+
 services:
   api:
+    <<: *restart
     ports: !override
       - "127.0.0.1:3002:3002"
+  playwright-service: *restart
+  nuq-postgres: *restart
+  redis: *restart
+  rabbitmq: *restart
+  foundationdb: *restart
 YAML
 ```
 
@@ -130,6 +139,12 @@ requests with no API key, which is how this CLI calls it by default. That
 also means anyone who can reach the port can scrape through it, and
 Firecrawl's own compose file publishes it on every interface. The override
 binds it to localhost, as `init --docker` does for SearXNG.
+
+The override also gives every long-running service `restart:
+unless-stopped`, as SearXNG has. Firecrawl's own compose file sets none, so
+a reboot or a Docker restart left the stack down while SearXNG came back,
+and every run after it read search snippets only until someone noticed.
+(`foundationdb-init` runs once and keeps its own `restart: "no"`.)
 
 Compose names a stack after its directory, so without `COMPOSE_PROJECT_NAME`
 every checkout called `firecrawl` is the same stack. A second checkout
@@ -155,18 +170,27 @@ starting (it keeps the localhost binding):
 
 ```sh
 cat > docker-compose.override.yaml <<'YAML'
+x-restart: &restart
+  restart: unless-stopped
+
 services:
   api:
+    <<: *restart
     image: ghcr.io/firecrawl/firecrawl:latest
     build: !reset null
     ports: !override
       - "127.0.0.1:3002:3002"
   playwright-service:
+    <<: *restart
     image: ghcr.io/firecrawl/playwright-service:latest
     build: !reset null
   nuq-postgres:
+    <<: *restart
     image: ghcr.io/firecrawl/nuq-postgres:latest
     build: !reset null
+  redis: *restart
+  rabbitmq: *restart
+  foundationdb: *restart
 YAML
 ```
 
@@ -174,14 +198,18 @@ Under rootless Podman (Fedora, RHEL) RabbitMQ exits at start with
 `Error when reading /var/lib/rabbitmq/.erlang.cookie: eacces` and the `api`
 container never starts: the image's entrypoint writes the cookie as root and
 then runs RabbitMQ as uid 999, which cannot read it. Run the service as 999
-from the start by adding it to the override file, then recreate it with its
-volume:
+from the start: in the override file, replace the line
+`rabbitmq: *restart` with
+
+```yaml
+  rabbitmq:
+    <<: *restart
+    user: "999:999"
+```
+
+then recreate it with its volume:
 
 ```sh
-cat >> docker-compose.override.yaml <<'YAML'
-  rabbitmq:
-    user: "999:999"
-YAML
 docker compose rm -sfv rabbitmq
 docker compose up -d
 ```
