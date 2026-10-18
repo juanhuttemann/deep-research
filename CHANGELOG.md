@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-17
+
 ### Changed
 
 - The command is `drsh`, not `deep-research`, which was long to type for
@@ -866,7 +868,9 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/juanhuttemann/deep-research/compare/v0.14.2...v0.15.0
+[0.14.2]: https://github.com/juanhuttemann/deep-research/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/juanhuttemann/deep-research/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/juanhuttemann/deep-research/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/juanhuttemann/deep-research/compare/v0.12.0...v0.13.0
