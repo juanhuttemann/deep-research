@@ -37,7 +37,7 @@ type Config struct {
 	Parallelism int
 	// fallback is the key from the environment or config.yaml for each
 	// transport, with the endpoint it goes with: the one the environment and
-	// config.yaml name, before `deep-research login`'s choice. See
+	// config.yaml name, before `drsh login`'s choice. See
 	// FallbackKey.
 	fallback map[string]fallbackKey
 }
@@ -57,7 +57,7 @@ func (c Config) FallbackKey(transport string) (baseURL, key string) {
 // The entries are commented out on purpose so users fill in their own values,
 // or export the matching environment variables for a session.
 const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
-# The easy way: run "deep-research login" to pick a provider and model and store
+# The easy way: run "drsh login" to pick a provider and model and store
 # the key (auth.json, readable only by you). The keys below are the fallback;
 # the provider and model settings below override what login picked.
 # Get a free OpenRouter key (no card): https://openrouter.ai/keys
@@ -281,7 +281,7 @@ func firstEnv(names ...string) string {
 }
 
 // applyEnvDefaults fills in LLM provider and search-service settings:
-// environment variables win over the selection saved by `deep-research
+// environment variables win over the selection saved by `drsh
 // login`, which wins over the config file; built-in defaults fill the gap.
 func applyEnvDefaults(cfg *Config, v *viper.Viper, sel auth.Selection) {
 	// Every setting resolves the same way: the environment, then the saved
@@ -349,7 +349,7 @@ func savedFor(sel auth.Selection, transport string) auth.Selection {
 }
 
 // applyKeys picks the key for the endpoint the settings resolved to: a key
-// stored by `deep-research login` for that endpoint, else the environment's,
+// stored by `drsh login` for that endpoint, else the environment's,
 // else the config file's. Every key is bound to an endpoint: a stored one to
 // the endpoint it was entered for, the environment's to the one the
 // environment and config file name. So an OPENAI_BASE_URL pointed elsewhere
@@ -402,7 +402,7 @@ func fallbackFor(f fallbackKey, v *viper.Viper, keyName string, envNames ...stri
 // import the catalog for one string.
 const catalogClaudeSubscription = "claude-subscription"
 
-// AuthDir is where `deep-research login` keeps auth.json and model.json:
+// AuthDir is where `drsh login` keeps auth.json and model.json:
 // DEEP_RESEARCH_CONFIG_DIR when set, else the per-user config directory.
 // Never the project's config/ directory, which sits in a checkout.
 func AuthDir() (string, error) {
@@ -412,7 +412,7 @@ func AuthDir() (string, error) {
 	return UserDir()
 }
 
-// loadLogin reads what `deep-research login` saved. With no user config
+// loadLogin reads what `drsh login` saved. With no user config
 // directory there is nothing saved, which is not an error.
 func loadLogin() (*auth.Store, auth.Selection, error) {
 	dir, err := AuthDir()

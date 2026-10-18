@@ -139,7 +139,7 @@ Code: `claude -p` talks to Anthropic, so it cannot serve a Kimi model.
 ## Packages
 
 ```
-cmd/deep-research   entrypoint; version is stamped in at link time
+cmd/drsh            entrypoint; version is stamped in at link time
 internal/
   agent     one LLM phase per method (ResearchDetail / Analyze / FactCheck /
             Summarize / Plan); real search via internal/tools when a

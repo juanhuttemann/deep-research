@@ -30,8 +30,11 @@ import (
 
 const (
 	defaultBaseURL = "https://github.com/juanhuttemann/deep-research"
-	binaryName     = "deep-research"
-	checksumsName  = binaryName + "_checksums.txt"
+	// The release keeps the project's name for its archives and checksums;
+	// the binary inside is the command, drsh.
+	projectName   = "deep-research"
+	binaryName    = "drsh"
+	checksumsName = projectName + "_checksums.txt"
 	// Caps on what a download may be, so a broken or hostile response cannot
 	// fill memory. The archives are ~10MB and the binary ~30MB today.
 	maxArchive  = 128 << 20
@@ -124,7 +127,7 @@ func AssetName(p Platform) (string, error) {
 		(p.Arch != "amd64" && p.Arch != "arm64") {
 		return "", fmt.Errorf("no release is built for %s/%s", p.OS, p.Arch)
 	}
-	name := binaryName + "_" + p.OS + "_" + p.Arch
+	name := projectName + "_" + p.OS + "_" + p.Arch
 	if p.OS == "windows" {
 		return name + ".zip", nil
 	}
@@ -372,7 +375,7 @@ var errNotSynced = errors.New("the new binary is in place, but its directory cou
 var syncDirectory = syncDir
 
 // candidatePrefix names Install's temporary files beside the executable.
-const candidatePrefix = "." + binaryName + "-update-"
+const candidatePrefix = "." + projectName + "-update-"
 
 // Install writes binary beside current, runs verify on it, and only then
 // swaps it in, so a binary that cannot run on this machine never replaces
@@ -453,7 +456,7 @@ func writeCandidate(f *os.File, binary []byte, perm os.FileMode) error {
 
 // verifyVersion runs the candidate's --version: it proves the binary starts
 // on this OS and architecture and is the release that was asked for. It
-// reads the last word of cobra's "deep-research version 0.6.0", which
+// reads the last word of cobra's "drsh version 0.6.0", which
 // TestVersionOutputEndsWithTheVersion in internal/cli pins.
 func verifyVersion(candidate, want string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

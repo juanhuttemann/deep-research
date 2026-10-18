@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -696,5 +697,83 @@ func TestJSONPayloadsYieldsTheEagerCandidatesInOrder(t *testing.T) {
 		if want := eagerJSONPayloads(out); !slices.Equal(got, want) {
 			t.Errorf("jsonPayloads(%q)\n got %q\nwant %q", out, got, want)
 		}
+	}
+}
+
+// fresh hands each piece of the reasoning out once, no more than once per
+// interval while it grows, and the rest at the end of the call.
+func TestThoughtsFreshSendsEachPieceOnce(t *testing.T) {
+	var th thoughts
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	type got struct {
+		text  string
+		first bool
+	}
+	step := func(d time.Duration, last bool) got {
+		text, first := th.fresh(t0.Add(d), last)
+		return got{text, first}
+	}
+	if g := step(0, false); g != (got{}) {
+		t.Errorf("before any reasoning: %+v, want nothing", g)
+	}
+	th.add("Weigh c3")
+	if g := step(0, false); g != (got{"Weigh c3", true}) {
+		t.Errorf("first piece: %+v", g)
+	}
+	th.add(" against")
+	if g := step(500*time.Millisecond, false); g != (got{}) {
+		t.Errorf("within the interval: %+v, want nothing", g)
+	}
+	th.add(" c5\n")
+	if g := step(thinkingInterval, false); g != (got{" against c5\n", false}) {
+		t.Errorf("after the interval: %+v", g)
+	}
+	th.add("Then c7.")
+	if g := step(thinkingInterval+time.Millisecond, true); g != (got{"Then c7.", false}) {
+		t.Errorf("at the end of the call: %+v", g)
+	}
+	if g := step(time.Hour, true); g != (got{}) {
+		t.Errorf("after everything was sent: %+v, want nothing", g)
+	}
+}
+
+// The thinking channel carries the reasoning whole, its line breaks kept,
+// where a status carries only the last words of it run together.
+func TestStreamedReasoningReachesTheThinkingChannel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning\":\"Weigh c3\\n\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"reasoning\":\"against c5\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"The report.\"},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m", ModelCallTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		mu     sync.Mutex
+		pieces []string
+		starts int
+	)
+	a.(interface{ SetThinking(func(string, bool)) }).SetThinking(func(text string, first bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		pieces = append(pieces, text)
+		if first {
+			starts++
+		}
+	})
+	if _, err := a.Summarize(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := strings.Join(pieces, ""); got != "Weigh c3\nagainst c5" {
+		t.Errorf("reasoning sent = %q, want it whole", got)
+	}
+	if starts != 1 {
+		t.Errorf("%d pieces marked first, want 1", starts)
 	}
 }

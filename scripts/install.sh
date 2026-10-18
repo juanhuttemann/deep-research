@@ -53,13 +53,20 @@ fi
 tar -xzf "$tmp/$asset" -C "$tmp"
 
 mkdir -p "$bin_dir"
-mv "$tmp/deep-research" "$bin_dir/deep-research"
-chmod +x "$bin_dir/deep-research"
+mv "$tmp/drsh" "$bin_dir/drsh"
+chmod +x "$bin_dir/drsh"
+# The command was deep-research before it was renamed drsh. Left in place,
+# that binary would stay on the old release, and its update cannot install
+# the new one.
+if [ -f "$bin_dir/deep-research" ]; then
+  rm -f "$bin_dir/deep-research"
+  echo "removed $bin_dir/deep-research: the command is drsh now"
+fi
 
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) echo "note: $bin_dir is not on your PATH" >&2 ;;
 esac
 
-echo "installed $bin_dir/deep-research"
-echo "next: deep-research init, then put your API key in .env"
+echo "installed $bin_dir/drsh"
+echo "next: drsh init, then put your API key in .env"

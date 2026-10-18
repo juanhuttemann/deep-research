@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// helperVersionEnv makes the test binary act as a released deep-research
+// helperVersionEnv makes the test binary act as a released drsh
 // whose --version prints the variable's value, so verifyVersion runs a real
 // process on every platform without building one.
 const helperVersionEnv = "DEEP_RESEARCH_UPDATE_HELPER_VERSION"
@@ -33,7 +33,7 @@ func TestVerifyVersionReadsTheCandidatesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(helperVersionEnv, "deep-research version 0.6.0")
+	t.Setenv(helperVersionEnv, "drsh version 0.6.0")
 	if err := verifyVersion(self, "v0.6.0"); err != nil {
 		t.Errorf("a binary reporting 0.6.0 failed verification for v0.6.0: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestVerifyVersionReadsTheCandidatesVersion(t *testing.T) {
 // linux/amd64 archive holding body, and records how many archives it served.
 func newFullReleaseServer(t *testing.T, tag, body string) (*httptest.Server, *int) {
 	t.Helper()
-	archive := tarGz(t, "deep-research", body)
+	archive := tarGz(t, "drsh", body)
 	downloads := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -76,7 +76,7 @@ func updateWith(t *testing.T, srv *httptest.Server, current, version string, che
 
 func TestUpdateInstallsANewerRelease(t *testing.T) {
 	srv, _ := newFullReleaseServer(t, "v0.6.0", "new")
-	current := filepath.Join(t.TempDir(), "deep-research")
+	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o755)
 	got, err := updateWith(t, srv, current, "0.5.0", false)
 	if err != nil {
@@ -123,7 +123,7 @@ func TestUpdateSurvivesAFailedDirectorySync(t *testing.T) {
 	syncDirectory = func(string) error { return errors.New("input/output error") }
 	t.Cleanup(func() { syncDirectory = orig })
 	srv, _ := newFullReleaseServer(t, "v0.6.0", "new")
-	current := filepath.Join(t.TempDir(), "deep-research")
+	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o755)
 	got, err := updateWith(t, srv, current, "0.5.0", false)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestUpdateSurvivesAFailedDirectorySync(t *testing.T) {
 
 func TestInstallSweepsOnlyStaleCandidates(t *testing.T) {
 	dir := t.TempDir()
-	current := filepath.Join(dir, "deep-research")
+	current := filepath.Join(dir, "drsh")
 	writeFile(t, current, "old", 0o755)
 	stale := filepath.Join(dir, candidatePrefix+"1")
 	fresh := filepath.Join(dir, candidatePrefix+"2")

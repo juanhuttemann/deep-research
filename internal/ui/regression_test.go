@@ -2772,3 +2772,36 @@ func TestRefusedSearchStopsTheSubAgentsQueries(t *testing.T) {
 		t.Error("a rate-limited search left the run thinking search answers, so a follow-up round would run")
 	}
 }
+
+// Every source in the report's lists ended in "— ok", the fetch status of a
+// page read in full: on nearly every line, it said nothing, and the sources
+// that were not read in full did not stand out.
+func TestSourceListsMarkOnlySourcesNotReadInFull(t *testing.T) {
+	res := testResult()
+	res.Findings = []agent.Finding{
+		{Title: "Read", URL: "https://a.example/read", Content: "c", Status: "ok"},
+		{Title: "Rated", URL: "https://a.example/rated", Content: "c", Status: "ok", Confidence: "high"},
+		{Title: "Snippet", URL: "https://b.example/snippet", Content: "c", Status: "degraded"},
+		{Title: "Rated snippet", URL: "https://b.example/rated", Content: "c", Status: "degraded", Confidence: "low"},
+		{Title: "Recollection", Content: "c", Status: "unverified"},
+		{Title: "Unknown", URL: "https://c.example/x", Content: "c"},
+	}
+	md := MarkdownReport(res)
+	for _, want := range []string{
+		"[Read](https://a.example/read)\n",
+		"[Rated](https://a.example/rated) — _high_\n",
+		"[Snippet](https://b.example/snippet) — snippet only\n",
+		"[Rated snippet](https://b.example/rated) — _low_ (snippet only)\n",
+		"Recollection — never fetched, no URL\n",
+		"[Unknown](https://c.example/x) — never fetched\n",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("source list lacks %q:\n%s", want, md)
+		}
+	}
+	for _, bad := range []string{"— ok", "(ok)", "degraded", "unverified"} {
+		if strings.Contains(md, bad) {
+			t.Errorf("source list says %q:\n%s", bad, md)
+		}
+	}
+}

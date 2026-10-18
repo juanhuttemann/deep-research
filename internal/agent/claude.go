@@ -50,7 +50,7 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 		}
 	}
 	if api == nil && !useClaudeCode(cfg) {
-		return nil, fmt.Errorf("no API key for %s (run `deep-research login`, or set ANTHROPIC_API_KEY)", safeEndpoint(cfg.AnthropicBaseURL))
+		return nil, fmt.Errorf("no API key for %s (run `drsh login`, or set ANTHROPIC_API_KEY)", safeEndpoint(cfg.AnthropicBaseURL))
 	}
 	if api == nil {
 		return nil, errors.New("provider claude needs Claude Code signed in to a Claude subscription" +
@@ -63,7 +63,7 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 // sign-in: not when the API was chosen over the subscription, nor for an
 // Anthropic-compatible provider (Kimi, MiniMax) — claude -p talks to
 // Anthropic, so a Kimi model picked by name would be answered by Claude, or
-// refused. `deep-research login` sets ClaudeAPIOnly for both.
+// refused. `drsh login` sets ClaudeAPIOnly for both.
 func useClaudeCode(cfg Config) bool { return !cfg.ClaudeAPIOnly }
 
 // unstreamedMaxTokens and streamedMaxTokens replace the framework's 4096,

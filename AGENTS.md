@@ -28,7 +28,7 @@ analyses in `internal/ui/testdata/checker` and reports false approvals,
 blocks, accepts and rejects (`EVAL_REPEAT=n` to measure variance; spends one
 request per case and repeat; not part of the gate). Add a case there for
 each checker failure found in a real run.
-`./deep-research -p "question"` to exercise the CLI (needs an API key).
+`./drsh -p "question"` to exercise the CLI (needs an API key).
 
 `make verify` does not cross-compile. CI does
 (`.github/workflows/ci.yml`), and so should you after touching a
@@ -84,7 +84,7 @@ invariants:
 ## Boundaries
 
 - Never commit `.env` (API keys) or anything matching `.gitignore` (the
-  `/deep-research` binary, `reports/`, `TODO.md`, `ISSUES.md`, `PENDING.md`).
+  `/drsh` binary, `reports/`, `TODO.md`, `ISSUES.md`, `PENDING.md`).
   `.env.example` is the committed template. If you add a gitignore pattern
   for a directory of Go code, anchor it with a leading `/`, or `make verify`
   fails on hidden `.go` files.

@@ -1,13 +1,13 @@
 # Usage
 
-A research run is `deep-research -p "question"`; `serve`, `ask`, `list`,
-`init`, `doctor` and `update` are subcommands of the same binary, built by `make build`. `deep-research --version` reports the version stamped in at
+A research run is `drsh -p "question"`; `serve`, `ask`, `list`,
+`init`, `doctor` and `update` are subcommands of the same binary, built by `make build`. `drsh --version` reports the version stamped in at
 build time (`dev` for a plain `go build`).
 
 ## `-p` / `--prompt`
 
 ```bash
-deep-research -p "What are the latest advances in fusion energy?"
+drsh -p "What are the latest advances in fusion energy?"
 ```
 
 On a terminal this draws a live UI: a research brief you confirm, then a
@@ -44,9 +44,9 @@ run starts. `--plan-only` and `--plan` do the same from a file, for a
 script, an editor or a terminal without the live UI:
 
 ```bash
-deep-research -p "question" --plan-only > plan.json   # one model request
+drsh -p "question" --plan-only > plan.json   # one model request
 $EDITOR plan.json                                     # sub_topics: add, delete, rename
-deep-research --plan plan.json
+drsh --plan plan.json
 ```
 
 A plan carries its question, depth tier (`depth.key`) and any pinned
@@ -65,7 +65,7 @@ writes its plan to FILE instead of stdout.
 web:
 
 ```bash
-deep-research -p "how do Go generics constrain type parameters" \
+drsh -p "how do Go generics constrain type parameters" \
   --domains go.dev,pkg.go.dev
 ```
 
@@ -125,7 +125,7 @@ rejects it. With search off there is nothing to confine, and the run
 refuses the flag. The run's `.json` and history record list the sites it
 used.
 
-`deep-research doctor --domains LIST` runs the same check on its own, so a
+`drsh doctor --domains LIST` runs the same check on its own, so a
 list can be proved before a run is started on it.
 
 ### Resuming an interrupted run
@@ -142,7 +142,7 @@ command for it. A run cut short by rate limits is best resumed a few minutes
 later: search engines suspend a client for that long.
 
 ```bash
-deep-research --resume reports/<name>.<id>.partial.json
+drsh --resume reports/<name>.<id>.partial.json
 ```
 
 A resume runs the saved plan, without planning again or showing the brief.
@@ -167,9 +167,9 @@ model change cannot be told apart from a change in what the web returned.
 that evidence:
 
 ```bash
-deep-research -p "question" --trace          # reports/<name>.trace.json
-deep-research --replay reports/<name>.trace.json
-OPENAI_MODEL=other/model deep-research --replay reports/<name>.trace.json
+drsh -p "question" --trace          # reports/<name>.trace.json
+drsh --replay reports/<name>.trace.json
+OPENAI_MODEL=other/model drsh --replay reports/<name>.trace.json
 ```
 
 A replay takes its question, `--mode` and `--sources` from the trace (the
@@ -213,13 +213,13 @@ See [Driving it from another program](#driving-it-from-another-program).
 
 ```bash
 # Save the report next to the terminal output
-deep-research -p "question" --output report.md
+drsh -p "question" --output report.md
 
 # Widen the budget
-deep-research -p "question" --mode deep
+drsh -p "question" --mode deep
 
 # Feed another program or agent
-deep-research -p "question" --jsonl
+drsh -p "question" --jsonl
 ```
 
 ## Driving it from another program
@@ -229,7 +229,7 @@ nothing else on stdout, warnings on stderr.
 
 ```bash
 dir=$(mktemp -d)
-deep-research -p "question" --jsonl --reports "$dir" > "$dir/events.jsonl"
+drsh -p "question" --jsonl --reports "$dir" > "$dir/events.jsonl"
 tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
 ```
 
@@ -244,7 +244,11 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   a `transient` `info` line arrives at least every five seconds — waiting
   for the model to start, thinking, the count so far, or "no new output for Ns". While a reasoning
   model thinks, `detail` holds the status line, a newline, and the latest
-  of its reasoning. Retries and which model is asked are `info` lines too,
+  of its reasoning. The reasoning itself comes as `thinking` events, at most
+  one a second: `detail` is the text added since the last one, line breaks
+  kept, so the `detail`s joined are the whole reasoning, and `status` is
+  `start` on each model call's first. They carry the `phase` like any other
+  event. Retries and which model is asked are `info` lines too,
   planning included. LLM-search calls are unstreamed: they emit a start line
   and can stay silent until the per-call timeout (doubled on retry). Search
   and scraping also have no periodic heartbeat; silence alone does not
@@ -261,7 +265,7 @@ A run with `--domains` first sends one `source` event per site, before
 planning, with the check's result in `check` (`domain`, `status`, `pages`,
 `sample`, `chars`, `detail`).
 The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
-`citation`, `token`, `report`, `detach` and `error`; their fields are the
+`citation`, `token`, `report`, `detach`, `thinking` and `error`; their fields are the
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
 structured result: analysis, fact-check, sources and the whole timeline.
 
@@ -278,21 +282,34 @@ test fails if it mentions a flag no command defines.
 ## `serve`
 
 ```bash
-deep-research serve                      # http://localhost:7777
-deep-research serve --addr 127.0.0.1:0   # any free port
+drsh serve                      # http://localhost:7777
+drsh serve --addr 127.0.0.1:0   # any free port
 ```
 
-A page for launching a run and auditing what it decided. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
+A page for launching a run and auditing what it decided. `serve` opens it
+in the default browser once it is listening (`$BROWSER` if set; `wslview` or
+Windows' browser under WSL; nothing on a Linux session with no display, such
+as SSH, where the URL it prints is the way in); `--no-open` leaves that to
+you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question, `--mode` and `--sources` (as "Pages per topic"), and Search: the
 web, or "Only these sites", which opens a box for the list (`--domains`)
 and keeps the last one typed. The run then opens with a checklist of the
 sites, each marked usable, from snippets only, or dropped with the reason,
 and the plan review shows them. Research makes the plan first (the same
 as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
-add and remove sub-topics, or change the depth. A renamed sub-topic drops
-the query the planner wrote for its old name. Start research runs the
+add and remove sub-topics, change the search each one runs, or change the
+depth. Under each name is the planner's description of the sub-topic, which
+is for reading: research never sends it. Below that is the query the
+sub-agent searches, editable in place; a sub-topic added here can be given
+one too. A renamed sub-topic drops the query the planner wrote for its old
+name unless you type one, and a sub-topic with no query searches the question
+with its name. A query you change drops the terms the planner wrote to judge
+results for its own, so that sub-topic keeps every result its search returns. Start research runs the
 edited plan (the same as `--plan`, history record included). While it runs
-the page shows the live frame. Interrupted runs are listed on the start
+the page shows the live frame. While a model reasons, the status row shows
+the latest of its reasoning, and a thinking row below the sub-agents holds
+all of it, a section per model call headed by its phase; open it to read
+along. It follows the newest text unless you scroll up. Interrupted runs are listed on the start
 screen with Resume (the same as `--resume`) and Discard, which deletes the
 checkpoint. A tab left open while the server was killed and started again
 offers to resume the run it was showing. When it ends it opens on
@@ -317,6 +334,7 @@ in the tab and starts again when another run is opened.
 |---|---|---|
 | `--addr HOST:PORT` | `127.0.0.1:7777` | address to listen on |
 | `--reports DIR` | `reports` | where runs write their artifacts; served read-only at `/reports/`, with a directory listing |
+| `--no-open` | off | do not open the page in the default browser |
 
 - The top bar shows what the next run uses: the model and its provider's
   host, and the search engine and where page text comes from (`firecrawl`,
@@ -324,7 +342,7 @@ in the tab and starts again when another run is opened.
   result, or `snippets only`), and `not usable:` with the reason for a
   search setting a run would refuse. It is the configuration `serve` loaded
   when it started (`/api/info`), which is what every run it launches uses:
-  restart `serve` after `deep-research model` to change it. Hover a chip for
+  restart `serve` after `drsh model` to change it. Hover a chip for
   the full text.
 - One run at a time: a second launch is refused until the first ends.
 - Closing or reloading the tab does not cancel the run; the Cancel button
@@ -347,8 +365,8 @@ in the tab and starts again when another run is opened.
 ## `ask`
 
 ```bash
-deep-research ask reports/<run>.json -p "Which source gives the price?"
-deep-research ask reports/<run>.json        # one question per line; an empty line ends it
+drsh ask reports/<run>.json -p "Which source gives the price?"
+drsh ask reports/<run>.json        # one question per line; an empty line ends it
 ```
 
 Answers follow-up questions about a finished run from what the run saved:
@@ -380,7 +398,7 @@ finish)" once its report is printed; an empty line or Ctrl-D ends it.
 ## `list`
 
 ```bash
-deep-research list
+drsh list
 ```
 
 Shows each past run's findings, successfully fetched sources, and token
@@ -401,10 +419,10 @@ stays unknown.
 ## `init`
 
 ```bash
-deep-research init
+drsh init
 ```
 
-Writes `config.yaml` and a `.env` into the config directory, and points at `deep-research login` and where to get a free API key. Existing
+Writes `config.yaml` and a `.env` into the config directory, and points at `drsh login` and where to get a free API key. Existing
 files are never clobbered. The agent prompts are built into the binary, so
 no `agent.yaml` is written; create one only to override a prompt
 ([configuration](configuration.md#agent-prompts)).
@@ -426,10 +444,10 @@ hand to get them. Firecrawl is not included — it runs from its own repository
 ## `login`, `model`, `logout`
 
 ```bash
-deep-research login              # pick a model, paste its provider's key if it needs one
-deep-research login --new-key    # the same, replacing the stored key
-deep-research model              # the same picker; for switching models
-deep-research logout openrouter  # remove a stored key
+drsh login              # pick a model, paste its provider's key if it needs one
+drsh login --new-key    # the same, replacing the stored key
+drsh model              # the same picker; for switching models
+drsh logout openrouter  # remove a stored key
 ```
 
 Both open one list of every model of every provider, grouped under a heading
@@ -461,8 +479,8 @@ Without a terminal, script it; the key comes from stdin, so it stays out of
 shell history and the process list, and nothing is saved when the check fails:
 
 ```bash
-echo "$KEY" | deep-research login --provider openrouter --model openrouter/free --key-stdin
-echo "" | deep-research login --provider custom --base-url http://localhost:8000/v1 --model qwen --key-stdin
+echo "$KEY" | drsh login --provider openrouter --model openrouter/free --key-stdin
+echo "" | drsh login --provider custom --base-url http://localhost:8000/v1 --model qwen --key-stdin
 ```
 
 | Flag | Meaning |
@@ -474,13 +492,13 @@ echo "" | deep-research login --provider custom --base-url http://localhost:8000
 | `--key-stdin` | read the key from stdin; without it the stored or environment key is used (switching models by script) |
 
 Where the files go and how they rank against the environment:
-[configuration.md](configuration.md#stored-keys-deep-research-login).
+[configuration.md](configuration.md#stored-keys-drsh-login).
 
 ## `doctor`
 
 ```bash
-deep-research doctor
-deep-research doctor --domains go.dev,pkg.go.dev   # also check a site list
+drsh doctor
+drsh doctor --domains go.dev,pkg.go.dev   # also check a site list
 ```
 
 One line per dependency a run has, each from one cheap request that spends
@@ -502,12 +520,12 @@ command to run or the setting to change. Two setups warn rather than pass:
 a search that answers with no results for a common query, and no scraper,
 which leaves every claim checked against a search snippet instead of the
 page. When public SearXNG instances refuse the check, the `→` line names
-both ways out, a SearXNG of your own (`deep-research init --docker`) or a
+both ways out, a SearXNG of your own (`drsh init --docker`) or a
 hosted engine (`DEEP_RESEARCH_SEARCH_ENGINE=exa` with `EXA_API_KEY`, or
 `tavily` with `TAVILY_API_KEY`). Public instances warn even when they answer,
 since they often refuse a run's later searches; the `→` line recommends
 `init --docker`. The `config` line names the `config.yaml` read, or where
-`deep-research init` would write one, and an `! config` line names a
+`drsh init` would write one, and an `! config` line names a
 `config/config.yaml` or `.env` in the working directory that holds
 deep-research settings and is no longer read. A doctor with no failures ends
 on `ready to run`.
@@ -515,8 +533,8 @@ on `ready to run`.
 ## `update`
 
 ```bash
-deep-research update          # install the latest release over this binary
-deep-research update --check  # only say whether one exists
+drsh update          # install the latest release over this binary
+drsh update --check  # only say whether one exists
 ```
 
 Finds the latest GitHub release and, when it is newer, replaces the running
@@ -528,11 +546,11 @@ installed binary untouched. It reads no config and needs no API key.
 `--check` changes nothing.
 
 It needs write access to the binary's directory: a root install in
-`/usr/local/bin` needs `sudo deep-research update`. A binary built from
+`/usr/local/bin` needs `sudo drsh update`. A binary built from
 source (`dev`, or a `git describe` version from `make build`) is refused:
 replacing it with a release could install an older version than it is.
 On Windows the running `.exe` cannot be deleted, so the previous version is
-left beside it as `deep-research.exe.old-*`; the next update removes it.
+left beside it as `drsh.exe.old-*`; the next update removes it.
 
 ## Keys
 

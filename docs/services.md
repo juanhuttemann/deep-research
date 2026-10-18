@@ -14,7 +14,7 @@ pages. SearXNG alone is enough for web search — each source is then its
 search snippet, marked `snippet only`
 ([configuration.md](configuration.md#research-modes)).
 
-For SearXNG alone, `deep-research init --docker` writes a ready
+For SearXNG alone, `drsh init --docker` writes a ready
 `docker-compose.yml` and settings file (JSON enabled, bound to localhost):
 `docker compose up -d`, then set `SEARXNG_URL=http://localhost:8888`. The
 generated `searxng/settings.yml` contains a secret and is created with
@@ -203,7 +203,7 @@ starting usually means the API is still booting; retry before investigating.
 
 ## 3. Point deep-research at them
 
-Add the URLs to the `.env` that `deep-research init` writes in the config
+Add the URLs to the `.env` that `drsh init` writes in the config
 directory (`~/.config/deep-research/.env`; `init --docker` adds the
 SearXNG line for you):
 
@@ -218,7 +218,7 @@ Environment variables win over that file.
 Then run anything:
 
 ```sh
-deep-research -p "What is the Firecrawl v2 scrape API?" --mode quick
+drsh -p "What is the Firecrawl v2 scrape API?" --mode quick
 ```
 
 ### Confirm it used web search
@@ -232,7 +232,7 @@ sources  9 (9 fetched)      tokens  18.1k
 `fetched` means Firecrawl returned the page. `snippet only` means the search
 result was used without the page. `unverified` means the run used LLM search
 and fetched nothing — if you see that, `SEARXNG_URL` is `off`.
-`deep-research doctor` checks both services directly.
+`drsh doctor` checks both services directly.
 
 While a run is in progress each result is reported as it is handled, marked
 `ok`, `snippet`, `off-topic` (the result mentioned none of the terms the
@@ -264,7 +264,7 @@ EXA_API_KEY=...                      # or TAVILY_API_KEY=tvly-...
 ```
 
 Either can also extract pages behind SearXNG, in place of Firecrawl:
-`DEEP_RESEARCH_SCRAPER=exa` (or `tavily`) with its key. `deep-research doctor`
+`DEEP_RESEARCH_SCRAPER=exa` (or `tavily`) with its key. `drsh doctor`
 runs one query and says which engine answered. Every query goes to that
 company and spends its credit; costs are in
 [configuration.md](configuration.md#hosted-search-exa-and-tavily).
@@ -278,7 +278,7 @@ company and spends its credit; costs are in
 | Firecrawl API container exits; logs show `EAI_AGAIN nuq-postgres` | It was started without its database. Run `docker compose up -d` for the whole stack |
 | Firecrawl API container exits; logs show `password authentication failed for user "postgres"` | Another stack with the same Compose project name supplied the database. Stop it (`docker compose -p firecrawl stop`), set `COMPOSE_PROJECT_NAME` in Firecrawl's `.env` as in section 2, then `docker compose up -d` |
 | Every source is `unverified` | The run used LLM search: `SEARXNG_URL` is `off` |
-| `no search answered: cannot reach SearXNG at …` | Nothing is listening at `SEARXNG_URL`. Start it (`docker compose up -d`, or `docker start searxng`) or fix the URL; `deep-research doctor` checks it |
+| `no search answered: cannot reach SearXNG at …` | Nothing is listening at `SEARXNG_URL`. Start it (`docker compose up -d`, or `docker start searxng`) or fix the URL; `drsh doctor` checks it |
 | `no search answered (rate-limited)` | Every instance refused. With `auto`, public instances limit bursts; retry later, or run your own SearXNG |
 | Every source is `snippet only` | Search works, scraping does not. Check Firecrawl with the curl in section 2; if hosted, check `FIRECRAWL_API_KEY` |
 | Sources reported as `blocked` | The target resolved to a private or loopback address and was refused before the request. See [the trust boundary](configuration.md#scraping-trust-boundary) |

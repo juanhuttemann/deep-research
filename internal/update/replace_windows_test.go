@@ -12,15 +12,15 @@ import (
 )
 
 const (
-	winExe = `C:\bin\deep-research.exe`
-	winNew = `C:\bin\deep-research.exe.new`
-	winOld = `C:\bin\deep-research.exe.old-42`
+	winExe = `C:\bin\drsh.exe`
+	winNew = `C:\bin\drsh.exe.new`
+	winOld = `C:\bin\drsh.exe.old-42`
 )
 
 func TestReplaceExecutableReplacesOrdinaryFile(t *testing.T) {
 	dir := t.TempDir()
-	current := filepath.Join(dir, "deep-research.exe")
-	candidate := filepath.Join(dir, "deep-research.exe.new")
+	current := filepath.Join(dir, "drsh.exe")
+	candidate := filepath.Join(dir, "drsh.exe.new")
 	writeFile(t, current, "old", 0o755)
 	writeFile(t, candidate, "new", 0o755)
 	if _, err := replaceExecutable(current, candidate); err != nil {
@@ -146,7 +146,7 @@ func TestReplaceExecutableWindowsRetriesOnPidReuse(t *testing.T) {
 }
 
 func TestSweepBackupsOnWindows(t *testing.T) {
-	current := filepath.Join(t.TempDir(), "deep-research.exe")
+	current := filepath.Join(t.TempDir(), "drsh.exe")
 	writeFile(t, current, "new", 0o755)
 	stale := current + ".old-1"
 	writeFile(t, stale, "stale", 0o644)

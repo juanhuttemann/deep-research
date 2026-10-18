@@ -28,6 +28,14 @@ $got = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
 if ($got -ne $want) { throw "checksum mismatch for $asset" }
 
 Expand-Archive -Path $zip -DestinationPath $dir -Force
+# The command was deep-research before it was renamed drsh. Left in place,
+# that binary would stay on the old release, and its update cannot install
+# the new one.
+$old = Join-Path $dir 'deep-research.exe'
+if (Test-Path $old) {
+    Remove-Item $old
+    Write-Host "removed $old: the command is drsh now"
+}
 Remove-Item $zip
 Remove-Item $sumPath
 
@@ -42,5 +50,5 @@ if (($env:Path -split ';') -notcontains $dir) {
     $env:Path += ';' + $dir
 }
 
-Write-Host "installed $dir\deep-research.exe"
-Write-Host "next: deep-research init, then put your API key in .env"
+Write-Host "installed $dir\drsh.exe"
+Write-Host "next: drsh init, then put your API key in .env"

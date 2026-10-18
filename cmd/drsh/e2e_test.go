@@ -35,7 +35,7 @@ type event struct {
 // binary builds the CLI into a temporary directory.
 func binary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "deep-research")
+	bin := filepath.Join(t.TempDir(), "drsh")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}

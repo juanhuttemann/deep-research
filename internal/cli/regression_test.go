@@ -261,7 +261,7 @@ func TestIncompleteRunIsSavedAndFails(t *testing.T) {
 	// It keeps its checkpoint, and says how to resume it: the reader re-ran
 	// the whole question, paying again for every search that had worked.
 	cps, _ := filepath.Glob(filepath.Join(dir, "*.partial.json"))
-	if len(cps) != 1 || err == nil || !strings.Contains(err.Error(), "deep-research --resume "+cps[0]) {
+	if len(cps) != 1 || err == nil || !strings.Contains(err.Error(), "drsh --resume "+cps[0]) {
 		t.Errorf("checkpoints %v; err = %v, want the resume command naming it", cps, err)
 	}
 	if mds, _ := filepath.Glob(filepath.Join(dir, "*.md")); len(mds) != 1 {
@@ -394,13 +394,13 @@ func TestInitSaysWhereTheEnvWent(t *testing.T) {
 }
 
 // A missing Exa key failed the run under "Pick a provider and store its key:
-// deep-research login", sending the reader to fix a model key that worked.
+// drsh login", sending the reader to fix a model key that worked.
 func TestSearchSettingErrorHasNoLoginHint(t *testing.T) {
 	d := Deps{Assistant: func() (agent.Assistant, error) {
 		return agent.New(agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: "http://127.0.0.1:1", SearchEngine: "exa"})
 	}}
 	_, err := pickAssistant(d)
-	if err == nil || !strings.Contains(err.Error(), "EXA_API_KEY") || strings.Contains(err.Error(), "deep-research login") {
+	if err == nil || !strings.Contains(err.Error(), "EXA_API_KEY") || strings.Contains(err.Error(), "drsh login") {
 		t.Errorf("error = %v", err)
 	}
 }
@@ -448,7 +448,7 @@ func TestDoctorSaysWhatToDoNext(t *testing.T) {
 	if got := callBudget(true); !strings.Contains(got, "at most 7, in every --mode") {
 		t.Errorf("web-search budget = %q", got)
 	}
-	if got := configSource(); !strings.Contains(got, "deep-research init") {
+	if got := configSource(); !strings.Contains(got, "drsh init") {
 		t.Errorf("no config found, and no word on how to make one: %q", got)
 	}
 }

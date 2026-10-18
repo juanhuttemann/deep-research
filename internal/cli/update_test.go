@@ -68,7 +68,7 @@ func TestUpdateReportsEachOutcome(t *testing.T) {
 		{update.Result{Current: "v0.6.0", Latest: "v0.6.0", State: update.UpToDate}, "up to date (v0.6.0)"},
 		{update.Result{Current: "v0.7.0", Latest: "v0.6.0", State: update.NewerInstalled}, "newer than the latest release v0.6.0"},
 		{update.Result{Current: "v0.5.0", Latest: "v0.6.0", State: update.UpgradeAvailable, Updated: true,
-			LeftoverBackup: `C:\bin\deep-research.exe.old-1`}, `left at C:\bin\deep-research.exe.old-1`},
+			LeftoverBackup: `C:\bin\drsh.exe.old-1`}, `left at C:\bin\drsh.exe.old-1`},
 	} {
 		out, err := runUpdateWith(t, "0.5.0", func(context.Context, string, bool) (update.Result, error) {
 			return tc.result, nil

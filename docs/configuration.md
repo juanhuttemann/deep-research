@@ -5,13 +5,13 @@
 Settings resolve in one order, highest first:
 
 1. environment variables
-2. the provider and model `deep-research login` picked (`model.json`)
+2. the provider and model `drsh login` picked (`model.json`)
 3. `config.yaml` in the config directory
 4. the defaults embedded in the binary
 
-API keys resolve differently: a key stored by `deep-research login` wins, and
+API keys resolve differently: a key stored by `drsh login` wins, and
 the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) is the fallback, then
-`config.yaml`. See [Stored keys](#stored-keys-deep-research-login).
+`config.yaml`. See [Stored keys](#stored-keys-drsh-login).
 
 The config directory is `$DEEP_RESEARCH_CONFIG_DIR` when set, else
 `~/.config/deep-research/` (`%AppData%\deep-research` on Windows,
@@ -23,15 +23,15 @@ replace yours. When the working directory has either file with deep-research
 settings in it (from a release that read them), every run warns and `doctor`
 names the file to move.
 
-`deep-research init` writes a default `config.yaml` and a `.env` template
+`drsh init` writes a default `config.yaml` and a `.env` template
 there. Newly created `.env` files use owner-only permissions (`0600`) on
 Unix; existing files are left alone.
 
-## Stored keys (`deep-research login`)
+## Stored keys (`drsh login`)
 
-`deep-research login` and `deep-research model` pick a model from one list of
+`drsh login` and `drsh model` pick a model from one list of
 every provider's models and store the key when the provider needs one;
-`deep-research logout` removes one ([usage](usage.md#login-model-logout)).
+`drsh logout` removes one ([usage](usage.md#login-model-logout)).
 Two files, in `$DEEP_RESEARCH_CONFIG_DIR` when set, else
 `~/.config/deep-research/`:
 
@@ -48,7 +48,7 @@ environment or `config.yaml` goes to the endpoint the environment and
 `config.yaml` name (OpenRouter when they name none): with DeepSeek picked in
 `login`, an `OPENAI_API_KEY` meant for OpenRouter is not sent to DeepSeek, and
 `login` asks for DeepSeek's key. The environment still overrides the
-selection: `OPENAI_MODEL=x deep-research -p ...` is a one-off run on `x`, and
+selection: `OPENAI_MODEL=x drsh -p ...` is a one-off run on `x`, and
 `login` warns when something in the environment overrides what it just saved.
 
 A key that starts with `!` is a command whose output is the key, run once per
@@ -76,7 +76,7 @@ login), so a run never bills the plan when you chose the API.
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key, when `deep-research login` stored none for the endpoint; free at <https://openrouter.ai/keys> | — (required) |
+| `OPENAI_API_KEY` | LLM API key, when `drsh login` stored none for the endpoint; free at <https://openrouter.ai/keys> | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
@@ -128,7 +128,7 @@ when OpenRouter retires it. Two consequences:
   optional reanalysis, repair and revision checking. LLM search adds up to
   2 queries per sub-topic and per follow-up. Worst-case totals are quick 19,
   standard 21 and deep 25 before retries.
-  `deep-research doctor` prints these worst-case budgets (7 with web
+  `drsh doctor` prints these worst-case budgets (7 with web
   search) and, for an OpenRouter key, its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
   it names; the daily cap (`free-models-per-day`) fails at once with a
   message instead of burning the retries on a limit that clears only at

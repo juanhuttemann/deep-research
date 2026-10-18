@@ -8,7 +8,7 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/auth"
 )
 
-// loginIn loads a config from a temp dir holding what `deep-research login`
+// loginIn loads a config from a temp dir holding what `drsh login`
 // saves, and an empty config.yaml. Callers clear the provider environment
 // first, then set what the test needs.
 func loginIn(t *testing.T, sel *auth.Selection, creds map[string]auth.Credential) Config {

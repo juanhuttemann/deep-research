@@ -30,7 +30,7 @@ func loginCmd() *cobra.Command {
 		Long: "Pick a provider and model, paste the API key (shown as asterisks) and store it in\n" +
 			"auth.json, readable only by you. The stored key wins over OPENAI_API_KEY and\n" +
 			"ANTHROPIC_API_KEY, which remain the fallback.\n\n" +
-			"Without a terminal: echo \"$KEY\" | deep-research login --provider openrouter --model openrouter/free --key-stdin",
+			"Without a terminal: echo \"$KEY\" | drsh login --provider openrouter --model openrouter/free --key-stdin",
 		Args: cobra.NoArgs,
 		RunE: runLogin,
 	}
@@ -115,7 +115,7 @@ func loadLoginState(ctx context.Context) (loginState, error) {
 func pickAndSave(cmd *cobra.Command, opts setup.Options) error {
 	if !isTerminal(cmd.InOrStdin()) || !isTerminal(cmd.OutOrStdout()) {
 		return errors.New("the picker needs a terminal; script it with:" +
-			" echo \"$KEY\" | deep-research login --provider <id> --model <id> --key-stdin")
+			" echo \"$KEY\" | drsh login --provider <id> --model <id> --key-stdin")
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -314,7 +314,7 @@ func runLogout(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "no stored keys")
 		return nil
 	default:
-		return fmt.Errorf("keys are stored for %s; name the one to remove: deep-research logout <provider>", strings.Join(stored, ", "))
+		return fmt.Errorf("keys are stored for %s; name the one to remove: drsh logout <provider>", strings.Join(stored, ", "))
 	}
 	found, err := store.Delete(id)
 	if err != nil {

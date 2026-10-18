@@ -286,11 +286,21 @@ func (o Options) buildSink(renderer *Renderer, interactive bool) *MultiSink {
 
 // wireProgress routes the assistant's progress into events: which model is
 // asked and each retry as Info, streamed-phase status as transient Info — one
-// row replaced in place on the frame, not an activity line every five seconds.
+// row replaced in place on the frame, not an activity line every five seconds
+// — and the reasoning behind it as Thinking, which only the page shows.
 func wireProgress(a agent.Assistant, emit func(Event)) {
 	a.SetProgress(func(msg string) { emit(Event{Type: Info, Detail: msg}) })
 	if s, ok := a.(interface{ SetStatus(func(string)) }); ok {
 		s.SetStatus(func(msg string) { emit(Event{Type: Info, Detail: msg, Transient: true}) })
+	}
+	if s, ok := a.(interface{ SetThinking(func(string, bool)) }); ok {
+		s.SetThinking(func(text string, first bool) {
+			e := Event{Type: Thinking, Detail: text}
+			if first {
+				e.Status = "start"
+			}
+			emit(e)
+		})
 	}
 }
 

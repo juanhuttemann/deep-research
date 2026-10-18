@@ -1121,7 +1121,7 @@ func TestExportsCarryPerSourceStatus(t *testing.T) {
 	}
 
 	md := MarkdownReport(res)
-	if !strings.Contains(md, "degraded") || !strings.Contains(md, "unverified") {
+	if !strings.Contains(md, "snippet only") || !strings.Contains(md, "never fetched") {
 		t.Errorf("markdown citations hide the source status:\n%s", md)
 	}
 }
@@ -2150,5 +2150,49 @@ func TestLoadMetaReadsTheSidecar(t *testing.T) {
 	}
 	if _, err := LoadMeta(filepath.Join(t.TempDir(), "missing.json")); err == nil {
 		t.Error("a missing sidecar loaded")
+	}
+}
+
+// thinkingDuringAnalyze sends reasoning from inside Analyze, the way the real
+// assistant does while the analysis streams.
+type thinkingDuringAnalyze struct {
+	*fakeAssistant
+	think func(string, bool)
+}
+
+func (s *thinkingDuringAnalyze) SetThinking(f func(string, bool)) { s.think = f }
+
+func (s *thinkingDuringAnalyze) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
+	if s.think != nil {
+		s.think("Weigh c3\n", true)
+		s.think("against c5", false)
+	}
+	return s.fakeAssistant.Analyze(ctx, prompt)
+}
+
+// The page builds its thinking block from these events, so they carry the
+// reasoning whole, filed under the phase that thought it.
+func TestJSONLCarriesThinking(t *testing.T) {
+	fa := &thinkingDuringAnalyze{fakeAssistant: &fakeAssistant{}}
+	var stdout bytes.Buffer
+	if _, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "quick",
+		JSONL: true, OutDir: t.TempDir(), Stdout: &stdout, Stderr: io.Discard}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var got []Event
+	for _, ln := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var ev Event
+		if err := json.Unmarshal([]byte(ln), &ev); err == nil && ev.Type == Thinking {
+			got = append(got, ev)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("thinking events = %+v, want 2", got)
+	}
+	if got[0].Status != "start" || got[1].Status != "" {
+		t.Errorf("statuses = %q, %q; want only the first marked start", got[0].Status, got[1].Status)
+	}
+	if got[0].Phase != "Analyze" || got[0].Detail+got[1].Detail != "Weigh c3\nagainst c5" {
+		t.Errorf("thinking = %+v, want the Analyze reasoning whole", got)
 	}
 }

@@ -219,17 +219,36 @@ func writeCitationList(sb *strings.Builder, heading string, cits []MetaCitation)
 	}
 	fmt.Fprintf(sb, "## %s (%d)\n\n", heading, len(cits))
 	for i, c := range cits {
-		label := c.Status
+		label := sourceNote(c.Status)
 		if c.Confidence != "" {
-			label = "_" + c.Confidence + "_ (" + c.Status + ")"
+			label = strings.TrimSuffix("_"+c.Confidence+"_ ("+label+")", " ()")
 		}
 		if c.URL == "" {
-			fmt.Fprintf(sb, "%d. %s — %s, no URL\n", i+1, c.Title, label)
+			fmt.Fprintf(sb, "%d. %s — %s\n", i+1, c.Title, strings.TrimPrefix(label+", no URL", ", "))
 			continue
 		}
-		fmt.Fprintf(sb, "%d. [%s](%s) — %s\n", i+1, c.Title, c.URL, label)
+		if label != "" {
+			label = " — " + label
+		}
+		fmt.Fprintf(sb, "%d. [%s](%s)%s\n", i+1, c.Title, c.URL, label)
 	}
 	sb.WriteString("\n")
+}
+
+// sourceNote says how a listed source was obtained, in the words the page's
+// audit uses. A page read in full, the usual case, gets none: "— ok" after
+// nearly every URL told the reader nothing, and its rare exceptions were
+// lost among them.
+func sourceNote(status string) string {
+	switch status {
+	case "ok":
+		return ""
+	case "degraded":
+		return "snippet only"
+	case "unverified":
+		return "never fetched"
+	}
+	return status
 }
 
 // writeOpenQuestions lists the searches the analysis says could settle what

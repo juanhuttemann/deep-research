@@ -108,14 +108,14 @@ func TestParseChecksumRequiresOneExactValidEntry(t *testing.T) {
 
 func TestExtractArchiveRejectsUnsafeEntries(t *testing.T) {
 	const asset = "deep-research_linux_amd64.tar.gz"
-	got, err := extractArchive(tarGz(t, "deep-research", "binary"), asset, 1024)
+	got, err := extractArchive(tarGz(t, "drsh", "binary"), asset, 1024)
 	if err != nil || string(got) != "binary" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 	for name, archive := range map[string][]byte{
-		"nested": tarGz(t, "bin/deep-research", "binary"),
-		"extra":  tarGz(t, "deep-research", "binary", "README", "x"),
-		"large":  tarGz(t, "deep-research", strings.Repeat("x", 1025)),
+		"nested": tarGz(t, "bin/drsh", "binary"),
+		"extra":  tarGz(t, "drsh", "binary", "README", "x"),
+		"large":  tarGz(t, "drsh", strings.Repeat("x", 1025)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := extractArchive(archive, asset, 1024); err == nil {
@@ -135,7 +135,7 @@ func TestExtractArchiveSkipsAPAXGlobalHeader(t *testing.T) {
 		PAXRecords: map[string]string{"comment": "release"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tw.WriteHeader(&tar.Header{Name: "deep-research", Mode: 0o755, Size: 6, Typeflag: tar.TypeReg}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: "drsh", Mode: 0o755, Size: 6, Typeflag: tar.TypeReg}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tw.Write([]byte("binary")); err != nil {
@@ -156,7 +156,7 @@ func TestExtractArchiveSkipsAPAXGlobalHeader(t *testing.T) {
 func TestExtractWindowsArchive(t *testing.T) {
 	var archive bytes.Buffer
 	zw := zip.NewWriter(&archive)
-	f, err := zw.Create("deep-research.exe")
+	f, err := zw.Create("drsh.exe")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func newReleaseServer(t *testing.T, archive []byte, sums string) (*httptest.Serv
 }
 
 func TestDownloadVerifiesTheArchiveOfTheRequestedTag(t *testing.T) {
-	archive := tarGz(t, "deep-research", "binary")
+	archive := tarGz(t, "drsh", "binary")
 	srv, paths := newReleaseServer(t, archive,
 		fmt.Sprintf("%x  deep-research_linux_amd64.tar.gz\n", sha256.Sum256(archive)))
 	c := Client{HTTP: srv.Client(), BaseURL: srv.URL}
@@ -211,7 +211,7 @@ func TestDownloadVerifiesTheArchiveOfTheRequestedTag(t *testing.T) {
 }
 
 func TestDownloadRefusesAChecksumMismatch(t *testing.T) {
-	archive := tarGz(t, "deep-research", "binary")
+	archive := tarGz(t, "drsh", "binary")
 	srv, _ := newReleaseServer(t, archive,
 		fmt.Sprintf("%x  deep-research_linux_amd64.tar.gz\n", sha256.Sum256([]byte("other"))))
 	c := Client{HTTP: srv.Client(), BaseURL: srv.URL}
@@ -249,7 +249,7 @@ func TestLatestReadsTheRedirectTag(t *testing.T) {
 		if r.URL.Path != "/releases/latest" {
 			t.Errorf("requested %s", r.URL.Path)
 		}
-		w.Header().Set("Location", "/juanhuttemann/deep-research/releases/tag/v0.6.0")
+		w.Header().Set("Location", "/juanhuttemann/drsh/releases/tag/v0.6.0")
 		w.WriteHeader(http.StatusFound)
 	}))
 	t.Cleanup(srv.Close)
@@ -270,7 +270,7 @@ func TestLatestWithoutARedirectIsAnError(t *testing.T) {
 }
 
 func TestInstallVerifiesBeforeReplacing(t *testing.T) {
-	current := filepath.Join(t.TempDir(), "deep-research")
+	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o755)
 	broken := errors.New("exec format error")
 	_, err := Install(current, []byte("new"), func(candidate string) error {
@@ -289,7 +289,7 @@ func TestInstallVerifiesBeforeReplacing(t *testing.T) {
 }
 
 func TestInstallReplacesAndKeepsTheMode(t *testing.T) {
-	current := filepath.Join(t.TempDir(), "deep-research")
+	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o751)
 	leftover, err := Install(current, []byte("new"), func(string) error { return nil })
 	if err != nil {
@@ -316,7 +316,7 @@ func TestInstallKeepsUserRollbackCopiesOnUnix(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows sweeps its own .old-* backups")
 	}
-	current := filepath.Join(t.TempDir(), "deep-research")
+	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o755)
 	manual := current + ".old-manual"
 	writeFile(t, manual, "keep me", 0o644)
