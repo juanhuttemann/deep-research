@@ -56,6 +56,9 @@ func (o Options) checkSources(ctx context.Context, sink *MultiSink, domains []st
 	if !o.Quiet && !o.JSONL {
 		_, _ = fmt.Fprint(o.Stderr, sourceTable(checks, len(usable)))
 	}
+	if err := searchDown(checks); err != nil {
+		return nil, err
+	}
 	if len(usable) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNoUsableSources, failedSummary(checks))
 	}
@@ -92,6 +95,21 @@ func sourceGlyph(status string) string {
 	default:
 		return "✗"
 	}
+}
+
+// searchDown is the run's error when the search failed on every domain: the
+// sites were never asked about, so the fault is the search, and "wikipedia.org
+// search-failed" sent the reader to the list while SearXNG was not running.
+func searchDown(checks []agent.DomainCheck) error {
+	for _, c := range checks {
+		if c.SearchErr() == nil {
+			return nil
+		}
+	}
+	if len(checks) == 0 {
+		return nil
+	}
+	return noSearch("no search answered while checking the listed sites", checks[0].SearchErr())
 }
 
 // failedSummary names each domain and why it failed, for the error a run with

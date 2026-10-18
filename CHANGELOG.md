@@ -5,6 +5,23 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- A run limited to a list of sites stopped on "None of the listed domains
+  can be researched: wikipedia.org search-failed" when SearXNG was not
+  running. No site was checked at all: the search was down. When the search
+  fails on every site, the run now says no search answered and what to check
+  (`SEARXNG_URL`, that SearXNG is running, `drsh doctor`), as a run without a
+  list does.
+- docs/services.md gives every long-running service in Firecrawl's stack
+  `restart: unless-stopped`, as SearXNG has. Firecrawl's compose file sets
+  none, so after a reboot or a Docker restart SearXNG came back and Firecrawl
+  did not, and runs read search snippets only until someone noticed. The
+  Podman RabbitMQ fix now edits the override's `rabbitmq` entry instead of
+  appending a second one.
+- The 0.15.0 entry's PDF source-list item no longer sits after a stray blank
+  line, which split that list in two.
+
 ## [0.15.0] - 2026-10-17
 
 ### Changed
@@ -24,7 +41,6 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   was what the review showed before, and research never reads it: the query
   is what a sub-agent searches. A changed query drops the planner's terms
   for the old one, as a rename already did.
-
 - The report's Citations and Other Sources Retrieved lists no longer end
   nearly every source in "— ok". A page read in full is left unmarked, and
   the rest say `snippet only` or `never fetched`, the page audit's words,

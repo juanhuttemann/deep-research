@@ -84,7 +84,10 @@ search that comes back empty or rate-limited is asked once more, a few
 seconds later, before the site is judged: a throttled engine often answers
 the second time. A site that fails is named with the reason and
 dropped, and the run goes on with the rest. A run where none pass stops
-there. The table goes to stderr, and under `--jsonl` each site is a `source`
+there, naming each site and why. When the search failed on every site
+(SearXNG not running, say), no site was really checked, so the run says
+instead that no search answered and what to check, as a run without a list
+does. The table goes to stderr, and under `--jsonl` each site is a `source`
 event.
 
 | Status | Meaning | Researched |

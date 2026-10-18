@@ -19,9 +19,11 @@ import (
 type scopingAssistant struct {
 	*fakeAssistant
 	statuses map[string]string
-	checked  []string
-	scoped   []string
-	planned  int
+	// searchErr is the search's error on the domains scripted search-failed.
+	searchErr error
+	checked   []string
+	scoped    []string
+	planned   int
 }
 
 func (s *scopingAssistant) CheckDomains(_ context.Context, domains []string) ([]agent.DomainCheck, error) {
@@ -33,6 +35,9 @@ func (s *scopingAssistant) CheckDomains(_ context.Context, domains []string) ([]
 			st = tools.DomainOK
 		}
 		out[i] = agent.DomainCheck{Domain: d, Status: st, Pages: 3, Chars: 900, Sample: "https://" + d + "/", Detail: "scripted"}
+		if st == tools.DomainSearchFail && s.searchErr != nil {
+			out[i] = tools.SearchFailedCheck(d, s.searchErr)
+		}
 	}
 	return out, nil
 }

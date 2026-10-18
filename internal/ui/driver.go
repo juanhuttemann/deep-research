@@ -973,25 +973,31 @@ func (d *Driver) searchFailure(findings []agent.Finding) error {
 	if len(findings) > 0 || d.searchesOK > 0 || d.searchErr == nil {
 		return nil
 	}
-	status := tools.SearchStatus(d.searchErr)
-	if status == "unreachable" && tools.UnreachableService(d.searchErr) != "SearXNG" {
+	return noSearch("no search answered", d.searchErr)
+}
+
+// noSearch is the error of a run that stopped because no search answered,
+// led by lead and ending on what to check for the way it failed.
+func noSearch(lead string, err error) error {
+	status := tools.SearchStatus(err)
+	if status == "unreachable" && tools.UnreachableService(err) != "SearXNG" {
 		// A hosted engine has a fixed address: what failed is the network.
-		return fmt.Errorf("no search answered: %w. Check this machine's network (drsh doctor checks it)", d.searchErr)
+		return fmt.Errorf("%s: %w. Check this machine's network (drsh doctor checks it)", lead, err)
 	}
 	if status == "unreachable" {
 		// Nothing answered at the configured address: the server is down or
 		// the setting points at the wrong place, and both are the reader's to
 		// fix.
-		return fmt.Errorf("no search answered: %w. Check SEARXNG_URL and that SearXNG is running (drsh doctor checks it)", d.searchErr)
+		return fmt.Errorf("%s: %w. Check SEARXNG_URL and that SearXNG is running (drsh doctor checks it)", lead, err)
 	}
 	if status == "unauthorized" || status == "quota" {
 		// Only a hosted engine takes a key, and its error already names it.
-		return fmt.Errorf("no search answered (%s): %w. Check the engine's API key and its credit (drsh doctor checks it)", status, d.searchErr)
+		return fmt.Errorf("%s (%s): %w. Check the engine's API key and its credit (drsh doctor checks it)", lead, status, err)
 	}
-	if tools.PublicSearchRefused(d.searchErr) {
-		return fmt.Errorf("no search answered (%s): %w. %s", status, d.searchErr, publicRefusalHint)
+	if tools.PublicSearchRefused(err) {
+		return fmt.Errorf("%s (%s): %w. %s", lead, status, err, publicRefusalHint)
 	}
-	return fmt.Errorf("no search answered (%s): %w", status, d.searchErr)
+	return fmt.Errorf("%s (%s): %w", lead, status, err)
 }
 
 // contributionLine says what a finished sub-agent actually added to the run.
