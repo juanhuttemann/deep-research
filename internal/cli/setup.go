@@ -37,11 +37,12 @@ func setupCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "set up the model, web search and page extraction (start here)",
-		Long: "Choose the model, the web search and what reads the pages, one step at a time.\n" +
-			"Nothing is saved until you confirm the review; then keys go to auth.json\n" +
-			"(readable only by you), search settings to config.yaml and the model to\n" +
-			"model.json, all in the config directory. Run one part again with\n" +
-			"drsh setup model, drsh setup search or drsh setup scraper.",
+		Long: "Set up what a run uses. Each step opens on what you have now, so Enter keeps it,\n" +
+			"and nothing is saved until you confirm the review.\n\n" +
+			"  drsh setup            everything: the model, then web search, then page extraction\n" +
+			"  drsh setup model      only the model\n" +
+			"  drsh setup search     only the web search\n" +
+			"  drsh setup scraper    only page extraction (what reads each result's page)",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSetup(cmd, sections{model: true, search: true, scraper: true})

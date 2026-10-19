@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -83,6 +84,9 @@ func TestStoredServiceKeyBeatsTheEnvironment(t *testing.T) {
 	clearSearchEnv(t)
 	t.Setenv("EXA_API_KEY", "exa-env")
 	t.Setenv("TAVILY_API_KEY", "tavily-env")
+	// Exa searches and Tavily reads pages, so both keys are used.
+	t.Setenv("DEEP_RESEARCH_SEARCH_ENGINE", "exa")
+	t.Setenv("DEEP_RESEARCH_SCRAPER", "tavily")
 	cfg := loginIn(t, nil, map[string]auth.Credential{
 		auth.ServiceID("exa"): {Type: auth.TypeService, Key: "exa-stored", BaseURL: agent.ExaURL}})
 	if cfg.ExaAPIKey != "exa-stored" || cfg.TavilyAPIKey != "tavily-env" {
@@ -160,5 +164,52 @@ func TestOverridesNameTheirFile(t *testing.T) {
 	sel := auth.Selection{Provider: "openrouter", Transport: "openai", BaseURL: "https://openrouter.ai/api/v1", Model: "a/b"}
 	if got := ModelOverrides(sel); len(got) != 1 || got[0].Var != "OPENAI_MODEL" || got[0].Source != "the environment" {
 		t.Errorf("model overrides = %+v", got)
+	}
+}
+
+// TestTypedKeyStaysWithItsAddress: a hosted Firecrawl key typed in setup is
+// not sent, by setup's check, to a FIRECRAWL_URL the environment points
+// elsewhere; a run would not send the stored key there either.
+func TestTypedKeyStaysWithItsAddress(t *testing.T) {
+	clearSearchEnv(t)
+	t.Setenv("FIRECRAWL_URL", "http://elsewhere:3002")
+	cfg := loginIn(t, nil, nil)
+	draft, err := cfg.WithSearch(SearchSettings{Engine: "searxng", SearXNGURL: "auto", Scraper: "firecrawl",
+		FirecrawlURL: agent.FirecrawlURL}, map[string]string{"firecrawl": "fc-typed"}, auth.Empty())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.FirecrawlURL != "http://elsewhere:3002" || draft.FirecrawlAPIKey == "fc-typed" {
+		t.Errorf("the typed key went to %s: %q", draft.FirecrawlURL, draft.FirecrawlAPIKey)
+	}
+}
+
+// TestTypedKeyCommandIsRun: a "!command" typed in setup is checked with what
+// it prints, as a run uses it; sent as typed it is a certain 401.
+func TestTypedKeyCommandIsRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	clearSearchEnv(t)
+	cfg := loginIn(t, nil, nil)
+	draft, err := cfg.WithSearch(SearchSettings{Engine: "exa"}, map[string]string{"exa": "!echo exa-1"}, auth.Empty())
+	if err != nil || draft.ExaAPIKey != "exa-1" {
+		t.Errorf("key %q, %v", draft.ExaAPIKey, err)
+	}
+}
+
+// TestUnusedServiceKeyIsNotRun: a stored key whose command fails stops only
+// a run that uses its service; one on SearXNG never runs it.
+func TestUnusedServiceKeyIsNotRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	clearSearchEnv(t)
+	creds := map[string]auth.Credential{
+		auth.ServiceID("tavily"): {Type: auth.TypeService, Key: "!exit 1", BaseURL: agent.TavilyURL}}
+	loginIn(t, nil, creds) // Fatal when Load fails
+	t.Setenv("DEEP_RESEARCH_SEARCH_ENGINE", "tavily")
+	if _, err := Load(); err == nil {
+		t.Error("a run on Tavily loaded without its key")
 	}
 }

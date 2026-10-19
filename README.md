@@ -78,10 +78,17 @@ choice as it goes, and saves nothing until you confirm:
    checked against it: nothing (search snippets only), Firecrawl, Exa or
    Tavily.
 
-It then checks the choices and prints what a run will use. To change one part
-later, run just that step: `drsh setup model`, `drsh setup search` or
-`drsh setup scraper`. Environment variables still work, for CI and one-off
-runs (`OPENAI_MODEL=x drsh -p ...`); see
+It then checks the choices and prints what a run will use. To change one
+part later, run only that step:
+
+```bash
+drsh setup model      # only the model
+drsh setup search     # only the web search
+drsh setup scraper    # only page extraction
+```
+
+Environment variables still work, for CI and one-off runs
+(`OPENAI_MODEL=x drsh -p ...`); see
 [configuration](docs/configuration.md#environment-variables-ci-and-one-off-overrides).
 
 Something off? `drsh doctor` checks the model endpoint and key,

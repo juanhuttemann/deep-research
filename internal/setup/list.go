@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // item is one row of a picker list.
@@ -40,8 +41,27 @@ type list struct {
 	plain bool
 }
 
+// newInput is a text input drawn in the picker's own colours. The defaults
+// are fixed grays, the prompt and cursor light and the placeholder dark, so
+// on one terminal background or the other the search box all but vanished.
+func newInput() textinput.Model {
+	in := textinput.New()
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Cyan).Bold(true)
+	st := textinput.StyleState{
+		Prompt:      accent,
+		Text:        lipgloss.NewStyle(),
+		Placeholder: lipgloss.NewStyle().Faint(true),
+		Suggestion:  lipgloss.NewStyle().Faint(true),
+	}
+	styles := in.Styles()
+	styles.Focused, styles.Blurred = st, st
+	styles.Cursor.Color = lipgloss.Cyan
+	in.SetStyles(styles)
+	return in
+}
+
 func newList(items []item, placeholder string, freeText bool) list {
-	f := textinput.New()
+	f := newInput()
 	f.Prompt = "search: "
 	f.Placeholder = placeholder
 	f.SetWidth(inputWidth)

@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -72,7 +73,11 @@ func NewServices(opts ServiceOptions) ServicesModel {
 		opts.KeyMark = func(string, string) string { return "" }
 	}
 	m := ServicesModel{opts: opts, st: newStyles(), s: opts.Current}
-	m.s.Keys = map[string]string{}
+	// Keys typed before the review sent the reader back to edit stay typed.
+	m.s.Keys = maps.Clone(opts.Current.Keys)
+	if m.s.Keys == nil {
+		m.s.Keys = map[string]string{}
+	}
 	if opts.Search {
 		return m.engineStep()
 	}
@@ -189,9 +194,14 @@ func (m ServicesModel) needScraper() bool {
 	case "", "none":
 		return inline(m.s.Engine)
 	case "firecrawl":
-		return m.s.FirecrawlURL == ""
+		// A self-hosted Firecrawl needs no key; the hosted one does.
+		return m.s.FirecrawlURL == "" || (m.hostedFirecrawl() && !m.hasKey("firecrawl"))
 	}
 	return !m.hasKey(m.s.Scraper)
+}
+
+func (m ServicesModel) hostedFirecrawl() bool {
+	return m.s.FirecrawlURL != "" && strings.EqualFold(strings.TrimRight(m.s.FirecrawlURL, "/"), m.opts.FirecrawlURL)
 }
 
 func (m ServicesModel) scraperItems() []item {
@@ -224,7 +234,7 @@ func (m ServicesModel) currentScraper() string {
 		}
 		return "none"
 	case "firecrawl":
-		if m.s.FirecrawlURL != "" && strings.EqualFold(strings.TrimRight(m.s.FirecrawlURL, "/"), m.opts.FirecrawlURL) {
+		if m.hostedFirecrawl() {
 			return "firecrawl-hosted"
 		}
 	}
@@ -278,7 +288,7 @@ func (m ServicesModel) askKey(service string) (tea.Model, tea.Cmd) {
 }
 
 func (m ServicesModel) ask(s svcStep, prompt, placeholder string, secret bool, value string) (tea.Model, tea.Cmd) {
-	in := textinput.New()
+	in := newInput()
 	in.Prompt, in.Placeholder = prompt, placeholder
 	in.SetWidth(inputWidth)
 	if secret {
