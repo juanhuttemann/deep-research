@@ -4,6 +4,8 @@ A research run is `drsh -p "question"`; `setup`, `serve`, `ask`, `list`,
 `init`, `doctor` and `update` are subcommands of the same binary, built by `make build`. `drsh --version` reports the version stamped in at
 build time (`dev` for a plain `go build`).
 
+First time, or changing the model, search or page extraction: [`drsh setup`](#setup).
+
 ## `-p` / `--prompt`
 
 ```bash
@@ -434,54 +436,40 @@ stays unknown.
 
 ## `setup`
 
-```bash
-drsh setup            # the model, web search and page extraction, in turn
-drsh setup model      # one part again
-drsh setup search
-drsh setup scraper
-```
+| To set up or change | Run |
+| ------------------- | --- |
+| everything (the first time) | `drsh setup` |
+| only the model | `drsh setup model` |
+| only the web search | `drsh setup search` |
+| only page extraction | `drsh setup scraper` |
 
-The one command a new install needs. Each step explains its choices and
-starts on what a run uses now, so running it again is Enter to keep:
+Each step opens on what you have now, so Enter keeps it. Nothing is saved
+until you confirm the review screen at the end; Esc quits without saving.
 
-1. **Model**: the picker described under [`login`](#login-model-logout),
-   with a first row that keeps the model runs use now, wherever it was set
-   (a custom endpoint, or one set in the environment). The picker checks a
-   new model with one free request before it returns.
-2. **Web search**: public SearXNG instances, a local SearXNG in Docker, your
-   own SearXNG (one address or several, comma-separated), Exa, Tavily, or no
-   web search. Exa and Tavily ask for their key unless one is stored or in
-   the environment; Enter keeps it, a new one replaces it.
-3. **Page extraction**: none (search snippets), Firecrawl self-hosted (its
-   address), Firecrawl hosted (its key), Exa or Tavily. Skipped when search
-   is off.
+The choices:
 
-Then a review lists each choice, the file it goes to, and any environment
-variable that will override it — with where it was set (your shell, or the
-config directory's `.env`) and what to remove. Enter checks the search and
-the scraper with one query and one page read (a hosted service may charge for
-them), and only then saves; a failed check offers to check again, edit, save
-anyway or quit. Esc at any point saves nothing.
+- **Model**: any provider's model, searchable; it asks for the key when the
+  provider needs one, and checks it with one free request.
+- **Web search**: public SearXNG instances (free, the default), a local
+  SearXNG in Docker, your own SearXNG, Exa, Tavily, or none.
+- **Page extraction**: none (search snippets only), Firecrawl self-hosted,
+  Firecrawl hosted, Exa or Tavily.
 
-Saved: keys in `auth.json`, search settings in `config.yaml` (only the keys
-setup owns — `search_engine`, `searxng_url`, `scraper`, `firecrawl_url` —
-change; the rest of the file, comments included, is left as it is), the model
-in `model.json`, and for a local SearXNG the Docker files `init --docker`
-writes. `.env` is never written. The last screen prints what a run now uses
-and the command that starts the local SearXNG when one was chosen; a `serve`
-already running keeps its setup until restarted.
+`setup search` also asks about page extraction when the new search needs it,
+e.g. switching to Exa with nothing reading pages.
 
-`setup search` asks about page extraction too when the new engine needs it:
-Exa or Tavily with nothing reading pages (offered as the same service), or a
-scraper left without the key or address it needs. `setup scraper` with
-search off says to turn search on first.
+The review screen also warns when an environment variable (from your shell
+or `.env`) will override a choice, and says where to remove it.
 
-Without a terminal, script each part. A check that fails saves nothing,
-unless `--no-check`:
+### Without a terminal
+
+A check runs before saving; if it fails, nothing is saved (`--no-check`
+skips it).
 
 ```bash
 echo "$KEY" | drsh login --provider openrouter --model openrouter/free --key-stdin
-drsh setup search --engine searxng --url http://localhost:8888   # no --url: public instances
+drsh setup search --engine searxng                       # public instances
+drsh setup search --engine searxng --url http://localhost:8888
 echo "$EXA_KEY" | drsh setup search --engine exa --key-stdin
 drsh setup search --engine off
 drsh setup scraper --scraper firecrawl --url http://localhost:3002
@@ -494,8 +482,15 @@ drsh setup scraper --scraper none
 | `--engine` | `setup search`: `searxng`, `exa`, `tavily` or `off` |
 | `--scraper` | `setup scraper`: `none`, `firecrawl`, `exa` or `tavily` |
 | `--url` | the SearXNG address(es), or Firecrawl's |
-| `--key-stdin` | read the service's key from stdin; without it a stored or environment key is used, and a hosted service with neither is an error |
-| `--no-check` | save without the check request |
+| `--key-stdin` | read the service's key from stdin |
+| `--no-check` | save without checking |
+
+### Where it saves
+
+All in the config directory: keys in `auth.json` (readable only by you), the
+model in `model.json`, search settings in `config.yaml` (only those keys
+change; the rest of the file is left as you wrote it). It never writes
+`.env`. Details: [configuration](configuration.md#what-drsh-setup-writes).
 
 ## `init`
 

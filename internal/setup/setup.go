@@ -306,7 +306,7 @@ func (m Model) askKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) ask(s step, prompt, placeholder string, secret bool, value string) (tea.Model, tea.Cmd) {
-	in := textinput.New()
+	in := newInput()
 	in.Prompt, in.Placeholder = prompt, placeholder
 	in.SetWidth(inputWidth)
 	if secret {

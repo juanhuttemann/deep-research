@@ -118,27 +118,71 @@ func (c Config) WithSearch(s SearchSettings, keys map[string]string, store *auth
 	if strings.EqualFold(c.SearXNGURL, "off") {
 		c.SearXNGURL = ""
 	}
-	for _, sv := range []struct {
-		name, baseURL string
-		dst           *string
-	}{
-		{ServiceExa, agent.ExaURL, &c.ExaAPIKey},
-		{ServiceTavily, agent.TavilyURL, &c.TavilyAPIKey},
-		{ServiceFirecrawl, c.FirecrawlURL, &c.FirecrawlAPIKey},
-	} {
+	for _, sv := range c.serviceSlots() {
 		*sv.dst = c.serviceFallback[sv.name]
-		key, err := store.ServiceKey(sv.name, sv.baseURL)
+		if !c.usesService(sv.name) {
+			continue
+		}
+		key, err := draftKey(sv, keys[sv.name], serviceURL(sv.name, s.FirecrawlURL), store)
 		if err != nil {
 			return c, err
-		}
-		if k := keys[sv.name]; k != "" {
-			key = k
 		}
 		if key != "" {
 			*sv.dst = key
 		}
 	}
 	return c, nil
+}
+
+// draftKey is the key a service gets in a draft: the one typed in setup when
+// it was typed for the address the service now has, else the stored one for
+// that address. A FIRECRAWL_URL in the environment keeps the address, and a
+// hosted key typed in setup is not sent there. A "!command" is run, as a run
+// would run it.
+func draftKey(sv serviceSlot, typed, typedFor string, store *auth.Store) (string, error) {
+	if typed != "" && auth.SameEndpoint(typedFor, sv.baseURL) {
+		key, err := auth.Resolve(typed)
+		if err != nil {
+			return "", fmt.Errorf("%s key: %w", sv.name, err)
+		}
+		return key, nil
+	}
+	return store.ServiceKey(sv.name, sv.baseURL)
+}
+
+// serviceURL is the address a key for the named service is typed for.
+func serviceURL(name, firecrawlURL string) string {
+	switch name {
+	case ServiceExa:
+		return agent.ExaURL
+	case ServiceTavily:
+		return agent.TavilyURL
+	}
+	return firecrawlURL
+}
+
+// serviceSlot is one search service's key in a Config, and the address it
+// goes to.
+type serviceSlot struct {
+	name, baseURL string
+	dst           *string
+}
+
+func (c *Config) serviceSlots() []serviceSlot {
+	return []serviceSlot{
+		{ServiceExa, agent.ExaURL, &c.ExaAPIKey},
+		{ServiceTavily, agent.TavilyURL, &c.TavilyAPIKey},
+		{ServiceFirecrawl, c.FirecrawlURL, &c.FirecrawlAPIKey},
+	}
+}
+
+// usesService reports whether a run on c sends anything to the named
+// service. A stored key of a service it does not use is never resolved: a
+// password manager locked on the Tavily entry must not stop a run that
+// searches with SearXNG.
+func (c Config) usesService(name string) bool {
+	s := c.Search()
+	return s.Engine != "off" && (s.Engine == name || s.Scraper == name)
 }
 
 // Override is an environment variable that wins over what setup saves.

@@ -141,3 +141,29 @@ func TestKeepRowKeepsTheModel(t *testing.T) {
 		t.Errorf("result %+v, %v, checked %v", res, ok, checked)
 	}
 }
+
+// TestHostedFirecrawlWithoutAKeyIsAsked: after `logout firecrawl` the hosted
+// Firecrawl has no key, and setup search offers the step that takes one.
+func TestHostedFirecrawlWithoutAKeyIsAsked(t *testing.T) {
+	cur := Services{Engine: "searxng", SearXNGURL: "auto", Scraper: "firecrawl", FirecrawlURL: "https://api.firecrawl.dev"}
+	m := driveSvc(t, NewServices(svcOpts(cur, true, false)), enterKey)
+	if m.step != svcScraper {
+		t.Errorf("step %d, want the scraper", m.step)
+	}
+	cur.FirecrawlURL = "http://localhost:3002"
+	m = driveSvc(t, NewServices(svcOpts(cur, true, false)), enterKey)
+	if _, ok := m.Result(); !ok {
+		t.Error("a keyless self-hosted Firecrawl was asked about")
+	}
+}
+
+// TestEditKeepsTypedKeys: going back from the review to edit does not lose
+// a key typed the first time round.
+func TestEditKeepsTypedKeys(t *testing.T) {
+	cur := Services{Engine: "exa", Scraper: "exa", Keys: map[string]string{"exa": "exa-1"}, SearchAsked: true}
+	m := driveSvc(t, NewServices(svcOpts(cur, true, false)), enterKey)
+	s, ok := m.Result()
+	if !ok || s.Keys["exa"] != "exa-1" {
+		t.Errorf("result %+v, %v", s, ok)
+	}
+}

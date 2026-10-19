@@ -397,19 +397,16 @@ func applyKeys(cfg *Config, v *viper.Viper, store *auth.Store, sel auth.Selectio
 // applyServiceKeys puts a key `drsh setup` stored for a search service in
 // place of the environment's and config.yaml's. Setup asked for it, so it is
 // the one meant; the environment's stays the fallback, as for model keys. Each
-// stored key goes only to the address it was entered for.
+// stored key goes only to the address it was entered for, and is resolved
+// only for a service the run uses.
 func applyServiceKeys(cfg *Config, store *auth.Store) error {
 	cfg.serviceFallback = map[string]string{
 		ServiceExa: cfg.ExaAPIKey, ServiceTavily: cfg.TavilyAPIKey, ServiceFirecrawl: cfg.FirecrawlAPIKey,
 	}
-	for _, s := range []struct {
-		name, baseURL string
-		dst           *string
-	}{
-		{ServiceExa, agent.ExaURL, &cfg.ExaAPIKey},
-		{ServiceTavily, agent.TavilyURL, &cfg.TavilyAPIKey},
-		{ServiceFirecrawl, cfg.FirecrawlURL, &cfg.FirecrawlAPIKey},
-	} {
+	for _, s := range cfg.serviceSlots() {
+		if !cfg.usesService(s.name) {
+			continue
+		}
 		key, err := store.ServiceKey(s.name, s.baseURL)
 		if err != nil {
 			return fmt.Errorf("stored %s key in %s: %w", s.name, store.Path(), err)
