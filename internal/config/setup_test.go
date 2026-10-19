@@ -130,7 +130,7 @@ func TestWithSearchKeepsWhatTheEnvironmentSets(t *testing.T) {
 	t.Setenv("SEARXNG_URL", "http://env:8888")
 	cfg := loginIn(t, nil, nil)
 	draft, err := cfg.WithSearch(SearchSettings{Engine: "searxng", SearXNGURL: "auto", Scraper: "exa"},
-		map[string]string{"exa": "typed"}, auth.Empty())
+		map[string]auth.Credential{"exa": {Key: "typed", BaseURL: agent.ExaURL}}, auth.Empty())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,8 @@ func TestTypedKeyStaysWithItsAddress(t *testing.T) {
 	t.Setenv("FIRECRAWL_URL", "http://elsewhere:3002")
 	cfg := loginIn(t, nil, nil)
 	draft, err := cfg.WithSearch(SearchSettings{Engine: "searxng", SearXNGURL: "auto", Scraper: "firecrawl",
-		FirecrawlURL: agent.FirecrawlURL}, map[string]string{"firecrawl": "fc-typed"}, auth.Empty())
+		FirecrawlURL: agent.FirecrawlURL}, map[string]auth.Credential{"firecrawl": {Key: "fc-typed", BaseURL: agent.FirecrawlURL}},
+		auth.Empty())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,8 @@ func TestTypedKeyCommandIsRun(t *testing.T) {
 	}
 	clearSearchEnv(t)
 	cfg := loginIn(t, nil, nil)
-	draft, err := cfg.WithSearch(SearchSettings{Engine: "exa"}, map[string]string{"exa": "!echo exa-1"}, auth.Empty())
+	draft, err := cfg.WithSearch(SearchSettings{Engine: "exa"}, map[string]auth.Credential{"exa": {Key: "!echo exa-1", BaseURL: agent.ExaURL}},
+		auth.Empty())
 	if err != nil || draft.ExaAPIKey != "exa-1" {
 		t.Errorf("key %q, %v", draft.ExaAPIKey, err)
 	}

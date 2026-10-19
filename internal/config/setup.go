@@ -92,10 +92,10 @@ func (c Config) ServiceFallbackKey(name string) string { return c.serviceFallbac
 
 // WithSearch is c as a run would resolve it once s is saved: a setting the
 // environment sets keeps the environment's value, and one s leaves empty
-// keeps c's. keys are keys typed in
-// setup, by service; a service without one gets its stored key for the
-// address it now has, else the environment's or config.yaml's.
-func (c Config) WithSearch(s SearchSettings, keys map[string]string, store *auth.Store) (Config, error) {
+// keeps c's. keys are keys typed in setup, by service, each with the address
+// it was typed for; a service without one for the address it now has gets
+// its stored key there, else the environment's or config.yaml's.
+func (c Config) WithSearch(s SearchSettings, keys map[string]auth.Credential, store *auth.Store) (Config, error) {
 	for _, st := range searchSettings {
 		if _, _, ok := firstSet(st.key, st.env...); ok {
 			continue
@@ -123,7 +123,7 @@ func (c Config) WithSearch(s SearchSettings, keys map[string]string, store *auth
 		if !c.usesService(sv.name) {
 			continue
 		}
-		key, err := draftKey(sv, keys[sv.name], serviceURL(sv.name, s.FirecrawlURL), store)
+		key, err := draftKey(sv, keys[sv.name].Key, keys[sv.name].BaseURL, store)
 		if err != nil {
 			return c, err
 		}
@@ -148,17 +148,6 @@ func draftKey(sv serviceSlot, typed, typedFor string, store *auth.Store) (string
 		return key, nil
 	}
 	return store.ServiceKey(sv.name, sv.baseURL)
-}
-
-// serviceURL is the address a key for the named service is typed for.
-func serviceURL(name, firecrawlURL string) string {
-	switch name {
-	case ServiceExa:
-		return agent.ExaURL
-	case ServiceTavily:
-		return agent.TavilyURL
-	}
-	return firecrawlURL
 }
 
 // serviceSlot is one search service's key in a Config, and the address it
