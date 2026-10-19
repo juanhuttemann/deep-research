@@ -2,7 +2,7 @@
 name: deep-research
 description: Researches a question across the web with the deep-research CLI and returns a fact-checked, cited report (Markdown, plus JSON with every claim, its verdict and the page text it was checked against). Use when the user asks to research, investigate or survey a topic, compare options with sources, or get a sourced answer that needs many web pages; also to answer follow-up questions about an earlier deep-research run.
 license: MIT
-compatibility: Requires the drsh binary on PATH, a model configured with drsh login, and network access.
+compatibility: Requires the drsh binary on PATH, a model configured with drsh setup, and network access.
 ---
 
 # deep-research
@@ -67,17 +67,17 @@ run or the setting to change.
      to set it up following
      [docs/services.md](https://github.com/juanhuttemann/deep-research/blob/main/docs/services.md),
      and ask before running the commands.
-  2. Exa or Tavily: the user sets `DEEP_RESEARCH_SCRAPER` and
-     `EXA_API_KEY` or `TAVILY_API_KEY` themselves.
+  2. Exa or Tavily: the user runs `drsh setup scraper` themselves and picks
+     one; it asks for the key.
   3. Run with snippets only, accepting lower confidence.
 
   Start only after they choose. With no one to ask (a non-interactive
   session), go on and say in the answer that no scraper was used.
 - A missing or rejected model key is fixed by the user running
-  `drsh login`, which is interactive: do not run it for them, and
+  `drsh setup`, which is interactive: do not run it for them, and
   never ask them to paste a key into the conversation. The same goes for any
-  `→` step that needs an API key (`EXA_API_KEY`, `TAVILY_API_KEY`): the user
-  sets it themselves.
+  `→` step that needs an API key (Exa, Tavily, hosted Firecrawl): the user
+  enters it in `drsh setup search` or `drsh setup scraper` themselves.
 - **Search through public instances** (the `search` line says "a public
   instance"): recommend the user's own SearXNG in Docker. It is free, keeps
   queries on their machine, and queries more engines than public instances

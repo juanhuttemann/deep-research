@@ -1,7 +1,8 @@
-// Package setup is the terminal picker behind `drsh login` and
-// `drsh model`: one searchable list of every model of every
-// provider, each row naming its provider; then the key, behind a mask of
-// asterisks, when that provider has none; then one free request to check it.
+// Package setup is the terminal side of `drsh setup`, `drsh login` and
+// `drsh model`. The model picker is one searchable list of every model of
+// every provider, each row naming its provider; then the key, behind a mask
+// of asterisks, when that provider has none; then one free request to check
+// it.
 //
 // It decides nothing about where a key is stored; the caller gets a Result
 // and saves it. The single list across providers is Crush's model picker,
@@ -42,13 +43,20 @@ type Options struct {
 	NewKey bool
 	// Current is the saved selection, highlighted when the picker opens.
 	Current auth.Selection
+	// Keep, when set, names the model runs use now: a first row keeps it as
+	// it is, wherever it was set, and is highlighted instead of Current. The
+	// catalog has no row for a custom endpoint or a model set in the
+	// environment, so highlighting alone could not offer to keep those.
+	Keep string
 }
 
 // Result is what the user picked. Key is empty when no new key was entered
-// (a stored or environment one is used, or the provider needs none).
+// (a stored or environment one is used, or the provider needs none). Keep is
+// the Keep row: nothing changes, and Selection is empty.
 type Result struct {
 	Selection auth.Selection
 	Key       string
+	Keep      bool
 }
 
 type step int
@@ -77,8 +85,8 @@ const NoKey = "none"
 // Where a provider's key comes from, shown on its heading. Empty is a
 // provider that needs one: it is asked for when a model is picked.
 const (
-	markStored = "✓ key stored"
-	markEnv    = "✓ key from your environment"
+	MarkStored = "✓ key stored"
+	MarkEnv    = "✓ key from your environment"
 	markNoKey  = "✓ no key: runs through Claude Code, billed to your plan"
 )
 
@@ -96,7 +104,11 @@ type Model struct {
 	input    textinput.Model
 	checkErr error
 	quit     bool
+	keep     bool
 }
+
+// keepID is the Keep row's id; no provider is called that.
+const keepID = "\x1fkeep"
 
 // New returns the picker on the list of every model.
 func New(opts Options) Model {
@@ -109,6 +121,9 @@ func New(opts Options) Model {
 	m := Model{opts: opts, st: newStyles()}
 	m.list = newList(m.pickItems(), "search a model or a provider", false)
 	m.list.selectID(rowID(opts.Current.Provider, opts.Current.Model))
+	if opts.Keep != "" {
+		m.list.selectID(keepID)
+	}
 	return m
 }
 
@@ -122,6 +137,9 @@ const otherModel = "\x1fother"
 // first, each followed by its row for a model the catalog does not list.
 func (m Model) pickItems() []item {
 	var ready, rest []item
+	if m.opts.Keep != "" {
+		ready = append(ready, item{id: keepID, group: "Now", title: "keep " + m.opts.Keep, mark: "✓ what runs use now"})
+	}
 	for _, p := range m.opts.Providers {
 		mark := m.keyMark(p)
 		rows := m.providerRows(p, mark)
@@ -162,7 +180,7 @@ func (m Model) keyMark(p catalog.Provider) string {
 	case p.ID == catalog.Custom:
 		// The custom URL is not known yet: any stored key marks it.
 		if _, ok := m.opts.StoredEndpoint(p.ID); ok {
-			return markStored
+			return MarkStored
 		}
 		return ""
 	}
@@ -173,10 +191,10 @@ func (m Model) keyMark(p catalog.Provider) string {
 // for that endpoint, else an environment key that goes there.
 func (m Model) keyAt(id, transport, baseURL string) string {
 	if ep, ok := m.opts.StoredEndpoint(id); ok && auth.SameEndpoint(ep, baseURL) {
-		return markStored
+		return MarkStored
 	}
 	if ep, ok := m.opts.EnvEndpoint(transport); ok && auth.SameEndpoint(ep, baseURL) {
-		return markEnv
+		return MarkEnv
 	}
 	return ""
 }
@@ -188,6 +206,9 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Result() (Result, bool) {
 	if m.step != stepDone || m.quit {
 		return Result{}, false
+	}
+	if m.keep {
+		return Result{Keep: true}, true
 	}
 	return Result{Selection: m.selection(), Key: m.key}, true
 }
@@ -236,6 +257,10 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.step == stepModel {
 		return m.modelChosen(it.id)
+	}
+	if it.id == keepID {
+		m.keep, m.step = true, stepDone
+		return m, tea.Quit
 	}
 	providerID, modelID, _ := strings.Cut(it.id, "\x1f")
 	p, _ := catalog.Find(m.opts.Providers, providerID)

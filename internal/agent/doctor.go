@@ -32,6 +32,14 @@ type Check struct {
 // ServicesDoc is where running SearXNG and Firecrawl is explained.
 const ServicesDoc = tools.ServicesDoc
 
+// The hosted services' addresses, for callers that do not import tools: a
+// stored key is bound to one of them.
+const (
+	ExaURL       = tools.ExaURL
+	TavilyURL    = tools.TavilyURL
+	FirecrawlURL = "https://api.firecrawl.dev"
+)
+
 // diagnoseTimeout bounds each check: doctor is for finding out quickly.
 const diagnoseTimeout = 20 * time.Second
 
@@ -70,7 +78,7 @@ func checkModel(ctx context.Context, cfg Config) Check {
 	}
 	c := Check{Name: "model"}
 	if strings.TrimSpace(cfg.OpenAIAPIKey) == "" {
-		c.Detail = "no API key — run `drsh login`, or get a free one (no card): https://openrouter.ai/keys"
+		c.Detail = "no API key — run `drsh setup`, or get a free one (no card): https://openrouter.ai/keys"
 		return c
 	}
 	base := strings.TrimRight(cfg.OpenAIBaseURL, "/")
@@ -112,10 +120,10 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 	}
 	key := strings.TrimSpace(cfg.AnthropicAPIKey)
 	if key == "" {
-		c.Detail = "no API key — run `drsh login`, or set ANTHROPIC_API_KEY"
+		c.Detail = "no API key — run `drsh setup`, or set ANTHROPIC_API_KEY"
 		if useClaudeCode(cfg) {
 			c.Detail = "Claude Code is not signed in to a subscription (run `claude auth login`)," +
-				" and there is no API key (`drsh login`, or ANTHROPIC_API_KEY)"
+				" and there is no API key (`drsh setup`, or ANTHROPIC_API_KEY)"
 		}
 		return c
 	}
@@ -159,6 +167,13 @@ func keyFrom(cfg Config) string {
 	}
 	return " (key from " + cfg.KeySource + ")"
 }
+
+// CheckSearch is doctor's search check alone: one real query, which a hosted
+// engine charges for.
+func CheckSearch(ctx context.Context, cfg Config) Check { return checkSearch(ctx, cfg) }
+
+// CheckScraper is doctor's scraper check alone: one page read through it.
+func CheckScraper(ctx context.Context, cfg Config) Check { return checkScraper(ctx, cfg) }
 
 // CheckModel is doctor's model check alone: one free request that proves the
 // endpoint answers and accepts the key. `drsh login` runs it on a
@@ -299,10 +314,10 @@ func searchFix(err error) string {
 	case status == "unreachable" && tools.UnreachableService(err) != "SearXNG":
 		return "check this machine's network: the hosted engine did not answer"
 	case status == "unreachable":
-		return "check that SEARXNG_URL is right and that SearXNG is running there" +
-			" (set up by init --docker: docker compose -f <config dir>/docker-compose.yml up -d)"
+		return "check that SearXNG is running at that address (a local one from drsh setup search:" +
+			" docker compose -f <config dir>/docker-compose.yml up -d), or choose another: drsh setup search"
 	case status == "unauthorized" || status == "quota":
-		return "check the engine's API key (EXA_API_KEY or TAVILY_API_KEY) and its remaining credit"
+		return "check the engine's key (enter it again with drsh setup search) and its remaining credit"
 	}
 	return ""
 }
@@ -343,8 +358,7 @@ func checkScraper(ctx context.Context, cfg Config) Check {
 		// the weakest evidence a run can have.
 		c.Warn = true
 		c.Detail = "none — sources are search snippets only, never the full page"
-		c.Fix = "for full page text set FIRECRAWL_URL (" + ServicesDoc + ")," +
-			" or DEEP_RESEARCH_SCRAPER=exa with EXA_API_KEY, or tavily with TAVILY_API_KEY"
+		c.Fix = "for full page text choose Firecrawl, Exa or Tavily: drsh setup scraper (" + ServicesDoc + ")"
 		return c
 	}
 	where := scraperName(cfg, scraper)

@@ -278,9 +278,8 @@ const ServicesDoc = "https://github.com/juanhuttemann/deep-research/blob/main/do
 // the reader's own in Docker first, since it is free and keeps queries on
 // this machine, else a hosted engine. Each names the exact step, since "set
 // search_engine" left the reader to find out where and to what.
-const SearchFix = "run SearXNG in Docker: drsh init --docker sets it up and prints the one command" +
-	" that starts it (" + ServicesDoc + "). Without Docker, search through a hosted engine:" +
-	" DEEP_RESEARCH_SEARCH_ENGINE=exa with EXA_API_KEY, or DEEP_RESEARCH_SEARCH_ENGINE=tavily with TAVILY_API_KEY"
+const SearchFix = "run SearXNG in Docker: drsh setup search sets it up and prints the one command" +
+	" that starts it (" + ServicesDoc + "). Without Docker, choose a hosted engine there: Exa or Tavily"
 
 // PublicSearchRefused reports whether err is every public SearXNG instance
 // refusing a query with a challenge, a block or a limiter: not a fault to fix

@@ -639,7 +639,7 @@ func TestClaudeAPIOnlySkipsTheSubscription(t *testing.T) {
 	}
 	// Without a key there is no subscription to fall back on.
 	if _, err := New(Config{Provider: "claude", ClaudeModel: "k3", ClaudeAPIOnly: true,
-		AnthropicBaseURL: api.URL}); err == nil || !strings.Contains(err.Error(), "drsh login") {
+		AnthropicBaseURL: api.URL}); err == nil || !strings.Contains(err.Error(), "drsh setup") {
 		t.Errorf("no key: err = %v", err)
 	}
 }

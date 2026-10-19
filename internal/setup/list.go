@@ -35,6 +35,9 @@ type list struct {
 	height   int   // rows visible at once
 	grouped  bool  // rows carry a provider: headed by it, not repeating it
 	freeText bool  // Enter with no match picks the typed text
+	// plain lists are a handful of choices: no search box, and typing does
+	// nothing but move.
+	plain bool
 }
 
 func newList(items []item, placeholder string, freeText bool) list {
@@ -125,6 +128,13 @@ func (l *list) selectID(id string) {
 	}
 }
 
+// newPlainList is a short list of choices, read top to bottom.
+func newPlainList(items []item) list {
+	l := newList(items, "", false)
+	l.plain = true
+	return l
+}
+
 func (l list) update(msg tea.Msg) (list, tea.Cmd) {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
@@ -142,6 +152,9 @@ func (l list) update(msg tea.Msg) (list, tea.Cmd) {
 			return l, nil
 		}
 	}
+	if l.plain {
+		return l, nil
+	}
 	before := l.filter.Value()
 	var cmd tea.Cmd
 	l.filter, cmd = l.filter.Update(msg)
@@ -154,7 +167,9 @@ func (l list) update(msg tea.Msg) (list, tea.Cmd) {
 
 func (l list) view(st styles) string {
 	var b strings.Builder
-	b.WriteString(l.filter.View() + "\n\n")
+	if !l.plain {
+		b.WriteString(l.filter.View() + "\n\n")
+	}
 	if len(l.shown) == 0 {
 		msg := "  no match"
 		if l.freeText && strings.TrimSpace(l.filter.Value()) != "" {
@@ -220,6 +235,16 @@ func (l list) row(st styles, it item, current bool) string {
 		prefix = "  " + prefix
 	}
 	line := prefix + title
+	if l.plain {
+		// A choice's detail is a sentence on what it means, on its own line.
+		if it.mark != "" {
+			line += "  " + st.ok.Render(it.mark)
+		}
+		if it.detail != "" {
+			line += "\n    " + st.dim.Render(it.detail)
+		}
+		return line
+	}
 	if it.detail != "" {
 		line += "  " + st.dim.Render(it.detail)
 	}

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -171,5 +172,44 @@ func TestNullFileIsAnEmptyStore(t *testing.T) {
 	}
 	if err := s.Set("x", Credential{Key: "k"}); err != nil {
 		t.Fatalf("Set: %v", err)
+	}
+}
+
+// TestServiceKeysStayApart: a service key is a flat entry an older binary
+// keeps when it rewrites the file, and never a model provider's key, even
+// for the same address.
+func TestServiceKeysStayApart(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Load(dir, nil)
+	if err := s.SetService("exa", "exa-1", "https://api.exa.ai"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("openrouter", Credential{Key: "sk-or-1", BaseURL: "https://openrouter.ai/api/v1"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, AuthFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What an older binary decodes and writes back.
+	var legacy map[string]Credential
+	if err := json.Unmarshal(b, &legacy); err != nil || legacy["service:exa"].Key != "exa-1" {
+		t.Fatalf("not flat: %v %+v", err, legacy)
+	}
+	s2, _ := Load(dir, nil)
+	if got := s2.Providers(); len(got) != 1 || got[0] != "openrouter" {
+		t.Errorf("Providers = %v", got)
+	}
+	if got := s2.Services(); len(got) != 1 || got[0] != "exa" {
+		t.Errorf("Services = %v", got)
+	}
+	if key, _, _ := s2.KeyFor("https://api.exa.ai", "exa"); key != "" {
+		t.Errorf("a model endpoint got the service key %q", key)
+	}
+	if key, _ := s2.ServiceKey("exa", "https://api.exa.ai/"); key != "exa-1" {
+		t.Errorf("ServiceKey = %q", key)
+	}
+	if key, _ := s2.ServiceKey("exa", "https://elsewhere"); key != "" {
+		t.Errorf("ServiceKey at another address = %q", key)
 	}
 }

@@ -55,7 +55,7 @@ func modelCmd() *cobra.Command {
 
 func logoutCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "logout [provider]",
+		Use:   "logout [provider|exa|tavily|firecrawl]",
 		Short: "remove a stored API key",
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runLogout,
@@ -84,6 +84,9 @@ type loginState struct {
 	// env is the run config without login's choice applied to keys: where
 	// the environment's keys go (Config.FallbackKey).
 	env config.Config
+	// loadErr is why env did not load; env is then empty, and setup starts
+	// from the defaults rather than refusing to repair the setup.
+	loadErr error
 }
 
 func loadLoginState(ctx context.Context) (loginState, error) {
@@ -94,9 +97,9 @@ func loadLoginState(ctx context.Context) (loginState, error) {
 	// Load also reads .env, where most keys live. A config that does not
 	// load only means no environment keys are offered. It warns about a
 	// readable auth.json, so the store below is loaded without a second one.
-	env, err := config.Load()
+	env, loadErr := config.Load()
 	warn := io.Writer(nil)
-	if err != nil {
+	if loadErr != nil {
 		warn = os.Stderr
 	}
 	store, err := auth.Load(dir, warn)
@@ -108,7 +111,7 @@ func loadLoginState(ctx context.Context) (loginState, error) {
 		return loginState{}, err
 	}
 	providers := loadCatalog(ctx)
-	return loginState{dir: dir, store: store, current: current, providers: providers, env: env}, nil
+	return loginState{dir: dir, store: store, current: current, providers: providers, env: env, loadErr: loadErr}, nil
 }
 
 // pickAndSave runs the picker and saves what it returns.
@@ -302,8 +305,8 @@ func runLogout(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	stored := store.Providers()
-	slices.Sort(stored)
+	providers, services := store.Providers(), store.Services()
+	stored := slices.Sorted(slices.Values(append(slices.Clone(providers), services...)))
 	var id string
 	switch {
 	case len(args) == 1:
@@ -314,9 +317,14 @@ func runLogout(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "no stored keys")
 		return nil
 	default:
-		return fmt.Errorf("keys are stored for %s; name the one to remove: drsh logout <provider>", strings.Join(stored, ", "))
+		return fmt.Errorf("keys are stored for %s; name the one to remove: drsh logout <name>", strings.Join(stored, ", "))
 	}
-	found, err := store.Delete(id)
+	// A service is named as setup shows it ("exa"); its entry is service:exa.
+	entry := id
+	if !slices.Contains(providers, id) && slices.Contains(services, id) {
+		entry = auth.ServiceID(id)
+	}
+	found, err := store.Delete(entry)
 	if err != nil {
 		return err
 	}
@@ -324,6 +332,9 @@ func runLogout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no key stored for %q (stored: %s)", id, strings.Join(stored, ", "))
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "removed the %s key from %s\n", id, store.Path())
+	if entry != id {
+		fmt.Fprintf(cmd.OutOrStdout(), "a run now uses %s_API_KEY from the environment or config.yaml, if one is set\n", strings.ToUpper(id))
+	}
 	if sel, ok, _ := auth.LoadSelection(dir); ok && sel.Provider == id {
 		fmt.Fprintln(cmd.OutOrStdout(), "it was the selected provider: runs now use the key from the environment, if any")
 	}

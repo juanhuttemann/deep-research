@@ -50,7 +50,7 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 		}
 	}
 	if api == nil && !useClaudeCode(cfg) {
-		return nil, fmt.Errorf("no API key for %s (run `drsh login`, or set ANTHROPIC_API_KEY)", safeEndpoint(cfg.AnthropicBaseURL))
+		return nil, fmt.Errorf("no API key for %s (run `drsh setup`, or set ANTHROPIC_API_KEY)", safeEndpoint(cfg.AnthropicBaseURL))
 	}
 	if api == nil {
 		return nil, errors.New("provider claude needs Claude Code signed in to a Claude subscription" +

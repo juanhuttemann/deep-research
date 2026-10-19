@@ -90,7 +90,7 @@ func TestMissingKeyIsAHardError(t *testing.T) {
 	if err == nil {
 		t.Fatal("a run with no API key succeeded")
 	}
-	for _, want := range []string{"drsh login", "https://openrouter.ai/keys"} {
+	for _, want := range []string{"drsh setup", "https://openrouter.ai/keys"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not say %q: %v", want, err)
 		}

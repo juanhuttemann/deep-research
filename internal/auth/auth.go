@@ -102,6 +102,23 @@ func warnPermissive(p string, warn io.Writer) {
 	}
 }
 
+// Service keys — Exa, Tavily, hosted Firecrawl — sit beside the providers'
+// as flat "service:<name>" entries of type "service". A nested "services"
+// object would load in an older binary as one empty credential and be dropped
+// on its next save; a flat entry survives it, though an older binary's KeyFor
+// does not know to skip it.
+const (
+	TypeService   = "service"
+	servicePrefix = "service:"
+)
+
+// ServiceID is the auth.json entry of the named service.
+func ServiceID(name string) string { return servicePrefix + name }
+
+func isService(id string, c Credential) bool {
+	return c.Type == TypeService || strings.HasPrefix(id, servicePrefix)
+}
+
 // Path is the auth.json this store reads and writes.
 func (s *Store) Path() string { return filepath.Join(s.dir, AuthFile) }
 
@@ -111,15 +128,49 @@ func (s *Store) Get(provider string) (Credential, bool) {
 	return c, ok && c.Key != ""
 }
 
-// Providers lists the providers with a stored key.
+// Providers lists the model providers with a stored key, never a service:
+// a model endpoint is not sent an Exa key however its URL is spelled.
 func (s *Store) Providers() []string {
 	var ids []string
 	for id, c := range s.creds {
-		if c.Key != "" {
+		if c.Key != "" && !isService(id, c) {
 			ids = append(ids, id)
 		}
 	}
 	return ids
+}
+
+// Services lists the services with a stored key, by name ("exa").
+func (s *Store) Services() []string {
+	var names []string
+	for id, c := range s.creds {
+		if name, ok := strings.CutPrefix(id, servicePrefix); ok && c.Key != "" && c.Type == TypeService {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// Service returns the named service's stored credential.
+func (s *Store) Service(name string) (Credential, bool) {
+	c, ok := s.creds[ServiceID(name)]
+	return c, ok && c.Key != "" && c.Type == TypeService
+}
+
+// SetService stores key for the named service at baseURL and saves the file.
+func (s *Store) SetService(name, key, baseURL string) error {
+	return s.Set(ServiceID(name), Credential{Type: TypeService, Key: key, BaseURL: baseURL})
+}
+
+// ServiceKey returns the named service's stored key when it was entered for
+// baseURL, else "". A hosted Firecrawl key does not follow FIRECRAWL_URL to
+// another server.
+func (s *Store) ServiceKey(name, baseURL string) (string, error) {
+	c, ok := s.Service(name)
+	if !ok || !SameEndpoint(c.BaseURL, baseURL) {
+		return "", nil
+	}
+	return Resolve(c.Key)
 }
 
 // Set stores c for provider and saves the file.

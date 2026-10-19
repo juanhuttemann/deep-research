@@ -40,6 +40,10 @@ type Config struct {
 	// config.yaml name, before `drsh login`'s choice. See
 	// FallbackKey.
 	fallback map[string]fallbackKey
+	// serviceFallback is each search service's key from the environment or
+	// config.yaml, before a stored one replaced it: what a service falls back
+	// to when setup points it at an address its stored key is not for.
+	serviceFallback map[string]string
 }
 
 type fallbackKey struct{ baseURL, key, source string }
@@ -56,10 +60,10 @@ func (c Config) FallbackKey(transport string) (baseURL, key string) {
 // EnvTemplate is the default contents written to a root .env file by `init`.
 // The entries are commented out on purpose so users fill in their own values,
 // or export the matching environment variables for a session.
-const EnvTemplate = `# Secrets / machine-specific overrides for deep-research.
-# The easy way: run "drsh login" to pick a provider and model and store
-# the key (auth.json, readable only by you). The keys below are the fallback;
-# the provider and model settings below override what login picked.
+const EnvTemplate = `# Environment overrides for deep-research, for CI and one-off changes.
+# The easy way is "drsh setup": it picks the model, web search and page
+# extraction and stores the keys (auth.json, readable only by you). The keys
+# below are the fallback; every other setting below overrides what setup saved.
 # Get a free OpenRouter key (no card): https://openrouter.ai/keys
 # OPENAI_API_KEY=
 # OPENAI_BASE_URL=https://openrouter.ai/api/v1
@@ -356,6 +360,9 @@ func savedFor(sel auth.Selection, transport string) auth.Selection {
 // for one run never receives the stored OpenRouter key, and a DeepSeek chosen
 // in login never receives the OPENAI_API_KEY meant for OpenRouter.
 func applyKeys(cfg *Config, v *viper.Viper, store *auth.Store, sel auth.Selection) error {
+	if err := applyServiceKeys(cfg, store); err != nil {
+		return err
+	}
 	cfg.fallback["openai"] = fallbackFor(cfg.fallback["openai"], v, "openai_api_key", "OPENAI_API_KEY", "OPENROUTER_API_KEY")
 	cfg.fallback["claude"] = fallbackFor(cfg.fallback["claude"], v, "anthropic_api_key", "ANTHROPIC_API_KEY")
 	base, transport := cfg.OpenAIBaseURL, "openai"
@@ -384,6 +391,33 @@ func applyKeys(cfg *Config, v *viper.Viper, store *auth.Store, sel auth.Selectio
 		return nil
 	}
 	cfg.OpenAIAPIKey = key
+	return nil
+}
+
+// applyServiceKeys puts a key `drsh setup` stored for a search service in
+// place of the environment's and config.yaml's. Setup asked for it, so it is
+// the one meant; the environment's stays the fallback, as for model keys. Each
+// stored key goes only to the address it was entered for.
+func applyServiceKeys(cfg *Config, store *auth.Store) error {
+	cfg.serviceFallback = map[string]string{
+		ServiceExa: cfg.ExaAPIKey, ServiceTavily: cfg.TavilyAPIKey, ServiceFirecrawl: cfg.FirecrawlAPIKey,
+	}
+	for _, s := range []struct {
+		name, baseURL string
+		dst           *string
+	}{
+		{ServiceExa, agent.ExaURL, &cfg.ExaAPIKey},
+		{ServiceTavily, agent.TavilyURL, &cfg.TavilyAPIKey},
+		{ServiceFirecrawl, cfg.FirecrawlURL, &cfg.FirecrawlAPIKey},
+	} {
+		key, err := store.ServiceKey(s.name, s.baseURL)
+		if err != nil {
+			return fmt.Errorf("stored %s key in %s: %w", s.name, store.Path(), err)
+		}
+		if key != "" {
+			*s.dst = key
+		}
+	}
 	return nil
 }
 

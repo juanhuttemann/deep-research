@@ -213,14 +213,14 @@ func TestDiagnoseSaysHowToFixSearch(t *testing.T) {
 	pool.Public = true
 	_, err := pool.Search(context.Background(), "q")
 	if fix := searchFix(err); !strings.Contains(fix, "retrying will not help") ||
-		!strings.Contains(fix, "init --docker") || !strings.Contains(fix, "DEEP_RESEARCH_SEARCH_ENGINE=exa") {
+		!strings.Contains(fix, "drsh setup search") || !strings.Contains(fix, "Exa") {
 		t.Errorf("public refusal fix = %q", fix)
 	}
 
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
 	c := checkSearch(context.Background(), Config{SearXNGURL: dead.URL, ModelCallTimeout: time.Second})
-	if c.OK || !strings.Contains(c.Fix, "SEARXNG_URL") {
+	if c.OK || !strings.Contains(c.Fix, "drsh setup search") {
 		t.Errorf("an unreachable SearXNG gave no fix: %+v", c)
 	}
 }
@@ -238,7 +238,7 @@ func TestDiagnoseWarnsAboutWeakSetups(t *testing.T) {
 	if c := checkSearch(context.Background(), cfg); !c.OK || !c.Warn || c.Fix == "" {
 		t.Errorf("an empty search answer did not warn: %+v", c)
 	}
-	if c := checkScraper(context.Background(), cfg); !c.OK || !c.Warn || !strings.Contains(c.Fix, "FIRECRAWL_URL") {
+	if c := checkScraper(context.Background(), cfg); !c.OK || !c.Warn || !strings.Contains(c.Fix, "drsh setup scraper") {
 		t.Errorf("no scraper did not warn: %+v", c)
 	}
 	cfg.SearchEngine, cfg.ExaAPIKey = "exa", "k"
