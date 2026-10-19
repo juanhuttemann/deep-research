@@ -28,11 +28,12 @@ sources_per_topic: 0
 # search backend or a rate-limited model provider cannot take the concurrency.
 parallelism: 3
 
-# LLM provider. `drsh login` picks one from a list and stores its key;
-# what it picks wins over the settings below, and the environment wins over
-# both. Any OpenAI-compatible endpoint works (OpenRouter, vLLM, llama.cpp,
-# LM Studio). The matching OPENAI_* environment variables override whatever is
-# set here. Keep API keys in `drsh login` or .env, not in this file.
+# LLM provider. `drsh setup` (or `drsh login`) picks one from a list and
+# stores its key; what it picks wins over the settings below, and the
+# environment wins over both. Any OpenAI-compatible endpoint works
+# (OpenRouter, vLLM, llama.cpp, LM Studio). The matching OPENAI_* environment
+# variables override whatever is set here. Keep API keys in `drsh setup` or
+# .env, not in this file.
 # openai_base_url: https://openrouter.ai/api/v1
 # openai_model: openrouter/free
 
@@ -42,10 +43,12 @@ parallelism: 3
 # provider: claude
 # claude_model: claude-opus-5-5
 
-# Web search. Unset, searxng_url is "auto": public SearXNG instances listed on
-# searx.space, tried in turn — every query then goes to a third party. Set one
-# or more of your own instances (comma-separated) to keep queries local, or
-# "off" to let the model supply findings from memory (all unverified).
+# Web search: `drsh setup search` and `drsh setup scraper` set the keys below
+# and leave the rest of this file alone. Unset, searxng_url is "auto": public
+# SearXNG instances listed on searx.space, tried in turn — every query then
+# goes to a third party. Set one or more of your own instances
+# (comma-separated) to keep queries local, or "off" to let the model supply
+# findings from memory (all unverified).
 # firecrawl_url is optional: with it each result page is scraped for its full
 # text, without it the search snippet is the source. SEARXNG_URL /
 # FIRECRAWL_URL override these. Running both services: docs/services.md.
@@ -62,6 +65,7 @@ parallelism: 3
 # and spends its credit; it is never chosen just because a key is set.
 # scraper picks the page extractor behind any engine: firecrawl (the default
 # when firecrawl_url is set), exa, tavily or none. Keys: EXA_API_KEY /
-# TAVILY_API_KEY, in .env rather than here. docs/configuration.md has costs.
+# TAVILY_API_KEY, or stored by `drsh setup`, rather than here.
+# docs/configuration.md has costs.
 # search_engine: searxng
 # scraper: firecrawl

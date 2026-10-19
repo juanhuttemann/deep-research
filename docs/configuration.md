@@ -1,5 +1,22 @@
 # Configuration
 
+## What `drsh setup` writes
+
+[`drsh setup`](usage.md#setup) is the way to configure a run; the files and
+variables below are what it writes, for reading and for scripts. All of them
+live in the config directory:
+
+| File | Holds | Written by |
+| ---- | ----- | ---------- |
+| `auth.json` | API keys: the model provider's, and Exa's, Tavily's and hosted Firecrawl's | `setup`, `login` |
+| `model.json` | the chosen provider, endpoint and model; no secrets | `setup`, `setup model`, `login`, `model` |
+| `config.yaml` | everything else; setup writes `search_engine`, `searxng_url`, `scraper` and `firecrawl_url` and leaves the rest as you wrote it | `setup search`, `setup scraper`, `init`, you |
+| `.env` | environment variables, read at start | you (`init` writes a commented template) |
+
+Environment variables still override all of it: for CI, and for a one-off
+run (`OPENAI_MODEL=x drsh -p ...`). `setup`'s review says when one will win
+over a choice and where it was set.
+
 ## Precedence
 
 Settings resolve in one order, highest first:
@@ -9,8 +26,9 @@ Settings resolve in one order, highest first:
 3. `config.yaml` in the config directory
 4. the defaults embedded in the binary
 
-API keys resolve differently: a key stored by `drsh login` wins, and
-the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) is the fallback, then
+API keys resolve differently: a key stored by `drsh setup` or `drsh login`
+wins, and the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`EXA_API_KEY`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`) is the fallback, then
 `config.yaml`. See [Stored keys](#stored-keys-drsh-login).
 
 The config directory is `$DEEP_RESEARCH_CONFIG_DIR` when set, else
@@ -23,15 +41,17 @@ replace yours. When the working directory has either file with deep-research
 settings in it (from a release that read them), every run warns and `doctor`
 names the file to move.
 
-`drsh init` writes a default `config.yaml` and a `.env` template
-there. Newly created `.env` files use owner-only permissions (`0600`) on
+`drsh setup` writes `config.yaml` there when it saves search settings and
+there is none; `drsh init` writes a default `config.yaml` and a `.env`
+template. Newly created `.env` files use owner-only permissions (`0600`) on
 Unix; existing files are left alone.
 
 ## Stored keys (`drsh login`)
 
-`drsh login` and `drsh model` pick a model from one list of
-every provider's models and store the key when the provider needs one;
-`drsh logout` removes one ([usage](usage.md#login-model-logout)).
+`drsh setup` (and `drsh login` and `drsh model`, its model step on its own)
+picks a model from one list of every provider's models and stores the key
+when the provider needs one; `drsh logout` removes one
+([usage](usage.md#login-model-logout)).
 Two files, in `$DEEP_RESEARCH_CONFIG_DIR` when set, else
 `~/.config/deep-research/`:
 
@@ -40,6 +60,15 @@ Two files, in `$DEEP_RESEARCH_CONFIG_DIR` when set, else
   atomically. A group- or world-readable file loads with a warning.
 - `model.json` holds the selection: provider, transport, endpoint and model.
   It has no secrets.
+
+A search service's key is stored as its own entry, `service:exa`,
+`service:tavily` or `service:firecrawl`, of type `service`, with the address
+it was entered for: Exa's and Tavily's APIs, or the Firecrawl it was typed for.
+A hosted Firecrawl key is not sent to a `FIRECRAWL_URL` pointed at another
+server. The entries are flat, so a release from before `setup` keeps them
+when it rewrites the file; such a release does not know to keep them apart
+from model keys, though, and would send one to a model endpoint at the very
+same address.
 
 Every key goes only to its own endpoint. A stored key goes to the endpoint it
 was entered for: with `OPENAI_BASE_URL` pointed somewhere else for a run, the
@@ -72,20 +101,26 @@ Picking Anthropic, Kimi or MiniMax runs on the key alone: Claude Code is used
 only for the Claude subscription entry (or `provider: claude` set without
 login), so a run never bills the plan when you chose the API.
 
-## Provider and services
+## Environment variables (CI and one-off overrides)
+
+`drsh setup` covers everything in this section. Each setting also has an
+environment variable, read from the shell or the config directory's `.env`,
+that wins over what setup saved: the way to configure CI, or to change one run
+without touching the saved setup. A variable left set by mistake overrides a
+choice made later in setup, which is why setup's review lists them.
 
 | Env var | Meaning | Default |
 | ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key, when `drsh login` stored none for the endpoint; free at <https://openrouter.ai/keys> | — (required) |
+| `OPENAI_API_KEY` | LLM API key, when `drsh setup` stored none for the endpoint; free at <https://openrouter.ai/keys> | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
 | `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: search snippets only) |
-| `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none) | — |
+| `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none), when `setup` stored none for that address | — |
 | `DEEP_RESEARCH_SEARCH_ENGINE` | `searxng`, `exa`, `tavily` or `off` (LLM search) | `searxng` |
 | `DEEP_RESEARCH_SCRAPER` | `firecrawl`, `exa`, `tavily` or `none` | `firecrawl` when `FIRECRAWL_URL` is set, else `none` |
-| `EXA_API_KEY` | key for [Exa](https://exa.ai), as engine or scraper | — |
-| `TAVILY_API_KEY` | key for [Tavily](https://tavily.com), as engine or scraper | — |
+| `EXA_API_KEY` | key for [Exa](https://exa.ai), as engine or scraper, when `setup` stored none | — |
+| `TAVILY_API_KEY` | key for [Tavily](https://tavily.com), as engine or scraper, when `setup` stored none | — |
 
 A trailing slash on `FIRECRAWL_URL` is ignored when building API paths.
 
@@ -151,7 +186,8 @@ Each of these can also be written in `config.yaml` under the lower-case key
 (`openai_base_url`, `openai_model`, `searxng_url`, `firecrawl_url`,
 `firecrawl_api_key`, `search_engine`, `scraper`, `exa_api_key`,
 `tavily_api_key`); the environment variable wins where both are set. Keep
-the API key in `.env`, not in the config file.
+keys in `auth.json` (`drsh setup` puts them there) or `.env`, not in the
+config file.
 
 ### Claude
 

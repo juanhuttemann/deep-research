@@ -98,12 +98,13 @@ func New(load func() (Deps, error)) *cobra.Command {
 
 	initCmd := &cobra.Command{
 		Use:   "init",
-		Short: "write default config files",
+		Short: "write default config files (to set everything up: drsh setup)",
 		RunE:  runInit,
 	}
 	initCmd.Flags().Bool("docker", false, "also write a docker-compose.yml for a local SearXNG")
 
-	root.AddCommand(initCmd,
+	root.AddCommand(setupCmd(),
+		initCmd,
 		doctorCmd(load),
 		loginCmd(),
 		modelCmd(),
@@ -154,8 +155,8 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	// The key comes last: it is the step every first run needs, so it is
 	// the one left on screen.
 	if envFile := filepath.Join(dir, ".env"); slices.Contains(created, envFile) {
-		fmt.Fprintln(out, "\nPick a provider and model, and store its key: drsh login")
-		fmt.Fprintln(out, "(a free OpenRouter key, no card: "+keyURL+"; or add OPENAI_API_KEY=... to "+envFile+")")
+		fmt.Fprintln(out, "\nSet up the model, web search and page extraction: drsh setup")
+		fmt.Fprintln(out, "(a free OpenRouter key, no card: "+keyURL+")")
 		fmt.Fprintln(out, "then run: drsh -p \"your question\"")
 	}
 	return nil
@@ -327,7 +328,7 @@ func (w *wroteTo) Write(p []byte) (int, error) {
 
 // keyURL is where a first-time user gets a free OpenRouter key.
 //
-// The hint leads with `drsh login`, which stores the key; the .env
+// The hint leads with `drsh setup`, which stores the key; the .env
 // line stays for those who keep keys in the environment.
 const keyURL = "https://openrouter.ai/keys"
 
@@ -349,7 +350,7 @@ func keyHint(d Deps, err error) error {
 	if d.Config.Provider == "claude" || errors.Is(err, agent.ErrSearchConfig) {
 		return err
 	}
-	return fmt.Errorf("%w\n  Pick a provider and store its key: drsh login\n"+
+	return fmt.Errorf("%w\n  Pick a provider and store its key: drsh setup\n"+
 		"  (free OpenRouter key, no card: %s; or set OPENAI_API_KEY in .env)", err, keyURL)
 }
 

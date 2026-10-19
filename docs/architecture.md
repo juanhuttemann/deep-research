@@ -147,17 +147,22 @@ internal/
             a finished run; the providers (OpenAI-compatible, Claude
             through Claude Code or the Messages API)
   auth      auth.json (stored keys, 0600, atomic, each bound to its
-            endpoint; "!command" keys) and model.json (the selection)
+            endpoint; "!command" keys; search services' keys as flat
+            "service:<name>" entries) and model.json (the selection)
   catalog   the provider/model list for login: Catwalk's catalog, a
             snapshot embedded, refreshed and cached when online
-  cli       cobra commands (run / ask / serve / list / init / doctor /
-            login / model / logout / update)
+  cli       cobra commands (run / ask / serve / list / setup / init /
+            doctor / login / model / logout / update); setup's sequence of
+            steps, its review, checks and the order files are saved in
   config    config resolution (env > login's selection > config dir >
             embedded defaults; stored key > env key) + the config dir's
-            .env; never the working directory
-  setup     the Bubble Tea picker behind login and model: every
+            .env; never the working directory. Also what setup needs from
+            it: a draft resolved as a run would, the variables that would
+            override it, and config.yaml with only setup's keys changed
+  setup     the Bubble Tea screens behind setup, login and model: every
             provider's models in one searchable list, then the masked key
-            when needed, then the check; returns the choice, saves nothing
+            when needed, then the check; the search and scraper steps; the
+            review prompt. Returns the choices, saves nothing
   replay    --trace recorder and --replay player: wraps the assistant to
             record, or serve back, the plan and every search result; the
             same recorder saves each run's checkpoint as it goes, and

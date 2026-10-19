@@ -9,14 +9,15 @@ full page text instead of a search snippet:
 | SearXNG | searches the web, returns result URLs and snippets | `http://localhost:8888` | none |
 | Firecrawl | fetches each result page and returns Markdown | `http://localhost:3002` | none when self-hosted |
 
-Set `SEARXNG_URL` to use your SearXNG; set `FIRECRAWL_URL` too to scrape the
-pages. SearXNG alone is enough for web search — each source is then its
+Point `drsh setup search` at your SearXNG, and `drsh setup scraper` at your
+Firecrawl to scrape the pages (or set `SEARXNG_URL` and `FIRECRAWL_URL`). SearXNG alone is enough for web search — each source is then its
 search snippet, marked `snippet only`
 ([configuration.md](configuration.md#research-modes)).
 
-For SearXNG alone, `drsh init --docker` writes a ready
-`docker-compose.yml` and settings file (JSON enabled, bound to localhost):
-`docker compose up -d`, then set `SEARXNG_URL=http://localhost:8888`. The
+For SearXNG alone, "local SearXNG in Docker" in `drsh setup search` (or
+`drsh init --docker`) writes a ready `docker-compose.yml` and settings file
+(JSON enabled, bound to localhost) and points the config at it:
+`docker compose up -d` is all that is left. The
 generated `searxng/settings.yml` contains a secret and is created with
 owner-only permissions (`0600`) on Unix; the compose file remains `0644`.
 Existing files are left alone. The sections below do the same by hand and
@@ -231,9 +232,17 @@ starting usually means the API is still booting; retry before investigating.
 
 ## 3. Point deep-research at them
 
-Add the URLs to the `.env` that `drsh init` writes in the config
+Run `drsh setup search` and `drsh setup scraper` and give them the
+addresses, or script it:
+
+```sh
+drsh setup search --engine searxng --url http://localhost:8888
+drsh setup scraper --scraper firecrawl --url http://localhost:3002
+```
+
+Or add the URLs to the `.env` that `drsh init` writes in the config
 directory (`~/.config/deep-research/.env`; `init --docker` adds the
-SearXNG line for you):
+SearXNG line for you); the environment wins over what setup saved:
 
 ```sh
 SEARXNG_URL=http://localhost:8888

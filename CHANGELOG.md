@@ -5,7 +5,33 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `drsh setup`: one command that walks through the model, web search and
+  page extraction, explaining each choice. Setting up used to take `init`,
+  `login`, and hand-editing `config.yaml` or `.env` for search and
+  Firecrawl, and users found that confusing. Each step starts on what runs use
+  now, the model step has a row to keep it, and nothing is saved until a
+  review that names any environment variable that would override a choice
+  and where it was set. Search and scraper are checked with one query and
+  one page read before saving. `drsh setup model`, `setup search` and
+  `setup scraper` rerun one part. `setup search` asks about page extraction
+  too when the new engine needs it, and `setup search --engine` and
+  `setup scraper --scraper` script them. Search settings go to `config.yaml`
+  with the rest of the file left as it was; `.env` is never written.
+- Exa, Tavily and hosted Firecrawl keys can be stored in `auth.json`
+  (`service:exa` and so on), each bound to its service's address. A stored
+  key wins over `EXA_API_KEY`, `TAVILY_API_KEY` or `FIRECRAWL_API_KEY`, as a
+  stored model key does over `OPENAI_API_KEY`, and `drsh logout exa`
+  removes one.
+
 ### Changed
+
+- The README's quick start, the missing-key error and `doctor`'s hints
+  point to `drsh setup` instead of `drsh login`, `init --docker` and
+  environment variables. `init`, `login` and `model` work as before.
+  Environment variables still override everything, and the docs now present
+  them as the way to configure CI and one-off runs.
 
 - The page's top bar named the search engine alone (`searxng`), leaving out
   Firecrawl, which reads every page a claim is checked against. It now reads

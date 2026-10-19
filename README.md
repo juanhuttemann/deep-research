@@ -62,19 +62,27 @@ degrades to headless output — one log line per event, then the report.
 ## Quick start
 
 ```bash
-drsh init          # config files, a .env template, where to get a key
-```
-
-Pick a provider and model, and paste the key (shown as `*`, stored readable
-only by you). A free OpenRouter key (no card) is at <https://openrouter.ai/keys>:
-
-```bash
-drsh login
+drsh setup
 drsh -p "What are the latest advances in fusion energy?"
 ```
 
-`drsh model` switches later. Environment variables still work as
-the fallback: `export OPENAI_API_KEY="sk-or-..."`.
+`drsh setup` walks through the three things a run needs, explaining each
+choice as it goes, and saves nothing until you confirm:
+
+1. **The model.** One searchable list of every provider's models; paste the
+   key when the provider needs one (shown as `*`, stored readable only by
+   you). A free OpenRouter key (no card) is at <https://openrouter.ai/keys>.
+2. **Web search.** Public SearXNG instances (free, nothing to install), a
+   local SearXNG in Docker, your own SearXNG, Exa or Tavily.
+3. **Page extraction.** What reads each result's full page so a claim is
+   checked against it: nothing (search snippets only), Firecrawl, Exa or
+   Tavily.
+
+It then checks the choices and prints what a run will use. To change one part
+later, run just that step: `drsh setup model`, `drsh setup search` or
+`drsh setup scraper`. Environment variables still work, for CI and one-off
+runs (`OPENAI_MODEL=x drsh -p ...`); see
+[configuration](docs/configuration.md#environment-variables-ci-and-one-off-overrides).
 
 Something off? `drsh doctor` checks the model endpoint and key,
 the search backend and the scraper — one cheap request each, no tokens — and
