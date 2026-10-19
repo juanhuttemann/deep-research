@@ -194,9 +194,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 
 .status { padding: 10px 2ch 0; }
 .status .now { display: flex; gap: 1ch; }
-.status .thought { margin-top: 2px; padding-left: 2ch; color: var(--dim); overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
-.status .thought:empty { display: none; }
 .notice { padding: 10px 2ch 0; color: var(--yellow); }
 .notice .btn { margin-left: 1ch; }
 
@@ -238,14 +235,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .activity[open] summary::before { content: "▾"; }
 .log { max-height: 320px; overflow: auto; margin: 0; padding: 0 2ch 12px; list-style: none; }
 .activity + .activity { margin-top: 0; }
-/* The model's reasoning, whole, a section per call: the status row shows only
-   its latest words, rewrapped every five seconds, too short a window to
-   follow. Open, the block makes that tail a repeat, so it goes. */
+/* The model's reasoning, whole, a section per call. It is the only place the
+   page shows it: the status row's tail of the latest words, rewrapped every
+   five seconds, repeated this block and was too short a window to follow. */
 .thought-log { max-height: 360px; overflow: auto; padding: 0 2ch 12px; }
 .thought-head { color: var(--cyan); font-weight: 700; margin: 10px 0 2px; }
 .thought-head:first-child { margin-top: 0; }
 .thought-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-#live:has(#thinking[open]) #status-thought { display: none; }
 .log li { display: grid; grid-template-columns: 5ch 2ch minmax(0, 1fr); gap: 1ch; }
 .log li span:last-child { overflow-wrap: anywhere; }
 .log .t, .log .s { color: var(--dim); }
@@ -305,25 +301,31 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .audit h2 .count { color: var(--dim); font-weight: 400; letter-spacing: 0; }
 .interp { color: var(--dim); margin: 0 0 20px; }
 .interp:empty { display: none; }
-.unit { padding: 8px 2ch; margin-bottom: 8px; }
+.src-warn { color: var(--yellow); margin: 16px 0 0; }
+.unit { padding: 8px 2ch; margin-bottom: 8px; overflow-wrap: anywhere; }
 .unit.blocked { border-color: color-mix(in srgb, var(--red) 40%, var(--rule)); }
-.unit .id { color: var(--dim); margin-right: 1ch; }
+.unit-kind { color: var(--dim); margin-bottom: 4px; }
 .unit .why { margin-top: 6px; padding-left: 1.5ch; border-left: 2px solid var(--red); color: var(--red); }
-/* Claim references read like the report's own citation marks: [c3]. */
-.chips { display: flex; flex-wrap: wrap; gap: 0 1ch; margin-top: 6px; }
-.chip { padding: 0 2px; border: 0; background: none; color: var(--cyan); cursor: pointer; }
-.chip::before { content: "["; color: var(--dim); }
-.chip::after { content: "]"; color: var(--dim); }
-.chip:hover { text-decoration: underline; }
-.chip.failed { color: var(--red); }
-.chip.active { background: var(--cyan); color: var(--bg); }
-.chip.active::before, .chip.active::after { color: inherit; }
+.audit-ref { padding: 0; border: 0; background: none; color: var(--cyan); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.why .audit-ref { color: inherit; }
+.audit-ref:hover { text-decoration-thickness: 2px; }
+.audit-ref.active { font-weight: 700; }
+.basis { margin-top: 8px; border-top: 1px solid var(--rule); }
+.basis summary { padding: 6px 0; color: var(--cyan); cursor: pointer; }
+.basis summary:hover { text-decoration: underline; }
+.basis .row { padding: 8px 1ch; }
+.row.claim-row { flex-direction: column; gap: 4px; }
+.claim-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 2ch; width: 100%; }
+.claim-action { color: var(--cyan); margin-left: auto; }
+.claim-row:hover .claim-action { text-decoration: underline; }
+.claim-failed { color: var(--red); }
 .list { list-style: none; margin: 0; padding: 0; overflow: hidden; }
 .list > li + li { border-top: 1px solid var(--rule); }
 .row { display: flex; gap: 2ch; align-items: flex-start; width: 100%; padding: 6px 2ch; text-align: left; background: none; border: 0; cursor: pointer; }
 .row:hover { background: var(--bg-2); }
+.row:focus-visible { outline-offset: -2px; }
 .row.active { background: var(--cyan-soft); box-shadow: inset 2px 0 var(--cyan); }
-.row .tag { min-width: 15ch; }
+.row > .tag { min-width: 15ch; }
 .row .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .row .sub { display: block; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -332,6 +334,18 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .inspector .placeholder { color: var(--dim); padding: 32px 1ch; text-align: center; }
 .inspector h3 { color: var(--cyan); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; margin: 20px 0 6px; }
 .inspector .lead { margin: 8px 0; font-weight: 700; }
+.inspector { overflow-wrap: anywhere; }
+.inspector .src { flex-wrap: wrap; }
+/* The panel takes focus so a keyboard or screen reader lands on what was
+   opened; it is a bordered box, not a control, and the focus ring drew a
+   second border around it. */
+.inspector:focus { outline: none; }
+/* A cited source is its mark, then its title in a column of its own: in a
+   wrapping row a long title dropped below its mark, and cut to one line two
+   titles from one site read the same on a phone. The column fits the
+   widest mark, "∅ never fetched". */
+.inspector .src.cited { display: grid; grid-template-columns: 15ch minmax(0, 1fr); gap: 2ch; align-items: baseline; }
+.inspector .src.cited a { white-space: normal; }
 .kv { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: 0 2ch; margin: 10px 0 0; }
 .kv dt { color: var(--dim); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
@@ -341,7 +355,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .verdict p { margin: 6px 0 0; color: var(--dim); }
 blockquote { margin: 10px 0 4px; padding: 6px 2ch; border-left: 2px solid var(--cyan); background: var(--bg-2); }
 .evidence-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2ch; }
-.back { display: inline-block; margin-bottom: 8px; }
+.back { display: block; margin-bottom: 8px; }
 .page-note { color: var(--dim); margin: 8px 0; }
 pre.page { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; background: var(--bg-2); padding: 10px 2ch; margin: 10px 0 0; }
 mark { background: var(--yellow); color: var(--bg); }
@@ -488,7 +502,8 @@ mark { background: var(--yellow); color: var(--bg); }
       <div id="live">
         <div id="stepper" class="stepper"></div>
         <div id="note" class="notice" hidden></div>
-        <div id="status" class="status" hidden><div class="now"><span class="spin"></span><span id="status-now"></span></div><div id="status-thought" class="thought"></div></div>
+        <div id="scrape-note" class="notice" hidden></div>
+        <div id="status" class="status" hidden><div class="now"><span class="spin"></span><span id="status-now"></span></div></div>
         <div id="sources-check" class="sources" hidden></div>
         <div id="agents" class="agents"></div>
         <details id="thinking" class="activity" hidden><summary>thinking <span id="n-thought"></span></summary><div id="thought-log" class="thought-log"></div></details>
@@ -503,6 +518,7 @@ mark { background: var(--yellow); color: var(--bg); }
     </div>
 
     <div id="audit" hidden>
+      <p id="src-warn" class="src-warn" hidden></p>
       <div id="view-bar" class="view-bar">
         <div class="segmented" role="radiogroup" aria-label="View">
           <input type="radio" name="view" id="v-report" value="report" checked><label for="v-report">reading view</label>
@@ -525,7 +541,7 @@ mark { background: var(--yellow); color: var(--bg); }
             <h2>Sources <span id="c-srcs" class="count"></span></h2>
             <ul id="srcs" class="list card"></ul>
           </div>
-          <aside id="inspector" class="inspector card" aria-live="polite"></aside>
+          <aside id="inspector" class="inspector card" aria-label="Evidence inspector" tabindex="-1" aria-live="polite"></aside>
         </div>
       </div>
       <section class="card ask" aria-labelledby="ask-title">
@@ -568,15 +584,34 @@ function domain(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } c
 function fmtNum(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n || 0); }
 function clock(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
 
+// Short results for scanning; their meaning is visible with the selected evidence.
+// These describe the material available to the checker, which may be snippets.
 const VERDICT = {
-  supported: ["ok", "✓ Supported"], partial: ["warn", "~ Partial"], disputed: ["warn", "≈ Disputed"],
-  contradicted: ["bad", "✗ Contradicted"], insufficient: ["off", "? Insufficient"], unsourced: ["off", "∅ Unsourced"],
+  supported: ["ok", "✓ Supported", "The available source material supports the whole claim within its stated scope."],
+  partial: ["warn", "~ Partly supported", "The material supports only part of this claim, or a narrower scope."],
+  disputed: ["warn", "≈ Sources disagree", "Applicable sources disagree, and the available material cannot settle this claim."],
+  contradicted: ["bad", "✗ Contradicted by sources", "Applicable source material states something incompatible with this claim."],
+  insufficient: ["off", "? Not enough evidence", "The available material cannot establish this claim. A missing or unverifiable quote can also cause this result."],
+  unsourced: ["off", "∅ No retrieved source", "This claim cites no source that the run retrieved. It could not be checked against source text."],
 };
-const PROVENANCE = { ok: ["ok", "Fetched"], degraded: ["warn", "Snippet only"], unverified: ["off", "Never fetched"] };
+const PROVENANCE = {
+  ok: ["ok", "✓ Fetched", "The run retrieved page text. Quotes can be checked against that saved text."],
+  degraded: ["warn", "~ Snippet only", "Only the search-result excerpt was available. The full page was not retrieved, so context beyond the excerpt could not be checked."],
+  unverified: ["off", "∅ Never fetched", "The run retrieved no text from this source. Its contents could not be checked."],
+};
+const QUOTE = {
+  found: ["ok", "✓ Quote found in page text", "The wording matches the saved page text; this alone does not establish the claim."],
+  missing: ["bad", "✗ Quote not found in page text", "The wording could not be matched to the saved text, so it cannot verify the claim."],
+  snippetFound: ["warn", "~ Quote found in search snippet", "The wording matches only the saved search-result excerpt. The full page was not retrieved."],
+  snippetMissing: ["bad", "✗ Quote not found in search snippet", "The wording could not be matched to the saved excerpt. The full page was not retrieved."],
+  nopage: ["bad", "∅ No source text to check", "No retrieved source text is available to verify this quote."],
+};
 const OUTCOME = { complete: ["ok", "✓ Complete"], incomplete: ["warn", "Incomplete"], failed: ["bad", "✗ Failed"], cancelled: ["off", "Cancelled"] };
 function tag([cls, text]) { return el("span", "tag " + cls, text); }
-function verdictTag(s) { return tag(VERDICT[s] || ["off", s || "unknown"]); }
-function provenanceTag(s) { return tag(PROVENANCE[s || "unverified"] || ["off", s]); }
+function verdictInfo(s) { return VERDICT[s] || ["off", "? Not checked", "No recognised fact-check result is recorded for this claim."]; }
+function verdictTag(s) { return tag(verdictInfo(s)); }
+function provenanceInfo(s) { return PROVENANCE[s || "unverified"] || ["off", "? Retrieval unknown", "The run did not record a recognised retrieval status for this source."]; }
+function provenanceTag(s) { return tag(provenanceInfo(s)); }
 
 // ---- views ----------------------------------------------------------------
 
@@ -591,17 +626,36 @@ function show(view) {
 // loadSetup shows the model and the search the server's runs use, loaded
 // once when serve started: their names in the bar, the whole of it on the
 // start screen. A failure hides both, nothing more.
+let setup = null;
 async function loadSetup() {
   try {
     const s = await (await fetch("/api/info")).json();
     if (!s.model) return;
     fillChip("setup-model", s.model, "Model " + s.model + " via " + s.provider);
-    fillChip("setup-search", s.search, "Search: " + s.search + "\nPage text: " + s.pages);
+    setup = s;
+    fillChip("setup-search", searchChip(s), "Search: " + s.search + "\nPage text: " + s.pages);
     $("setup").hidden = false;
     $("setup-list").replaceChildren(...[["model", s.model], ["provider", s.provider], ["search", s.search], ["page text", s.pages]]
       .filter(([, v]) => v).flatMap(([k, v]) => [el("dt", "", k), el("dd", "", v)]));
     $("setup-list").hidden = false;
   } catch {}
+}
+// searchChip names the engine and what reads the pages, without their hosts:
+// "searxng (localhost:8888)" alone left out Firecrawl, which reads every
+// page a claim is checked against. The hosts are in the tooltip and on the
+// start screen.
+function searchChip(s) {
+  const bare = v => v.replace(/ \(.*\)$/, ""), search = bare(s.search);
+  if (!s.pages || s.pages === "none" || s.pages === "page text included") return search;
+  if (s.pages === "snippets only") return search + " · snippets only";
+  if (s.pages.startsWith("not usable")) return search + " · pages not usable";
+  return search + " + " + bare(s.pages);
+}
+// scraperSet reports whether the setup names a scraper to read pages with,
+// so a run of snippets alone means it is not answering.
+function scraperSet() {
+  const p = (setup && setup.pages) || "";
+  return !!p && !["none", "snippets only", "page text included"].includes(p) && !p.startsWith("not usable");
 }
 function fillChip(id, value, title) {
   $(id).querySelector(".v").textContent = value;
@@ -660,7 +714,7 @@ function meter(p) {
 
 const PIPELINE = ["Plan", "Research", "Analyze", "Fact-Check", "Summarize"];
 const loadedAt = Date.now();
-let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, agents = new Map(), events = 0, thoughts = [];
+let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, agents = new Map(), events = 0, thoughts = [], reads = { full: 0, snippet: 0 };
 // A plan-only run (the first half of Research) ends in the plan review, not
 // in an outcome; its plan arrives as the plan event before its done line.
 let planning = false, madePlan = null, planStamp = "";
@@ -677,11 +731,11 @@ function setRunning(on) {
   if (!on && !endedAt) endedAt = Date.now();
 }
 function reset() {
-  agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0; thoughts = [];
+  agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0; thoughts = []; reads = { full: 0, snippet: 0 };
   for (const id of ["question", "agents", "sources-check", "log", "thought-log", "n-thought", "files", "exports", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
   $("sources-check").hidden = $("thinking").hidden = true;
   $("n-sources").textContent = "0"; $("n-tokens").textContent = "0"; $("n-events").textContent = "";
-  $("note").hidden = $("status").hidden = $("outcome").hidden = $("audit").hidden = true;
+  $("note").hidden = $("scrape-note").hidden = $("status").hidden = $("outcome").hidden = $("audit").hidden = true;
   $("live").hidden = false;
   // The bar already names the app; the frame's title says what the run is doing.
   $("run-title").textContent = "Researching";
@@ -698,10 +752,10 @@ function stepper() {
 }
 function status(text) {
   if (!text) { $("status").hidden = true; return; }
-  // A thinking model's status is a line, a newline, then its latest reasoning.
-  const [now, ...thought] = text.split("\n");
-  $("status-now").textContent = now;
-  $("status-thought").textContent = thought.join(" ").trim();
+  // A thinking model's status is a line, a newline, then its latest reasoning:
+  // the terminal's only view of it. Here the thinking block holds it whole,
+  // so the row keeps the line.
+  $("status-now").textContent = text.split("\n")[0];
   $("status").hidden = false;
 }
 function agent(e) {
@@ -771,9 +825,22 @@ function think(e) {
   $("n-thought").textContent = "· " + ph.toLowerCase() + " · " + fmtNum(words) + (words === 1 ? " word" : " words");
   $("thinking").hidden = false;
 }
-// Opened, the block starts at the latest reasoning, which is what the status
-// row was showing; closed, it could not follow.
+// Opened, the block starts at the latest reasoning; closed, it could not
+// follow.
 $("thinking").ontoggle = () => { if ($("thinking").open) $("thought-log").scrollTop = $("thought-log").scrollHeight; };
+// scraped counts the pages read in full and the snippets read instead. Only
+// snippets, several in, with a scraper set up, means the scraper is not
+// answering: said while the run can still be cancelled, not after it has
+// checked every claim against a line or two.
+function scraped(e) {
+  if (e.status === "ok") reads.full++;
+  else if (e.status === "degraded") reads.snippet++;
+  else return;
+  const warn = !reads.full && reads.snippet >= 5 && scraperSet();
+  $("scrape-note").hidden = !warn;
+  $("scrape-note").textContent = warn ? "No page read in full yet: " + reads.snippet + " sources were search snippets only. " +
+    setup.pages + " may be down; drsh doctor checks it." : "";
+}
 function log(e, text, cls) {
   events++;
   $("n-events").textContent = "· " + events;
@@ -834,7 +901,7 @@ function handle(e) {
   case "search": log(e, "search “" + e.query + "”"); break;
   case "read": log(e, "read " + (e.domain || domain(e.url))); break;
   // An off-topic result has no line of its own: the search's line counts them.
-  case "verify": if (e.status === "offtopic" && !e.line) break; log(e, e.line || (e.status + " " + (e.domain || domain(e.url)) + (e.code ? " " + e.code : "")), e.status === "ok" ? "ok" : ""); break;
+  case "verify": scraped(e); if (e.status === "offtopic" && !e.line) break; log(e, e.line || (e.status + " " + (e.domain || domain(e.url)) + (e.code ? " " + e.code : "")), e.status === "ok" ? "ok" : ""); break;
   case "error": log(e, e.detail, "error"); break;
   case "done": done(e); break;
   }
@@ -1126,31 +1193,82 @@ function showView() {
   $("audit-body").hidden = report;
 }
 function unitText(u) { return u.statement || ("Choose " + u.choose + (u.when ? " when " + u.when : "")); }
-function chip(id, failed) {
-  const b = el("button", "chip" + (failed ? " failed" : ""), id);
-  b.dataset.claim = id;
-  b.onclick = () => showClaim(id);
+function claimName(id) {
+  const i = ((meta.analysis || {}).claims || []).findIndex(c => c.id === id);
+  return i < 0 ? "Missing claim" : "Claim " + (i + 1);
+}
+function auditUnits() {
+  const a = meta.analysis || {};
+  return [...(a.conclusions || []).map((u, i) => ["k" + (i + 1), u, "Conclusion"]),
+          ...(a.recommendations || []).map((u, i) => ["r" + (i + 1), u, "Recommendation"])];
+}
+// Keep the checker's wording, but turn internal references into readable,
+// operable links. Never insert model text as HTML or guess a missing record.
+function auditText(text) {
+  const out = document.createDocumentFragment();
+  for (const part of String(text).split(/(\b[ckr]\d+(?:\.\d+)?\b)/g)) {
+    const c = ((meta.analysis || {}).claims || []).find(c => c.id === part);
+    const unit = auditUnits().find(([id]) => id === part);
+    if (!c && !unit) { out.append(part); continue; }
+    const b = el("button", "audit-ref", c ? claimName(part).toLowerCase() : unit[2].toLowerCase() + " " + part.slice(1));
+    if (c) { b.dataset.claim = part; b.onclick = () => showClaim(part, b); }
+    else b.onclick = () => revealUnit(part);
+    out.append(b);
+  }
+  return out;
+}
+function revealUnit(id) {
+  const card = document.getElementById("unit-" + id);
+  if (card) { card.focus({ preventScroll: true }); card.scrollIntoView({ block: "center" }); }
+}
+function claimRow(c, id, failed = false) {
+  const b = el("button", "row claim-row"); b.dataset.claim = id;
+  const head = el("span", "claim-meta");
+  head.append(el("span", "muted", claimName(id)), verdictTag(c && c.status));
+  if (failed) head.append(el("span", "claim-failed", "Blocks this statement"));
+  b.append(head, el("span", "txt", c ? c.claim : "This statement refers to a claim missing from the saved analysis."),
+    el("span", "claim-action", "Inspect evidence →"));
+  b.onclick = () => showClaim(id, b);
   return b;
+}
+function supportingClaims(u, byId) {
+  const d = el("details", "basis"), ids = u.claims || [], bad = new Set(u.failed || []);
+  const summary = el("summary", "", "Based on " + ids.length + (ids.length === 1 ? " claim" : " claims"));
+  if (bad.size) summary.append(el("span", "claim-failed", " · " + bad.size + " failed"));
+  d.append(summary);
+  const list = el("ul", "list");
+  for (const id of ids) {
+    const li = el("li"); li.append(claimRow(byId.get(id), id, bad.has(id))); list.append(li);
+  }
+  d.append(list);
+  return d;
 }
 function stat(v, l) { const c = el("span", "stat"); c.append(el("span", "l", l), el("b", "", String(v))); return c; }
 function renderAudit() {
   const a = meta.analysis || {};
   $("audit").hidden = false;
   $("interpretation").textContent = a.interpretation || "";
-  const units = [...(a.conclusions || []).map((u, i) => ["k" + (i + 1), u]),
-                 ...(a.recommendations || []).map((u, i) => ["r" + (i + 1), u])];
-  const answer = $("answer"), blocked = $("blocked");
+  const units = auditUnits();
+  const answer = $("answer"), blocked = $("blocked"), byId = new Map((a.claims || []).map(c => [c.id, c]));
   answer.replaceChildren(); blocked.replaceChildren();
   let passed = 0, failed = 0;
-  for (const [id, u] of units) {
+  for (const [id, u, kind] of units) {
     const c = el("div", "card unit" + (u.blocked ? " blocked" : ""));
-    const p = el("div"); p.append(el("span", "id", id), el("span", "", unitText(u)));
-    if (u.revises) p.append(el("span", "muted", " · revises " + u.revises));
-    c.append(p);
-    if (u.blocked) c.append(el("div", "why", u.blocked));
-    const bad = new Set(u.failed || []), chips = el("div", "chips");
-    for (const cid of u.claims || []) chips.append(chip(cid, bad.has(cid)));
-    if (chips.childElementCount) c.append(chips);
+    c.id = "unit-" + id; c.tabIndex = -1;
+    const head = el("div", "unit-kind", kind);
+    if (u.revises) {
+      const original = units.find(([uid]) => uid === u.revises);
+      if (original) {
+        const b = el("button", "audit-ref", "earlier " + original[2].toLowerCase());
+        b.onclick = () => revealUnit(u.revises);
+        head.append(" · revised from ", b);
+      } else head.append(" · revised; earlier statement unavailable");
+    }
+    c.append(head, el("div", "", unitText(u)));
+    if (u.blocked) {
+      const why = el("div", "why"); why.append(el("strong", "", "Why it was blocked: "), auditText(u.blocked)); c.append(why);
+    }
+    if ((u.claims || []).length) c.append(supportingClaims(u, byId));
     if (u.blocked) { blocked.append(c); failed++; } else { answer.append(c); passed++; }
   }
   if (!passed) answer.append(el("p", "muted", "No statement passed the fact-check."));
@@ -1160,10 +1278,7 @@ function renderAudit() {
 
   const claims = $("claims"); claims.replaceChildren();
   for (const c of a.claims || []) {
-    const b = el("button", "row"); b.dataset.claim = c.id;
-    const txt = el("span", "txt"); txt.append(el("span", "mono muted", c.id + "  "), c.claim);
-    b.append(verdictTag(c.status), txt);
-    b.onclick = () => showClaim(c.id);
+    const b = claimRow(c, c.id);
     const li = el("li"); li.append(b); claims.append(li);
   }
   if (!claims.childElementCount) claims.append(el("li", "empty", meta.error || "The analysis stated no claims."));
@@ -1174,13 +1289,21 @@ function renderAudit() {
     const b = el("button", "row"); b.dataset.page = c.url;
     const txt = el("span", "txt"); txt.append(c.title || c.url, el("span", "sub", [domain(c.url), c.cited ? "" : "not cited in the report"].filter(Boolean).join(" · ")));
     b.append(provenanceTag(c.status), txt);
-    b.onclick = () => showPage(c.url);
+    b.onclick = () => showPage(c.url, null, false, b);
     const li = el("li"); li.append(b); srcs.append(li);
   }
   $("c-srcs").textContent = (meta.citations || []).length;
 
   const supported = (a.claims || []).filter(c => c.status === "supported").length;
   const fetched = (meta.citations || []).filter(c => c.status === "ok").length;
+  // No page read in full means no claim was checked against a page: the
+  // stats said "0/22" in passing, and a run made while Firecrawl was down
+  // read as a normal one.
+  const cited = (meta.citations || []).length, warn = cited > 0 && !fetched;
+  $("src-warn").hidden = !warn;
+  $("src-warn").textContent = warn ? "No page was read in full: " + (cited === 1 ? "the source is" : "all " + cited + " sources are") +
+    " search snippets or never fetched, so each claim was checked against a line or two, not the page." +
+    " If Firecrawl or another scraper is set up, it did not answer; drsh doctor checks it." : "";
   $("stats").replaceChildren(
     stat(passed, "passed"),
     stat(failed, "blocked"),
@@ -1190,73 +1313,91 @@ function renderAudit() {
 }
 function placeholder() {
   const v = $("inspector"); v.replaceChildren();
-  v.append(el("div", "placeholder", "Select a claim or a source to see its verdict, its quotes, and the page text they were found in."));
+  v.append(el("div", "placeholder", "Open a statement’s supporting claims, then inspect its evidence here. You can also select any claim or source below."));
 }
 function highlight(attr, value) {
-  for (const n of document.querySelectorAll(".row.active, .chip.active")) n.classList.remove("active");
+  for (const n of document.querySelectorAll(".row.active, .audit-ref.active")) n.classList.remove("active");
   for (const n of document.querySelectorAll(`[data-${attr}]`)) if (n.dataset[attr] === value) n.classList.add("active");
 }
 function citation(url) { return (meta.citations || []).find(c => c.url === url) || { url, status: "unverified" }; }
 function sourceLine(url) {
-  const c = citation(url), d = el("div", "src");
+  const c = citation(url), d = el("div", "src cited");
   d.append(provenanceTag(c.status), link(url, c.title || domain(url)));
   return d;
 }
-function inspector() {
+let inspectorOrigin = null;
+function inspector(origin) {
   const v = $("inspector");
+  // Keep a return path to the exact statement or list row, especially when
+  // the narrow layout puts this panel far below the clicked reference.
+  if (!v.contains(origin)) inspectorOrigin = origin;
   v.replaceChildren(); v.scrollTop = 0;
-  // On a narrow screen the inspector sits below the lists; bring it into view.
-  if (matchMedia("(max-width: 960px)").matches) v.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (inspectorOrigin && inspectorOrigin !== document.body) {
+    const back = el("button", "audit-ref back", "← Back to selection"), origin = inspectorOrigin;
+    back.onclick = () => { origin.focus({ preventScroll: true }); origin.scrollIntoView({ block: "center" }); };
+    v.append(back);
+  }
+  requestAnimationFrame(() => {
+    v.focus({ preventScroll: true });
+    if (matchMedia("(max-width: 960px)").matches) v.scrollIntoView({ block: "start" });
+  });
   return v;
 }
-function showClaim(id) {
+function showClaim(id, origin = document.activeElement) {
   selected = id; highlight("claim", id);
-  const v = inspector();
+  const v = inspector(origin);
   const c = ((meta.analysis || {}).claims || []).find(c => c.id === id);
-  if (!c) { v.append(el("p", "muted", "No claim " + id + " in this analysis.")); return; }
-  const head = el("div", "src"); head.append(el("span", "mono muted", "Claim " + id), verdictTag(c.status));
-  v.append(head, el("p", "lead", c.claim));
+  if (!c) { v.append(el("p", "muted", "This claim is missing from the saved analysis, so its evidence cannot be inspected.")); return; }
+  const head = el("div", "src"); head.append(el("span", "muted", claimName(id)), verdictTag(c.status));
+  v.append(head, el("p", "lead", c.claim), el("p", "page-note", verdictInfo(c.status)[2]));
   const verdicts = ((meta.fact_check || {}).verdicts || []).map((x, i) => [i, x]).filter(([, x]) => x.id === id);
   // The note is usually the verdict's reason, shown below; it differs when
   // governance overrode the verdict (a quote not found, two verdicts).
-  if (c.note && !verdicts.some(([, x]) => x.reason === c.note)) v.append(el("p", "page-note", c.note));
+  if (c.note && !verdicts.some(([, x]) => x.reason === c.note)) { const note = el("p", "page-note"); note.append(auditText(c.note)); v.append(note); }
   const kv = el("dl", "kv");
   for (const k of ["option", "criterion", "scope"]) if (c[k]) kv.append(el("dt", "", k), el("dd", "", c[k]));
   if (kv.childElementCount) v.append(kv);
   if ((c.sources || []).length) { v.append(el("h3", "", "Cited sources")); for (const s of c.sources) v.append(sourceLine(s)); }
-  v.append(el("h3", "", "Fact-check"));
+  v.append(el("h3", "", "Checker’s assessment"));
   if (!verdicts.length) v.append(el("p", "muted", "The fact-check returned no verdict for this claim."));
   for (const [i, x] of verdicts) {
     const box = el("div", "verdict");
     box.append(verdictTag(x.status));
-    if (x.reason) box.append(el("p", "", x.reason));
+    if (x.status !== c.status) box.append(el("p", "", "The final result above supersedes this checker assessment. " + verdictInfo(x.status)[2]));
+    if (x.reason) { const reason = el("p"); reason.append(auditText(x.reason)); box.append(reason); }
     v.append(box);
     for (const ps of (meta.passages || []).filter(p => p.verdict === i)) {
       v.append(el("blockquote", "", ps.quote));
       const foot = el("div", "evidence-foot");
-      if (!ps.page) foot.append(tag(["bad", "No fetched page"]), el("span", "muted", "The quote names a page the run did not fetch."));
-      else {
-        foot.append(tag(ps.located ? ["ok", "Found in page"] : ["bad", "Not in page"]), link(ps.page, citation(ps.page).title || domain(ps.page)));
-        const b = el("button", "btn sm", "view in page"); b.onclick = () => showPage(ps.page, ps.quote, ps.located);
+      const available = ps.page && (meta.pages || {})[ps.page] != null;
+      const snippet = ps.page && citation(ps.page).status === "degraded";
+      const info = !available ? QUOTE.nopage : snippet
+        ? (ps.located ? QUOTE.snippetFound : QUOTE.snippetMissing) : (ps.located ? QUOTE.found : QUOTE.missing);
+      foot.append(tag(info));
+      if (ps.page) {
+        foot.append(link(ps.page, citation(ps.page).title || domain(ps.page)));
+      }
+      if (available) {
+        const b = el("button", "btn sm", snippet ? "view search snippet" : "view saved page text"); b.onclick = () => showPage(ps.page, ps.quote, ps.located);
         foot.append(b);
       }
-      v.append(foot);
+      v.append(foot, el("p", "page-note", info[2]));
     }
   }
 }
-function showPage(url, quote, located) {
+function showPage(url, quote, located, origin = document.activeElement) {
   highlight("page", url);
-  const v = inspector();
+  const v = inspector(origin);
   if (quote && selected) {
-    const back = el("a", "back", "← Back to claim " + selected), id = selected;
-    back.href = "#";
-    back.onclick = ev => { ev.preventDefault(); showClaim(id); };
+    const back = el("button", "audit-ref back", "← Back to " + claimName(selected).toLowerCase()), id = selected;
+    back.onclick = () => showClaim(id);
     v.append(back);
   }
   const c = citation(url);
-  v.append(el("p", "lead", c.title || domain(url)), sourceLine(url));
+  v.append(el("p", "lead", c.title || domain(url)), sourceLine(url), el("p", "page-note", provenanceInfo(c.status)[2]));
   const text = (meta.pages || {})[url];
-  if (text == null) { v.append(el("p", "page-note", "The run did not fetch this page, so there is no stored text to show.")); return; }
+  if (text == null) { v.append(el("p", "page-note", "No source text was saved for this URL.")); return; }
+  v.append(el("h3", "", c.status === "degraded" ? "Saved search snippet" : "Saved page text"));
   const pre = el("pre", "page");
   const q = quote ? quote.trim() : "", at = q ? text.indexOf(q) : -1;
   if (at < 0) {
@@ -1265,11 +1406,11 @@ function showPage(url, quote, located) {
     // markup, entities and line hyphens. Export match spans if this misleads.
     if (q) v.append(el("p", "page-note", located
       ? "The check found this quote after normalising markup and whitespace, so its exact position is not highlighted."
-      : "This quote is not in the page text."));
+      : "This quote was not found in the saved text."));
   } else {
     const mark = el("mark", "", text.slice(at, at + q.length));
     pre.append(text.slice(0, at), mark, text.slice(at + q.length));
-    requestAnimationFrame(() => mark.scrollIntoView({ block: "center", behavior: "smooth" }));
+    requestAnimationFrame(() => mark.scrollIntoView({ block: "center" }));
   }
   v.append(pre);
 }

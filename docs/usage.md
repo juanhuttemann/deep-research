@@ -309,10 +309,10 @@ name unless you type one, and a sub-topic with no query searches the question
 with its name. A query you change drops the terms the planner wrote to judge
 results for its own, so that sub-topic keeps every result its search returns. Start research runs the
 edited plan (the same as `--plan`, history record included). While it runs
-the page shows the live frame. While a model reasons, the status row shows
-the latest of its reasoning, and a thinking row below the sub-agents holds
-all of it, a section per model call headed by its phase; open it to read
-along. It follows the newest text unless you scroll up. Interrupted runs are listed on the start
+the page shows the live frame. While a model reasons, the status row says
+which phase is thinking and for how long, and a thinking row below the
+sub-agents holds the reasoning, a section per model call headed by its
+phase; open it to read along. It follows the newest text unless you scroll up. Interrupted runs are listed on the start
 screen with Resume (the same as `--resume`) and Discard, which deletes the
 checkpoint. A tab left open while the server was killed and started again
 offers to resume the run it was showing. When it ends it opens on
@@ -320,10 +320,21 @@ the Reading view: the report's text without its inline citations or claim
 IDs. It is not the `.md` or `.pdf` download, which adds the title,
 confidence, the fact-check section and the source lists, and keeps
 the citations. Audit, beside it, reads the run's `.json` artifact and shows
-the answer, the statements the fact-check blocked with the claim that
-failed, every claim with its verdict, and each quote inside the page text
-the check located it in. Every source is marked `fetched`, `snippet only` or
-`never fetched`. A quote is highlighted where it appears verbatim; one
+the answer, the statements the fact-check blocked and why, every claim with
+its verdict, and each quote inside the saved source text the check located
+it in. Every source is marked `fetched`, `snippet only` or
+`never fetched`. Cards use readable kinds (Conclusion or Recommendation)
+instead of internal IDs. Open “Based on … claims” to read the full supporting
+statements and their verdicts, then select “Inspect evidence” to see why each
+claim received its result. Claim references in blocking reasons open the same
+inspector; revision links return to the earlier statement. The inspector
+explains the selected verdict and source availability beside the evidence,
+and distinguishes a quote found in a search snippet from one found in fetched
+page text. “Back to selection” returns to the card or list row you opened.
+A run in which no page was read in full says so above both views: every claim was then
+checked against a search snippet. While a run is going, five snippets in a
+row with no page read, with a scraper set up, put up a notice that the
+scraper may be down, while the run can still be cancelled. A quote is highlighted where it appears verbatim; one
 the check located only after normalising markup and whitespace is marked
 located but not highlighted. The start screen lists the 50 most recent runs
 in the reports directory, and `/?run=<name>.json` opens any of them.
@@ -339,11 +350,13 @@ in the tab and starts again when another run is opened.
 | `--reports DIR` | `reports` | where runs write their artifacts; served read-only at `/reports/`, with a directory listing |
 | `--no-open` | off | do not open the page in the default browser |
 
-- The top bar shows what the next run uses: the model and its provider's
-  host, and the search engine and where page text comes from (`firecrawl`,
+- The top bar shows what the next run uses: the model, and the search
+  engine with what reads the pages (`searxng + firecrawl`), without their
+  hosts. The start screen lists the provider's host and both services'
+  hosts. Page text comes from `firecrawl`,
   `exa`, `tavily`, `page text included` when the engine sends it with each
-  result, or `snippets only`), and `not usable:` with the reason for a
-  search setting a run would refuse. It is the configuration `serve` loaded
+  result, or `snippets only`; a search setting a run would refuse shows
+  `not usable:` with the reason. It is the configuration `serve` loaded
   when it started (`/api/info`), which is what every run it launches uses:
   restart `serve` after `drsh model` to change it. Hover a chip for
   the full text.

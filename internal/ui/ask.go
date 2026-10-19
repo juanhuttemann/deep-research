@@ -51,11 +51,21 @@ func RunOverview(m *Meta) string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("Sources (status: ok = page read in full, degraded = search snippet only):\n")
+	sb.WriteString("Sources (fetched = page read in full, snippet only = only the search result's snippet was read):\n")
 	for i, c := range m.Citations {
-		fmt.Fprintf(&sb, "  %d. %s (%s) %s\n", i+1, c.Title, c.URL, c.Status)
+		fmt.Fprintf(&sb, "  %d. %s (%s) %s\n", i+1, c.Title, c.URL, pageWords(c.Status))
 	}
 	return sb.String()
+}
+
+// pageWords is a source's status in the words the page marks it with: told
+// "degraded", the model answered with a word the reader could find nowhere
+// on the page.
+func pageWords(status string) string {
+	if status == "ok" {
+		return "fetched"
+	}
+	return sourceNote(cmp.Or(status, "unverified"))
 }
 
 // readLimit is how much of one page read_source returns: several times a
