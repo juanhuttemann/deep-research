@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-19
+
 ### Added
 
 - `drsh setup`: one command that walks through the model, web search and
@@ -32,6 +34,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   environment variables. `init`, `login` and `model` work as before.
   Environment variables still override everything, and the docs now present
   them as the way to configure CI and one-off runs.
+- The model picker's search box (`login`, `model`, `setup`) was barely
+  visible: its prompt, cursor and placeholder were fixed grays, and on any
+  terminal background one of them nearly vanished. They now use the
+  picker's cyan accent and the terminal's own dimmed text.
 
 - The page's top bar named the search engine alone (`searxng`), leaving out
   Firecrawl, which reads every page a claim is checked against. It now reads
@@ -937,7 +943,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/juanhuttemann/deep-research/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/juanhuttemann/deep-research/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/juanhuttemann/deep-research/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/juanhuttemann/deep-research/compare/v0.14.1...v0.14.2
