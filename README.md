@@ -20,11 +20,9 @@ claim the fact-check passed or blocked.
 
 ![deep-research planning, researching, fact-checking and reporting on a question about mixture-of-experts LLMs](demo.gif)
 
-Running it costs nothing and needs no setup beyond one free key: the default
-model is OpenRouter's free router and search goes through public SearXNG
-instances.
-Every source says how it was obtained, and nothing the model invents is ever
-passed off as a retrieved page.
+By default it costs nothing: OpenRouter's free models and public SearXNG
+search, so a free key is all it needs. Every source says how it was obtained,
+and nothing the model invents is passed off as a retrieved page.
 
 ## Quick install
 
@@ -66,20 +64,16 @@ drsh setup
 drsh -p "What are the latest advances in fusion energy?"
 ```
 
-`drsh setup` walks through the three things a run needs, explaining each
-choice as it goes, and saves nothing until you confirm:
+`drsh setup` asks three things, explains each choice, and saves nothing until
+you confirm:
 
-1. **The model.** One searchable list of every provider's models; paste the
-   key when the provider needs one (shown as `*`, stored readable only by
-   you). A free OpenRouter key (no card) is at <https://openrouter.ai/keys>.
-2. **Web search.** Public SearXNG instances (free, nothing to install), a
-   local SearXNG in Docker, your own SearXNG, Exa or Tavily.
-3. **Page extraction.** What reads each result's full page so a claim is
-   checked against it: nothing (search snippets only), Firecrawl, Exa or
-   Tavily.
+| Step | Choices |
+| ---- | ------- |
+| Model | any provider's model; a free OpenRouter key (no card) is at <https://openrouter.ai/keys> |
+| Web search | public SearXNG (the default), a local SearXNG in Docker, your own SearXNG, Exa, Tavily |
+| Page extraction | none (search snippets only), Firecrawl, Exa, Tavily |
 
-It then checks the choices and prints what a run will use. To change one
-part later, run only that step:
+To change one part later:
 
 ```bash
 drsh setup model      # only the model
@@ -87,140 +81,92 @@ drsh setup search     # only the web search
 drsh setup scraper    # only page extraction
 ```
 
-Environment variables still work, for CI and one-off runs
-(`OPENAI_MODEL=x drsh -p ...`); see
-[configuration](docs/configuration.md#environment-variables-ci-and-one-off-overrides).
-
-Something off? `drsh doctor` checks the model endpoint and key,
-the search backend and the scraper — one cheap request each, no tokens — and
-prints how many model requests a run spends.
-
-No key at all? A run without one fails and says where to get one.
+Something off? `drsh doctor` checks the model, search and scraper with one
+cheap request each.
 
 ## What a run looks like
 
-On a terminal you first get a **research brief**: the planned sub-topics,
-which you can add to, rename, delete or re-budget before pressing Enter. Keys
-pressed while the plan is still being made are ignored, and the brief says so.
+In the terminal:
 
-Then a **live frame**: the pipeline stage, one row per parallel sub-agent,
-the sources as they are read, and one status line for the model call in
-flight — waiting for the model to start, the latest of a reasoning model's
-thinking in a few rows under it, then the part of the analysis being written, claims or words so far with the
-change since the last update, and "no new output for 10s" if the stream
-stalls.
+1. **Research brief**: the planned sub-topics. Add, rename, delete or
+   re-budget them, then press Enter.
+2. **Live frame**: the pipeline stage, one row per parallel sub-agent, the
+   sources as they are read, and a status line for the model call in flight,
+   with a reasoning model's latest thinking under it.
+3. **Report**: rendered in the terminal and saved to `reports/` as `.md`,
+   `.pdf` and `.json`.
 
-The **report** is rendered in the terminal and saved to `reports/` as `.md`,
-`.pdf` and `.json`. Besides the answer it carries:
+The report opens with the answer (for a choice: which option, under which
+conditions), then:
 
-- the model that wrote it — the configured one, and which models a router
-  actually served;
-- the answer first: for a choice, which option to pick under which
-  conditions, then a comparison of the options and the reasoning, each
-  claim linked to its source;
-- the limits that could change the answer, and searches that could settle
-  them;
-- the fact-check: how many claims were confirmed, and each one that was not
-  confirmed or was contradicted;
-- citations split into sources the report cites and sources it only read,
-  each source not read in full marked `snippet only` (the search snippet was
-  all it gave) or `never fetched` (model-supplied); a page read in full is
-  left unmarked.
+- the comparison and reasoning, each claim linked to its source;
+- the limits that could change the answer, and searches that could settle them;
+- the fact-check: how many claims were confirmed, and each one that was not;
+- the sources, each one not read in full marked `snippet only` or
+  `never fetched`;
+- the model that wrote it, and which models a router actually served.
 
-If the analysis or the report call fails late in a run — a provider error, or
-the run deadline — what was gathered is still saved and exported, marked
-incomplete, and the command exits non-zero. The same goes for a run where more
-searches gave nothing than gave something (refused, or answered with only
-off-topic results): its report opens by saying so and how many sources it
-rests on, with confidence `low`. With fewer than three sources such a run
-stops before the analysis instead, saying why.
+A run that fails late still saves what it gathered, marked incomplete. One
+whose searches mostly came back empty says so up front, with confidence
+`low`, and with fewer than three sources it stops before the analysis.
 
 ### In the browser
 
-`drsh serve` runs the same pipeline from a page on localhost, styled
-after the terminal UI, in a light or a dark theme, and opens it in your
-browser. You type the question and pick the depth, then edit the plan before
+`drsh serve` runs the same pipeline from a page on localhost, in a light or a
+dark theme. Type the question, pick the depth, then edit the plan before
 anything is searched: rename, add or remove sub-topics, and change the search
 each one runs:
 
 ![The serve page's plan review for "How close are we to a room-temperature superconductor after LK-99?": four sub-topics, each with the search it will run](docs/images/web-plan.jpg)
 
-The live frame shows the pipeline, each sub-agent with its sources, the
-follow-up searches the analysis asked for, and the model's reasoning as it
-streams: its latest lines under the status, and all of it, call by call, in a
-thinking block you can open:
+The live frame shows each sub-agent with its sources, the follow-up searches,
+and the model's reasoning as it streams:
 
 ![The live frame mid-analysis: Plan and Research done, seven sub-agents complete including three follow-ups, and the model's reasoning streaming above them](docs/images/web-live.jpg)
 
-When the run ends, the report opens below it without its citation marks, with
-the `.md`, `.pdf` and `.json` downloads in the header (here in the light
-theme):
+When the run ends, the report opens below it, with the `.md`, `.pdf` and
+`.json` downloads in the header (here in the light theme):
 
 ![A finished run in the light theme for "Have the Voyager probes really left the solar system?": every phase done, md, pdf and json downloads in the header, and the answer opening on the two readings of "left the solar system"](docs/images/web-report.jpg)
 
-The audit shows what the fact-check decided: the statements that passed, the
-ones it blocked, every claim with its verdict, and for each verdict the quote
-it rests on and the page it was found in:
+The audit shows what the fact-check decided: the statements that passed or
+were blocked, every claim's verdict, and the quote and page each rests on:
 
 ![The audit view: statements passed and blocked, and the inspector showing a claim about LK-99's Cu2S impurity rated partial, with the checker's reason and the quote it located](docs/images/web-audit.jpg)
 
 ## Search
 
-| Setting (`SEARXNG_URL`) | What happens |
-| ----------------------- | ------------ |
-| unset (`auto`) — the default | public SearXNG instances from [searx.space](https://searx.space/), tried in turn; the one that answers is used first next time |
-| your instance(s), comma-separated | your own SearXNG; add `FIRECRAWL_URL` to scrape full page text instead of snippets |
-| `off` | no search: the model proposes findings from memory, every source is `~ unverified`, and the fact-check runs as a self-consistency pass |
+Choose with `drsh setup search`:
 
-Public instances mostly refuse SearXNG's JSON API, so their HTML result page
-is read instead. A search that is refused — rate limit, bot challenge,
-outage — is reported with that reason; it is never quietly replaced by
-findings the model makes up, and a run whose every search failed stops
-instead of writing a report about nothing.
+| Search | Cost | Notes |
+| ------ | ---- | ----- |
+| Public SearXNG (default) | free | nothing to install; third parties see the queries, and often refuse a run partway |
+| Local SearXNG in Docker | free | **recommended**: private and more reliable; setup writes the files, you start it with one `docker compose` command |
+| Your own SearXNG | free | one address or several |
+| Exa, Tavily | per search | hosted; each result comes with its page text |
+| No search | free | the model answers from memory, and every source is marked unverified |
 
-With `auto`, every query goes to a third party you did not pick. To keep
-queries on your machine:
-
-```bash
-drsh init --docker   # sets up SearXNG and points the config at it
-docker compose -f ~/.config/deep-research/docker-compose.yml up -d
-drsh doctor          # confirms it answers
-```
-
-This is the recommended setup: public instances often refuse a run's
-searches partway through. It also turns on more engines than SearXNG's
-default three. Engines rate-limit by IP address, so a local SearXNG can
-still be throttled after many searches; more engines means one engine's
-limit rarely leaves a search unanswered. A run cut short by a limit can be
-finished later with `--resume`, which repeats only the searches that
-failed.
-
-Firecrawl, for full page text, runs from its own repository:
+Page extraction (`drsh setup scraper`) reads each result's full page, so a
+claim is checked against the page and not just its search snippet: Firecrawl
+(self-hosted and free, or hosted), Exa or Tavily. Self-hosting Firecrawl:
 [docs/services.md](docs/services.md).
+
+A refused search (rate limit, bot challenge, outage) is reported with its
+reason, never replaced by findings the model makes up. A run cut short by a
+limit can be finished later with `--resume`, which repeats only the searches
+that failed.
 
 ## Models
 
-`openrouter/free` costs nothing and picks an available free model per request,
-so runs are not reproducible model-for-model — which is why every report
-records what served it. Free models are capped per minute and per UTC day; a
-run is 4 to 7 model requests with search (plan, analyze, a second analyze
-when follow-up searches found evidence, fact-check, a revision and its
-check when a recommendation was blocked, summarize). With search off, the
-worst-case budgets before retries are quick 19, standard 21 and deep 25,
-as printed by `doctor`. Hitting the daily cap fails at once with a message
-instead of burning retries; a per-minute limit waits for the provider's
-`Retry-After`.
+`drsh setup model` lists OpenRouter, OpenAI, Anthropic and some thirty
+compatible providers (from [Catwalk](https://github.com/charmbracelet/catwalk)'s
+catalog), your Claude subscription through Claude Code, and a custom endpoint
+for a local vLLM, llama.cpp or LM Studio server.
 
-`drsh login` lists the providers it can drive — OpenRouter, OpenAI,
-Anthropic and some thirty OpenAI- or Anthropic-compatible ones, from
-[Catwalk](https://github.com/charmbracelet/catwalk)'s catalog — and a custom
-endpoint for a local vLLM, llama.cpp or LM Studio server, which needs no key.
-Without login, set `OPENAI_BASE_URL` and `OPENAI_MODEL`.
-
-Or Claude: `DEEP_RESEARCH_PROVIDER=claude` runs on your Claude subscription
-through Claude Code when it is signed in (`claude auth login`), and on
-`ANTHROPIC_API_KEY` otherwise or once the subscription's limit is reached.
-See [Claude](docs/configuration.md#claude).
+The default, `openrouter/free`, costs nothing and picks a free model per
+request, so every report records what served it. Free models are capped per
+minute and per day; a run with web search takes 4 to 7 model requests, and
+`drsh doctor` shows how many free requests an OpenRouter key has left today. On Claude: [docs/configuration.md](docs/configuration.md#claude).
 
 ## Common commands
 
@@ -232,10 +178,9 @@ drsh -p "question" --jsonl              # machine-readable events
 drsh serve                               # launch and audit runs in the browser
 drsh --resume reports/<run>.partial.json # continue an interrupted run
 drsh list                                # past runs
-drsh login                               # pick provider + model, store the key
-drsh model                               # switch provider or model
+drsh setup                               # set up the model, search and page extraction
+drsh setup search                        # change only the search (or: model, scraper)
 drsh doctor                              # check model, key, search
-drsh init --docker                       # local SearXNG setup
 drsh update                              # install the latest release
 ```
 
@@ -267,25 +212,18 @@ Or copy `skills/deep-research/` into the agent's skills directory.
 
 ## Configuration
 
-Settings resolve environment > what `drsh login` picked >
-`config.yaml` > embedded defaults, and every `config.yaml` key is also
-settable as `DEEP_RESEARCH_<KEY>`. A key stored by `login` wins over the
-environment's. `config.yaml` and `.env` are read from one place,
-`~/.config/deep-research/` (`$DEEP_RESEARCH_CONFIG_DIR` when set), whatever
-folder a run starts in.
+`drsh setup` saves everything in `~/.config/deep-research/`
+(`$DEEP_RESEARCH_CONFIG_DIR` when set): keys in `auth.json`, readable only by
+you, the model in `model.json`, the rest in `config.yaml`.
 
-| Env var | Meaning | Default |
-| ------- | ------- | ------- |
-| `OPENAI_API_KEY` | LLM API key, when `login` stored none | — (required) |
-| `OPENAI_BASE_URL` | LLM endpoint | `https://openrouter.ai/api/v1` |
-| `OPENAI_MODEL` | model to use | `openrouter/free` |
-| `DEEP_RESEARCH_PROVIDER` | `openai`, or `claude` for Claude Code / `ANTHROPIC_API_KEY` | `openai` |
-| `SEARXNG_URL` | a URL, a comma-separated list, `auto` or `off` | `auto` |
-| `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (snippets only) |
+Environment variables override what setup saved, for CI and one-off runs:
 
-Timeouts, retries, parallelism, history location, the legacy `OPENROUTER_*`
-names and the trust boundaries for scraping and public search are in
-[docs/configuration.md](docs/configuration.md).
+```bash
+OPENAI_MODEL=deepseek/deepseek-v4.1-flash drsh -p "question"
+```
+
+The variables, timeouts, retries, parallelism and the trust boundaries for
+scraping and public search are in [docs/configuration.md](docs/configuration.md).
 
 ## Development
 
