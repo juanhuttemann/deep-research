@@ -24,9 +24,12 @@ func svcOpts(cur Services, search, scraper bool) ServiceOptions {
 		FirecrawlURL: "https://api.firecrawl.dev"}
 }
 
-// moveTo presses down until the highlighted row is id.
+// moveTo goes to the top, then presses down until the highlighted row is id.
 func moveTo(t *testing.T, m ServicesModel, id string) ServicesModel {
 	t.Helper()
+	for range 10 {
+		m = driveSvc(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	}
 	for range 10 {
 		if it, ok := m.list.selected(); ok && it.id == id {
 			return m
@@ -78,7 +81,7 @@ func TestHostedEngineOffersItsOwnScraper(t *testing.T) {
 	}
 	m = driveSvc(t, m, enterKey)
 	s, ok := m.Result()
-	if !ok || s.Engine != "exa" || s.Scraper != "exa" || s.Keys["exa"] != "exa-1" || !s.ScraperAsked {
+	if !ok || s.Engine != "exa" || s.Scraper != "exa" || s.Keys["exa"].Key != "exa-1" || !s.ScraperAsked {
 		t.Errorf("result %+v, %v", s, ok)
 	}
 }
@@ -160,10 +163,51 @@ func TestHostedFirecrawlWithoutAKeyIsAsked(t *testing.T) {
 // TestEditKeepsTypedKeys: going back from the review to edit does not lose
 // a key typed the first time round.
 func TestEditKeepsTypedKeys(t *testing.T) {
-	cur := Services{Engine: "exa", Scraper: "exa", Keys: map[string]string{"exa": "exa-1"}, SearchAsked: true}
+	cur := Services{Engine: "exa", Scraper: "exa", Keys: map[string]auth.Credential{"exa": {Key: "exa-1", BaseURL: "https://api.exa.ai"}},
+		SearchAsked: true}
 	m := driveSvc(t, NewServices(svcOpts(cur, true, false)), enterKey)
 	s, ok := m.Result()
-	if !ok || s.Keys["exa"] != "exa-1" {
+	if !ok || s.Keys["exa"].Key != "exa-1" {
 		t.Errorf("result %+v, %v", s, ok)
+	}
+}
+
+// TestHostedKeyIsNotMovedToAnotherServer: a hosted Firecrawl key typed
+// before an edit stays bound to firecrawl.dev when the edit moves Firecrawl
+// to a server of the reader's own, and choosing hosted again asks for no key.
+func TestHostedKeyIsNotMovedToAnotherServer(t *testing.T) {
+	m := NewServices(svcOpts(public, false, true))
+	m = driveSvc(t, moveTo(t, m, "firecrawl-hosted"), enterKey)
+	m = driveSvc(t, m, append(typed("fc-1"), enterKey)...)
+	first, ok := m.Result()
+	if !ok || first.Keys["firecrawl"].BaseURL != "https://api.firecrawl.dev" {
+		t.Fatalf("first pass %+v, %v", first, ok)
+	}
+	// The review's edit: back to the scraper, now self-hosted.
+	m = NewServices(svcOpts(first, false, true))
+	m = driveSvc(t, moveTo(t, m, "firecrawl"), enterKey)
+	m.input.SetValue("http://localhost:3002")
+	m = driveSvc(t, m, enterKey)
+	s, ok := m.Result()
+	if !ok || s.FirecrawlURL != "http://localhost:3002" || s.Keys["firecrawl"].BaseURL != "https://api.firecrawl.dev" {
+		t.Errorf("after edit %+v, %v", s, ok)
+	}
+	if m.typedKey("firecrawl") {
+		t.Error("the hosted key counts as the self-hosted server's")
+	}
+}
+
+// TestHostedEngineDropsTheLocalSearXNG: switching from a local SearXNG in
+// Docker to Exa or to no search writes no Docker files.
+func TestHostedEngineDropsTheLocalSearXNG(t *testing.T) {
+	cur := Services{Engine: "searxng", SearXNGURL: "http://localhost:8888", Docker: true, Scraper: "none"}
+	for _, id := range []string{"exa", "off"} {
+		m := driveSvc(t, moveTo(t, NewServices(svcOpts(cur, true, false)), id), enterKey)
+		if id == "exa" {
+			m = driveSvc(t, m, append(typed("exa-1"), enterKey, enterKey)...)
+		}
+		if s, ok := m.Result(); !ok || s.Docker {
+			t.Errorf("%s: %+v, %v", id, s, ok)
+		}
 	}
 }

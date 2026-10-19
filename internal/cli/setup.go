@@ -327,7 +327,7 @@ func review(st loginState, d setupDraft) string {
 	for _, name := range slices.Sorted(maps.Keys(d.services.Keys)) {
 		fmt.Fprintf(&b, "  %-8s %s key  %s\n", "", serviceTitle(name), setup.Dim("→ auth.json"))
 	}
-	if d.services.Docker && d.services.SearchAsked {
+	if localDocker(d.services) {
 		fmt.Fprintf(&b, "  %-8s %s\n", "", setup.Dim("docker-compose.yml and searxng/settings.yml → "+st.dir+"; start it after saving"))
 	}
 	var overrides []config.Override
@@ -438,6 +438,13 @@ func checkServices(ctx context.Context, out io.Writer, st loginState, d setupDra
 	return ok
 }
 
+// localDocker reports whether this setup chose a local SearXNG in Docker,
+// whose files it writes: not merely one that was set up before and is now
+// replaced by a hosted engine or no search.
+func localDocker(s setup.Services) bool {
+	return s.SearchAsked && s.Docker && s.Engine == "searxng"
+}
+
 // saveSetup writes the draft: keys to auth.json, then config.yaml, then the
 // Docker files, then model.json. config.yaml is built and checked before the
 // first write, so a file that cannot take the settings stops the save before
@@ -484,7 +491,7 @@ func writeSetup(st loginState, d setupDraft, cfgFile *config.PendingFile) (wrote
 		}
 		wrote = append(wrote, cfgFile.Path)
 	}
-	if d.services.Docker && d.services.SearchAsked {
+	if localDocker(d.services) {
 		created, err := config.InitDocker(st.dir)
 		wrote = append(wrote, created...)
 		if err != nil {
@@ -510,9 +517,10 @@ func saveKeys(st loginState, d setupDraft) error {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(d.services.Keys)) {
-		base := map[string]string{config.ServiceExa: agent.ExaURL, config.ServiceTavily: agent.TavilyURL,
-			config.ServiceFirecrawl: d.services.FirecrawlURL}[name]
-		if err := st.store.SetService(name, d.services.Keys[name], base); err != nil {
+		// Bound to the address it was typed for, not to where the service
+		// points after an edit.
+		c := d.services.Keys[name]
+		if err := st.store.SetService(name, c.Key, c.BaseURL); err != nil {
 			return err
 		}
 	}
@@ -532,7 +540,7 @@ func setupDone(out io.Writer, st loginState, d setupDraft) {
 	fmt.Fprintf(out, "  %-8s %s · %s\n", "model", s.Provider, s.Model)
 	fmt.Fprintf(out, "  %-8s %s\n", "search", s.Search)
 	fmt.Fprintf(out, "  %-8s %s\n", "pages", s.Pages)
-	if d.services.Docker && d.services.SearchAsked {
+	if localDocker(d.services) {
 		fmt.Fprintln(out, "\nStart the local search; Docker restarts it from then on:")
 		fmt.Fprintf(out, "  docker compose -f %s up -d\n", filepath.Join(st.dir, "docker-compose.yml"))
 	}
@@ -600,7 +608,7 @@ func scriptedScraper(cmd *cobra.Command) error {
 // it the stored or environment key is kept, and a hosted service with none
 // is an error before any request; a self-hosted Firecrawl needs none.
 func scriptedServiceKey(cmd *cobra.Command, st loginState, s setup.Services, service string) (setup.Services, error) {
-	s.Keys = map[string]string{}
+	s.Keys = map[string]auth.Credential{}
 	base := map[string]string{config.ServiceExa: agent.ExaURL, config.ServiceTavily: agent.TavilyURL}[service]
 	if service == config.ServiceFirecrawl {
 		base = s.FirecrawlURL
@@ -610,9 +618,11 @@ func scriptedServiceKey(cmd *cobra.Command, st loginState, s setup.Services, ser
 		if err != nil {
 			return s, err
 		}
-		if s.Keys[service] = strings.TrimSpace(string(b)); s.Keys[service] == "" {
+		key := strings.TrimSpace(string(b))
+		if key == "" {
 			return s, errors.New("no key on stdin")
 		}
+		s.Keys[service] = auth.Credential{Key: key, BaseURL: base}
 		return s, nil
 	}
 	hosted := service != config.ServiceFirecrawl || auth.SameEndpoint(base, agent.FirecrawlURL)

@@ -8,6 +8,8 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/juanhuttemann/deep-research/internal/auth"
 )
 
 // Services is what setup asks about web search: the engine and the page
@@ -19,9 +21,11 @@ type Services struct {
 	Docker       bool
 	Scraper      string // none, firecrawl, exa or tavily; "" when nothing chose one
 	FirecrawlURL string
-	// Keys are the keys typed here, by service ("exa"). A service whose
-	// stored or environment key was kept has none.
-	Keys map[string]string
+	// Keys are the keys typed here, by service ("exa"), each with the
+	// address it was typed for: a hosted Firecrawl key typed before an edit
+	// moved Firecrawl to another server is not that server's key. A service
+	// whose stored or environment key was kept has none.
+	Keys map[string]auth.Credential
 	// SearchAsked and ScraperAsked say which steps were shown: only what was
 	// asked is saved, so a setting nobody looked at is not rewritten.
 	SearchAsked, ScraperAsked bool
@@ -76,7 +80,7 @@ func NewServices(opts ServiceOptions) ServicesModel {
 	// Keys typed before the review sent the reader back to edit stay typed.
 	m.s.Keys = maps.Clone(opts.Current.Keys)
 	if m.s.Keys == nil {
-		m.s.Keys = map[string]string{}
+		m.s.Keys = map[string]auth.Credential{}
 	}
 	if opts.Search {
 		return m.engineStep()
@@ -114,8 +118,15 @@ func (m ServicesModel) baseURL(service string) string {
 	return m.s.FirecrawlURL
 }
 
+// typedKey reports whether a key was typed here for service at the address
+// it now has.
+func (m ServicesModel) typedKey(service string) bool {
+	c, ok := m.s.Keys[service]
+	return ok && auth.SameEndpoint(c.BaseURL, m.baseURL(service))
+}
+
 func (m ServicesModel) hasKey(service string) bool {
-	return m.s.Keys[service] != "" || m.opts.KeyMark(service, m.baseURL(service)) != ""
+	return m.typedKey(service) || m.opts.KeyMark(service, m.baseURL(service)) != ""
 }
 
 func (m ServicesModel) engineItems() []item {
@@ -165,10 +176,12 @@ func (m ServicesModel) engineChosen(id string) (tea.Model, tea.Cmd) {
 		}
 		return m.ask(svcSearXNGURL, "address: ", "http://localhost:8888", false, prefill)
 	case "off":
-		m.s.Engine = "off"
+		m.s.Engine, m.s.Docker = "off", false
 		return m.finish()
 	default:
-		m.s.Engine = id
+		// A hosted engine: a local SearXNG chosen before is no longer used,
+		// and its Docker files are not written.
+		m.s.Engine, m.s.Docker = id, false
 		return m.askKey(id)
 	}
 	return m.afterEngine()
@@ -272,7 +285,7 @@ func (m ServicesModel) scraperChosen(id string) (tea.Model, tea.Cmd) {
 // (Exa as engine, then as scraper). A stored or environment key is kept by
 // pressing Enter; a new one replaces it.
 func (m ServicesModel) askKey(service string) (tea.Model, tea.Cmd) {
-	if m.s.Keys[service] != "" {
+	if m.typedKey(service) {
 		return m.next()
 	}
 	m.keyFor = service
@@ -369,7 +382,7 @@ func (m ServicesModel) entered(v string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if v != "" {
-		m.s.Keys[m.keyFor] = v
+		m.s.Keys[m.keyFor] = auth.Credential{Key: v, BaseURL: m.baseURL(m.keyFor)}
 	}
 	return m.next()
 }
