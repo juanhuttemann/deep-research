@@ -2847,3 +2847,17 @@ func TestSiteCheckWithSearchDownBlamesTheSearch(t *testing.T) {
 		t.Errorf("mixed failures: err = %v, want each site and why named", err)
 	}
 }
+
+// Sources are marked in the page's words: told "degraded", the model
+// answered with a label the reader could not find on the page.
+func TestRunOverviewMarksSourcesAsThePageDoes(t *testing.T) {
+	o := RunOverview(askMeta())
+	for _, want := range []string{"/acme) fetched\n", "b.example/) snippet only\n"} {
+		if !strings.Contains(o, want) {
+			t.Errorf("overview lacks %q:\n%s", want, o)
+		}
+	}
+	if strings.Contains(o, "degraded") {
+		t.Errorf("overview says degraded:\n%s", o)
+	}
+}

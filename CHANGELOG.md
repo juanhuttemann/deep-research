@@ -5,6 +5,31 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The page's top bar named the search engine alone (`searxng`), leaving out
+  Firecrawl, which reads every page a claim is checked against. It now reads
+  `searxng + firecrawl`, or `· snippets only` when nothing reads the pages;
+  the hosts stay in the tooltip and on the start screen.
+- Audit cards now open their supporting claims as full statements with
+  verdicts and links to inspect the evidence, replacing internal IDs, claim
+  chips and the label glossary. Blocking reasons link to the relevant claims,
+  and revisions link to earlier statements. Verdicts use readable names;
+  the inspector explains source availability and distinguishes quote matches
+  in search snippets from matches in fetched page text. It also provides a
+  return link to the selected card or list row.
+- A run that read no page in full, as every run did while Firecrawl was
+  down, looked like any other: its stats said `0/22` in passing. The report
+  now says so above both views, and a live run puts up a notice after five
+  snippets in a row with a scraper set up, while it can still be cancelled.
+- The page showed a model's reasoning twice: the latest of it under the
+  status row ("Analyzing — thinking · 0:12"), and all of it in the thinking
+  block below. The status row now keeps its one line, and the reasoning is
+  in the thinking block only. The terminal, which has no such block, still
+  shows it under the status.
+- Follow-up answers called snippet-only sources "degraded", a word the page
+  never shows: the model is now told the page's own marks.
+
 ## [0.15.1] - 2026-10-18
 
 ### Changed
