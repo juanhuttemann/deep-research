@@ -69,7 +69,10 @@ r2, ...) are governed alike; "recommendation" below means either. The Driver hol
   claim it names is supported and the fact-check judges (by its ID, r1,
   r2, ...) that it follows from them; otherwise it is kept, `blocked`, for
   audit, and the answer names it as not established with the claim that
-  failed. A fact-check that did not run approves nothing.
+  failed. A fact-check that did not run approves nothing. One given claims
+  that answers with no verdict and no inference has judged nothing: it is
+  asked once more, and empty twice it is reported as not run, not read as
+  every claim insufficient.
 - The repair pass: when a recommendation is blocked and some claims passed,
   one analyzer call revises the blocked ones from the supported claims only
   (`repairPrompt`); code drops a revision that cites any other claim

@@ -2861,3 +2861,63 @@ func TestRunOverviewMarksSourcesAsThePageDoes(t *testing.T) {
 		t.Errorf("overview says degraded:\n%s", o)
 	}
 }
+
+// scriptedChecker answers FactCheck from a list, in order, over a structured
+// analysis.
+type scriptedChecker struct {
+	*scriptedAnalyzer
+	checks []*agent.FactCheckResult
+	calls  int
+}
+
+func (s *scriptedChecker) FactCheck(context.Context, string) (*agent.FactCheckResult, error) {
+	fc := s.checks[min(s.calls, len(s.checks)-1)]
+	s.calls++
+	return fc, nil
+}
+
+func newScriptedChecker(checks ...*agent.FactCheckResult) *scriptedChecker {
+	return &scriptedChecker{scriptedAnalyzer: &scriptedAnalyzer{fakeAssistant: &fakeAssistant{},
+		answers: []*agent.Analysis{structured}}, checks: checks}
+}
+
+// A replay's fact-check reasoned through all twenty claims and then answered
+// with nothing that parsed as a verdict. Governed as it was, every claim was
+// insufficient and the run said "0 of 20 claims supported" with no error, as
+// if the sources had failed. A check that judged nothing is asked once more.
+func TestFactCheckThatJudgedNothingIsAskedAgain(t *testing.T) {
+	judged := &agent.FactCheckResult{Verdicts: []agent.Verdict{{ID: "c1", Status: "insufficient"}}}
+	sc := newScriptedChecker(&agent.FactCheckResult{}, judged)
+	sink := &MultiSink{}
+	res, err := NewDriver(sc, sink, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.calls != 2 || res.FactCheck == nil || len(res.FactCheck.Verdicts) != 1 {
+		t.Errorf("fact-check ran %d times, result %+v; want the second, judged answer", sc.calls, res.FactCheck)
+	}
+	if !slices.ContainsFunc(sink.TimelineSnapshot(), func(e Event) bool {
+		return strings.Contains(e.Detail, "the fact-check returned no verdicts; asking once more")
+	}) {
+		t.Error("the second ask was not reported")
+	}
+}
+
+// Empty twice, the check did not run, and the run says so: unverified, at low
+// confidence, instead of a verdict of insufficient on every claim.
+func TestFactCheckEmptyTwiceIsReportedUnavailable(t *testing.T) {
+	sc := newScriptedChecker(&agent.FactCheckResult{})
+	sink := &MultiSink{}
+	res, err := NewDriver(sc, sink, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.calls != 2 || res.FactCheck != nil || res.Summary.Confidence != "low" {
+		t.Errorf("calls %d, fact-check %+v, confidence %q; want 2, none, low", sc.calls, res.FactCheck, res.Summary.Confidence)
+	}
+	if !slices.ContainsFunc(sink.TimelineSnapshot(), func(e Event) bool {
+		return e.Type == Error && strings.Contains(e.Detail, "fact-check unavailable, reporting unverified: it returned no verdicts, twice")
+	}) {
+		t.Error("the run did not report the check as unavailable")
+	}
+}

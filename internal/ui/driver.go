@@ -371,7 +371,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// exists. If it fails there is still a complete, citable report to
 	// deliver, so the failure is surfaced and the run continues rather than
 	// discarding every search and the analysis behind it.
-	fc, err := d.Agent.FactCheck(ctx, factCheckPrompt(claimsToCheck(analysis), findings, retrieved, analysis.Claims))
+	fc, err := d.factCheck(ctx, factCheckPrompt(claimsToCheck(analysis), findings, retrieved, analysis.Claims), len(analysis.Claims) > 0)
 	if err != nil {
 		fc = nil
 		d.emit(Event{Type: Error, Phase: "Fact-Check",
@@ -444,7 +444,7 @@ func (d *Driver) repair(ctx context.Context, question string, a *agent.Analysis,
 	if len(added) == 0 {
 		return
 	}
-	recheck, err := d.Agent.FactCheck(ctx, revisionCheckPrompt(a, added, findings))
+	recheck, err := d.factCheck(ctx, revisionCheckPrompt(a, added, findings), true)
 	if err != nil {
 		for _, id := range added {
 			if u, ok := unitByID(a, id); ok {
@@ -486,6 +486,31 @@ func (d *Driver) analyze(ctx context.Context, prompt string) (*agent.Analysis, e
 		return again, nil
 	}
 	return a, nil
+}
+
+// factCheck runs the fact-check, asking once more when it was given claims
+// and judged none of them: no verdict and no inference. A replay's check
+// reasoned through all twenty claims for a minute and then answered with
+// nothing that parsed as a verdict; govern read that as twenty claims the
+// sources could not settle, and the run reported "0 of 20 claims supported"
+// with no error, as if the evidence had failed. Empty twice, it is a check
+// that did not run, and the run says so instead.
+func (d *Driver) factCheck(ctx context.Context, prompt string, claims bool) (*agent.FactCheckResult, error) {
+	fc, err := d.Agent.FactCheck(ctx, prompt)
+	if err != nil || !claims || !judgedNothing(fc) || ctx.Err() != nil {
+		return fc, err
+	}
+	d.emit(Event{Type: Info, Phase: "Fact-Check", Detail: "the fact-check returned no verdicts; asking once more"})
+	again, err := d.Agent.FactCheck(ctx, prompt)
+	if err != nil || !judgedNothing(again) {
+		return again, err
+	}
+	return nil, errors.New("it returned no verdicts, twice")
+}
+
+// judgedNothing reports a fact-check with no verdict and no inference.
+func judgedNothing(fc *agent.FactCheckResult) bool {
+	return fc == nil || len(fc.Verdicts) == 0 && len(fc.Inferences) == 0
 }
 
 // malformed reports an analysis with no structure and no prose answer.

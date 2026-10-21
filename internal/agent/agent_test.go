@@ -941,3 +941,23 @@ func TestParseEffort(t *testing.T) {
 		t.Errorf("a typo: err = %v", err)
 	}
 }
+
+// A fact-check answer with no verdict is logged with its opening, the only
+// clue to why: a replay's check judged nothing and nothing it sent was kept.
+func TestFactCheckWithNoVerdictsLogsWhatCameBack(t *testing.T) {
+	srv := newEffortServer(t, "")
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var lines []string
+	a.SetProgress(func(m string) { lines = append(lines, m) })
+	if _, err := a.FactCheck(context.Background(), "claims"); err != nil {
+		t.Fatalf("FactCheck: %v", err)
+	}
+	if !slices.ContainsFunc(lines, func(l string) bool {
+		return strings.Contains(l, `the fact-check answered with no verdicts (13 characters): "{\"claims\":[]}"`)
+	}) {
+		t.Errorf("the empty answer was not logged:\n%s", strings.Join(lines, "\n"))
+	}
+}
