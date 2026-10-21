@@ -1198,6 +1198,9 @@ func TestSlugDistinguishesQuestions(t *testing.T) {
 	if !strings.HasPrefix(slug("What is X?"), "What-is-X") {
 		t.Errorf("slug lost its readable stem: %q", slug("What is X?"))
 	}
+	if s := slug("dev boards (arduino, esp32, etc"); !strings.HasPrefix(s, "dev-boards-arduino-esp32-etc-") {
+		t.Errorf("slug kept a dash per separator: %q", s)
+	}
 	if slug("") == "" {
 		t.Error("an empty question still needs a filename")
 	}

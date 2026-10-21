@@ -5,6 +5,23 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The question's correction did nothing for "best selling modules for dev
+  boards (arduino, raspberry pi, esp32, etc": the planner's title-cased fix
+  was refused whole, since "Best-selling" joins two words and "etc.)" changed
+  a three-letter word. Case, hyphens and the punctuation around words are no
+  longer counted as changes, so capitalization, brackets and punctuation are
+  fixed along with spelling; adding, dropping, reordering or replacing a
+  word, or changing a number or a symbol in a word ("C++", "<5%", "−1000"),
+  is still refused. The planner is asked to
+  write the question as a title, and a refused fix is now named in the
+  progress log instead of passing in silence. The browser's plan review
+  lines the two up by the words they share, so a hyphenated pair is shown
+  replaced rather than not at all.
+- A report's file name gave each separator its own dash
+  (`dev-boards--arduino--raspberry-pi`); a run of them is now one.
+
 ## [0.18.0] - 2026-10-21
 
 ### Added

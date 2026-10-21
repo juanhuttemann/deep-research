@@ -537,14 +537,16 @@ func Stem(question string) string { return slug(question) }
 // and the edges are trimmed, so "What is X?" and "What is X" reduce to the
 // same name and the second run overwrites the first's .md, .pdf and .json.
 // A 128-bit digest of the untouched question makes collisions negligible,
-// while re-running the same question keeps replacing its own files.
+// while re-running the same question keeps replacing its own files. A run
+// of separators is one dash: "boards (arduino, raspberry" was
+// "boards--arduino--raspberry".
 func slug(s string) string {
 	var sb strings.Builder
 	for _, r := range s {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			sb.WriteRune(r)
-		default:
+		case !strings.HasSuffix(sb.String(), "-"):
 			sb.WriteByte('-')
 		}
 	}
