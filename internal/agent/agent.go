@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -123,6 +124,14 @@ type SubTopic struct {
 	// every noisy run and broke on any other language.
 	Query string   `json:"query,omitempty"`
 	Terms []string `json:"terms,omitempty"`
+}
+
+// Outline is the planner's answer: the sub-topics, and the question they
+// plan for with its typos fixed. Question is empty when the planner offered
+// no fix the caller should take.
+type Outline struct {
+	Question  string
+	SubTopics []SubTopic
 }
 
 // Finding is one unit of research evidence.
@@ -303,7 +312,7 @@ type Assistant interface {
 	// tier that set only the former left the model deciding half of it. It
 	// returns an error only when the model call itself fails; a usable plan is
 	// always derived as a fallback.
-	Plan(ctx context.Context, question string, subTopics int) ([]SubTopic, error)
+	Plan(ctx context.Context, question string, subTopics int) (Outline, error)
 	// SetSourceBudget caps how many sources a single query may gather. It is
 	// what gives the depth tier its effect: without it the search tool's own
 	// fixed per-query limit bounds every run identically, and picking a deeper
@@ -1492,7 +1501,7 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
 }
 
-const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. Respond ONLY with JSON of the shape: {"subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
+const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. The question field is the question as asked with only its misspelled words corrected, word for word: never add, remove, reorder or replace a word, never change a number, never answer, narrow or broaden it, and when nothing is misspelled repeat it exactly. Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
 
 // planPrompt is the planner's user message: the breadth and the question.
 // How to plan is the system message, planner_instructions, which is only
@@ -1510,17 +1519,17 @@ func planPrompt(question string, subTopics int) string {
 const defaultSubTopicCount = 4
 
 // Plan implements the planning phase of the pipeline.
-func (a *impl) Plan(ctx context.Context, question string, subTopics int) ([]SubTopic, error) {
+func (a *impl) Plan(ctx context.Context, question string, subTopics int) (Outline, error) {
 	// The deadline is part of the answer to "how long will this sit here":
 	// planning is one call with nothing on screen behind it.
 	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s, %s)", a.model, a.timeout, a.effortLabel(a.effort.Plan)))
 	out, err := a.plan(ctx, planPrompt(question, subTopics))
 	if err != nil {
-		return nil, err
+		return Outline{}, err
 	}
 	topics := parsePlanAgent(out)
 	if len(topics) == 0 {
-		return defaultSubTopics(question), nil
+		return Outline{SubTopics: defaultSubTopics(question)}, nil
 	}
 	// A requested count is a suggestion to a model, not a constraint. Running
 	// every extra branch it volunteers would spend a budget the caller sized
@@ -1528,7 +1537,94 @@ func (a *impl) Plan(ctx context.Context, question string, subTopics int) ([]SubT
 	if subTopics > 0 && len(topics) > subTopics {
 		topics = topics[:subTopics]
 	}
-	return topics, nil
+	return Outline{Question: fixedQuestion(question, parsePlanQuestion(out)), SubTopics: topics}, nil
+}
+
+// parsePlanQuestion is the corrected question the planner wrote beside its
+// sub-topics, or "" when it wrote none.
+func parsePlanQuestion(out string) string {
+	for payload := range jsonPayloads(out) {
+		var obj struct {
+			Question string `json:"question"`
+		}
+		if json.Unmarshal([]byte(payload), &obj) == nil && strings.TrimSpace(obj.Question) != "" {
+			return strings.Join(strings.Fields(obj.Question), " ")
+		}
+	}
+	return ""
+}
+
+// fixedQuestion is the planner's correction of asked when it is one: the
+// question titles the report, its files and the history, so a typo in it
+// ("overalll") was printed everywhere the run is named. Only a spelling fix
+// is taken, word for word. A whole-question edit bound let a correction drop
+// "not" or turn "Go 1.26" into "Go 1.25", and the run then researched the
+// opposite of what was asked under a title that hid it.
+//
+// ponytail: a misspelling that lands on another real word ("sale" for
+// "safe") passes; the brief shows the question as typed for that.
+func fixedQuestion(asked, proposed string) string {
+	was, now := strings.Fields(asked), strings.Fields(proposed)
+	if len(now) == 0 || len(was) != len(now) || strings.Join(was, " ") == proposed {
+		return ""
+	}
+	for i := range was {
+		if !misspelling(was[i], now[i]) {
+			return ""
+		}
+	}
+	return proposed
+}
+
+// misspelling reports whether fixed can be typed as a mistyped: a few
+// letters off in a word long enough that a few letters do not make it
+// another word. Words of three letters or fewer ("not", "no", "is") and
+// any word with a digit are taken only as typed: a sign or a separator is
+// the whole difference between "-1000" and "1000", "10.00" and "1000", or
+// "1.26" and "126", and comparing the digits alone let a fix change them.
+func misspelling(typed, fixed string) bool {
+	typed, fixed = strings.ToLower(typed), strings.ToLower(fixed)
+	if typed == fixed {
+		return true
+	}
+	if strings.ContainsFunc(typed+fixed, unicode.IsDigit) {
+		return false
+	}
+	n := utf8.RuneCountInString(bareWordOf(typed))
+	return n > 3 && editDistance(typed, fixed) <= max(1, n/3)
+}
+
+// bareWordOf is w without the punctuation around it, so "overall?" is as
+// long as "overall".
+func bareWordOf(w string) string {
+	return strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
+// editDistance is the edit distance between a and b in runes, counting two
+// swapped letters ("teh") as one edit: the most common typo, which plain
+// Levenshtein counts as two and so refused in a four-letter word.
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	rows := [3][]int{make([]int, len(rb)+1), make([]int, len(rb)+1), make([]int, len(rb)+1)}
+	for j := range rows[1] {
+		rows[1][j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		prev2, prev, cur := rows[0], rows[1], rows[2]
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			sub := prev[j-1]
+			if ra[i-1] != rb[j-1] {
+				sub++
+			}
+			cur[j] = min(sub, prev[j]+1, cur[j-1]+1)
+			if i > 1 && j > 1 && ra[i-1] == rb[j-2] && ra[i-2] == rb[j-1] {
+				cur[j] = min(cur[j], prev2[j-2]+1)
+			}
+		}
+		rows = [3][]int{prev, cur, prev2}
+	}
+	return rows[1][len(rb)]
 }
 
 // parsePlanAgent decodes the planner's JSON output. It tolerates a wrapped

@@ -33,7 +33,7 @@ type stubAssistant struct {
 	tokens atomic.Int64
 }
 
-func (s *stubAssistant) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
+func (s *stubAssistant) Plan(context.Context, string, int) (agent.Outline, error) {
 	subs := make([]agent.SubTopic, 0, 6)
 	for _, t := range []struct{ id, name, query string }{
 		{"s1", "Iterator signatures", "range over func iterator signature yield"},
@@ -46,7 +46,7 @@ func (s *stubAssistant) Plan(context.Context, string, int) ([]agent.SubTopic, er
 		subs = append(subs, agent.SubTopic{ID: t.id, Name: t.name, Query: t.query,
 			Terms: []string{"iterator", "yield", "range", "loop", "spec"}})
 	}
-	return subs, nil
+	return agent.Outline{SubTopics: subs}, nil
 }
 
 func (s *stubAssistant) ResearchDetail(context.Context, string, []string) (*agent.ResearchDetail, error) {

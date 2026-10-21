@@ -5,6 +5,25 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- The planner fixes misspelled words in the question, which titled the
+  report, its `.md`/`.pdf`/`.json` files and the history entry as typed:
+  "Best cloud storage provider for personal files overalll" kept its extra
+  "l" everywhere. The fix comes back in the planning call itself, so it costs
+  no extra request, and is taken only word for word: the same words in the
+  same order, each a few letters off, with words of three letters or fewer
+  and any word with a digit unchanged. A correction that dropped "not" or
+  turned "Go 1.26" into "Go 1.25" or "-1000" into "1000" would have
+  researched another question, so it is ignored. The brief shows the
+  question as typed under the fixed one, the browser's plan review strikes
+  through each word replaced, and the plan JSON carries it as `asked`, which
+  `--plan` keeps. A question typed over several lines
+  is joined into one, and a trace records the question as planned, so its
+  replay and resume search the same fallback queries. A custom
+  `planner_instructions` that does not ask for `question` keeps the question
+  as typed.
+
 ## [0.17.0] - 2026-10-21
 
 ### Added

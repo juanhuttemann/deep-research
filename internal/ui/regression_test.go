@@ -594,7 +594,7 @@ type progressDuringPlan struct {
 
 func (p *progressDuringPlan) SetProgress(logf func(string)) { p.logf = logf }
 
-func (p *progressDuringPlan) Plan(ctx context.Context, question string, subTopics int) ([]agent.SubTopic, error) {
+func (p *progressDuringPlan) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
 	if p.logf != nil {
 		p.logf(p.msg)
 	}
@@ -666,7 +666,7 @@ type breadthRecorder struct {
 	over  int
 }
 
-func (b *breadthRecorder) Plan(ctx context.Context, question string, subTopics int) ([]agent.SubTopic, error) {
+func (b *breadthRecorder) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
 	b.asked = subTopics
 	n := subTopics
 	if b.over > 0 {
@@ -676,7 +676,7 @@ func (b *breadthRecorder) Plan(ctx context.Context, question string, subTopics i
 	for i := range out {
 		out[i] = agent.SubTopic{ID: fmt.Sprint(i + 1), Name: fmt.Sprintf("Topic %d", i+1)}
 	}
-	return out, nil
+	return agent.Outline{SubTopics: out}, nil
 }
 
 // Analyze, fact-check and summarize each re-embed every finding's content, so
@@ -2919,5 +2919,58 @@ func TestFactCheckEmptyTwiceIsReportedUnavailable(t *testing.T) {
 		return e.Type == Error && strings.Contains(e.Detail, "fact-check unavailable, reporting unverified: it returned no verdicts, twice")
 	}) {
 		t.Error("the run did not report the check as unavailable")
+	}
+}
+
+// fixingPlanner answers the plan with a corrected question, as the planner
+// does for a typo.
+type fixingPlanner struct {
+	*fakeAssistant
+	fixed string
+}
+
+func (f *fixingPlanner) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
+	out, err := f.fakeAssistant.Plan(ctx, question, subTopics)
+	out.Question = f.fixed
+	return out, err
+}
+
+// The question as typed ("overalll", over two lines) titled the report and
+// named its files. The planner's fix is what the run reports under, and the
+// brief keeps what was typed so the change is seen before launch.
+func TestFixedQuestionTitlesTheRun(t *testing.T) {
+	a := &fixingPlanner{fakeAssistant: &fakeAssistant{}, fixed: "Best cloud storage overall"}
+	var stdout, stderr bytes.Buffer
+	res, err := Run(context.Background(), Options{
+		Question: "Best cloud storage\noveralll", Assistant: a, DepthMode: "quick", OutDir: t.TempDir(),
+		JSONL: true, Stdout: &stdout, Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Report.Question != a.fixed || strings.Contains(res.MDPath, "overalll") {
+		t.Errorf("report question %q at %s, want it titled %q", res.Report.Question, res.MDPath, a.fixed)
+	}
+	if res.Plan.Asked != "Best cloud storage overalll" {
+		t.Errorf("plan.Asked = %q, want the typed question on one line", res.Plan.Asked)
+	}
+	r := NewRenderer(discard{}, Theme{})
+	r.plan = res.Plan
+	if head := strings.Join(r.briefHead(), "\n"); !strings.Contains(head, "typed as: Best cloud storage overalll") {
+		t.Errorf("brief does not show what was typed:\n%s", head)
+	}
+}
+
+// The browser reviews the plan and hands it back to run; the typed question
+// went with it only as far as the page, so a run of the reviewed plan lost
+// what the planner had corrected.
+func TestReadPlanKeepsTheTypedQuestion(t *testing.T) {
+	plan, err := ReadPlan(strings.NewReader(`{"question":"cloud storage overall","asked":"cloud storage overalll",
+		"depth":{"key":"quick"},"sub_topics":[{"name":"Pricing"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Asked != "cloud storage overalll" {
+		t.Errorf("plan.Asked = %q, want the typed question kept", plan.Asked)
 	}
 }

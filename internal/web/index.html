@@ -145,6 +145,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .brief { max-width: 88ch; margin: 4vh auto 0; }
 .brief-head { padding: 14px 2ch 12px; display: grid; gap: 6px; }
 .brief-head h1 { font-weight: 700; overflow-wrap: anywhere; }
+.brief-head h1 del { color: var(--dim); font-weight: 400; text-decoration-thickness: 1px; }
+.brief-head h1 ins { text-decoration: none; }
 .brief-head p { margin: 0; color: var(--dim); }
 .brief-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 3ch; padding: 10px 2ch; border-top: 1px solid var(--rule); }
 .topics-label { padding: 10px 2ch 2px; color: var(--dim); border-top: 1px solid var(--rule); }
@@ -978,7 +980,7 @@ function showBrief(plan) {
   // renamed sub-topic drops both, as the CLI brief does, unless its query
   // was typed here; an edited query drops the terms written for the old one.
   for (const t of brief.sub_topics) { t.planned = t.name; t.plannedQuery = t.query || ""; t.query = t.plannedQuery; }
-  $("brief-question").textContent = brief.question;
+  showQuestion($("brief-question"), brief.question, brief.asked);
   const sites = brief.domains || [];
   $("brief-domains").textContent = sites.length ? "Only on: " + sites.join(", ") : "";
   $("brief-domains").hidden = !sites.length;
@@ -987,6 +989,17 @@ function showBrief(plan) {
   $("brief-msg").textContent = "";
   renderTopics();
   show("brief");
+}
+// A corrected question shows each word the planner fixed after the word as
+// typed: the fix titles the report, so it is seen here before it does. A fix
+// is word for word (agent.fixedQuestion), so the two line up by position.
+function showQuestion(h, question, asked) {
+  const now = question.split(/\s+/), was = (asked || "").split(/\s+/);
+  if (!asked || was.length !== now.length) { h.textContent = question; return; }
+  h.replaceChildren(...now.flatMap((w, i) => {
+    const words = w === was[i] ? [w] : [el("del", "", was[i]), " ", el("ins", "", w)];
+    return i ? [" ", ...words] : words;
+  }));
 }
 function perTopic() {
   const n = brief.sub_topics.length, per = brief.pinned_per_topic || TIER_SOURCES[brief.depth.key] || 4;
@@ -1034,6 +1047,7 @@ function renderTopics() {
 function editedPlan() {
   return {
     question: brief.question,
+    asked: brief.asked || "",
     depth: { key: brief.depth.key },
     pinned_per_topic: brief.pinned_per_topic || 0,
     domains: brief.domains || [],

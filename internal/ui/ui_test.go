@@ -45,14 +45,14 @@ type fakeAssistant struct {
 	tokens        atomic.Int64
 }
 
-func (f *fakeAssistant) Plan(ctx context.Context, question string, subTopics int) ([]agent.SubTopic, error) {
+func (f *fakeAssistant) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
 	if f.planTopics != nil {
-		return f.planTopics, nil
+		return agent.Outline{SubTopics: f.planTopics}, nil
 	}
-	return []agent.SubTopic{
+	return agent.Outline{SubTopics: []agent.SubTopic{
 		{ID: "1", Name: "Alpha", Notes: "first branch"},
 		{ID: "2", Name: "Beta", Notes: "second branch"},
-	}, nil
+	}}, nil
 }
 
 func (f *fakeAssistant) ResearchDetail(ctx context.Context, query string, _ []string) (*agent.ResearchDetail, error) {

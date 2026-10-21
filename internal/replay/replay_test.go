@@ -16,8 +16,8 @@ import (
 // phase with a fixed value.
 type live struct{ searches int }
 
-func (l *live) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
-	return []agent.SubTopic{{ID: "1", Name: "Alpha", Query: "alpha query"}}, nil
+func (l *live) Plan(context.Context, string, int) (agent.Outline, error) {
+	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: "Alpha", Query: "alpha query"}}}, nil
 }
 func (l *live) ResearchDetail(_ context.Context, q string, _ []string) (*agent.ResearchDetail, error) {
 	l.searches++
@@ -61,7 +61,7 @@ func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	}
 	fresh := &live{}
 	p := Play(fresh, tr)
-	if plan, _ := p.Plan(ctx, "ignored", 9); len(plan) != 1 || plan[0].Query != "alpha query" {
+	if plan, _ := p.Plan(ctx, "ignored", 9); len(plan.SubTopics) != 1 || plan.SubTopics[0].Query != "alpha query" {
 		t.Errorf("plan = %+v, want the recorded one", plan)
 	}
 	det, err := p.ResearchDetail(ctx, "alpha query", nil)
@@ -301,5 +301,16 @@ func TestWrappersForwardScopingButAPlayerHasNone(t *testing.T) {
 	}
 	if _, ok := any(Play(inner, &Trace{})).(agent.SourceScoper); ok {
 		t.Error("a Player claims to scope a search it never makes")
+	}
+}
+
+// The trace keeps the question the run planned and searched with, not the one
+// typed: its fallback queries are built from it, and a question typed over
+// two lines made every one of them a query the replay had never seen.
+func TestTraceKeepsThePlannedQuestion(t *testing.T) {
+	rec := Record(&live{}, "cloud\nstorage", "quick", 0)
+	_, _ = rec.Plan(context.Background(), "cloud storage", 3)
+	if rec.trace.Question != "cloud storage" {
+		t.Errorf("trace question = %q, want the planned %q", rec.trace.Question, "cloud storage")
 	}
 }
