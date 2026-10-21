@@ -1471,7 +1471,13 @@ func (a *impl) FactCheck(ctx context.Context, claims string) (*FactCheckResult, 
 	if err != nil {
 		return nil, err
 	}
-	return parseFactCheck(out), nil
+	fc := parseFactCheck(out)
+	// What came back is the only clue to why nothing was judged: a stream that
+	// ended early, an answer under other keys, or prose.
+	if len(fc.Verdicts) == 0 && len(fc.Inferences) == 0 {
+		a.log(fmt.Sprintf("the fact-check answered with no verdicts (%d characters): %q", len(out), clip(strings.TrimSpace(out), 200)))
+	}
+	return fc, nil
 }
 
 func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {

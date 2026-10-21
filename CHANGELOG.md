@@ -20,6 +20,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   `none` and `minimal`, since it cannot turn thinking off. Claude Code is
   run without `CLAUDE_CODE_EFFORT_LEVEL`, which would override `--effort`.
 
+### Fixed
+
+- A fact-check that answered with no verdict at all was read as every claim
+  insufficient: a replay reported "0 of 20 claims supported" and no
+  established answer, with no error, after the checker had reasoned through
+  every claim. A check given claims that judges none of them is now asked
+  once more, and empty twice it is reported as unavailable (the report is
+  unverified, at low confidence). What it answered is logged, since nothing
+  else keeps it.
+
 ## [0.16.0] - 2026-10-19
 
 ### Added
