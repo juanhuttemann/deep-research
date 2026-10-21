@@ -261,9 +261,11 @@ planner_instructions: |
   is not rejected for wording this sub-topic differently.
   Write them in the language of the question, in their shortest common form.
 
-  The question is the question as asked with only its misspelled words
-  corrected, word for word: never add, remove, reorder or replace a word,
-  never change a number, never answer, narrow or broaden it. When nothing
-  is misspelled, repeat it exactly. It titles the report.
+  The question is the question as asked, written as a title: misspelled
+  words, capitalization (a capital first letter, proper names, acronyms),
+  hyphenation, punctuation and unclosed brackets corrected, word for word.
+  Never add, remove, reorder or replace a word, never expand an
+  abbreviation, never change a number, never answer, narrow or broaden it.
+  When nothing needs correcting, repeat it exactly. It titles the report.
 
   Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}

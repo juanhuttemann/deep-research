@@ -1248,12 +1248,23 @@ func TestPlannerFixesTyposButNotTheQuestion(t *testing.T) {
 		"Is Go 1.26 faster":                          "Is Go 126 faster",
 		"Is 10.00 mg a safe dose":                    "Is 1000 mg a safe dose",
 		"Why is -1000 smaller":                       "Why is 1000 smaller",
+		"Is 5% enough":                               "Is 5 enough",
+		"Why is −1000 smaller":                       "Why is 1000 smaller",
+		"Is <5% enough":                              "Is >5% enough",
+		"Learn C++ fast":                             "Learn C# fast",
+		"Is .5 enough":                               "Is 5 enough",
+		"best modules for dev boards":                "Best modules for development boards",
 		"Is it safe to fly now":                      "Is it safe to fly not",
 		"What is best way to learn Go":               "What is the best way to learn Go",
 	} {
 		checkFix(t, asked, proposed, "")
 	}
 	checkFix(t, "Waht is the bset cloud stoarge?", "What is the best cloud storage?", "What is the best cloud storage?")
+	// Case, hyphens and the punctuation around words make a title, and
+	// counting them refused this whole fix over "Best-selling" and "etc.)".
+	title := "Best-selling modules for dev boards (Arduino, Raspberry Pi, ESP32, etc.)"
+	checkFix(t, "best selling modules for dev boards (arduino,\nraspberry pi, esp32, etc", title, title)
+	checkFix(t, "Why is (-1000) smaller", "Why is -1000 smaller?", "Why is -1000 smaller?")
 }
 
 // checkFix plans asked with a planner that proposes proposed as its fix.

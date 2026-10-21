@@ -16,15 +16,17 @@ On a terminal this draws a live UI: a research brief you confirm, then a
 frame showing the pipeline stage, one row per parallel sub-agent with its
 progress meter, a rolling activity tail, and running source/token counters.
 
-The planner fixes misspelled words in the question ("overalll" becomes
+The planner fixes misspelled words, capitalization, hyphenation, punctuation
+and unclosed brackets in the question ("best selling modules (arduino, etc"
+becomes "Best selling modules (Arduino, etc.)", "overalll" becomes
 "overall"), and a question typed over several lines is joined into one. The
 fixed question titles the report, its files and the history entry; the brief
 shows what you typed under it (the browser's plan review strikes through each
 word it replaced), so you can cancel before the run starts. Only a
-word-for-word spelling fix is taken: a correction that adds, drops or
-reorders a word, or alters a word with a digit in it or one of three letters
-or fewer ("not"), is ignored, and the question runs as typed. Grammar is
-left as typed.
+word-for-word fix is taken: a correction that adds, drops, reorders or
+replaces a word, or alters a word with a digit in it or one of three letters
+or fewer ("not"), is ignored, the progress log says so, and the question runs
+as typed. Grammar is left as typed.
 
 ### Flags
 

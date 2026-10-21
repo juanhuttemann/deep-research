@@ -990,16 +990,31 @@ function showBrief(plan) {
   renderTopics();
   show("brief");
 }
-// A corrected question shows each word the planner fixed after the word as
-// typed: the fix titles the report, so it is seen here before it does. A fix
-// is word for word (agent.fixedQuestion), so the two line up by position.
+// A corrected question shows each run of words the planner changed after
+// the words as typed: the fix titles the report, so it is seen here before
+// it does. A hyphen joins two typed words into one ("Best-selling"), so the
+// two are lined up by their longest common run of words, not by position.
 function showQuestion(h, question, asked) {
-  const now = question.split(/\s+/), was = (asked || "").split(/\s+/);
-  if (!asked || was.length !== now.length) { h.textContent = question; return; }
-  h.replaceChildren(...now.flatMap((w, i) => {
-    const words = w === was[i] ? [w] : [el("del", "", was[i]), " ", el("ins", "", w)];
-    return i ? [" ", ...words] : words;
-  }));
+  if (!asked) { h.textContent = question; return; }
+  const now = question.split(/\s+/), was = asked.split(/\s+/);
+  const lcs = was.map(() => Array(now.length + 1).fill(0)).concat([Array(now.length + 1).fill(0)]);
+  for (let i = was.length - 1; i >= 0; i--)
+    for (let j = now.length - 1; j >= 0; j--)
+      lcs[i][j] = was[i] === now[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  const out = [], del = [], ins = [];
+  const flush = () => {
+    if (del.length) out.push(el("del", "", del.join(" ")));
+    if (ins.length) out.push(el("ins", "", ins.join(" ")));
+    del.length = ins.length = 0;
+  };
+  let i = 0, j = 0;
+  while (i < was.length || j < now.length) {
+    if (i < was.length && j < now.length && was[i] === now[j]) { flush(); out.push(now[j]); i++; j++; }
+    else if (j >= now.length || (i < was.length && lcs[i + 1][j] >= lcs[i][j + 1])) del.push(was[i++]);
+    else ins.push(now[j++]);
+  }
+  flush();
+  h.replaceChildren(...out.flatMap((n, k) => k ? [" ", n] : [n]));
 }
 function perTopic() {
   const n = brief.sub_topics.length, per = brief.pinned_per_topic || TIER_SOURCES[brief.depth.key] || 4;

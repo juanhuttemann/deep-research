@@ -1501,7 +1501,7 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
 }
 
-const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. The question field is the question as asked with only its misspelled words corrected, word for word: never add, remove, reorder or replace a word, never change a number, never answer, narrow or broaden it, and when nothing is misspelled repeat it exactly. Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
+const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. The question field is the question as asked, written as a title: misspelled words, capitalization (a capital first letter, proper names, acronyms), hyphenation, punctuation and unclosed brackets corrected, word for word. Never add, remove, reorder or replace a word, never expand an abbreviation, never change a number, never answer, narrow or broaden it; when nothing needs correcting repeat it exactly. Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
 
 // planPrompt is the planner's user message: the breadth and the question.
 // How to plan is the system message, planner_instructions, which is only
@@ -1537,7 +1537,15 @@ func (a *impl) Plan(ctx context.Context, question string, subTopics int) (Outlin
 	if subTopics > 0 && len(topics) > subTopics {
 		topics = topics[:subTopics]
 	}
-	return Outline{Question: fixedQuestion(question, parsePlanQuestion(out)), SubTopics: topics}, nil
+	proposed := parsePlanQuestion(out)
+	fixed := fixedQuestion(question, proposed)
+	// A refused correction leaves the question as typed with nothing on
+	// screen to say a fix was offered: the reader saw only that it "did not
+	// work".
+	if fixed == "" && proposed != "" && proposed != strings.Join(strings.Fields(question), " ") {
+		a.log(fmt.Sprintf("kept the question as typed: the planner's %q changes a word, not only its spelling", proposed))
+	}
+	return Outline{Question: fixed, SubTopics: topics}, nil
 }
 
 // parsePlanQuestion is the corrected question the planner wrote beside its
@@ -1556,16 +1564,24 @@ func parsePlanQuestion(out string) string {
 
 // fixedQuestion is the planner's correction of asked when it is one: the
 // question titles the report, its files and the history, so a typo in it
-// ("overalll") was printed everywhere the run is named. Only a spelling fix
-// is taken, word for word. A whole-question edit bound let a correction drop
-// "not" or turn "Go 1.26" into "Go 1.25", and the run then researched the
-// opposite of what was asked under a title that hid it.
+// ("overalll") was printed everywhere the run is named. Only a correction
+// that keeps every word is taken. A whole-question edit bound let a
+// correction drop "not" or turn "Go 1.26" into "Go 1.25", and the run then
+// researched the opposite of what was asked under a title that hid it.
+//
+// Case, the punctuation around a word and hyphens are free: they are what
+// makes "best selling modules for dev boards (arduino, … etc" a title, and
+// counting them as words refused the whole fix for "Best-selling" and
+// "etc.)".
 //
 // ponytail: a misspelling that lands on another real word ("sale" for
 // "safe") passes; the brief shows the question as typed for that.
 func fixedQuestion(asked, proposed string) string {
-	was, now := strings.Fields(asked), strings.Fields(proposed)
-	if len(now) == 0 || len(was) != len(now) || strings.Join(was, " ") == proposed {
+	if proposed == "" || proposed == strings.Join(strings.Fields(asked), " ") {
+		return ""
+	}
+	was, now := questionWords(asked), questionWords(proposed)
+	if len(was) != len(now) {
 		return ""
 	}
 	for i := range was {
@@ -1576,28 +1592,47 @@ func fixedQuestion(asked, proposed string) string {
 	return proposed
 }
 
+// questionWords splits s into the words a correction must keep, lowercase,
+// without the brackets, quotes and sentence punctuation around them. Every
+// other symbol is part of its word: trimming all of them let a correction
+// turn "−1000" into "1000", "<5%" into ">5%" or "C++" into "C#". A leading
+// period stays too (".5", ".NET"). A hyphen splits a word without a digit
+// into its parts; one with a digit stays whole, as "-1000" and "1000" are
+// different numbers.
+func questionWords(s string) []string {
+	var out []string
+	for _, w := range strings.Fields(strings.ToLower(s)) {
+		parts := []string{w}
+		if !strings.ContainsFunc(w, unicode.IsDigit) {
+			parts = strings.Split(w, "-")
+		}
+		for _, part := range parts {
+			part = strings.TrimLeftFunc(part, func(r rune) bool { return r != '.' && isPunctuation(r) })
+			if part = strings.TrimRightFunc(part, isPunctuation); part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
+}
+
+// isPunctuation reports whether r is punctuation a title adds or drops
+// without changing what is asked.
+func isPunctuation(r rune) bool { return strings.ContainsRune(`()[]{}"'“”‘’«»,.;:!?…`, r) }
+
 // misspelling reports whether fixed can be typed as a mistyped: a few
 // letters off in a word long enough that a few letters do not make it
 // another word. Words of three letters or fewer ("not", "no", "is") and
-// any word with a digit are taken only as typed: a sign or a separator is
-// the whole difference between "-1000" and "1000", "10.00" and "1000", or
-// "1.26" and "126", and comparing the digits alone let a fix change them.
+// any word with a digit are taken only as typed.
 func misspelling(typed, fixed string) bool {
-	typed, fixed = strings.ToLower(typed), strings.ToLower(fixed)
 	if typed == fixed {
 		return true
 	}
 	if strings.ContainsFunc(typed+fixed, unicode.IsDigit) {
 		return false
 	}
-	n := utf8.RuneCountInString(bareWordOf(typed))
+	n := utf8.RuneCountInString(typed)
 	return n > 3 && editDistance(typed, fixed) <= max(1, n/3)
-}
-
-// bareWordOf is w without the punctuation around it, so "overall?" is as
-// long as "overall".
-func bareWordOf(w string) string {
-	return strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 }
 
 // editDistance is the edit distance between a and b in runes, counting two
