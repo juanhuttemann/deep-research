@@ -643,3 +643,153 @@ func TestClaudeAPIOnlySkipsTheSubscription(t *testing.T) {
 		t.Errorf("no key: err = %v", err)
 	}
 }
+
+// The effort goes in output_config beside the call's own limits: a streamed
+// call keeps its 64k output and adaptive thinking, an unstreamed one the 16k
+// it gets without an effort. Claude cannot turn thinking off, so "none" asks
+// for low.
+func TestClaudeEffortGoesInOutputConfig(t *testing.T) {
+	noClaudeCode(t)
+	api := newAnthropicServer(t, func(int) anthropicReply { return text(`{"findings":[]}`) })
+	a, err := New(Config{Provider: "claude", ClaudeModel: "claude-opus-5-5", ClaudeAPIOnly: true,
+		AnthropicAPIKey: "sk", AnthropicBaseURL: api.URL, ModelCallTimeout: 10 * time.Second,
+		Effort: Effort{Analyze: "none", Search: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Summarize(ctx, "p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ResearchDetail(ctx, "q", nil); err != nil {
+		t.Fatal(err)
+	}
+	effort := func(b map[string]any) any { oc, _ := b["output_config"].(map[string]any); return oc["effort"] }
+	thinking := func(b map[string]any) any { th, _ := b["thinking"].(map[string]any); return th["type"] }
+	for i, want := range []struct {
+		effort, thinking any
+		maxTokens        float64
+	}{{"low", "adaptive", streamedMaxTokens}, {nil, "adaptive", streamedMaxTokens}, {"high", nil, unstreamedMaxTokens}} {
+		b := api.bodies[i]
+		if effort(b) != want.effort || thinking(b) != want.thinking || b["max_tokens"] != want.maxTokens {
+			t.Errorf("request %d: effort %v thinking %v max_tokens %v; want %v %v %v",
+				i, effort(b), thinking(b), b["max_tokens"], want.effort, want.thinking, want.maxTokens)
+		}
+	}
+}
+
+// The stripped body keeps the rest of output_config: a refused effort must not
+// take a structured-output format with it.
+func TestStripEffortKeepsTheRestOfOutputConfig(t *testing.T) {
+	got, level := stripEffort([]byte(`{"model":"m","output_config":{"effort":"low","format":{"type":"json_schema"}}}`))
+	if level != "low" || string(got) != `{"model":"m","output_config":{"format":{"type":"json_schema"}}}` {
+		t.Errorf("stripEffort = %s, %q", got, level)
+	}
+	got, level = stripEffort([]byte(`{"model":"m","output_config":{"effort":"max"}}`))
+	if level != "max" || string(got) != `{"model":"m"}` {
+		t.Errorf("stripEffort = %s, %q", got, level)
+	}
+	if got, level = stripEffort([]byte(`{"model":"m"}`)); level != "" || string(got) != `{"model":"m"}` {
+		t.Errorf("a body with no effort changed: %s, %q", got, level)
+	}
+}
+
+// claude -p takes the effort as --effort from the same parameters the API
+// twin is handed, so a call that moves to the API mid-run keeps it; a phase
+// left to the default passes no flag.
+func TestClaudeCodeGetsTheEffort(t *testing.T) {
+	for _, c := range []struct {
+		effort string
+		want   []string
+	}{{"medium", []string{"--effort", "medium"}}, {"minimal", []string{"--effort", "low"}}, {"", nil}} {
+		dir := fakeClaudeCode(t, subscribed, claudeCodeRun("The report."))
+		// The user's own sessions' level overrides --effort in claude.
+		t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", "max")
+		a, err := New(Config{Provider: "claude", ClaudeModel: "claude-opus-5-5",
+			ModelCallTimeout: 10 * time.Second, Effort: Effort{Summarize: c.effort}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Summarize(context.Background(), "the findings"); err != nil {
+			t.Fatal(err)
+		}
+		if env := readFile(t, filepath.Join(dir, "env")); strings.Contains(env, "CLAUDE_CODE_EFFORT_LEVEL=") {
+			t.Errorf("effort %q: claude was given CLAUDE_CODE_EFFORT_LEVEL, which overrides --effort", c.effort)
+		}
+		args := strings.Split(readFile(t, filepath.Join(dir, "args")), "\n")
+		i := slices.Index(args, "--effort")
+		switch {
+		case c.want == nil && i >= 0:
+			t.Errorf("effort %q: claude was passed %v", c.effort, args[i:i+2])
+		case c.want != nil && (i < 0 || !slices.Equal(args[i:i+2], c.want)):
+			t.Errorf("effort %q: claude args lack %v:\n%s", c.effort, c.want, strings.Join(args, "\n"))
+		}
+	}
+}
+
+// A call the subscription's limit hands to the API keeps its effort: claude -p
+// and the API twin read it from the same parameters.
+func TestClaudeEffortSurvivesTheMoveToTheAPI(t *testing.T) {
+	dir := fakeClaudeCode(t, subscribed, limitRun)
+	api := newAnthropicServer(t, func(int) anthropicReply { return text("from the API") })
+	a, err := New(Config{Provider: "claude", ClaudeModel: "claude-opus-5-5", Effort: Effort{Summarize: "medium"},
+		AnthropicAPIKey: "sk", AnthropicBaseURL: api.URL, ModelCallTimeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Summarize(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
+	if args := readFile(t, filepath.Join(dir, "args")); !strings.Contains(args, "--effort\nmedium") {
+		t.Errorf("claude was not passed the effort:\n%s", args)
+	}
+	if api.requests() != 1 {
+		t.Fatalf("the API was asked %d times, want 1", api.requests())
+	}
+	if oc, _ := api.bodies[0]["output_config"].(map[string]any); oc["effort"] != "medium" {
+		t.Errorf("the API was sent output_config %v, want effort medium", api.bodies[0]["output_config"])
+	}
+}
+
+// A Claude Code older than --effort refuses it as an unknown option. The
+// planner asks for an effort on every run, so that would fail every run; the
+// call is asked again without it, and so is every later one.
+func TestClaudeCodeWithoutEffortFlagStillAnswers(t *testing.T) {
+	dir := fakeClaudeCode(t, subscribed, claudeCodeRun("The report."))
+	script := readFile(t, filepath.Join(dir, "claude"))
+	refusing := strings.Replace(script, "echo call >>", `for a in "$@"; do if [ "$a" = --effort ]; then echo refused >> "$d/refused"; echo "error: unknown option '--effort'" >&2; exit 1; fi; done
+echo call >>`, 1)
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(refusing), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(Config{Provider: "claude", ClaudeModel: "claude-opus-5-5", ClaudeAPIOnly: false,
+		ModelCallTimeout: 10 * time.Second, Effort: Effort{Summarize: "low", Analyze: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logged []string
+	a.SetProgress(func(m string) { logged = append(logged, m) })
+	ctx := context.Background()
+	if sum, err := a.Summarize(ctx, "p"); err != nil || sum.Report != "The report." {
+		t.Fatalf("Summarize = %v, %v", sum, err)
+	}
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Count(readFile(t, filepath.Join(dir, "calls")), "call"); calls != 2 {
+		t.Errorf("claude answered %d calls, want 2 (the second sent no --effort to refuse)", calls)
+	}
+	if refused := strings.Count(readFile(t, filepath.Join(dir, "refused")), "refused"); refused != 1 {
+		t.Errorf("claude refused --effort %d times, want once: later calls must leave it out", refused)
+	}
+	if !slices.ContainsFunc(logged, func(l string) bool { return strings.Contains(l, "this claude has no --effort") }) {
+		t.Errorf("the dropped flag was not reported:\n%s", strings.Join(logged, "\n"))
+	}
+	// The later call's line says what it sent, not what was configured.
+	if !slices.ContainsFunc(logged, func(l string) bool { return strings.Contains(l, "effort high not sent") }) {
+		t.Errorf("the analysis line claims an effort it did not send:\n%s", strings.Join(logged, "\n"))
+	}
+}

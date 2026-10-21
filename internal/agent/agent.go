@@ -66,6 +66,8 @@ type Config struct {
 	// ModelCallRetries is how many extra attempts a failed model call gets.
 	// Zero means one attempt and no retry.
 	ModelCallRetries int
+	// Effort is each phase's reasoning effort; a phase left "" sends none.
+	Effort Effort
 	// SearchEngine is searxng (also when empty), exa, tavily or off.
 	SearchEngine    string
 	SearXNGURL      string
@@ -407,9 +409,9 @@ func New(cfg Config) (Assistant, error) {
 	// has a mode for it (impl.jsonOpts). Search and the planner parse JSON back
 	// out, so forcing structured output stops freeform models from emitting
 	// prose that the parser cannot recover.
-	newRunJSON := func(a *agent.Agent) runFunc {
+	newRunJSON := func(a *agent.Agent, effort string) runFunc {
 		return func(ctx context.Context, prompt string) (string, error) {
-			return impl.call(ctx, a, prompt, impl.jsonOpts...)
+			return impl.call(ctx, a, prompt, effort, impl.jsonOpts...)
 		}
 	}
 
@@ -418,32 +420,34 @@ func New(cfg Config) (Assistant, error) {
 	// they finished or the deadline killed them. Streaming lets them report
 	// how much of the answer has arrived. Search is left unstreamed: it runs in
 	// parallel across sub-agents, where interleaved progress is noise.
-	newRunStreaming := func(a *agent.Agent, label string, unit progressUnit, opts ...agent.Option) runFunc {
+	newRunStreaming := func(a *agent.Agent, effort, label string, unit progressUnit) runFunc {
 		return func(ctx context.Context, prompt string) (string, error) {
-			return impl.callStreaming(ctx, a, prompt, impl.streamProgress(label, unit), opts...)
+			return impl.callStreaming(ctx, a, prompt, effort, impl.streamProgress(label, unit))
 		}
 	}
 	if cfg.PlanningInstructions == "" {
 		cfg.PlanningInstructions = defaultPlanningInstructions
 	}
-	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions, nil))
+	impl.search = newRunJSON(newAgent("search", cfg.SearchInstructions, nil), cfg.Effort.Search)
 	// The analysis and the fact-check are not sent in JSON mode, though both
 	// are parsed as JSON. In that mode the provider held back a reasoning
 	// model's thinking and sent it in one piece after a minute of silence;
 	// without it the same request streamed its thinking from the first second.
 	// Their prompts ask for JSON only, and jsonPayloads repairs what comes back
 	// broken.
-	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions, nil), "analyzing", analysisUnit)
-	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), "fact-checking",
-		entriesUnit("claim checked", "claims checked", "claim"))
-	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), "writing the report", wordsUnit)
+	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions, nil), cfg.Effort.Analyze,
+		"analyzing", analysisUnit)
+	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), cfg.Effort.FactCheck,
+		"fact-checking", entriesUnit("claim checked", "claims checked", "claim"))
+	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), cfg.Effort.Summarize,
+		"writing the report", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
 	// it, so the wait is dead air unless the run can say how much of the plan
 	// has arrived.
 	planner := newAgent("planner", cfg.PlanningInstructions, nil)
 	impl.plan = func(ctx context.Context, prompt string) (string, error) {
 		reported := 0
-		return impl.callStreaming(ctx, planner, prompt, func(partial, _ string) {
+		return impl.callStreaming(ctx, planner, prompt, cfg.Effort.Plan, func(partial, _ string) {
 			// Report on whole sub-topics, not on every chunk: a counter that
 			// moves once per token is noise, and the name key is the first
 			// thing complete enough to count.
@@ -483,7 +487,7 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	impl := &impl{timeout: timeout, retries: max(cfg.ModelCallRetries, 0), keySource: cfg.KeySource}
+	impl := &impl{timeout: timeout, retries: max(cfg.ModelCallRetries, 0), keySource: cfg.KeySource, effort: cfg.Effort}
 	if cfg.Provider == "claude" {
 		newAgent, err := impl.connectClaude(cfg, withTools)
 		return impl, newAgent, err
@@ -495,12 +499,7 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 	impl.model, impl.baseURL = cfg.OpenAIModel, cfg.OpenAIBaseURL
 	impl.keyEnv, impl.urlEnv = "OPENAI_API_KEY", "OPENAI_BASE_URL"
 	impl.jsonOpts = []agent.Option{agent.WithResponseFormat(agent.ResponseFormat{Kind: "json"})}
-	// An OpenAI-compatible API reports tokens for a streamed call only when
-	// stream_options.include_usage is set, so streaming without it would
-	// quietly drop the streamed phases' tokens from the run total.
-	impl.streamOpts = []agent.Option{openaiprovider.ChatCompletionNewParams(openai.ChatCompletionNewParams{
-		StreamOptions: openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)},
-	})}
+	impl.params = openAIParams
 
 	// The deadline is applied per call as a context timeout (see impl.call),
 	// not as http.Client.Timeout: that one also caps reading the response
@@ -516,7 +515,7 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 		// unreachable. Retry policy lives in impl.call, which knows the
 		// difference between a server that never answered and one that did.
 		option.WithMaxRetries(0),
-		option.WithMiddleware(impl.sniffServedModel),
+		option.WithMiddleware(impl.effortFallback, impl.sniffServedModel),
 	)
 	return impl, func(name, instructions string, tools []tool.Tool) *agent.Agent {
 		return openaiprovider.NewChatCompletionsAgent(client, openaiprovider.AgentConfig{
@@ -547,11 +546,23 @@ type impl struct {
 	// via names the provider in ModelInfo when it is not baseURL's host.
 	via string
 	// jsonOpts ask for a JSON answer; empty where the provider has no
-	// schemaless JSON mode. streamOpts are what a streamed call needs on top
-	// of agent.Stream.
-	jsonOpts, streamOpts []agent.Option
-	timeout              time.Duration
-	retries              int
+	// schemaless JSON mode.
+	jsonOpts []agent.Option
+	// params are the provider's request parameters for one call at an effort
+	// ("" for none), streamed or not (openAIParams, claudeParams).
+	params func(effort string, streamed bool) []agent.Option
+	// mapEffort is the level the provider is sent for a configured one, where
+	// they differ (claudeEffort).
+	mapEffort func(string) string
+	// effort is each phase's configured effort, for the line naming the call.
+	effort Effort
+	// refused are the efforts the endpoint refused (effortFallback).
+	refused refusedEfforts
+	// noEffortFlag is set once claude -p refused --effort as an unknown
+	// option; claudeCode sends none after that.
+	noEffortFlag atomic.Bool
+	timeout      time.Duration
+	retries      int
 	// tokens is the provider-reported usage summed across every call. Model
 	// calls run in parallel across sub-agents, so it is updated atomically.
 	tokens      atomic.Int64
@@ -568,10 +579,11 @@ type impl struct {
 }
 
 // callStreaming is call with the response streamed and each partial reported
-// through the progress logger, with the provider's streamed-call options
-// (impl.streamOpts) ahead of the caller's.
-func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string, progress func(partial, thinking string), opts ...agent.Option) (string, error) {
-	streamOpts := slices.Concat([]agent.Option{agent.Stream(true)}, a.streamOpts, opts)
+// through the progress logger, with the provider's streamed-call parameters
+// (impl.params) ahead of the caller's options.
+func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt, effort string,
+	progress func(partial, thinking string), opts ...agent.Option) (string, error) {
+	streamOpts := slices.Concat([]agent.Option{agent.Stream(true)}, a.params(effort, true), opts)
 	var th thoughts
 	report, stop := tickProgress(func(p string) {
 		progress(p, th.String())
@@ -588,14 +600,14 @@ func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt string
 	// nothing on the rest.
 	if err == nil && strings.TrimSpace(out) == "" {
 		a.log("no streamed response; asking again without streaming")
-		return a.callWith(ctx, ag, prompt, nil, opts...)
+		return a.call(ctx, ag, prompt, effort, opts...)
 	}
 	return out, err
 }
 
-// call runs one model call, collecting the response in one step.
-func (a *impl) call(ctx context.Context, ag *agent.Agent, prompt string, opts ...agent.Option) (string, error) {
-	return a.callWith(ctx, ag, prompt, nil, opts...)
+// call runs one model call at effort, collecting the response in one step.
+func (a *impl) call(ctx context.Context, ag *agent.Agent, prompt, effort string, opts ...agent.Option) (string, error) {
+	return a.callWith(ctx, ag, prompt, nil, slices.Concat(a.params(effort, false), opts)...)
 }
 
 // callWith runs one model call under its own budget (see attempt), retrying a
@@ -1426,7 +1438,7 @@ func (a *impl) ResearchDetail(ctx context.Context, query string, terms []string)
 		}
 		return det, nil
 	}
-	a.log("  llm agent searching")
+	a.log("  llm agent searching · " + a.effortLabel(a.effort.Search))
 	out, err := a.search(ctx, query)
 	if err != nil {
 		return nil, err
@@ -1443,7 +1455,7 @@ func (a *impl) ResearchDetail(ctx context.Context, query string, terms []string)
 }
 
 func (a *impl) Analyze(ctx context.Context, prompt string) (*Analysis, error) {
-	a.log(fmt.Sprintf("%-10s  %s", "analyze", a.model))
+	a.log(fmt.Sprintf("%-10s  %s · %s", "analyze", a.model, a.effortLabel(a.effort.Analyze)))
 	out, err := a.analyzer(ctx, prompt)
 	if err != nil {
 		return nil, err
@@ -1452,7 +1464,7 @@ func (a *impl) Analyze(ctx context.Context, prompt string) (*Analysis, error) {
 }
 
 func (a *impl) FactCheck(ctx context.Context, claims string) (*FactCheckResult, error) {
-	a.log(fmt.Sprintf("%-10s  %s", "fact-check", a.model))
+	a.log(fmt.Sprintf("%-10s  %s · %s", "fact-check", a.model, a.effortLabel(a.effort.FactCheck)))
 	// The prompt arrives fully composed: the caller is the only thing that
 	// knows the answer AND the findings the claims must be checked against.
 	out, err := a.factCheck(ctx, claims)
@@ -1463,7 +1475,7 @@ func (a *impl) FactCheck(ctx context.Context, claims string) (*FactCheckResult, 
 }
 
 func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
-	a.log(fmt.Sprintf("%-10s  %s", "summarize", a.model))
+	a.log(fmt.Sprintf("%-10s  %s · %s", "summarize", a.model, a.effortLabel(a.effort.Summarize)))
 	out, err := a.summarizer(ctx, prompt)
 	// A report cut off at the output limit is still most of a report, and it
 	// is prose: nothing repairs it into something it is not.
@@ -1495,7 +1507,7 @@ const defaultSubTopicCount = 4
 func (a *impl) Plan(ctx context.Context, question string, subTopics int) ([]SubTopic, error) {
 	// The deadline is part of the answer to "how long will this sit here":
 	// planning is one call with nothing on screen behind it.
-	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s)", a.model, a.timeout))
+	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s, %s)", a.model, a.timeout, a.effortLabel(a.effort.Plan)))
 	out, err := a.plan(ctx, planPrompt(question, subTopics))
 	if err != nil {
 		return nil, err

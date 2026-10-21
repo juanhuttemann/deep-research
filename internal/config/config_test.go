@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/juanhuttemann/deep-research/internal/agent"
 )
 
 // write pre-creates files in dir so tests can simulate an existing setup.
@@ -110,7 +112,9 @@ func clearProviderEnv(t *testing.T) {
 		"SEARXNG_URL", "FIRECRAWL_URL", "FIRECRAWL_API_KEY",
 		"EXA_API_KEY", "TAVILY_API_KEY", "DEEP_RESEARCH_SEARCH_ENGINE", "DEEP_RESEARCH_SCRAPER",
 		"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
-		"DEEP_RESEARCH_PROVIDER", "DEEP_RESEARCH_CLAUDE_MODEL",
+		"DEEP_RESEARCH_PROVIDER", "DEEP_RESEARCH_CLAUDE_MODEL", "DEEP_RESEARCH_REASONING_EFFORT",
+		"DEEP_RESEARCH_REASONING_EFFORT_PLAN", "DEEP_RESEARCH_REASONING_EFFORT_ANALYZE",
+		"DEEP_RESEARCH_REASONING_EFFORT_FACT_CHECK", "DEEP_RESEARCH_REASONING_EFFORT_SUMMARIZE",
 	} {
 		t.Setenv(k, "")
 	}
@@ -370,5 +374,60 @@ func TestUseLocalSearXNG(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(dir, ".env"))
 	if string(b) != "OPENAI_MODEL=m\nSEARXNG_URL="+LocalSearXNG+"\n" {
 		t.Errorf(".env = %q", b)
+	}
+}
+
+// Reasoning effort lowers only the phases accuracy does not rest on, unless
+// told otherwise: the analysis, the fact-check and the report keep the
+// provider's default.
+func TestReasoningEffortDefaults(t *testing.T) {
+	got := loadIn(t, "").Effort
+	want := agent.Effort{Plan: "low", Chat: "medium"}
+	if got != want {
+		t.Errorf("effort = %+v, want %+v", got, want)
+	}
+}
+
+// Each phase is set on its own, from the file or the environment, and a file
+// naming one phase keeps the others' defaults: a config.yaml on disk replaces
+// the embedded one whole.
+func TestReasoningEffortComesFromFileAndEnv(t *testing.T) {
+	clearProviderEnv(t)
+	cfgDir := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"),
+		"reasoning_effort:\n  analyze: Medium\n  fact_check: high\n  summarize: low\n")
+	t.Setenv("DEEP_RESEARCH_REASONING_EFFORT_FACT_CHECK", "low")
+	t.Setenv("DEEP_RESEARCH_REASONING_EFFORT_PLAN", "default")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := agent.Effort{Analyze: "medium", FactCheck: "low", Summarize: "low", Chat: "medium"}
+	if cfg.Effort != want {
+		t.Errorf("effort = %+v, want %+v", cfg.Effort, want)
+	}
+}
+
+// A level or a phase the tool does not know is an error naming it, not a
+// setting quietly ignored; so is one level for every phase.
+func TestReasoningEffortRejectsWhatItCannotUse(t *testing.T) {
+	for _, c := range []struct{ yaml, env, want string }{
+		{yaml: "reasoning_effort:\n  analyze: hgih\n", want: `reasoning_effort.analyze (DEEP_RESEARCH_REASONING_EFFORT_ANALYZE): "hgih"`},
+		{yaml: "reasoning_effort:\n  analyse: low\n", want: "reasoning_effort.analyse: no such phase"},
+		{yaml: "reasoning_effort: low\n", want: "give a level per phase"},
+		{env: "low", want: "give a level per phase"},
+		{yaml: "reasoning_effort:\n  analyze: [high]\n", want: "reasoning_effort.analyze"},
+		{yaml: "reasoning_effort:\n  analyze: 2\n", want: "reasoning_effort.analyze"},
+		{yaml: "reasoning_effort: false\n", want: "want a level per phase"},
+	} {
+		clearProviderEnv(t)
+		cfgDir := t.TempDir()
+		t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+		writeFile(t, filepath.Join(cfgDir, "config.yaml"), c.yaml)
+		t.Setenv("DEEP_RESEARCH_REASONING_EFFORT", c.env)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("yaml %q env %q: err = %v, want %q", c.yaml, c.env, err, c.want)
+		}
 	}
 }

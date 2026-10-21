@@ -507,16 +507,12 @@ func Load() (Config, error) {
 	if cfg.Parallelism <= 0 {
 		cfg.Parallelism = defaultParallelism
 	}
-	cfg.ModelCallTimeout = v.GetDuration("model_call_timeout")
-	cfg.ModelCallRetries = v.GetInt("model_call_retries")
+	if err := loadModelCalls(&cfg, v); err != nil {
+		return Config{}, err
+	}
 
-	// Expand ~ in paths
-	if strings.HasPrefix(cfg.DataFile, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Config{}, fmt.Errorf("expand home: %w", err)
-		}
-		cfg.DataFile = filepath.Join(home, cfg.DataFile[1:])
+	if cfg.DataFile, err = expandHome(cfg.DataFile); err != nil {
+		return Config{}, err
 	}
 
 	store, sel, err := loadLogin()
@@ -545,6 +541,92 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// expandHome expands a leading ~ in path to the home directory.
+func expandHome(path string) (string, error) {
+	if !strings.HasPrefix(path, "~") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand home: %w", err)
+	}
+	return filepath.Join(home, path[1:]), nil
+}
+
+// loadModelCalls reads what every model call is given: its deadline, its
+// retries and each phase's reasoning effort.
+func loadModelCalls(cfg *Config, v *viper.Viper) (err error) {
+	cfg.ModelCallTimeout = v.GetDuration("model_call_timeout")
+	cfg.ModelCallRetries = v.GetInt("model_call_retries")
+	cfg.Effort, err = loadEffort(v)
+	return err
+}
+
+// effortPhases are the reasoning_effort keys, each with the field it sets and
+// its default. The defaults lower only the phases accuracy does not rest on:
+// the planner writes search queries, a follow-up question reads a finished
+// run. The analysis, the fact-check and the report keep the provider's own
+// default, which differs by model (DeepSeek's reasons as at high, Claude Opus
+// 5.5's is medium), so one level for all would slow some down. Search left
+// to its default too: without a search engine that call writes the findings.
+var effortPhases = []struct {
+	key, def string
+	field    func(*agent.Effort) *string
+}{
+	{"plan", "low", func(e *agent.Effort) *string { return &e.Plan }},
+	{"search", "default", func(e *agent.Effort) *string { return &e.Search }},
+	{"analyze", "default", func(e *agent.Effort) *string { return &e.Analyze }},
+	{"fact_check", "default", func(e *agent.Effort) *string { return &e.FactCheck }},
+	{"summarize", "default", func(e *agent.Effort) *string { return &e.Summarize }},
+	{"chat", "medium", func(e *agent.Effort) *string { return &e.Chat }},
+}
+
+// loadEffort reads reasoning_effort, one level per phase. Each leaf is read on
+// its own, so DEEP_RESEARCH_REASONING_EFFORT_ANALYZE overrides one phase, and
+// defaulted on its own, because a config.yaml on disk replaces the embedded
+// one whole and would otherwise drop every phase it does not name.
+func loadEffort(v *viper.Viper) (agent.Effort, error) {
+	var e agent.Effort
+	// One level for every phase, or a value of another type, reads as a
+	// setting and would be ignored: GetString turns what is not a string into
+	// "", which is the provider's default.
+	switch root := v.Get("reasoning_effort").(type) {
+	case nil, map[string]any:
+	case string:
+		if root != "" {
+			return e, fmt.Errorf("reasoning_effort %q: give a level per phase (reasoning_effort.analyze: medium, or DEEP_RESEARCH_REASONING_EFFORT_ANALYZE)", root)
+		}
+	default:
+		return e, fmt.Errorf("reasoning_effort: want a level per phase, got %v", root)
+	}
+	known := map[string]bool{}
+	for _, p := range effortPhases {
+		known[p.key] = true
+		key := "reasoning_effort." + p.key
+		v.SetDefault(key, p.def)
+		level, err := effortLevel(v.Get(key))
+		if err != nil {
+			return e, fmt.Errorf("%s (DEEP_RESEARCH_%s): %w", key, strings.ToUpper(strings.ReplaceAll(key, ".", "_")), err)
+		}
+		*p.field(&e) = level
+	}
+	for k := range v.GetStringMap("reasoning_effort") {
+		if !known[k] {
+			return e, fmt.Errorf("reasoning_effort.%s: no such phase (want plan, search, analyze, fact_check, summarize or chat)", k)
+		}
+	}
+	return e, nil
+}
+
+// effortLevel is one phase's configured level; a list or a number is not one.
+func effortLevel(raw any) (string, error) {
+	s, ok := raw.(string)
+	if !ok && raw != nil {
+		return "", fmt.Errorf("%v is not an effort level", raw)
+	}
+	return agent.ParseEffort(s)
 }
 
 // loadAgentConfig reads the prompts from a, the agent.yaml at path ("" for
