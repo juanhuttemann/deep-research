@@ -260,8 +260,42 @@ var pdfFallbacks = strings.NewReplacer(
 	"≤", "<=", "≥", ">=", "≠", "!=", "≈", "~", "−", "-",
 )
 
+// pdfDisplay is parsed text as the PDF can draw it: the symbols spelled out
+// and emoji left out. An emoji is decoration (a source titled "Top 20
+// Raspberry Pi Projects of 2025🤯!"); drawn as '?' it made the run warn that
+// the PDF lost text. It is done to parsed text, never to the Markdown, whose
+// syntax and link targets a rune changed in the source would change.
+func pdfDisplay(s string) string {
+	return strings.Map(func(r rune) rune {
+		if isEmoji(r) {
+			return -1
+		}
+		return r
+	}, pdfFallbacks.Replace(s))
+}
+
+// pdfBMPEmoji are the emoji outside the pictograph blocks that reports and
+// page titles use. The blocks they sit in also hold symbols that mean
+// something ("C♯", "★"), which still warn: only these are dropped.
+var pdfBMPEmoji = map[rune]bool{
+	'✅': true, '❌': true, '✨': true, '⭐': true, '⚡': true, '❗': true, '❓': true,
+	'⭕': true, '⌛': true, '⏳': true, '☕': true, '⚽': true, '⛔': true, '✋': true,
+}
+
+// isEmoji reports whether r is an emoji, or a joiner, selector or keycap
+// mark that composes one.
+func isEmoji(r rune) bool {
+	switch {
+	case r >= 0x1F300 && r <= 0x1FAFF, // pictographs, emoticons, transport, skin tones
+		r >= 0x1F1E6 && r <= 0x1F1FF,          // regional indicators: flags
+		r == 0xFE0F, r == 0x200D, r == 0x20E3: // emoji presentation, joiner, keycap
+		return true
+	}
+	return pdfBMPEmoji[r]
+}
+
 func (p *pdfParser) addRun(r pdfRun) {
-	r.text = pdfFallbacks.Replace(r.text)
+	r.text = pdfDisplay(r.text)
 	if p.cur < 0 {
 		p.open(pdfBlock{kind: blockPara})
 	}
@@ -293,7 +327,7 @@ func (p *pdfParser) code(n ast.Node) {
 		}
 		return r
 	}, src)
-	p.open(pdfBlock{kind: blockCode, runs: []pdfRun{{text: pdfFallbacks.Replace(src), mono: true}}})
+	p.open(pdfBlock{kind: blockCode, runs: []pdfRun{{text: pdfDisplay(src), mono: true}}})
 	p.cur = -1
 }
 

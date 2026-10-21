@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- A run warned that its PDF had replaced characters with "?", over one
+  emoji in a source's title ("Top 20 Raspberry Pi Projects of 2025🤯!").
+  The standard PDF fonts draw no emoji. Emoji are now left out of the PDF's
+  text, so the warning is kept for text it cannot show: a script the fonts
+  cannot draw (Cyrillic, Greek, CJK, Arabic, Hebrew) or a symbol that means
+  something ("C♯", "★"). The Markdown's syntax and link targets are not
+  touched.
+
 ## [0.18.1] - 2026-10-21
 
 ### Fixed

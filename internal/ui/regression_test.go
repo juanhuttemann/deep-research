@@ -2021,6 +2021,32 @@ func TestPDFExportDoesNotSilentlyDropNonLatinText(t *testing.T) {
 	}
 }
 
+// A run warned that its PDF lost text over one emoji in a source's title:
+// decoration, not text the reader needs the Markdown for. Only emoji are
+// dropped, from parsed text: the Markdown's syntax and link targets stay as
+// written, and a symbol that means something still warns.
+func TestPDFDropsEmojiWithoutWarning(t *testing.T) {
+	report := "$580.0M (2025) → $1,813.0M (2034); value ≠ ranking; " +
+		"[Top 20 Raspberry Pi Projects of 2025🤯!](https://example.com/🤯) 👍🏽 ⭐️ ✅ 🇦🇷"
+	if pdfDropsText(report) {
+		t.Errorf("warned for emoji: %+v", parsePDFBlocks(report))
+	}
+	pdf := string(BuildPDF(report))
+	for _, want := range []string{"-> $1,813.0M", "value != ranking", "of 2025!", "example.com/%F0%9F%A4%AF"} {
+		if !strings.Contains(pdf, want) {
+			t.Errorf("PDF lacks %q", want)
+		}
+	}
+	for _, text := range []string{"Привет мир", "C♯ versus C♭", "★ rating"} {
+		if !pdfDropsText(text) {
+			t.Errorf("%q stopped warning", text)
+		}
+	}
+	if b := parsePDFBlocks("− 5 percent"); len(b) != 1 || b[0].kind != blockPara {
+		t.Errorf("a minus sign became list syntax: %+v", b)
+	}
+}
+
 func TestPDFExportDoesNotWarnForSupportedLatinText(t *testing.T) {
 	var warnings bytes.Buffer
 	res := testResult()
