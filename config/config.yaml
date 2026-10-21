@@ -18,6 +18,21 @@ run_timeout: 30m
 # Extra attempts for a failed model call; each retry doubles the call timeout,
 # because a call that ran out of time usually needed more of it.
 model_call_retries: 2
+# How hard each phase's model reasons before answering: default (send nothing,
+# the provider decides), none, minimal, low, medium, high, xhigh or max.
+# Reasoning is most of a run's time. Lower levels are faster; the analysis and
+# the fact-check are what the answer rests on, so they keep the provider's
+# default unless you set them. A level the provider refuses is dropped for the
+# rest of the run, and Claude, which cannot turn thinking off, gets low for
+# none and minimal. One phase from the environment:
+# DEEP_RESEARCH_REASONING_EFFORT_FACT_CHECK=medium.
+reasoning_effort:
+  plan: low
+  search: default
+  analyze: default
+  fact_check: default
+  summarize: default
+  chat: medium
 # Sources gathered per sub-agent. Left at 0 the --mode tier decides
 # (quick 3, standard 4, deep 5), which is what makes changing depth in the
 # research brief change the plan. Set it to pin the budget regardless of mode.

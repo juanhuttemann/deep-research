@@ -71,10 +71,14 @@ func claudeCodeLogin(ctx context.Context) (bin, plan string) {
 // claudeCodeEnv is this process's environment without the Anthropic API
 // settings. Given ANTHROPIC_API_KEY, claude -p bills the key instead of the
 // subscription, and the .env that holds one for the fallback loads it here.
+// CLAUDE_CODE_EFFORT_LEVEL goes too: it overrides --effort, so a level set for
+// the user's own sessions would run every phase at it while the run said
+// otherwise.
 func claudeCodeEnv() []string {
 	return slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
-		return k == "ANTHROPIC_API_KEY" || k == "ANTHROPIC_AUTH_TOKEN" || k == "ANTHROPIC_BASE_URL"
+		return k == "ANTHROPIC_API_KEY" || k == "ANTHROPIC_AUTH_TOKEN" || k == "ANTHROPIC_BASE_URL" ||
+			k == "CLAUDE_CODE_EFFORT_LEVEL"
 	})
 }
 
@@ -129,8 +133,27 @@ func (c *claudeCode) run(ctx context.Context, twin *agent.Agent, msgs []*message
 }
 
 // call runs one claude -p, yielding the answer as it streams. sent reports
-// whether any of it reached yield.
+// whether any of it reached yield. The planner asks for an effort on every
+// run, so a Claude Code older than --effort would fail every run at its first
+// call: that one is asked again without it, and so is every later call.
 func (c *claudeCode) call(ctx context.Context, msgs []*message.Message, opts []agent.Option, yield func(*agent.ResponseUpdate, error) bool) (sent bool, err error) {
+	effort := claudeCodeEffort(opts)
+	if c.impl.noEffortFlag.Load() {
+		effort = ""
+	}
+	sent, err = c.callAt(ctx, msgs, opts, effort, yield)
+	if effort == "" || sent || err == nil || !strings.Contains(err.Error(), "unknown option '--effort'") {
+		return sent, err
+	}
+	if !c.impl.noEffortFlag.Swap(true) {
+		c.impl.log("this claude has no --effort; asking without it from now on (update Claude Code to set reasoning effort)")
+	}
+	return c.callAt(ctx, msgs, opts, "", yield)
+}
+
+// callAt is call at effort, "" for none.
+func (c *claudeCode) callAt(ctx context.Context, msgs []*message.Message, opts []agent.Option, effort string,
+	yield func(*agent.ResponseUpdate, error) bool) (sent bool, err error) {
 	args := []string{"-p",
 		// The binary with nothing of the user's loaded: no CLAUDE.md, hooks,
 		// MCP servers or plugins. --bare does the same but refuses the
@@ -141,6 +164,9 @@ func (c *claudeCode) call(ctx context.Context, msgs []*message.Message, opts []a
 		"--no-session-persistence", "--permission-prompts", "none",
 		"--model", c.model,
 		"--output-format", "stream-json", "--verbose", "--include-partial-messages"}
+	if effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	if sys := strings.Join(slices.Collect(agent.AllOptions(opts, agent.WithInstructions)), "\n"); sys != "" {
 		args = append(args, "--system-prompt", sys)
 	}

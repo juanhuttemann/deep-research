@@ -777,3 +777,167 @@ func TestStreamedReasoningReachesTheThinkingChannel(t *testing.T) {
 		t.Errorf("%d pieces marked first, want 1", starts)
 	}
 }
+
+// effortServer is an OpenAI-compatible double that keeps every request body
+// and refuses, as Gemini does "none", any request whose reasoning_effort is
+// refuse.
+type effortServer struct {
+	*httptest.Server
+	mu     sync.Mutex
+	bodies []map[string]any
+}
+
+func newEffortServer(t *testing.T, refuse string) *effortServer {
+	t.Helper()
+	s := &effortServer{}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		s.mu.Lock()
+		s.bodies = append(s.bodies, body)
+		s.mu.Unlock()
+		if refuse != "" && body["reasoning_effort"] == refuse {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400}}`)
+			return
+		}
+		if body["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"{\\\"claims\\\":[]}\"}}]}\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": `{"findings":[]}`}}},
+		})
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func (s *effortServer) body(i int) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i >= len(s.bodies) {
+		return nil
+	}
+	return s.bodies[i]
+}
+
+func (s *effortServer) requests() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.bodies)
+}
+
+// The effort rides in the same request parameters as stream_options: the
+// framework keeps only the last parameters option, so a separate one for the
+// effort dropped include_usage and every streamed phase's tokens with it.
+func TestEffortIsSentWithTheCallsOtherParameters(t *testing.T) {
+	srv := newEffortServer(t, "")
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test",
+		Effort: Effort{Analyze: "high", Search: "low"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if _, err := a.Summarize(ctx, "p"); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if _, err := a.ResearchDetail(ctx, "q", nil); err != nil {
+		t.Fatalf("ResearchDetail: %v", err)
+	}
+	usage := func(b map[string]any) any { so, _ := b["stream_options"].(map[string]any); return so["include_usage"] }
+	if b := srv.body(0); b["reasoning_effort"] != "high" || usage(b) != true {
+		t.Errorf("analyze sent effort %v, include_usage %v; want high and true", b["reasoning_effort"], usage(b))
+	}
+	if b := srv.body(1); b["reasoning_effort"] != nil || usage(b) != true {
+		t.Errorf("summarize, left to the provider, sent effort %v, include_usage %v", b["reasoning_effort"], usage(b))
+	}
+	if b := srv.body(2); b["reasoning_effort"] != "low" || b["response_format"] == nil {
+		t.Errorf("search sent effort %v, response_format %v; want low and JSON mode kept", b["reasoning_effort"], b["response_format"])
+	}
+}
+
+// Gemini refuses "none" with a 400. The request is asked again without the
+// effort, and once that worked the level is left out of every later request
+// instead of being refused on each.
+func TestRefusedEffortIsDroppedAndRemembered(t *testing.T) {
+	srv := newEffortServer(t, "none")
+	var mu sync.Mutex
+	var lines []string
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test", ModelCallRetries: 0,
+		Effort: Effort{Analyze: "none", FactCheck: "none"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.SetProgress(func(msg string) { mu.Lock(); lines = append(lines, msg); mu.Unlock() })
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if n := srv.requests(); n != 2 {
+		t.Fatalf("want the refused request and one without the effort, got %d requests", n)
+	}
+	if b := srv.body(1); b["reasoning_effort"] != nil || b["stream"] != true {
+		t.Errorf("the second request sent effort %v, stream %v", b["reasoning_effort"], b["stream"])
+	}
+	if _, err := a.FactCheck(ctx, "claims"); err != nil {
+		t.Fatalf("FactCheck: %v", err)
+	}
+	if n := srv.requests(); n != 3 || srv.body(2)["reasoning_effort"] != nil {
+		t.Errorf("a remembered refusal was sent again: %d requests, last effort %v", n, srv.body(2)["reasoning_effort"])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"refused reasoning effort none (Reasoning is mandatory", "effort none refused by the endpoint"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("progress lacks %q:\n%s", want, joined)
+		}
+	}
+}
+
+// A 400 about something else is not taken for a refused effort: it is not
+// asked again without it, and the effort stays on later requests.
+func TestOtherRefusalsKeepTheEffort(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"model test does not exist"}}`)
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test", ModelCallRetries: 0,
+		Effort: Effort{Analyze: "low"}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := a.Analyze(context.Background(), "p"); err == nil {
+		t.Fatal("want the 400 reported")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("an unrelated 400 was sent %d times", n)
+	}
+	if label := a.(*impl).effortLabel("low"); label != "effort low" {
+		t.Errorf("label = %q, want the effort still sent", label)
+	}
+}
+
+func TestParseEffort(t *testing.T) {
+	for in, want := range map[string]string{"": "", "default": "", " High ": "high", "none": "none", "xhigh": "xhigh"} {
+		if got, err := ParseEffort(in); err != nil || got != want {
+			t.Errorf("ParseEffort(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := ParseEffort("hgih"); err == nil || !strings.Contains(err.Error(), "want default, none") {
+		t.Errorf("a typo: err = %v", err)
+	}
+}

@@ -5,6 +5,21 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `reasoning_effort` sets how hard each phase's model reasons: `plan`,
+  `search`, `analyze`, `fact_check`, `summarize` and `chat`, each `default`
+  (send nothing), `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or
+  `max`, in `config.yaml` or as `DEEP_RESEARCH_REASONING_EFFORT_<PHASE>`.
+  Thinking was about 80% of every long model call in the runs measured, and
+  nothing could change it. The planner now asks for `low` and follow-up
+  questions for `medium`; the analysis, fact-check and report keep the
+  provider's default. Each pipeline call's progress line says the effort it
+  sent. A level the endpoint refuses (Gemini refuses `none`) is asked again
+  without it and dropped for the rest of the run, and Claude gets `low` for
+  `none` and `minimal`, since it cannot turn thinking off. Claude Code is
+  run without `CLAUDE_CODE_EFFORT_LEVEL`, which would override `--effort`.
+
 ## [0.16.0] - 2026-10-19
 
 ### Added

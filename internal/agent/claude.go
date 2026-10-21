@@ -30,7 +30,7 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 	// No JSON mode: the framework turns a schemaless one into an output format
 	// without a schema, which the Messages API rejects. The prompts ask for
 	// JSON and jsonPayloads repairs it, as it does for the analysis.
-	a.streamOpts = claudeStreamOpts
+	a.params, a.mapEffort = claudeParams, claudeEffort
 	var api newAgentFunc
 	if key := strings.TrimSpace(cfg.AnthropicAPIKey); key != "" {
 		api = a.anthropicAgents(cfg, key)
@@ -74,19 +74,6 @@ const (
 	streamedMaxTokens   = 64000
 )
 
-// claudeStreamOpts give a streamed call room for the report and the thinking
-// before it, and ask for the thinking's text: current models omit it unless
-// asked, and the long wait then shows nothing.
-//
-// ponytail: adaptive thinking is what 4.6 and later models accept; earlier
-// ones (Haiku 4.5) reject it, and need a model check to stream.
-var claudeStreamOpts = []agent.Option{anthropicprovider.MessageNewParams(anthropic.MessageNewParams{
-	MaxTokens: streamedMaxTokens,
-	Thinking: anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
-		Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,
-	}},
-})}
-
 // anthropicAgents builds agents on the Messages API, paid with key.
 func (a *impl) anthropicAgents(cfg Config, key string) newAgentFunc {
 	opts := []aoption.RequestOption{
@@ -95,7 +82,7 @@ func (a *impl) anthropicAgents(cfg Config, key string) newAgentFunc {
 		aoption.WithHTTPClient(providerHTTPClient()),
 		// Retry policy lives in impl.call; see connect.
 		aoption.WithMaxRetries(0),
-		aoption.WithMiddleware(a.sniffServedModel),
+		aoption.WithMiddleware(a.effortFallback, a.sniffServedModel),
 	}
 	if refusalFallback(cfg.AnthropicBaseURL, cfg.ClaudeModel) {
 		opts = append(opts, refusalFallbackOpts()...)

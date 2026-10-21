@@ -256,6 +256,47 @@ API: they reject adaptive thinking.
 | `run_timeout` | `30m` | the whole run, including search and scraping |
 | `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works |
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |
+| `reasoning_effort.<phase>` | see below | how hard each phase's model reasons: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
+
+### Reasoning effort
+
+| To | Set |
+| --- | --- |
+| speed up the fact-check for one run | `DEEP_RESEARCH_REASONING_EFFORT_FACT_CHECK=medium drsh -p "…"` |
+| make every run's analysis think harder | `reasoning_effort:` / `  analyze: high` in `config.yaml` |
+| go back to what the provider does | the phase's value `default` |
+| see what a run sent | the `analyze  <model> · effort …` lines: on stderr, in `--jsonl`, and in the `.json` timeline of an interactive or `--jsonl` run |
+
+Thinking is most of a run's time, and the phases need it unequally. The
+defaults:
+
+```yaml
+reasoning_effort:
+  plan: low          # writes the search queries
+  search: default    # only runs with no search engine, and then it writes the findings
+  analyze: default   # the claims and conclusions the answer rests on
+  fact_check: default
+  summarize: default # the report's prose below the Answer section
+  chat: medium       # `ask` and the page's follow-up questions
+```
+
+`default` sends nothing, so the provider decides, and providers decide
+differently: DeepSeek V4.1 Flash on OpenRouter reasons as much as at `high`,
+Claude Opus 5.5 defaults to `medium`. That is why analyze and fact-check are
+not set to one level for every provider. Each phase is its own key, so a
+`config.yaml` that names one phase keeps the others' defaults, and
+`DEEP_RESEARCH_REASONING_EFFORT_<PHASE>` (`PLAN`, `SEARCH`, `ANALYZE`,
+`FACT_CHECK`, `SUMMARIZE`, `CHAT`) overrides one from the environment. An
+empty variable changes nothing; write `default`. The repair pass uses the
+analyze and fact-check levels.
+
+What a provider does with a level is its own: an OpenAI-compatible endpoint
+is sent `reasoning_effort`, Claude `output_config.effort` (and `claude -p
+--effort`), and a model without reasoning ignores it. A level the endpoint
+refuses with a 400 about reasoning, as Gemini refuses `none`, is asked again
+without it, and left out for the rest of the run once that worked; the run
+says so. Claude cannot turn thinking off, so it is sent `low` for `none` and
+`minimal`. `drsh doctor` does not check effort.
 
 Every `config.yaml` key can also be set from the environment as
 `DEEP_RESEARCH_<KEY>` in uppercase — `DEEP_RESEARCH_SOURCES_PER_TOPIC=9`, `DEEP_RESEARCH_PARALLELISM=6` — and the
