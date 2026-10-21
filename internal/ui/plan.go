@@ -42,7 +42,10 @@ type SubTopic = agent.SubTopic
 // Plan is the full research brief: the question, the depth tier, the derived
 // source budget and the ordered sub-topics that will run as sub-agents.
 type Plan struct {
-	Question   string     `json:"question"`
+	Question string `json:"question"`
+	// Asked is the question as typed, kept when the planner fixed a typo in
+	// it, so the brief can show what was changed before the run is launched.
+	Asked      string     `json:"asked,omitempty"`
 	Depth      DepthMode  `json:"depth"`
 	MaxSources int        `json:"max_sources"`
 	SubTopics  []SubTopic `json:"sub_topics"`
@@ -133,6 +136,9 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	}
 	plan := PlanFor(p.Question, depth, topics, p.PinnedPerTopic)
 	plan.Domains = domains
+	// The browser hands back the plan it reviewed, typed question included,
+	// so a run of it still reports what the planner corrected.
+	plan.Asked = strings.TrimSpace(p.Asked)
 	return plan, nil
 }
 
@@ -158,9 +164,16 @@ func NewPlanner(a agent.Assistant, depth DepthMode) *Planner {
 
 // Plan generates the plan for question, applying the configured depth tier.
 func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
-	topics, err := pl.Assistant.Plan(ctx, question, pl.Depth.SubTopics)
+	// A question pasted over two lines kept its line break into the report's
+	// title.
+	question = strings.Join(strings.Fields(question), " ")
+	out, err := pl.Assistant.Plan(ctx, question, pl.Depth.SubTopics)
 	if err != nil {
 		return nil, err
+	}
+	topics, asked := out.SubTopics, ""
+	if out.Question != "" {
+		question, asked = out.Question, question
 	}
 	// Nothing to research: running on would still spend three model calls on
 	// an empty findings list and write a report about nothing.
@@ -177,6 +190,7 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	trimSharedSubject(question, topics)
 	return &Plan{
 		Question:   question,
+		Asked:      asked,
 		Depth:      pl.Depth,
 		MaxSources: pl.MaxSourcesFor(len(topics)),
 		SubTopics:  topics,

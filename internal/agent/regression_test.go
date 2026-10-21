@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,7 +36,8 @@ func TestMalformedOutputDoesNotInventResearch(t *testing.T) {
 			t.Errorf("%q invented findings: %+v", out, got)
 		}
 		a := &impl{plan: func(context.Context, string) (string, error) { return out, nil }}
-		got, err := a.Plan(context.Background(), "original question", 3)
+		out, err := a.Plan(context.Background(), "original question", 3)
+		got := out.SubTopics
 		if err != nil || len(got) != 1 || got[0].Name != "original question" || got[0].ID == "" {
 			t.Errorf("fallback must research original question: %+v, %v", got, err)
 		}
@@ -338,10 +340,11 @@ func TestStreamedPlanReportsProgressAndKeepsUsage(t *testing.T) {
 	var progress []string
 	a.SetProgress(func(msg string) { mu.Lock(); progress = append(progress, msg); mu.Unlock() })
 
-	topics, err := a.Plan(context.Background(), "question", 3)
+	out, err := a.Plan(context.Background(), "question", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
+	topics := out.SubTopics
 	if !streamed.Load() {
 		t.Error("planning call was not streamed, so nothing can be reported while it runs")
 	}
@@ -1221,5 +1224,48 @@ func TestSilentStreamIsADeadlineNotACancel(t *testing.T) {
 	}
 	if n := requests.Load(); n != 2 {
 		t.Errorf("want one silent attempt and one retry, got %d requests", n)
+	}
+}
+
+// A typo in the question ("overalll") titled the report, its files and the
+// history entry. The planner now returns the question with typos fixed, and
+// only a word-for-word spelling fix is taken: an edit bound on the whole
+// question let a "fix" drop "not" or change a version, and the run would
+// research something the reader never asked.
+func TestPlannerFixesTyposButNotTheQuestion(t *testing.T) {
+	asked := "Best cloud storage provider for personal files\noveralll"
+	for _, c := range []struct{ proposed, want string }{
+		{"Best cloud storage provider for personal files overall", "Best cloud storage provider for personal files overall"},
+		{"Best cloud storage provider for personal files overalll", ""},
+		{"Which cloud storage provider has the lowest price per terabyte for families?", ""},
+		{"", ""},
+	} {
+		checkFix(t, asked, c.proposed, c.want)
+	}
+	for asked, proposed := range map[string]string{
+		"Which drugs are not safe during pregnancy?": "Which drugs are safe during pregnancy?",
+		"Compare Go 1.26 and Rust":                   "Compare Go 1.25 and Rust",
+		"Is Go 1.26 faster":                          "Is Go 126 faster",
+		"Is 10.00 mg a safe dose":                    "Is 1000 mg a safe dose",
+		"Why is -1000 smaller":                       "Why is 1000 smaller",
+		"Is it safe to fly now":                      "Is it safe to fly not",
+		"What is best way to learn Go":               "What is the best way to learn Go",
+	} {
+		checkFix(t, asked, proposed, "")
+	}
+	checkFix(t, "Waht is the bset cloud stoarge?", "What is the best cloud storage?", "What is the best cloud storage?")
+}
+
+// checkFix plans asked with a planner that proposes proposed as its fix.
+func checkFix(t *testing.T, asked, proposed, want string) {
+	t.Helper()
+	out := `{"question":` + strconv.Quote(proposed) + `,"subtopics":[{"name":"Pricing"}]}`
+	a := &impl{plan: func(context.Context, string) (string, error) { return out, nil }}
+	got, err := a.Plan(context.Background(), asked, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Question != want {
+		t.Errorf("%q fixed as %q: question = %q, want %q", asked, proposed, got.Question, want)
 	}
 }

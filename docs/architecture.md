@@ -19,6 +19,9 @@ analyzes once more only if they found evidence. It never repeats.
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
 each phase. The planner writes, for each sub-topic and in the question's
 language, a keyword search query and the terms a relevant page must mention.
+It also returns the question with its typos fixed (`agent.Outline.Question`);
+`agent` takes it only when it is a word-for-word spelling fix, and the
+`Plan` then carries the fix as its question and the original as `asked`.
 A sub-agent searches the planner's query first; if that does not fill the
 branch's source budget, it falls back to the research question plus its own
 facet. Both searches rank results by the branch's terms, and results that

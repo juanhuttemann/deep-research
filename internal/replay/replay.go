@@ -10,6 +10,7 @@
 package replay
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -94,12 +95,17 @@ func Record(a agent.Assistant, question, mode string, sources int) *Recorder {
 	return &Recorder{Assistant: a, trace: Trace{Version: 1, Question: question, Mode: mode, Sources: sources}}
 }
 
-func (r *Recorder) Plan(ctx context.Context, question string, n int) ([]agent.SubTopic, error) {
-	subs, err := r.Assistant.Plan(ctx, question, n)
+func (r *Recorder) Plan(ctx context.Context, question string, n int) (agent.Outline, error) {
+	out, err := r.Assistant.Plan(ctx, question, n)
 	r.mu.Lock()
-	r.trace.Plan = subs
+	r.trace.Plan = out.SubTopics
+	// A replay or resume runs the trace's question, so it is the one this
+	// run searched: the planner's fix, else the question as the planner was
+	// handed it, on one line. The line breaks of the question as typed
+	// changed every fallback query, and a replay found none of them.
+	r.trace.Question = cmp.Or(out.Question, question)
 	r.mu.Unlock()
-	return subs, err
+	return out, err
 }
 
 func (r *Recorder) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
@@ -371,8 +377,8 @@ func Play(live agent.Assistant, t *Trace) *Player {
 	return p
 }
 
-func (p *Player) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
-	return p.trace.Plan, nil
+func (p *Player) Plan(context.Context, string, int) (agent.Outline, error) {
+	return agent.Outline{SubTopics: p.trace.Plan}, nil
 }
 
 // Analyze runs the live analysis. The first one's follow-up queries are

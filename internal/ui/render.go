@@ -558,10 +558,17 @@ func (r *Renderer) nameColCap() int {
 }
 
 func (r *Renderer) briefHead() []string {
-	return []string{
+	head := []string{
 		r.heading("RESEARCH BRIEF", ""),
 		r.rule(),
 		"  " + r.T.bold(r.plan.Question),
+	}
+	// The fixed question titles the report and its files, so the reader sees
+	// what was changed while [q] can still stop the run.
+	if r.plan.Asked != "" {
+		head = append(head, "  "+r.T.dim("typed as: "+r.plan.Asked))
+	}
+	return append(head,
 		"",
 		// The per-sub-agent figure is what the reader asked for with --sources
 		// and what each branch actually gets, so a run budget that reduced the
@@ -571,8 +578,8 @@ func (r *Renderer) briefHead() []string {
 			r.T.dim("max sources"), r.plan.MaxSources,
 			r.T.dim("per sub-agent"), r.plan.PerTopic()),
 		"",
-		"  " + r.T.dim("planned sub-topics"),
-	}
+		"  "+r.T.dim("planned sub-topics"),
+	)
 }
 
 // briefFoot carries the key hints, the only thing that says how to start the

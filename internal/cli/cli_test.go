@@ -246,7 +246,7 @@ type deadlineRecorder struct {
 	budget time.Duration
 }
 
-func (d *deadlineRecorder) Plan(ctx context.Context, q string, subTopics int) ([]agent.SubTopic, error) {
+func (d *deadlineRecorder) Plan(ctx context.Context, q string, subTopics int) (agent.Outline, error) {
 	if dl, ok := ctx.Deadline(); ok {
 		d.budget = time.Until(dl)
 	}
@@ -269,8 +269,8 @@ func (stub) Summarize(context.Context, string) (*agent.Summary, error) {
 	return &agent.Summary{Report: "stub report", Executive: "stub", Confidence: "low"}, nil
 }
 
-func (stub) Plan(_ context.Context, question string, _ int) ([]agent.SubTopic, error) {
-	return []agent.SubTopic{{ID: "1", Name: question}}, nil
+func (stub) Plan(_ context.Context, question string, _ int) (agent.Outline, error) {
+	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: question}}}, nil
 }
 
 func (stub) ResearchDetail(_ context.Context, query string, _ []string) (*agent.ResearchDetail, error) {
@@ -346,10 +346,10 @@ type blockingPlan struct {
 	started chan struct{}
 }
 
-func (b blockingPlan) Plan(ctx context.Context, _ string, _ int) ([]agent.SubTopic, error) {
+func (b blockingPlan) Plan(ctx context.Context, _ string, _ int) (agent.Outline, error) {
 	close(b.started)
 	<-ctx.Done()
-	return nil, ctx.Err()
+	return agent.Outline{}, ctx.Err()
 }
 
 // A launch from the page must end on a done line like any --jsonl run, and
@@ -393,8 +393,8 @@ type handedPlan struct {
 	queries *[]string
 }
 
-func (h handedPlan) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
-	return nil, errors.New("planned again")
+func (h handedPlan) Plan(context.Context, string, int) (agent.Outline, error) {
+	return agent.Outline{}, errors.New("planned again")
 }
 
 func (h handedPlan) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
@@ -553,8 +553,8 @@ type stopsAt struct {
 	cancel context.CancelFunc
 }
 
-func (s *stopsAt) Plan(context.Context, string, int) ([]agent.SubTopic, error) {
-	return []agent.SubTopic{{ID: "1", Name: "Alpha"}, {ID: "2", Name: "Beta"}, {ID: "3", Name: "Gamma"}}, nil
+func (s *stopsAt) Plan(context.Context, string, int) (agent.Outline, error) {
+	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}, {ID: "2", Name: "Beta"}, {ID: "3", Name: "Gamma"}}}, nil
 }
 
 func (s *stopsAt) ResearchDetail(ctx context.Context, q string, terms []string) (*agent.ResearchDetail, error) {
