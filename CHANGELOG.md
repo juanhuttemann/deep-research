@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-21
+
 ### Fixed
 
 - A run warned that its PDF had replaced characters with "?", over one
@@ -1020,7 +1022,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/juanhuttemann/deep-research/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/juanhuttemann/deep-research/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/juanhuttemann/deep-research/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/juanhuttemann/deep-research/compare/v0.16.0...v0.17.0
