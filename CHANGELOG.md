@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-21
+
 ### Added
 
 - The planner fixes misspelled words in the question, which titled the
@@ -989,7 +991,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/juanhuttemann/deep-research/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/juanhuttemann/deep-research/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/juanhuttemann/deep-research/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/juanhuttemann/deep-research/compare/v0.15.0...v0.15.1
