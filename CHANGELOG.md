@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-22
+
 ### Added
 
 - `drsh update` and `update --check` print "What's new:": the changelog
@@ -1042,7 +1044,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/juanhuttemann/deep-research/compare/v0.18.2...v0.19.0
 [0.18.2]: https://github.com/juanhuttemann/deep-research/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/juanhuttemann/deep-research/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/juanhuttemann/deep-research/compare/v0.17.0...v0.18.0
