@@ -159,11 +159,14 @@ when OpenRouter retires it. Two consequences:
   response's `model` field.
 - Free models are capped per minute and per UTC day, and the daily ceiling
   depends on credits bought. A run is a handful of requests, not tokens:
-  plan, analyze, fact-check and summarize — 4–7 with web search, including
-  optional reanalysis, repair and revision checking. LLM search adds up to
-  2 queries per sub-topic and per follow-up. Worst-case totals are quick 19,
-  standard 21 and deep 25 before retries.
-  `drsh doctor` prints these worst-case budgets (7 with web
+  plan, analyze, fact-check and summarize — 4–13 with web search, including
+  optional reanalysis, repair and revision checking. The fact-check
+  runs as parallel calls: one per share of six or more claims, at most four,
+  and one per four recommendations and conclusions, at most three, so a run
+  with many of both spends up to seven requests on it at once. LLM search
+  adds up to 2 queries per sub-topic and per follow-up. Worst-case totals are
+  quick 25, standard 27 and deep 31 before retries.
+  `drsh doctor` prints these worst-case budgets (13 with web
   search) and, for an OpenRouter key, its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
   it names; the daily cap (`free-models-per-day`) fails at once with a
   message instead of burning the retries on a limit that clears only at

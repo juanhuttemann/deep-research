@@ -2163,7 +2163,9 @@ type thinkingDuringAnalyze struct {
 	think func(string, bool)
 }
 
-func (s *thinkingDuringAnalyze) SetThinking(f func(string, bool)) { s.think = f }
+func (s *thinkingDuringAnalyze) SetThinking(f func(string, string, bool)) {
+	s.think = func(text string, first bool) { f(text, "", first) }
+}
 
 func (s *thinkingDuringAnalyze) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
 	if s.think != nil {

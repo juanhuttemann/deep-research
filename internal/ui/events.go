@@ -43,8 +43,9 @@ const (
 	Error EventType = "error"
 	// Thinking is a streamed call's reasoning: Detail holds what arrived
 	// since the last one, so the events of a call joined are its whole
-	// reasoning, and Status is "start" on a call's first. The transient
-	// status carries only the latest of it, a window too short to follow.
+	// reasoning, and Status is "start" on a call's first. Part names the call
+	// when a phase runs as several at once. The transient status carries
+	// only the latest of it, a window too short to follow.
 	Thinking EventType = "thinking"
 	// PlanReady carries the plan the driver is about to run, whole: what was
 	// confirmed in the brief, or handed in with --plan. A caller can keep it,
@@ -100,6 +101,9 @@ type Event struct {
 	Progress int    `json:"progress,omitempty"`
 	// Line is the latest status line shown under a sub-agent node.
 	Line string `json:"line,omitempty"`
+	// Part names the call a Thinking event's reasoning belongs to when a phase
+	// runs as several calls at once, such as "claims 1-7" of the fact-check.
+	Part string `json:"part,omitempty"`
 	// Transient marks progress that replaces the previous status rather than
 	// adding to the history. The live frame shows only the latest; JSONL and
 	// the exported timeline keep every one.

@@ -124,7 +124,7 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	}
 	for i := range a.Claims {
 		if c := &a.Claims[i]; c.Status != statusUnsourced {
-			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, fcErr, findings, pages)
+			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, uncheckedBy(fcErr, c.ID), findings, pages)
 		}
 	}
 	blockUnits(a, inferences)
@@ -167,6 +167,9 @@ func judge(vs []agent.Verdict, notRun bool, fcErr error, findings []agent.Findin
 		return statusInsufficient, reason
 	case len(pages) == 0:
 		return statusInsufficient, "no page was retrieved: the findings are the model's own recollection"
+	case len(vs) == 0 && fcErr != nil:
+		// Its share of a check run as several calls failed (see checkAll).
+		return statusInsufficient, "fact_check_unavailable: " + fcErr.Error()
 	case len(vs) == 0:
 		return statusInsufficient, "the fact-check gave no verdict for it"
 	case len(vs) > 1:
@@ -957,42 +960,6 @@ func acceptRevisions(a *agent.Analysis, rev *agent.Analysis) []string {
 		}
 	}
 	return added
-}
-
-// revisionCheckPrompt asks the fact-checker whether each revision follows
-// from its claims. It is given the claims the revisions cite and only the
-// pages those claims come from: the claims already have their verdicts, and
-// the question now is the inference.
-func revisionCheckPrompt(a *agent.Analysis, added []string, findings []agent.Finding) string {
-	cited := map[string]bool{}
-	for _, id := range added {
-		if u, ok := unitByID(a, id); ok {
-			for _, c := range u.r.Claims {
-				cited[c] = true
-			}
-		}
-	}
-	var claims []agent.Claim
-	urls := map[string]bool{}
-	for _, c := range a.Claims {
-		if cited[c.ID] {
-			claims = append(claims, c)
-			for _, u := range c.Sources {
-				urls[tools.CanonicalURL(u)] = true
-			}
-		}
-	}
-	var sb strings.Builder
-	writePremisePackets(&sb, a, added)
-	sb.WriteString("Claims:\n")
-	writeClaims(&sb, claims)
-	var pages []agent.Finding
-	for _, f := range findings {
-		if urls[tools.CanonicalURL(f.URL)] {
-			pages = append(pages, f)
-		}
-	}
-	return factCheckPrompt(sb.String(), pages, true, claims)
 }
 
 // judgeRevisions blocks each revision the check did not find following from

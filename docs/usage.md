@@ -219,8 +219,11 @@ replaced in place: how long it has waited for the model to start, then, for
 a reasoning model, how long it has been thinking with the latest of its
 reasoning wrapped in a few rows under the line, then progress in a unit that
 fits the phase — the part of the analysis being written and its claims so
-far, claims for the fact-check, words for the report — with the change since
-the last line, and "no new output for Ns" once the stream stops growing.
+far, statements judged for the fact-check, words for the report — with the
+change since the last line, and "no new output for Ns" once the stream stops
+growing. The fact-check runs as several calls at once, each with its own
+line naming its share ("fact-checking claims c1-c6", "fact-checking
+inferences k1-k4"), so the line shows whichever reported last.
 These lines are not added to the activity tail, so they cannot push the
 source lines out of it; `--jsonl` still carries every one
 (`"transient": true`).
@@ -265,7 +268,8 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   one a second: `detail` is the text added since the last one, line breaks
   kept, so the `detail`s joined are the whole reasoning, and `status` is
   `start` on each model call's first. They carry the `phase` like any other
-  event. Retries and which model is asked are `info` lines too,
+  event, and the fact-check's, whose calls run at once and interleave, carry
+  the call they belong to in `part` ("claims c1-c6", "inferences k1-k4"). Retries and which model is asked are `info` lines too,
   planning included. LLM-search calls are unstreamed: they emit a start line
   and can stay silent until the per-call timeout (doubled on retry). Search
   and scraping also have no periodic heartbeat; silence alone does not

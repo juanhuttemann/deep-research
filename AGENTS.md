@@ -26,7 +26,8 @@ requests, needs `OPENAI_API_KEY` in the environment; not part of the gate).
 `make eval-replay` runs the live fact-check and governance on the frozen
 analyses in `internal/ui/testdata/checker` and reports false approvals,
 blocks, accepts and rejects (`EVAL_REPEAT=n` to measure variance; spends one
-request per case and repeat; not part of the gate). Add a case there for
+request per fact-check call, two for most cases, per case and repeat; not
+part of the gate). Add a case there for
 each checker failure found in a real run.
 `./drsh -p "question"` to exercise the CLI (needs an API key).
 
@@ -61,8 +62,10 @@ invariants:
   (plans sub-topics, fans out parallel sub-agents, composes prompts).
   `internal/agent` talks to one model and parses its answers; it never
   decides what to ask or in what order. Don't move sequencing into agent.
-- Each assistant phase is a single model call; no multi-turn loops inside an
-  agent method. `agent.Chat` (`ask`, the page's follow-up questions) is not a
+- Each agent method is a single model call; no multi-turn loops inside an
+  agent method. The Driver may run one phase as several independent calls
+  at once (the fact-check's parts, see `ui/factcheck.go`), never as calls
+  that feed each other. `agent.Chat` (`ask`, the page's follow-up questions) is not a
   phase: it comes after the run, and the framework's tool loop runs its
   calls to tools that only read the run's saved `.json`. Keep its tools
   read-only and local; a question that needs new evidence is a new run.

@@ -7,7 +7,8 @@ package ui
 // change to the checker's prompt, the model or the governance is measured on
 // its own. A replay of a recorded run re-runs the analysis too, and two
 // replays then compare different claims and recommendations as much as two
-// checkers. It spends one model request per case and repeat, and runs only
+// checkers. It spends a model request per fact-check call (two for most
+// cases: the claims and the inferences), per case and repeat, and runs only
 // through `make eval-replay`, never in `make verify`.
 
 import (
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
@@ -64,9 +66,11 @@ func TestEvalChecker(t *testing.T) {
 			continue
 		}
 		for run := range repeat {
+			// The check's wall time, to compare how a change to it costs.
+			start := time.Now()
 			s, detail := evalCase(t.Context(), asst, c)
 			total = addScore(total, s)
-			t.Logf("%-20s run %d: %s%s", c.Name, run+1, s, detail)
+			t.Logf("%-20s run %d (%.1fs): %s%s", c.Name, run+1, time.Since(start).Seconds(), s, detail)
 		}
 	}
 	t.Logf("TOTAL over %d cases x %d: %s", len(cases), repeat, total)
@@ -77,7 +81,8 @@ func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalSco
 	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations),
 		Conclusions: slices.Clone(c.Conclusions)}
 	checkAnalysis(a, c.Findings)
-	fc, err := asst.FactCheck(ctx, factCheckPrompt(claimsToCheck(a), c.Findings, true, a.Claims))
+	// The check as a run makes it: split into parallel calls (see checkParts).
+	fc, err := checkAll(ctx, checkParts(a, c.Findings, true), asst.FactCheck)
 	if err != nil {
 		return evalScore{errors: 1}, " (" + err.Error() + ")"
 	}

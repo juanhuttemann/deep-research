@@ -293,9 +293,11 @@ func wireProgress(a agent.Assistant, emit func(Event)) {
 	if s, ok := a.(interface{ SetStatus(func(string)) }); ok {
 		s.SetStatus(func(msg string) { emit(Event{Type: Info, Detail: msg, Transient: true}) })
 	}
-	if s, ok := a.(interface{ SetThinking(func(string, bool)) }); ok {
-		s.SetThinking(func(text string, first bool) {
-			e := Event{Type: Thinking, Detail: text}
+	if s, ok := a.(interface {
+		SetThinking(func(string, string, bool))
+	}); ok {
+		s.SetThinking(func(text, part string, first bool) {
+			e := Event{Type: Thinking, Detail: text, Part: part}
 			if first {
 				e.Status = "start"
 			}
