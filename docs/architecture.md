@@ -2,11 +2,11 @@
 
 ## The pipeline
 
-A run is four phases, in order, with one bounded follow-up round inside
-analyze:
+A run is four phases, in order, with one bounded follow-up round closing
+research:
 
 ```
-research → analyze → [follow-up research → analyze] → fact-check → [repair → fact-check] → summarize
+research → [follow-ups → follow-up research] → analyze → fact-check → [repair → fact-check] → summarize
 ```
 
 Each agent method is a single model call. There are no multi-turn loops
@@ -25,10 +25,18 @@ kept. The calls run at once and their verdicts are merged; one that fails
 leaves only its share unchecked and the run's confidence low, and with no
 claim call answered the check did not run. The repair pass's recheck is one
 such inference call, for the revisions: their claims already have verdicts.
-The follow-up round is the Driver's: it searches the first three of the
-analysis's follow-up queries as extra sub-agents, each named by the analysis
-(a query given without a name is its own name), and analyzes once more only
-if they found evidence. It never repeats.
+
+The follow-up round is the Driver's. One call (`agent.FollowUps`, its own
+short `follow_up_instructions`) reads the findings and names the searches
+that would most improve the answer, and the Driver searches the first three
+as extra sub-agents, each named by that call (a query given without a name
+is its own name). The analysis then runs once, on everything found. The
+searches used to come from a whole first analysis, replaced by a second
+once their evidence was in, which put two full analyses on the critical
+path of nine runs in ten; the call that only names the searches reasons a
+tenth as long. A follow-up call that fails or names nothing leaves the
+analysis to what the first round found, and with search refusing queries
+it is not made. The round never repeats.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for

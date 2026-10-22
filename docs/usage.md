@@ -195,8 +195,8 @@ used, with the sub-topics the brief added, not the planner's first answer.
 It writes its report under `<reports>/replay/` so the
 original is not overwritten, and is not saved to the history. It spends
 model requests on analyze, fact-check and summarize only. Its follow-up
-round searches the recorded run's follow-up queries, not the ones the
-replayed analysis words, so both runs end on the same evidence; any other
+round searches the recorded run's follow-up queries without asking the
+model for new ones, so both runs end on the same evidence; any other
 search that was not recorded fails instead of searching live. Its
 sub-agents run one at a time: in parallel they race for pages several
 searches return, which changes the pages each counts and whether it runs its

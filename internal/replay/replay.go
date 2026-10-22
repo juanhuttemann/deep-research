@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 )
@@ -152,6 +152,15 @@ func (r *Recorder) Seed(t *Trace) {
 		}
 	}
 }
+
+func (r *Recorder) FollowUps(ctx context.Context, prompt string) ([]agent.FollowUpQuery, error) {
+	out, err := r.Assistant.FollowUps(ctx, prompt)
+	r.phase(followUpsPhase, prompt, out, err)
+	return out, err
+}
+
+// followUpsPhase names the recorded call that chose the follow-up searches.
+const followUpsPhase = "follow-ups"
 
 func (r *Recorder) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
 	out, err := r.Assistant.Analyze(ctx, prompt)
@@ -361,9 +370,8 @@ func (t *Trace) addPage(url, content string) string {
 // phases to the live assistant it wraps.
 type Player struct {
 	agent.Assistant
-	trace    *Trace
-	byQuery  map[string]Search
-	analyzed atomic.Bool
+	trace   *Trace
+	byQuery map[string]Search
 }
 
 // Play replays t, calling live only for the model phases.
@@ -381,34 +389,61 @@ func (p *Player) Plan(context.Context, string, int) (agent.Outline, error) {
 	return agent.Outline{SubTopics: p.trace.Plan}, nil
 }
 
-// Analyze runs the live analysis. The first one's follow-up queries are
-// replaced by the recorded first analysis's: the replayed analysis words its
-// own, which the recorded run never searched, and the follow-up round would
-// find nothing and end the replay on less evidence than the run it is
-// compared against.
-func (p *Player) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
-	a, err := p.Assistant.Analyze(ctx, prompt)
-	if err != nil || p.analyzed.Swap(true) {
-		return a, err
+// FollowUps are the recorded run's, and no model is asked: a live call words
+// its own searches, which the recorded run never made, and the follow-up
+// round would find nothing and end the replay on less evidence than the run
+// it is compared against.
+//
+// Only those the recorded run searched are served. A trace from before the
+// follow-up call took them from its first analysis; in a later trace whose
+// round did not run, the analysis's queries are suggestions for the reader
+// that no search ever made.
+func (p *Player) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	var qs []agent.FollowUpQuery
+	for _, q := range recordedFollowUps(p.trace) {
+		if p.searchedFollowUp(q.Query) {
+			qs = append(qs, q)
+		}
 	}
-	if recorded := recordedFollowUps(p.trace); recorded != nil {
-		a.FollowUp = recorded
-	}
-	return a, nil
+	return qs, nil
 }
 
-// recordedFollowUps are the follow-up queries of the recorded run's first
-// analysis, the ones its follow-up round searched.
-func recordedFollowUps(t *Trace) []string {
+// searchedFollowUp reports whether the recorded run searched query as a
+// follow-up. The Driver trims a query and clips it at a word to the search
+// length before searching, so the search recorded is query or a prefix of it
+// ending at a word. A follow-up has no relevance terms, and a planned
+// sub-topic's search almost always has them, so a planned search that
+// happens to begin a follow-up's words is not taken for it.
+func (p *Player) searchedFollowUp(query string) bool {
+	query = strings.TrimSpace(query)
+	for _, s := range p.trace.Searches {
+		if len(s.Terms) == 0 && s.Query != "" && (s.Query == query || strings.HasPrefix(query, s.Query+" ")) {
+			return true
+		}
+	}
+	return false
+}
+
+// recordedFollowUps are the searches the recorded run's follow-up round made:
+// the follow-up call's, or in a trace from before it, the first analysis's.
+func recordedFollowUps(t *Trace) []agent.FollowUpQuery {
 	for _, ph := range t.Phases {
-		if ph.Name != "analyze" {
-			continue
+		switch ph.Name {
+		case followUpsPhase:
+			var qs []agent.FollowUpQuery
+			_ = json.Unmarshal(ph.Output, &qs)
+			return qs
+		case "analyze":
+			var a agent.Analysis
+			if json.Unmarshal(ph.Output, &a) != nil {
+				return nil
+			}
+			qs := make([]agent.FollowUpQuery, 0, len(a.FollowUp))
+			for _, q := range a.FollowUp {
+				qs = append(qs, agent.FollowUpQuery{Name: a.FollowUpNames[q], Query: q})
+			}
+			return qs
 		}
-		var a agent.Analysis
-		if json.Unmarshal(ph.Output, &a) != nil {
-			return nil
-		}
-		return a.FollowUp
 	}
 	return nil
 }

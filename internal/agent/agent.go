@@ -40,6 +40,7 @@ import (
 // search+scrape tools; otherwise the search agent (LLM) is used.
 type Config struct {
 	AnalyzerInstructions    string
+	FollowUpInstructions    string
 	FactCheckerInstructions string
 	SummarizerInstructions  string
 	SearchInstructions      string
@@ -298,6 +299,10 @@ type Assistant interface {
 	// best-effort signal set. terms are what a relevant result must mention;
 	// fewer than two leave the engines' own ranking standing.
 	ResearchDetail(ctx context.Context, query string, terms []string) (*ResearchDetail, error)
+	// FollowUps names the searches that would most improve the answer, from
+	// the findings so far, before the analysis is written. The prompt is the
+	// analysis's own; the call only lists what the findings leave open.
+	FollowUps(ctx context.Context, prompt string) ([]FollowUpQuery, error)
 	// Analyze synthesizes findings into an answer.
 	Analyze(ctx context.Context, prompt string) (*Analysis, error)
 	// FactCheck verifies claims against the findings. The prompt is composed
@@ -449,6 +454,8 @@ func New(cfg Config) (Assistant, error) {
 	// A verdict opens with its status and an inference with follows. Counting
 	// "claim", which only a verdict split out of prose carries, read "0 claims
 	// checked" through a whole check that ended with 22 verdicts.
+	impl.followUps = newRunStreaming(newAgent("follow_up", cfg.FollowUpInstructions, nil), cfg.Effort.Analyze,
+		"choosing follow-up searches", entriesUnit("search", "searches", "query"))
 	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), cfg.Effort.FactCheck,
 		"fact-checking", entriesUnit("judged", "judged", "status", "follows"))
 	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), cfg.Effort.Summarize,
@@ -580,6 +587,7 @@ type impl struct {
 	tokens      atomic.Int64
 	search      runFunc
 	analyzer    runFunc
+	followUps   runFunc
 	factCheck   runFunc
 	summarizer  runFunc
 	plan        runFunc
@@ -1493,6 +1501,39 @@ func (a *impl) ResearchDetail(ctx context.Context, query string, terms []string)
 		signals[i] = SourceSignal{URL: f.URL, Domain: tools.DomainOf(f.URL), Status: "unverified"}
 	}
 	return &ResearchDetail{Findings: findings, Signals: signals}, nil
+}
+
+// FollowUpQuery is a search the findings so far call for, and the few words
+// that name it on screen while it runs.
+type FollowUpQuery struct {
+	Name  string `json:"name,omitempty"`
+	Query string `json:"query"`
+}
+
+// FollowUps asks for the searches alone. A whole analysis written only for
+// them took 40 seconds and 55 thousand characters of reasoning on a Go
+// question's findings, then was discarded once the follow-up evidence came
+// in; this call took 13 seconds and 4 thousand on the same findings. An answer
+// that does not parse is no follow-up, not a failed run.
+func (a *impl) FollowUps(ctx context.Context, prompt string) ([]FollowUpQuery, error) {
+	a.log(fmt.Sprintf("%-10s  %s · %s", "follow-up", a.model, a.effortLabel(a.effort.Analyze)))
+	out, err := a.followUps(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+	m, ok := parseJSONObject(out)
+	if !ok {
+		a.log(fmt.Sprintf("the follow-up searches did not parse (%d characters): %q", len(out), clip(strings.TrimSpace(out), 200)))
+		return nil, nil
+	}
+	names := followUpNames(m)
+	var qs []FollowUpQuery
+	for _, raw := range followUps(m) {
+		if q := strings.TrimSpace(raw); q != "" {
+			qs = append(qs, FollowUpQuery{Name: strings.TrimSpace(names[raw]), Query: q})
+		}
+	}
+	return qs, nil
 }
 
 func (a *impl) Analyze(ctx context.Context, prompt string) (*Analysis, error) {

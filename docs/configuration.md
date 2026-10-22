@@ -159,8 +159,8 @@ when OpenRouter retires it. Two consequences:
   response's `model` field.
 - Free models are capped per minute and per UTC day, and the daily ceiling
   depends on credits bought. A run is a handful of requests, not tokens:
-  plan, analyze, fact-check and summarize — 4–13 with web search, including
-  optional reanalysis, repair and revision checking. The fact-check
+  plan, follow-ups, analyze, fact-check and summarize — 4–13 with web
+  search, including optional repair and revision checking. The fact-check
   runs as parallel calls: one per share of six or more claims, at most four,
   and one per four recommendations and conclusions, at most three, so a run
   with many of both spends up to seven requests on it at once. LLM search
