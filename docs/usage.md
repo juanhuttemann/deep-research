@@ -310,7 +310,11 @@ as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question, `--mode` and `--sources` (as "Pages per topic"), and Search: the
 web, or "Only these sites", which opens a box for the list (`--domains`)
-and keeps the last one typed. The run then opens with a checklist of the
+and keeps the last one typed. The empty question box shows an example, and
+Tab takes it as the question: a hot question from Stack Exchange's space,
+history or physics site, which the browser fetches from
+`api.stackexchange.com` on each load, or one of ten built-in ones until
+that answers or when it cannot. The run then opens with a checklist of the
 sites, each marked usable, from snippets only, or dropped with the reason,
 and the plan review shows them. Research makes the plan first (the same
 as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
@@ -639,6 +643,10 @@ as the install scripts check it, and the new binary must run and report the
 expected `--version` before it replaces the old one; any failure leaves the
 installed binary untouched. It reads no config and needs no API key.
 `--check` changes nothing.
+
+Both print "What's new:", the changelog entries of the releases between
+yours and the latest, read from that release's `CHANGELOG.md`. When the
+changelog cannot be read the update goes ahead without it.
 
 It needs write access to the binary's directory: a root install in
 `/usr/local/bin` needs `sudo drsh update`. A binary built from

@@ -69,4 +69,4 @@ case ":$PATH:" in
 esac
 
 echo "installed $bin_dir/drsh"
-echo "next: drsh init, then put your API key in .env"
+echo "next: drsh setup"

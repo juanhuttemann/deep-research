@@ -417,7 +417,7 @@ mark { background: var(--yellow); color: var(--bg); }
     <form id="launch" class="composer">
       <div class="prompt">
         <label for="q" class="prompt-label">research ▸</label>
-        <textarea id="q" placeholder="heat pump or gas furnace for a house in a cold climate?" required></textarea>
+        <textarea id="q" required></textarea>
       </div>
       <div class="composer-bar">
         <span class="group"><span class="k">depth</span>
@@ -443,7 +443,7 @@ mark { background: var(--yellow); color: var(--bg); }
         <p id="domains-note" class="note" hidden>Separate sites with commas. Each is checked before research starts; one that can't be searched or read is skipped.</p>
       </div>
     </form>
-    <p class="hint">[enter] research   [shift+enter] new line</p>
+    <p class="hint">[enter] research   [shift+enter] new line   [tab] use the example</p>
     <dl id="setup-list" class="setup-list" hidden></dl>
     <p id="msg" class="form-msg" role="alert"></p>
     <div id="stopped-wrap" hidden>
@@ -1535,8 +1535,32 @@ $("domains").addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("launch").requestSubmit(); }
 });
 showScope();
+// The example question is a real one: a hot question on a Stack Exchange
+// site, whose titles come HTML-escaped. Until it arrives, or when it
+// cannot, it is one of these, so a stalled request never leaves Tab nothing.
+const examples = [
+  "how close are we to a room-temperature superconductor?",
+  "is there life in the oceans of Europa or Enceladus?",
+  "how did the Antikythera mechanism work?",
+  "could a light sail reach Proxima Centauri within a lifetime?",
+  "what killed the dinosaurs: the asteroid or the Deccan Traps?",
+  "how do octopuses think with most of their neurons in their arms?",
+  "when could a quantum computer break RSA-2048?",
+  "what is inside a neutron star?",
+  "how did Polynesian navigators find islands without instruments?",
+  "can de-extinction bring back the woolly mammoth?",
+];
+const pick = list => list[Math.floor(Math.random() * list.length)];
+$("q").placeholder = pick(examples);
+fetch("https://api.stackexchange.com/2.3/questions?order=desc&sort=hot&pagesize=30&site=" + pick(["space", "history", "physics"]))
+  .then(r => r.json())
+  .then(d => { $("q").placeholder = new DOMParser().parseFromString(pick(d.items).title, "text/html").body.textContent; })
+  .catch(() => {});
 $("q").addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("launch").requestSubmit(); }
+  // Tab takes the example, as a shell completes a command. Once something
+  // is typed, Tab moves focus as usual, so the box never traps it.
+  if (ev.key === "Tab" && !ev.shiftKey && !ev.isComposing && !$("q").value && $("q").placeholder) { ev.preventDefault(); $("q").value = $("q").placeholder; }
 });
 $("cancel").onclick = async () => {
   $("cancel").disabled = true;

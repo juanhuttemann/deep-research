@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,9 +46,29 @@ func TestVerifyVersionReadsTheCandidatesVersion(t *testing.T) {
 	}
 }
 
+// releaseChangelog is the CHANGELOG.md the test release ships: the release
+// being installed, one already installed, and work not released yet.
+const releaseChangelog = `# Changelog
+
+## [Unreleased]
+
+- not released yet
+
+## [0.6.0] - 2026-10-21
+
+### Added
+
+- the new thing
+
+## [0.5.0] - 2026-10-01
+
+- the installed thing
+`
+
 // newFullReleaseServer is a repository whose latest release is tag, with the
-// linux/amd64 archive holding body, and records how many archives it served.
-func newFullReleaseServer(t *testing.T, tag, body string) (*httptest.Server, *int) {
+// linux/amd64 archive holding body and changelog as its CHANGELOG.md (none
+// when empty), and records how many archives it served.
+func newFullReleaseServer(t *testing.T, tag, body, changelog string) (*httptest.Server, *int) {
 	t.Helper()
 	archive := tarGz(t, "drsh", body)
 	downloads := 0
@@ -56,6 +77,10 @@ func newFullReleaseServer(t *testing.T, tag, body string) (*httptest.Server, *in
 		case r.URL.Path == "/releases/latest":
 			w.Header().Set("Location", "/releases/tag/"+tag)
 			w.WriteHeader(http.StatusFound)
+		case r.URL.Path == "/raw/"+tag+"/CHANGELOG.md" && changelog != "":
+			_, _ = io.WriteString(w, changelog)
+		case path.Base(r.URL.Path) == "CHANGELOG.md":
+			http.NotFound(w, r)
 		case path.Base(r.URL.Path) == checksumsName:
 			fmt.Fprintf(w, "%x  deep-research_linux_amd64.tar.gz\n", sha256.Sum256(archive))
 		default:
@@ -75,14 +100,15 @@ func updateWith(t *testing.T, srv *httptest.Server, current, version string, che
 }
 
 func TestUpdateInstallsANewerRelease(t *testing.T) {
-	srv, _ := newFullReleaseServer(t, "v0.6.0", "new")
+	srv, _ := newFullReleaseServer(t, "v0.6.0", "new", releaseChangelog)
 	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o755)
 	got, err := updateWith(t, srv, current, "0.5.0", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Result{Current: "v0.5.0", Latest: "v0.6.0", State: UpgradeAvailable, Updated: true}
+	want := Result{Current: "v0.5.0", Latest: "v0.6.0", State: UpgradeAvailable, Updated: true,
+		Notes: "## [0.6.0] - 2026-10-21\n\n### Added\n\n- the new thing"}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
@@ -92,7 +118,7 @@ func TestUpdateInstallsANewerRelease(t *testing.T) {
 }
 
 func TestUpdateCheckChangesNothing(t *testing.T) {
-	srv, downloads := newFullReleaseServer(t, "v0.6.0", "new")
+	srv, downloads := newFullReleaseServer(t, "v0.6.0", "new", releaseChangelog)
 	got, err := updateWith(t, srv, "", "0.5.0", true)
 	if err != nil {
 		t.Fatal(err)
@@ -100,14 +126,29 @@ func TestUpdateCheckChangesNothing(t *testing.T) {
 	if got.State != UpgradeAvailable || got.Updated || got.Latest != "v0.6.0" {
 		t.Errorf("got %+v, want an available, uninstalled v0.6.0", got)
 	}
+	if !strings.Contains(got.Notes, "the new thing") {
+		t.Errorf("--check notes %q, want what v0.6.0 brings", got.Notes)
+	}
 	if *downloads != 0 {
 		t.Errorf("--check downloaded %d archive(s)", *downloads)
 	}
 }
 
+// The notes are a courtesy: a release whose changelog cannot be read is
+// still installed, only without them.
+func TestUpdateInstallsWithoutItsChangelog(t *testing.T) {
+	srv, _ := newFullReleaseServer(t, "v0.6.0", "new", "")
+	current := filepath.Join(t.TempDir(), "drsh")
+	writeFile(t, current, "old", 0o755)
+	got, err := updateWith(t, srv, current, "0.5.0", false)
+	if err != nil || !got.Updated || got.Notes != "" {
+		t.Errorf("got %+v, %v; want v0.6.0 installed with no notes", got, err)
+	}
+}
+
 func TestUpdateNeverDowngrades(t *testing.T) {
 	for version, state := range map[string]State{"0.6.0": UpToDate, "0.7.0": NewerInstalled} {
-		srv, downloads := newFullReleaseServer(t, "v0.6.0", "new")
+		srv, downloads := newFullReleaseServer(t, "v0.6.0", "new", releaseChangelog)
 		got, err := updateWith(t, srv, "", version, false)
 		if err != nil || got.State != state || got.Updated || *downloads != 0 {
 			t.Errorf("%s: got %+v, %v, %d download(s); want %v and nothing installed",
@@ -122,7 +163,7 @@ func TestUpdateSurvivesAFailedDirectorySync(t *testing.T) {
 	orig := syncDirectory
 	syncDirectory = func(string) error { return errors.New("input/output error") }
 	t.Cleanup(func() { syncDirectory = orig })
-	srv, _ := newFullReleaseServer(t, "v0.6.0", "new")
+	srv, _ := newFullReleaseServer(t, "v0.6.0", "new", releaseChangelog)
 	current := filepath.Join(t.TempDir(), "drsh")
 	writeFile(t, current, "old", 0o755)
 	got, err := updateWith(t, srv, current, "0.5.0", false)

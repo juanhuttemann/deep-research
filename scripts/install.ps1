@@ -51,4 +51,4 @@ if (($env:Path -split ';') -notcontains $dir) {
 }
 
 Write-Host "installed $dir\drsh.exe"
-Write-Host "next: drsh init, then put your API key in .env"
+Write-Host "next: drsh setup"
