@@ -9,11 +9,26 @@ analyze:
 research → analyze → [follow-up research → analyze] → fact-check → [repair → fact-check] → summarize
 ```
 
-Each assistant phase is a single model call. There are no multi-turn loops
-inside an agent method. The follow-up round is the Driver's: it searches the
-first three of the analysis's follow-up queries as extra sub-agents, each
-named by the analysis (a query given without a name is its own name), and
-analyzes once more only if they found evidence. It never repeats.
+Each agent method is a single model call. There are no multi-turn loops
+inside an agent method. The fact-check is the one phase the Driver runs as
+several calls at once (`ui/factcheck.go`): it is the longest call of a run,
+and nearly all of it is the model reasoning through each claim in turn, so
+its time grows with the claims it is given. The claims are split into at
+most four shares of six or more, each judged in its own call against every
+finding (a claim can be contradicted by any applicable page, not only by the
+ones it cites), and the recommendations and conclusions are judged against
+their premises alone, with no findings, up to four to a call and in at most
+three calls. Each claim call sees every page excerpted by all the claims, as
+one call would, so a passage another share's claim matched can still
+contradict one of its own; and only its judgements of what it was asked are
+kept. The calls run at once and their verdicts are merged; one that fails
+leaves only its share unchecked and the run's confidence low, and with no
+claim call answered the check did not run. The repair pass's recheck is one
+such inference call, for the revisions: their claims already have verdicts.
+The follow-up round is the Driver's: it searches the first three of the
+analysis's follow-up queries as extra sub-agents, each named by the analysis
+(a query given without a name is its own name), and analyzes once more only
+if they found evidence. It never repeats.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
@@ -81,8 +96,9 @@ r2, ...) are governed alike; "recommendation" below means either. The Driver hol
   one analyzer call revises the blocked ones from the supported claims only
   (`repairPrompt`); code drops a revision that cites any other claim
   (`acceptRevisions`) and keeps only the first valid replacement per blocked
-  ID; one fact-check call judges whether each revision follows, given only
-  the pages its claims cite. An approved revision takes
+  ID; one fact-check call judges whether each revision follows from the
+  claims it names, given those claims as premises and no pages: their
+  verdicts are already in. An approved revision takes
   its original's place in the answer; the original stays, blocked.
 - What the fact-check sees: each page excerpted by the claims under check,
   those citing it first, then the others (`tools.ExcerptFor`), so a

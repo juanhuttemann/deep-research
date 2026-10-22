@@ -757,7 +757,9 @@ func TestStreamedReasoningReachesTheThinkingChannel(t *testing.T) {
 		pieces []string
 		starts int
 	)
-	a.(interface{ SetThinking(func(string, bool)) }).SetThinking(func(text string, first bool) {
+	a.(interface {
+		SetThinking(func(string, string, bool))
+	}).SetThinking(func(text, _ string, first bool) {
 		mu.Lock()
 		defer mu.Unlock()
 		pieces = append(pieces, text)
@@ -775,6 +777,51 @@ func TestStreamedReasoningReachesTheThinkingChannel(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Errorf("%d pieces marked first, want 1", starts)
+	}
+}
+
+// The Driver runs the fact-check as several calls at once. Their reasoning
+// and status interleave, and only the part each carries keeps one call's
+// reasoning apart from another's.
+func TestPartLabelsEachParallelCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning\":\"Weigh c3\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{\\\"verdicts\\\":[]}\"},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "m", ModelCallTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		mu       sync.Mutex
+		parts    []string
+		statuses []string
+	)
+	a.(interface {
+		SetThinking(func(string, string, bool))
+	}).SetThinking(func(_, part string, _ bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		parts = append(parts, part)
+	})
+	a.(interface{ SetStatus(func(string)) }).SetStatus(func(msg string) {
+		mu.Lock()
+		defer mu.Unlock()
+		statuses = append(statuses, msg)
+	})
+	if _, err := a.FactCheck(WithPart(context.Background(), "claims c1-c6"), "p"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(parts) == 0 || slices.ContainsFunc(parts, func(p string) bool { return p != "claims c1-c6" }) {
+		t.Errorf("reasoning parts %q, want every piece labelled with its call", parts)
+	}
+	if len(statuses) == 0 || !strings.HasPrefix(statuses[0], "fact-checking claims c1-c6 — ") {
+		t.Errorf("statuses %q, want the call's part in each", statuses)
 	}
 }
 

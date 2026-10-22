@@ -419,7 +419,7 @@ func TestPostResearchPhasesStreamProgress(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			unit := map[string]string{"analyze": "drafting the answer", "fact-check": "checked", "summarize": "word"}[phase]
+			unit := map[string]string{"analyze": "drafting the answer", "fact-check": "judged", "summarize": "word"}[phase]
 			var sawProgress bool
 			for _, msg := range progress {
 				if strings.Contains(msg, unit) {

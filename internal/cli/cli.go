@@ -837,14 +837,14 @@ func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // callBudget is how many model requests one run spends per --mode tier, which
 // is what a free model's per-day cap is counted in. With web search a run is
-// plan, analyze, fact-check and summarize, plus a second analyze when the
-// follow-up round finds evidence and an analyze and a fact-check when the
-// repair pass revises a blocked recommendation; LLM search adds up to two
-// calls per sub-topic.
+// plan, analyze, fact-check (up to ui.MaxCheckCalls calls at once) and
+// summarize, plus a second analyze when the follow-up round finds evidence
+// and an analyze and a fact-check when the repair pass revises a blocked
+// recommendation; LLM search adds up to two calls per sub-topic.
 func callBudget(webSearch bool) string {
 	parts := make([]string, len(ui.DepthModes))
 	for i, m := range ui.DepthModes {
-		n := 7
+		n := 6 + ui.MaxCheckCalls
 		if !webSearch {
 			n += 2 * (m.SubTopics + ui.MaxFollowUps)
 		}
@@ -854,7 +854,7 @@ func callBudget(webSearch bool) string {
 	// searches, not model calls. "quick 7, standard 7, deep 7" read as a
 	// bug, so a uniform budget is said once.
 	if webSearch {
-		return "model requests per run: at most 7, in every --mode (the modes differ in searches)"
+		return fmt.Sprintf("model requests per run: at most %d, in every --mode (the modes differ in searches)", 6+ui.MaxCheckCalls)
 	}
 	return "model requests per run: " + strings.Join(parts, ", ")
 }

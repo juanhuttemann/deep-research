@@ -1764,6 +1764,7 @@ func TestSummarizerSeesTheAnalysisGaps(t *testing.T) {
 // for not following from its claim, and whose repair pass narrows it.
 type repairingAssistant struct {
 	*fakeAssistant
+	mu     sync.Mutex
 	checks int
 }
 
@@ -1780,17 +1781,23 @@ func (r *repairingAssistant) Analyze(_ context.Context, p string) (*agent.Analys
 		}}, nil
 }
 
-func (r *repairingAssistant) FactCheck(context.Context, string) (*agent.FactCheckResult, error) {
+// FactCheck answers what each call asks: the claims, the first inference, or
+// the revision's. The check's calls run at once, in no fixed order.
+func (r *repairingAssistant) FactCheck(_ context.Context, p string) (*agent.FactCheckResult, error) {
+	r.mu.Lock()
 	r.checks++
-	if r.checks == 1 {
-		return &agent.FactCheckResult{
-			Verdicts: []agent.Verdict{{ID: "c1", Status: "supported", Evidence: []agent.Evidence{
-				{Source: "https://h.example/guide", Quote: "Dual-fuel suits high loads in severe climates"}}}},
-			Inferences: []agent.Inference{{ID: "r1", Follows: false, Reason: "the claim says and, not or"}},
-		}, nil
+	r.mu.Unlock()
+	switch {
+	case !isInferenceCheck(p):
+		return &agent.FactCheckResult{Verdicts: []agent.Verdict{{ID: "c1", Status: "supported", Evidence: []agent.Evidence{
+			{Source: "https://h.example/guide", Quote: "Dual-fuel suits high loads in severe climates"}}}}}, nil
+	case strings.Contains(p, "  - r2:"):
+		return &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "r2", Follows: true}}}, nil
 	}
-	return &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "r2", Follows: true}}}, nil
+	return &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "r1", Follows: false, Reason: "the claim says and, not or"}}}, nil
 }
+
+func isInferenceCheck(prompt string) bool { return strings.HasPrefix(prompt, "Judge only whether") }
 
 // A heating question lost its dual-fuel option because the recommendation
 // said "or" where its claim said "and": the check was right to block it,
@@ -1810,9 +1817,10 @@ func TestRepairPassRestoresAnOptionTheClaimsSupport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fa.checks != 2 {
-		t.Errorf("fact-check ran %d times, want 2 (claims, then the revision)", fa.checks)
+	if fa.checks != 3 {
+		t.Errorf("fact-check ran %d times, want 3 (claims and inference at once, then the revision)", fa.checks)
 	}
+
 	if r := res.Summary.Report; !strings.Contains(r, "- **Dual-fuel**: the load is high and the climate is severe") ||
 		strings.Contains(r, "Not established") {
 		t.Errorf("report does not answer with the checked revision:\n%s", r)
@@ -2889,16 +2897,24 @@ func TestRunOverviewMarksSourcesAsThePageDoes(t *testing.T) {
 }
 
 // scriptedChecker answers FactCheck from a list, in order, over a structured
-// analysis.
+// analysis. The claim calls and the inference calls each run down the list
+// on their own: the check makes both at once. calls counts the claim calls.
 type scriptedChecker struct {
 	*scriptedAnalyzer
-	checks []*agent.FactCheckResult
-	calls  int
+	checks                []*agent.FactCheckResult
+	mu                    sync.Mutex
+	calls, inferenceCalls int
 }
 
-func (s *scriptedChecker) FactCheck(context.Context, string) (*agent.FactCheckResult, error) {
-	fc := s.checks[min(s.calls, len(s.checks)-1)]
-	s.calls++
+func (s *scriptedChecker) FactCheck(_ context.Context, prompt string) (*agent.FactCheckResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := &s.calls
+	if isInferenceCheck(prompt) {
+		n = &s.inferenceCalls
+	}
+	fc := s.checks[min(*n, len(s.checks)-1)]
+	*n++
 	return fc, nil
 }
 
@@ -2942,7 +2958,8 @@ func TestFactCheckEmptyTwiceIsReportedUnavailable(t *testing.T) {
 		t.Errorf("calls %d, fact-check %+v, confidence %q; want 2, none, low", sc.calls, res.FactCheck, res.Summary.Confidence)
 	}
 	if !slices.ContainsFunc(sink.TimelineSnapshot(), func(e Event) bool {
-		return e.Type == Error && strings.Contains(e.Detail, "fact-check unavailable, reporting unverified: it returned no verdicts, twice")
+		return e.Type == Error && strings.HasPrefix(e.Detail, "fact-check unavailable, reporting unverified: ") &&
+			strings.Contains(e.Detail, "claims: it returned no verdicts, twice")
 	}) {
 		t.Error("the run did not report the check as unavailable")
 	}

@@ -371,14 +371,9 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// exists. If it fails there is still a complete, citable report to
 	// deliver, so the failure is surfaced and the run continues rather than
 	// discarding every search and the analysis behind it.
-	fc, err := d.factCheck(ctx, factCheckPrompt(claimsToCheck(analysis), findings, retrieved, analysis.Claims), len(analysis.Claims) > 0)
-	if err != nil {
-		fc = nil
-		d.emit(Event{Type: Error, Phase: "Fact-Check",
-			Detail: "fact-check unavailable, reporting unverified: " + err.Error()})
-	}
-	d.applyVerdicts(analysis, fc, err, findings)
-	d.repair(ctx, plan.Question, analysis, fc, findings)
+	fc, checkErr := d.factCheckAll(ctx, analysis, findings, retrieved)
+	d.applyVerdicts(analysis, fc, checkErr, findings)
+	d.repair(ctx, plan.Question, analysis, fc)
 
 	d.emit(Event{Type: Phase, Phase: "Summarize", Detail: "Writing the report"})
 	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved)
@@ -391,11 +386,12 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// analyzer's is the run's, and without carrying it over the report prints
 	// a bare "Confidence:" line and the exports record an empty string. A run
 	// whose fact-check did not run approved nothing, whatever the analyzer
-	// thought of its own answer.
+	// thought of its own answer, and one whose check left a share of the
+	// claims unverified is not the answer the analyzer was confident in.
 	if summary.Confidence == "" {
 		summary.Confidence = analysis.Confidence
 	}
-	if fc == nil && len(analysis.Claims) > 0 {
+	if (fc == nil || checkErr != nil) && len(analysis.Claims) > 0 {
 		summary.Confidence = "low"
 	}
 	return d.finish(&agent.ResearchResult{
@@ -427,9 +423,9 @@ func (d *Driver) applyVerdicts(a *agent.Analysis, fc *agent.FactCheckResult, fcE
 
 // repair runs the repair pass (see repairPrompt) when the check blocked a
 // recommendation and some claims passed: one analyzer call to revise, one
-// fact-check call to judge the revisions. A failure in either leaves the
-// recommendations as the first check left them.
-func (d *Driver) repair(ctx context.Context, question string, a *agent.Analysis, fc *agent.FactCheckResult, findings []agent.Finding) {
+// fact-check call to judge whether the revisions follow from their claims. A
+// failure in either leaves the recommendations as the first check left them.
+func (d *Driver) repair(ctx context.Context, question string, a *agent.Analysis, fc *agent.FactCheckResult) {
 	n := len(blockedUnits(a))
 	if fc == nil || n == 0 || len(supportedClaims(a)) == 0 || ctx.Err() != nil {
 		return
@@ -444,7 +440,10 @@ func (d *Driver) repair(ctx context.Context, question string, a *agent.Analysis,
 	if len(added) == 0 {
 		return
 	}
-	recheck, err := d.factCheck(ctx, revisionCheckPrompt(a, added, findings), true)
+	// Only the inference is new: the claims the revisions rest on have their
+	// verdicts, and given the claims again the check re-judged them for a
+	// minute before answering the one question asked.
+	recheck, err := d.factCheck(ctx, inferencePrompt(a, added), true)
 	if err != nil {
 		for _, id := range added {
 			if u, ok := unitByID(a, id); ok {

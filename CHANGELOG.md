@@ -5,6 +5,28 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The fact-check runs as parallel calls. It was the longest call of a run
+  (213 of 514 seconds in one, nearly all of it reasoning before the first
+  verdict), and its time grows with the claims it judges: the claims are
+  now split into up to four shares of six or more, each checked against
+  every finding in its own call, and the recommendations and conclusions
+  are judged against their premises, up to four to a call. A call that
+  fails leaves only its share unverified, and the run's confidence low. A
+  run spends up to 13 model requests instead of 7 before retries (`drsh
+  doctor` prints the new budgets).
+- The repair pass's recheck judges only whether each revision follows from
+  its claims. It was given the claims and their pages again and re-verified
+  them, a minute of reasoning for verdicts it then ignored.
+- The fact-check's reasoning in the page is shown per call, and its
+  `thinking` events under `--jsonl` name their call in `part`.
+
+### Fixed
+
+- The fact-check's progress line said "0 claims checked" until it ended; it
+  now counts the statements judged.
+
 ## [0.19.0] - 2026-10-22
 
 ### Added

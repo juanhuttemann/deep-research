@@ -456,10 +456,10 @@ func (r *Resumer) ResearchDetail(ctx context.Context, query string, terms []stri
 	return r.Assistant.ResearchDetail(ctx, query, terms)
 }
 
-func (r *Resumer) ModelInfo() (string, string)      { return modelInfo(r.Assistant) }
-func (r *Resumer) ServedModels() []string           { return servedModels(r.Assistant) }
-func (r *Resumer) SetStatus(f func(string))         { setStatus(r.Assistant, f) }
-func (r *Resumer) SetThinking(f func(string, bool)) { setThinking(r.Assistant, f) }
+func (r *Resumer) ModelInfo() (string, string)              { return modelInfo(r.Assistant) }
+func (r *Resumer) ServedModels() []string                   { return servedModels(r.Assistant) }
+func (r *Resumer) SetStatus(f func(string))                 { setStatus(r.Assistant, f) }
+func (r *Resumer) SetThinking(f func(string, string, bool)) { setThinking(r.Assistant, f) }
 
 // A resumed run searches live for what its checkpoint lacks, so it is
 // scoped like any other; a Player searches nothing and is not a scoper.
@@ -472,14 +472,14 @@ func (r *Resumer) ScopeTo(domains []string) { scopeTo(r.Assistant, domains) }
 // The driver and UI look for these optional methods on the assistant. An
 // embedded interface does not promote them, so each wrapper forwards them.
 
-func (r *Recorder) ModelInfo() (string, string)      { return modelInfo(r.Assistant) }
-func (r *Recorder) ServedModels() []string           { return servedModels(r.Assistant) }
-func (r *Recorder) SetStatus(f func(string))         { setStatus(r.Assistant, f) }
-func (r *Recorder) SetThinking(f func(string, bool)) { setThinking(r.Assistant, f) }
-func (p *Player) ModelInfo() (string, string)        { return modelInfo(p.Assistant) }
-func (p *Player) ServedModels() []string             { return servedModels(p.Assistant) }
-func (p *Player) SetStatus(f func(string))           { setStatus(p.Assistant, f) }
-func (p *Player) SetThinking(f func(string, bool))   { setThinking(p.Assistant, f) }
+func (r *Recorder) ModelInfo() (string, string)              { return modelInfo(r.Assistant) }
+func (r *Recorder) ServedModels() []string                   { return servedModels(r.Assistant) }
+func (r *Recorder) SetStatus(f func(string))                 { setStatus(r.Assistant, f) }
+func (r *Recorder) SetThinking(f func(string, string, bool)) { setThinking(r.Assistant, f) }
+func (p *Player) ModelInfo() (string, string)                { return modelInfo(p.Assistant) }
+func (p *Player) ServedModels() []string                     { return servedModels(p.Assistant) }
+func (p *Player) SetStatus(f func(string))                   { setStatus(p.Assistant, f) }
+func (p *Player) SetThinking(f func(string, string, bool))   { setThinking(p.Assistant, f) }
 
 func (r *Recorder) CheckDomains(ctx context.Context, domains []string) ([]agent.DomainCheck, error) {
 	return checkDomains(ctx, r.Assistant, domains)
@@ -519,8 +519,10 @@ func setStatus(a agent.Assistant, f func(string)) {
 	}
 }
 
-func setThinking(a agent.Assistant, f func(string, bool)) {
-	if s, ok := a.(interface{ SetThinking(func(string, bool)) }); ok {
+func setThinking(a agent.Assistant, f func(string, string, bool)) {
+	if s, ok := a.(interface {
+		SetThinking(func(string, string, bool))
+	}); ok {
 		s.SetThinking(f)
 	}
 }

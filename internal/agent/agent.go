@@ -431,7 +431,7 @@ func New(cfg Config) (Assistant, error) {
 	// parallel across sub-agents, where interleaved progress is noise.
 	newRunStreaming := func(a *agent.Agent, effort, label string, unit progressUnit) runFunc {
 		return func(ctx context.Context, prompt string) (string, error) {
-			return impl.callStreaming(ctx, a, prompt, effort, impl.streamProgress(label, unit))
+			return impl.callStreaming(ctx, a, prompt, effort, impl.streamProgress(withPart(ctx, label), unit))
 		}
 	}
 	if cfg.PlanningInstructions == "" {
@@ -446,8 +446,11 @@ func New(cfg Config) (Assistant, error) {
 	// broken.
 	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions, nil), cfg.Effort.Analyze,
 		"analyzing", analysisUnit)
+	// A verdict opens with its status and an inference with follows. Counting
+	// "claim", which only a verdict split out of prose carries, read "0 claims
+	// checked" through a whole check that ended with 22 verdicts.
 	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), cfg.Effort.FactCheck,
-		"fact-checking", entriesUnit("claim checked", "claims checked", "claim"))
+		"fact-checking", entriesUnit("judged", "judged", "status", "follows"))
 	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), cfg.Effort.Summarize,
 		"writing the report", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
@@ -543,7 +546,7 @@ type impl struct {
 	statusf func(string)
 	// thinkf receives a streamed call's reasoning as it grows, whole rather
 	// than the tail a status carries; first marks a call's first piece.
-	thinkf func(text string, first bool)
+	thinkf func(text, part string, first bool)
 	model  string
 	// baseURL is kept so a transport failure can name the endpoint that was
 	// actually tried, which is the one thing the reader has to check.
@@ -594,14 +597,17 @@ func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt, effor
 	progress func(partial, thinking string), opts ...agent.Option) (string, error) {
 	streamOpts := slices.Concat([]agent.Option{agent.Stream(true)}, a.params(effort, true), opts)
 	var th thoughts
+	part := partOf(ctx)
 	report, stop := tickProgress(func(p string) {
 		progress(p, th.String())
-		a.thinking(th.fresh(time.Now(), false))
+		text, first := th.fresh(time.Now(), false)
+		a.thinking(text, part, first)
 	}, progressTick)
 	report("") // the wait starts now, before the first byte arrives
 	out, err := a.callWith(context.WithValue(ctx, reasoningKey{}, th.add), ag, prompt, report, streamOpts...)
 	stop()
-	a.thinking(th.fresh(time.Now(), true))
+	text, first := th.fresh(time.Now(), true)
+	a.thinking(text, part, first)
 	// Not every OpenAI-compatible server honours stream:true — proxies and
 	// older local servers answer with a whole JSON body, the stream yields
 	// nothing, and the phase would hand back an empty answer with no error at
@@ -1210,6 +1216,30 @@ func (a *impl) sniffServedModel(req *http.Request, next option.MiddlewareNext) (
 // provider streams alongside the answer goes.
 type reasoningKey struct{}
 
+// partKey carries the label WithPart gives a call.
+type partKey struct{}
+
+// WithPart labels the model calls made under ctx as one part of a phase the
+// Driver runs as several calls at once, such as "claims 1-7" of the
+// fact-check. The label goes on the call's log line, status and reasoning,
+// which would otherwise read as one call's, interleaved.
+func WithPart(ctx context.Context, part string) context.Context {
+	return context.WithValue(ctx, partKey{}, part)
+}
+
+func partOf(ctx context.Context) string {
+	part, _ := ctx.Value(partKey{}).(string)
+	return part
+}
+
+// withPart appends ctx's part, if any, to a phase's label.
+func withPart(ctx context.Context, label string) string {
+	if part := partOf(ctx); part != "" {
+		return label + " " + part
+	}
+	return label
+}
+
 // reasoningSniffer passes a streamed body through, handing the reasoning delta
 // of each event to think. The agent framework keeps only the content delta,
 // so without this a reasoning model's thinking — most of the wait on the
@@ -1400,12 +1430,14 @@ func (a *impl) SetStatus(f func(string)) { a.statusf = f }
 
 // SetThinking wires the channel for a streamed call's reasoning, sent whole
 // as it grows. Like SetStatus it is not part of Assistant: unset, the
-// reasoning shows only as the tail each status carries.
-func (a *impl) SetThinking(f func(text string, first bool)) { a.thinkf = f }
+// reasoning shows only as the tail each status carries. part names the call
+// when the Driver runs a phase as several at once (see WithPart): their
+// reasoning streams interleaved, and only the part keeps each call's whole.
+func (a *impl) SetThinking(f func(text, part string, first bool)) { a.thinkf = f }
 
-func (a *impl) thinking(text string, first bool) {
+func (a *impl) thinking(text, part string, first bool) {
 	if text != "" && a.thinkf != nil {
-		a.thinkf(text, first)
+		a.thinkf(text, part, first)
 	}
 }
 
@@ -1473,7 +1505,7 @@ func (a *impl) Analyze(ctx context.Context, prompt string) (*Analysis, error) {
 }
 
 func (a *impl) FactCheck(ctx context.Context, claims string) (*FactCheckResult, error) {
-	a.log(fmt.Sprintf("%-10s  %s · %s", "fact-check", a.model, a.effortLabel(a.effort.FactCheck)))
+	a.log(withPart(ctx, fmt.Sprintf("%-10s  %s · %s", "fact-check", a.model, a.effortLabel(a.effort.FactCheck))))
 	// The prompt arrives fully composed: the caller is the only thing that
 	// knows the answer AND the findings the claims must be checked against.
 	out, err := a.factCheck(ctx, claims)

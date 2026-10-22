@@ -809,15 +809,18 @@ function think(e) {
   // A reader scrolled up to read stays where they are; one at the bottom
   // follows the reasoning as it arrives. Measured before a section is added.
   const box = $("thought-log"), follow = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
-  const ph = e.phase || "model";
-  let s = thoughts[thoughts.length - 1];
-  if (!s || e.status === "start" || s.phase !== ph) {
+  const ph = e.phase || "model", part = e.part || "";
+  // The fact-check runs as several calls at once, each named by its part, and
+  // their reasoning arrives interleaved: each piece goes to its own call's
+  // section, not to whichever section came last.
+  let s = part ? thoughts.findLast(t => t.phase === ph && t.part === part) : thoughts[thoughts.length - 1];
+  if (!s || e.status === "start" || s.phase !== ph || s.part !== part) {
     // An analysis asked again is a second call in the same phase.
-    const n = thoughts.filter(t => t.phase === ph).length + 1;
-    s = { phase: ph, text: document.createTextNode("") };
+    const n = thoughts.filter(t => t.phase === ph && t.part === part).length + 1;
+    s = { phase: ph, part, text: document.createTextNode("") };
     const body = el("div", "thought-text");
     body.append(s.text);
-    box.append(el("div", "thought-head", ph + (n > 1 ? " · call " + n : "")), body);
+    box.append(el("div", "thought-head", ph + (part ? " · " + part : "") + (n > 1 ? " · call " + n : "")), body);
     thoughts.push(s);
   }
   s.text.appendData(s.text.length ? e.detail || "" : (e.detail || "").replace(/^\s+/, ""));
