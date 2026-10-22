@@ -654,6 +654,7 @@ func loadAgentConfig(cfg *Config, a *viper.Viper, path string) error {
 		dst *string
 	}{
 		{"analyzer_instructions", &cfg.AnalyzerInstructions},
+		{"follow_up_instructions", &cfg.FollowUpInstructions},
 		{"fact_checker_instructions", &cfg.FactCheckerInstructions},
 		{"summarizer_instructions", &cfg.SummarizerInstructions},
 		{"search_instructions", &cfg.SearchInstructions},

@@ -7,6 +7,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The analysis runs once. The follow-up searches came from a whole first
+  analysis, which a second one replaced once their evidence was in: two
+  full analyses back to back in nine runs of ten, 63 to 128 seconds of the
+  first kept only for its three queries. A short call now names the
+  searches (13 seconds and a tenth of the reasoning on the same findings),
+  and the one analysis reads everything found. Its prompt is
+  `follow_up_instructions` in `agent.yaml`. A replay serves the recorded
+  run's follow-up searches without asking the model.
+
 - The fact-check runs as parallel calls. It was the longest call of a run
   (213 of 514 seconds in one, nearly all of it reasoning before the first
   verdict), and its time grows with the claims it judges: the claims are

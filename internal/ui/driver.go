@@ -351,6 +351,10 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err := d.thinEvidence(findings); err != nil {
 		return nil, err
 	}
+	findings, uncovered = d.followUp(ctx, plan, findings, uncovered)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
 	analysis, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
@@ -358,7 +362,6 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 		return d.partial(ctx, plan, findings, nil, nil, "analysis failed", err)
 	}
 	checkAnalysis(analysis, findings)
-	analysis, findings = d.followUp(ctx, plan, analysis, findings, uncovered)
 
 	// What this phase can honestly claim depends on where the "sources" came
 	// from. With no search backend configured the model supplied the findings,
@@ -715,9 +718,9 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 	return d.withFoundAgain(mergeFindings(all)), uncovered
 }
 
-// MaxFollowUps bounds the follow-up round to the analyzer's first few open
-// questions, which it lists most decisive first. Each is one more search and
-// the round adds one analyze call, so it cannot grow into a research loop.
+// MaxFollowUps bounds the follow-up round to the first few open questions,
+// which the follow-up call lists most decisive first. Each is one more
+// search, so the round cannot grow into a research loop.
 const MaxFollowUps = 3
 
 // followUpSources is the page allowance of each follow-up search. A follow-up
@@ -730,57 +733,62 @@ const followUpPrefix = "f"
 
 func isFollowUp(id string) bool { return strings.HasPrefix(id, followUpPrefix) }
 
-// followUp searches the analysis's open questions and analyzes again with
-// what they found. The first analysis routinely named the exact search that
-// would have settled its own gap ("does X support Y?") and the pipeline
-// printed it at the end of the report as homework for the reader.
+// followUp asks what the findings leave open, searches it, and returns the
+// findings with what it found and the open questions it found nothing for.
+// The analysis routinely named the exact search that would have settled its
+// own gap ("does X support Y?"), and the pipeline printed it at the end of the
+// report as homework for the reader.
 //
-// It returns the first analysis unchanged when there is nothing to follow up,
-// the searches found nothing, or the second analysis fails: a refinement that
-// did not happen is no reason to lose the analysis that did.
-func (d *Driver) followUp(ctx context.Context, plan *Plan, analysis *agent.Analysis,
-	findings []agent.Finding, uncovered []string) (*agent.Analysis, []agent.Finding) {
-	var subs []SubTopic
-	for _, q := range analysis.FollowUp {
-		if q = strings.TrimSpace(q); q != "" && len(subs) < MaxFollowUps {
-			// A follow-up named after its query showed a row cut off at the
-			// name column, the query repeated in full beside it. The analysis
-			// names each one; an unnamed query is still its own name. A
-			// follow-up has no fallback search: see subQueries.
-			name := cmp.Or(strings.TrimSpace(analysis.FollowUpNames[q]), q)
-			subs = append(subs, SubTopic{ID: followUpPrefix + strconv.Itoa(len(subs)+1), Name: name, Query: q})
-		}
-	}
-	if len(subs) == 0 || ctx.Err() != nil {
-		return analysis, findings
+// The searches are asked for before the analysis, in a call that only lists
+// them. They used to come from a whole first analysis, which a second one
+// then replaced once the follow-up evidence was in: two full analyses on the
+// critical path, the first kept only for its queries, in nine runs of ten.
+// A follow-up round that fails costs nothing but itself: the analysis runs on
+// what the first round found.
+func (d *Driver) followUp(ctx context.Context, plan *Plan, findings []agent.Finding,
+	uncovered []string) ([]agent.Finding, []string) {
+	if ctx.Err() != nil {
+		return findings, uncovered
 	}
 	if d.isSearchDown() {
-		// Every query of the round would be refused too.
-		d.emit(Event{Type: Info, Phase: "Research", Detail: fmt.Sprintf(
-			"%d open questions not followed up: search is refusing queries (rate-limited or challenged)", len(subs))})
-		return analysis, findings
+		// Every query of the round would be refused too, so the call that
+		// chooses them would be spent for nothing.
+		d.emit(Event{Type: Info, Phase: "Research",
+			Detail: "open questions not followed up: search is refusing queries (rate-limited or challenged)"})
+		return findings, uncovered
+	}
+	d.emit(Event{Type: Phase, Phase: "Research", Detail: "Finding what the evidence leaves open"})
+	qs, err := d.Agent.FollowUps(ctx, analyzePrompt(plan.Question, findings, uncovered))
+	if err != nil {
+		d.emit(Event{Type: Error, Phase: "Research", Detail: "follow-up searches not chosen, analysing what was found: " + err.Error()})
+		return findings, uncovered
+	}
+	subs := followUpTopics(qs)
+	if len(subs) == 0 || ctx.Err() != nil {
+		return findings, uncovered
 	}
 	d.emit(Event{Type: Phase, Phase: "Research", Detail: fmt.Sprintf("Following up %d open questions", len(subs))})
 	extra, unanswered := d.research(ctx, &Plan{Question: plan.Question, MaxSources: followUpSources * len(subs), SubTopics: subs})
-	if len(extra) == 0 || ctx.Err() != nil {
-		return analysis, findings
+	if len(extra) > 0 {
+		findings = d.withFoundAgain(mergeFindings(append(findings, extra...)))
 	}
-	findings = d.withFoundAgain(mergeFindings(append(findings, extra...)))
-	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Re-analyzing with the follow-up evidence"})
-	again, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, append(uncovered, unanswered...)))
-	if err != nil {
-		d.emit(Event{Type: Error, Phase: "Analyze", Detail: "re-analysis failed, keeping the first analysis: " + err.Error()})
-		return analysis, findings
+	return findings, append(uncovered, unanswered...)
+}
+
+// followUpTopics are the first MaxFollowUps follow-up searches as sub-agents.
+// A follow-up named after its query showed a row cut off at the name column,
+// the query repeated in full beside it: each is named by the call that chose
+// it, and an unnamed query is still its own name. A follow-up has no fallback
+// search: see subQueries.
+func followUpTopics(qs []agent.FollowUpQuery) []SubTopic {
+	var subs []SubTopic
+	for _, q := range qs {
+		if query := strings.TrimSpace(q.Query); query != "" && len(subs) < MaxFollowUps {
+			subs = append(subs, SubTopic{ID: followUpPrefix + strconv.Itoa(len(subs)+1),
+				Name: cmp.Or(strings.TrimSpace(q.Name), query), Query: query})
+		}
 	}
-	// A re-analysis that came back with no structure would replace one that
-	// had it, and send the report to the unchecked-prose path: a history
-	// question's re-analysis returned {"/": "placeholder"} and did.
-	if len(again.Claims) == 0 && len(analysis.Claims) > 0 {
-		d.emit(Event{Type: Error, Phase: "Analyze", Detail: "re-analysis returned no claims, keeping the first analysis"})
-		return analysis, findings
-	}
-	checkAnalysis(again, findings)
-	return again, findings
+	return subs
 }
 
 // mergeFindings keeps one finding per page, in first-seen order. A page that

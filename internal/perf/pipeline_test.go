@@ -57,6 +57,10 @@ func (s *stubAssistant) ResearchDetail(context.Context, string, []string) (*agen
 	return out, nil
 }
 
+func (s *stubAssistant) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	return nil, nil
+}
+
 func (s *stubAssistant) Analyze(context.Context, string) (*agent.Analysis, error) {
 	s.tokens.Add(24000)
 	return s.analysis, nil

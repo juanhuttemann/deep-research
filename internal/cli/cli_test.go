@@ -257,6 +257,7 @@ func (d *deadlineRecorder) Plan(ctx context.Context, q string, subTopics int) (a
 // whole pipeline through the CLI.
 type stub struct{}
 
+func (stub) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) { return nil, nil }
 func (stub) Analyze(context.Context, string) (*agent.Analysis, error) {
 	return &agent.Analysis{Answer: "stub", Confidence: "low"}, nil
 }

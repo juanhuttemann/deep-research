@@ -39,6 +39,8 @@ type fakeAssistant struct {
 	summary string
 	// analyzed captures the prompt Analyze was called with.
 	analyzed string
+	// followUps are what FollowUps answers.
+	followUps []agent.FollowUpQuery
 	// tokensPerCall is added to the running usage total by every model call,
 	// standing in for what a provider reports.
 	tokensPerCall int
@@ -70,6 +72,12 @@ func (f *fakeAssistant) ResearchDetail(ctx context.Context, query string, _ []st
 		ss = []agent.SourceSignal{{URL: url, Domain: "example.com", Status: "ok"}}
 	}
 	return &agent.ResearchDetail{Findings: fs, Signals: ss, Skipped: f.skipped[query]}, nil
+}
+
+// FollowUps answers with followUps, none unless a test sets them.
+func (f *fakeAssistant) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	f.call()
+	return f.followUps, nil
 }
 
 func (f *fakeAssistant) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
@@ -1067,7 +1075,7 @@ func TestWaitBriefDrawsBriefBeforeBlocking(t *testing.T) {
 // TestDriverReportsRealTokenUsage: the counters the UI shows and the metadata
 // exports must come from what the provider reported, not from a synthetic
 // per-source formula. Two sub-topics x one source each is 2 search calls plus
-// analyze + fact-check + summarize = 5 calls.
+// follow-ups + analyze + fact-check + summarize = 6 calls.
 func TestDriverReportsRealTokenUsage(t *testing.T) {
 	fa := &fakeAssistant{tokensPerCall: 40}
 	sink := &MultiSink{}
@@ -1082,8 +1090,8 @@ func TestDriverReportsRealTokenUsage(t *testing.T) {
 	if want := fa.TokensUsed(); d.tokens != want {
 		t.Errorf("driver tokens = %d, assistant reported %d", d.tokens, want)
 	}
-	if d.tokens != 200 {
-		t.Errorf("tokens = %d, want 200 (5 calls x 40)", d.tokens)
+	if d.tokens != 240 {
+		t.Errorf("tokens = %d, want 240 (6 calls x 40)", d.tokens)
 	}
 
 	// No Token event may claim a total the assistant never reported.

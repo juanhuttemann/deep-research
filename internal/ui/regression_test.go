@@ -1625,25 +1625,35 @@ func findEvent(t *testing.T, stream string, match func(Event) bool) (Event, bool
 	return Event{}, false
 }
 
-// followUpAnalyzer answers the first analysis with open follow-up queries and
-// the second without, and records every prompt it was sent.
+// followUpAnalyzer names open follow-up queries, or fails to, and records
+// every prompt the analysis was sent.
 type followUpAnalyzer struct {
 	*fakeAssistant
-	followUp []string
-	names    map[string]string
-	failNext bool
-	prompts  []string
+	followUp    []agent.FollowUpQuery
+	failFollow  bool
+	prompts     []string
+	followCalls int
+}
+
+func (f *followUpAnalyzer) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	f.followCalls++
+	if f.failFollow {
+		return nil, errors.New("provider unavailable")
+	}
+	return f.followUp, nil
 }
 
 func (f *followUpAnalyzer) Analyze(ctx context.Context, p string) (*agent.Analysis, error) {
 	f.prompts = append(f.prompts, p)
-	if len(f.prompts) == 1 {
-		return &agent.Analysis{Answer: "first", Confidence: "low", FollowUp: f.followUp, FollowUpNames: f.names}, nil
+	return &agent.Analysis{Answer: "analysed", Confidence: "high"}, nil
+}
+
+func queries(qs ...string) []agent.FollowUpQuery {
+	out := make([]agent.FollowUpQuery, len(qs))
+	for i, q := range qs {
+		out[i] = agent.FollowUpQuery{Query: q}
 	}
-	if f.failNext {
-		return nil, errors.New("provider unavailable")
-	}
-	return &agent.Analysis{Answer: "second", Confidence: "high"}, nil
+	return out
 }
 
 // The analysis named the search that would settle its own gap, and the
@@ -1652,19 +1662,22 @@ func (f *followUpAnalyzer) Analyze(ctx context.Context, p string) (*agent.Analys
 // would have answered.
 func TestFollowUpQueriesAreSearchedBeforeTheReport(t *testing.T) {
 	fq := "widgetdb serverless engine support"
-	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: []string{fq}}
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: queries(fq)}
 	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fa.prompts) != 2 {
-		t.Fatalf("analyze ran %d times, want 2 (first pass and after the follow-up)", len(fa.prompts))
+	// One analysis, after the follow-up: a first analysis only to name the
+	// searches, then replaced by a second, put two full analyses on the
+	// critical path of nine runs in ten.
+	if len(fa.prompts) != 1 {
+		t.Fatalf("analyze ran %d times, want once, after the follow-up", len(fa.prompts))
 	}
-	if !strings.Contains(fa.prompts[1], "Finding for "+fq) {
-		t.Errorf("second analysis never saw the follow-up evidence:\n%s", fa.prompts[1])
+	if !strings.Contains(fa.prompts[0], "Finding for "+fq) {
+		t.Errorf("the analysis never saw the follow-up evidence:\n%s", fa.prompts[0])
 	}
-	if res.Analysis.Answer != "second" {
-		t.Errorf("report built on analysis %q, want the one that saw the follow-up", res.Analysis.Answer)
+	if res.Analysis.Answer != "analysed" {
+		t.Errorf("report built on analysis %q", res.Analysis.Answer)
 	}
 }
 
@@ -1677,7 +1690,7 @@ func TestFollowUpOnAKnownPageSteersItsExcerptWithoutCountingIt(t *testing.T) {
 	plan := newTestPlan("quick", topics)
 	q1, fq := subQueries(plan.Question, topics[0])[0], "widgetdb serverless engine support"
 	shared := "https://docs.example/widgetdb"
-	fa := &followUpAnalyzer{followUp: []string{fq}, fakeAssistant: &fakeAssistant{
+	fa := &followUpAnalyzer{followUp: queries(fq), fakeAssistant: &fakeAssistant{
 		planTopics: topics,
 		findings: map[string][]agent.Finding{
 			q1: {{Query: q1, Title: "WidgetDB docs", URL: shared, Content: "text"}},
@@ -1709,10 +1722,10 @@ func TestFollowUpOnAKnownPageSteersItsExcerptWithoutCountingIt(t *testing.T) {
 
 // Follow-up rows were named after their search query, up to 80 characters,
 // and cut off at the 40-column name column beside the same query in full.
-func TestFollowUpRowsTakeTheAnalysisName(t *testing.T) {
+func TestFollowUpRowsTakeTheirGivenName(t *testing.T) {
 	named, unnamed := "Intel Arc Pro B70 vs AMD Radeon AI PRO R9700 benchmark LLM inference", "widgetdb limits"
-	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: []string{named, unnamed},
-		names: map[string]string{named: "LLM inference benchmarks"}}
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{},
+		followUp: []agent.FollowUpQuery{{Name: "LLM inference benchmarks", Query: named}, {Query: unnamed}}}
 	sink := &MultiSink{}
 	plan := newTestPlan("quick", nil)
 	if _, err := NewDriver(fa, sink, nil, 1).Run(context.Background(), plan); err != nil {
@@ -1729,7 +1742,7 @@ func TestFollowUpRowsTakeTheAnalysisName(t *testing.T) {
 		}
 	}
 	if rows["f1"] != "LLM inference benchmarks" || rows["f2"] != unnamed {
-		t.Errorf("follow-up rows = %v, want the analysis's name, or the query when it gave none", rows)
+		t.Errorf("follow-up rows = %v, want the given name, or the query when it has none", rows)
 	}
 	// The follow-up's own query only: the question with the name glued on
 	// asked nothing the query had not, clipped mid-phrase.
@@ -1738,16 +1751,35 @@ func TestFollowUpRowsTakeTheAnalysisName(t *testing.T) {
 	}
 }
 
-// The second analysis is a refinement: when it fails, the report is written
-// from the first one instead of the run failing after everything was spent.
-func TestFailedReanalysisKeepsTheFirstAnalysis(t *testing.T) {
-	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: []string{"widgetdb limits"}, failNext: true}
-	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+// The follow-up round is a refinement: when choosing its searches fails, the
+// report is analysed from what the first round found, instead of the run
+// failing after everything was spent.
+func TestFailedFollowUpCallStillAnalyses(t *testing.T) {
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, failFollow: true}
+	sink := &MultiSink{}
+	res, err := NewDriver(fa, sink, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Analysis == nil || res.Analysis.Answer != "first" {
-		t.Errorf("analysis = %+v, want the first analysis kept", res.Analysis)
+	if res.Analysis == nil || res.Analysis.Answer != "analysed" || len(fa.prompts) != 1 {
+		t.Errorf("analysis = %+v after %d analyses, want one, on the first round's findings", res.Analysis, len(fa.prompts))
+	}
+	if !slices.ContainsFunc(sink.TimelineSnapshot(), func(e Event) bool {
+		return e.Type == Error && strings.Contains(e.Detail, "follow-up searches not chosen")
+	}) {
+		t.Error("the failed follow-up call was not reported")
+	}
+}
+
+// Search refusing queries left a follow-up round with nothing to ask; the
+// call choosing its searches is not spent either.
+func TestRefusedSearchSkipsTheFollowUpCall(t *testing.T) {
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: queries("widgetdb limits")}
+	d := NewDriver(fa, &MultiSink{}, nil, 1)
+	d.searchDown = true
+	findings, _ := d.followUp(context.Background(), newTestPlan("quick", nil), nil, nil)
+	if fa.followCalls != 0 || len(findings) != 0 {
+		t.Errorf("follow-up call made %d times with search down, want none", fa.followCalls)
 	}
 }
 
@@ -1820,7 +1852,6 @@ func TestRepairPassRestoresAnOptionTheClaimsSupport(t *testing.T) {
 	if fa.checks != 3 {
 		t.Errorf("fact-check ran %d times, want 3 (claims and inference at once, then the revision)", fa.checks)
 	}
-
 	if r := res.Summary.Report; !strings.Contains(r, "- **Dual-fuel**: the load is high and the climate is severe") ||
 		strings.Contains(r, "Not established") {
 		t.Errorf("report does not answer with the checked revision:\n%s", r)
@@ -1857,21 +1888,6 @@ func TestMalformedAnalysisIsAskedAgain(t *testing.T) {
 	}
 	if sa.calls != 2 || len(res.Analysis.Claims) != 1 {
 		t.Errorf("analyze ran %d times and kept %d claims, want 2 and the second answer", sa.calls, len(res.Analysis.Claims))
-	}
-}
-
-// It was the re-analysis after the follow-up round that returned the
-// placeholder there, and it replaced a first analysis that had claims.
-func TestMalformedReanalysisKeepsTheFirst(t *testing.T) {
-	first := *structured
-	first.FollowUp = []string{"more on the crisis"}
-	sa := &scriptedAnalyzer{fakeAssistant: &fakeAssistant{}, answers: []*agent.Analysis{&first, placeholder, placeholder}}
-	res, err := NewDriver(sa, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Analysis.Claims) != 1 {
-		t.Errorf("the report was built on the malformed re-analysis: %+v", res.Analysis)
 	}
 }
 
@@ -2267,12 +2283,8 @@ func (r *refusedPool) ResearchDetail(ctx context.Context, q string, terms []stri
 	return nil, err
 }
 
-func (r *refusedPool) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
-	a, err := r.fakeAssistant.Analyze(ctx, prompt)
-	if a != nil {
-		a.FollowUp = []string{"what the first search missed"}
-	}
-	return a, err
+func (r *refusedPool) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	return queries("what the first search missed"), nil
 }
 
 var refusedTopics = []agent.SubTopic{{ID: "1", Name: "A", Query: "a"}, {ID: "2", Name: "B", Query: "b"}, {ID: "3", Name: "C", Query: "c"}}

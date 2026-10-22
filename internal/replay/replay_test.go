@@ -26,6 +26,9 @@ func (l *live) ResearchDetail(_ context.Context, q string, _ []string) (*agent.R
 	}
 	return &agent.ResearchDetail{Findings: []agent.Finding{{Query: q, URL: "https://a.example", Content: "page text"}}}, nil
 }
+func (l *live) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	return []agent.FollowUpQuery{{Query: "the live model's own follow-up"}}, nil
+}
 func (l *live) Analyze(context.Context, string) (*agent.Analysis, error) {
 	return &agent.Analysis{Answer: "live answer", FollowUp: []string{"the live model's own follow-up"}}, nil
 }
@@ -82,19 +85,53 @@ func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	}
 }
 
-// The replayed analysis words its own follow-ups, which the recorded run never
-// searched; searching the recorded ones keeps the replay on the same evidence.
+// A live follow-up call words its own searches, which the recorded run never
+// made; serving the recorded ones keeps the replay on the same evidence. A
+// trace from before the follow-up call holds them in its first analysis, and
+// a query the recorded run never searched is not served from either.
 func TestReplaySearchesTheRecordedFollowUps(t *testing.T) {
-	tr := &Trace{Question: "q", Plan: []agent.SubTopic{{ID: "1"}},
-		Phases: []Phase{{Name: "analyze", Output: json.RawMessage(`{"follow_up":["recorded follow-up"]}`)}}}
-	p := Play(&live{}, tr)
-	first, _ := p.Analyze(context.Background(), "p")
-	if len(first.FollowUp) != 1 || first.FollowUp[0] != "recorded follow-up" {
-		t.Errorf("first analysis follow-ups = %v, want the recorded run's", first.FollowUp)
+	searched := []Search{{Query: "recorded follow-up"}}
+	for name, phases := range map[string][]Phase{
+		"follow-up call": {{Name: "follow-ups", Output: json.RawMessage(
+			`[{"name":"Settles it","query":"recorded follow-up"},{"query":"never searched"}]`)}},
+		"older trace": {{Name: "analyze", Output: json.RawMessage(
+			`{"follow_up":["recorded follow-up","never searched"],"follow_up_names":{"recorded follow-up":"Settles it"}}`)}},
+	} {
+		p := Play(&live{}, &Trace{Question: "q", Plan: []agent.SubTopic{{ID: "1"}}, Searches: searched, Phases: phases})
+		qs, err := p.FollowUps(context.Background(), "p")
+		if err != nil || len(qs) != 1 || qs[0] != (agent.FollowUpQuery{Name: "Settles it", Query: "recorded follow-up"}) {
+			t.Errorf("%s: follow-ups = %+v (%v), want the one recorded and searched", name, qs, err)
+		}
 	}
-	second, _ := p.Analyze(context.Background(), "p")
-	if second.FollowUp[0] != "the live model's own follow-up" {
-		t.Errorf("second analysis follow-ups = %v, want its own: only the first is replaced", second.FollowUp)
+}
+
+// The Driver trims a follow-up and clips it to the search length before
+// searching, so the recorded search is not always the query the call gave:
+// matched exactly, a long follow-up was dropped from the replay and its
+// evidence with it. A planned search that only begins the same words is not
+// taken for one.
+func TestReplayFindsFollowUpsTheDriverClipped(t *testing.T) {
+	long := "go 1.23 range over func iterator benchmark versus a hand-written loop on amd64 with inlining and escape analysis"
+	clipped := "go 1.23 range over func iterator benchmark versus a hand-written loop on amd64 with inlining and"
+	tr := &Trace{Question: "q", Plan: []agent.SubTopic{{ID: "1"}},
+		Searches: []Search{{Query: clipped}, {Query: "spaced follow-up"}, {Query: "go iterators", Terms: []string{"go", "iter"}}},
+		Phases: []Phase{{Name: "follow-ups", Output: json.RawMessage(
+			`[{"query":"` + long + `"},{"query":"  spaced follow-up "},{"query":"go iterators in depth"}]`)}}}
+	qs, _ := Play(&live{}, tr).FollowUps(context.Background(), "p")
+	if len(qs) != 2 || qs[0].Query != long || strings.TrimSpace(qs[1].Query) != "spaced follow-up" {
+		t.Errorf("follow-ups = %+v, want the clipped and the spaced one, not the planned search's prefix", qs)
+	}
+}
+
+// The recorder keeps the follow-up call, so a replay of the trace searches
+// what the run searched.
+func TestRecorderKeepsTheFollowUps(t *testing.T) {
+	r := Record(&live{}, "q", "quick", 0)
+	if _, err := r.FollowUps(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
+	if got := recordedFollowUps(&r.trace); len(got) != 1 || got[0].Query != "the live model's own follow-up" {
+		t.Errorf("recorded follow-ups = %+v", got)
 	}
 }
 
