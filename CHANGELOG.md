@@ -5,6 +5,26 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `drsh update` and `update --check` print "What's new:": the changelog
+  entries of every release between the installed one and the latest, so an
+  update no longer ends on just a version number.
+
+### Changed
+
+- The web UI's question box no longer always suggests "heat pump or gas
+  furnace for a house in a cold climate?". It shows a hot question from
+  Stack Exchange's space, history or physics site, or one of ten built-in
+  questions until that arrives or when offline. Tab in the empty box takes
+  it as the question.
+
+### Fixed
+
+- The install scripts ended on "next: drsh init, then put your API key in
+  .env", the setup `drsh setup` replaced in 0.16.0. They now say
+  `next: drsh setup`.
+
 ## [0.18.2] - 2026-10-21
 
 ### Fixed

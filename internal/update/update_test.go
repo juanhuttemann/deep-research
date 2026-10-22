@@ -69,6 +69,23 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+func TestChangesSinceKeepsOnlyTheNewerReleases(t *testing.T) {
+	changelog := "# Changelog\n\n## [Unreleased]\n\n- soon\n\n" +
+		"## [0.7.0] - 2026-10-03\n\n- seven\n\n" +
+		"## [0.6.0] - 2026-10-02\n\n- six\n\n" +
+		"## [0.5.0] - 2026-10-01\n\n- five\n\n" +
+		"[0.5.0]: https://example.com/compare\n"
+	for current, want := range map[string]string{
+		"0.6.0":  "## [0.7.0] - 2026-10-03\n\n- seven",
+		"v0.5.0": "## [0.7.0] - 2026-10-03\n\n- seven\n\n## [0.6.0] - 2026-10-02\n\n- six",
+		"0.7.0":  "",
+	} {
+		if got := changesSince(changelog, current); got != want {
+			t.Errorf("since %s: got %q, want %q", current, got, want)
+		}
+	}
+}
+
 func TestAssetNameMatchesGoreleaser(t *testing.T) {
 	for p, want := range map[Platform]string{
 		{OS: "linux", Arch: "arm64"}:   "deep-research_linux_arm64.tar.gz",

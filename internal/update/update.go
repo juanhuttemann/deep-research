@@ -40,6 +40,7 @@ const (
 	maxArchive  = 128 << 20
 	maxChecksum = 1 << 20
 	maxBinary   = 256 << 20
+	maxNotes    = 4 << 20
 )
 
 // State is how the installed version compares with the latest release.
@@ -62,6 +63,9 @@ type Result struct {
 	LeftoverBackup string
 	// Warning is a problem after the swap, which the update survived.
 	Warning string
+	// Notes is the changelog of the releases after Current up to Latest, in
+	// Markdown; empty when it could not be read.
+	Notes string
 }
 
 // Platform names a release target.
@@ -153,6 +157,11 @@ func (c Client) Update(ctx context.Context, currentVersion string, checkOnly boo
 		return Result{}, err
 	}
 	result := Result{Current: "v" + strings.TrimPrefix(currentVersion, "v"), Latest: tag, State: state}
+	if state == UpgradeAvailable {
+		// Best effort: a changelog that cannot be read is no reason to
+		// withhold the release.
+		result.Notes, _ = c.Notes(ctx, currentVersion, tag)
+	}
 	if state != UpgradeAvailable || checkOnly {
 		return result, nil
 	}
@@ -220,6 +229,39 @@ func (c Client) Latest(ctx context.Context) (tag string, err error) {
 		return "", fmt.Errorf("resolve latest release redirect: %w", err)
 	}
 	return canonicalVersion(path.Base(u.Path))
+}
+
+// Notes is what changed since current, read from tag's CHANGELOG.md through
+// the repository's /raw/ redirect, which unlike the REST API's release notes
+// is not rate-limited.
+func (c Client) Notes(ctx context.Context, current, tag string) (string, error) {
+	// Its own deadline, not the archive's five minutes: a stalled raw host
+	// must not hold up the release the notes only describe.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	changelog, err := c.get(ctx, c.baseURL()+"/raw/"+tag+"/CHANGELOG.md", maxNotes)
+	if err != nil {
+		return "", fmt.Errorf("download changelog: %w", err)
+	}
+	return changesSince(string(changelog), current), nil
+}
+
+// changesSince keeps the sections of a Keep a Changelog file whose version
+// is newer than current. [Unreleased] names no version, so it never counts.
+func changesSince(changelog, current string) string {
+	var b strings.Builder
+	keep := false
+	for _, line := range strings.SplitAfter(changelog, "\n") {
+		if strings.HasPrefix(line, "## ") {
+			version, _, _ := strings.Cut(strings.TrimPrefix(line, "## ["), "]")
+			state, err := CompareVersions(current, version)
+			keep = err == nil && state == UpgradeAvailable
+		}
+		if keep {
+			b.WriteString(line)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // Download fetches tag's archive for p, checks it against the release's

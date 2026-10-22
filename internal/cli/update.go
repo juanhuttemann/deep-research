@@ -2,9 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/juanhuttemann/deep-research/internal/ui"
 	"github.com/juanhuttemann/deep-research/internal/update"
 )
 
@@ -52,6 +54,10 @@ func runUpdate(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(out, "%s is newer than the latest release %s\n", result.Current, result.Latest)
 	default:
 		fmt.Fprintf(out, "up to date (%s)\n", result.Latest)
+	}
+	if result.Notes != "" {
+		// Glamour opens on a blank line of its own.
+		fmt.Fprintf(out, "\nWhat's new:\n\n%s\n", strings.TrimLeft(ui.FormatMarkdown(out, result.Notes, false), "\n"))
 	}
 	return nil
 }
