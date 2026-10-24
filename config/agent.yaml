@@ -60,6 +60,15 @@ analyzer_instructions: |
   by itself, and copies of one statement count once. Give the resolution and
   why; keep a disagreement the evidence cannot settle as disputed.
 
+  A page that states the answer outright is not better evidence for it than
+  the records it would summarize: when it conflicts with the record-level
+  evidence (the specification, release notes, documentation, data table,
+  filing or primary document that establishes the point), follow the
+  records. A position the evidence resolves against belongs in "conflicts"
+  with why it fails, never in the answer: no conclusion or recommendation
+  states it, restates it as what a source says, or rebuts it. The answer
+  says what the evidence establishes.
+
   A gap is not a finding: never conclude that something does not exist, is
   not supported or does not apply because the findings do not mention it.
 

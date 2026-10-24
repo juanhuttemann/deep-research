@@ -1,0 +1,41 @@
+{
+ "about": "DRNOISE (arXiv 2607.17291): a blog states directly and wrongly that version 4.0 dropped Python 3.9; the 4.0 changelog keeps it (deprecated) and the 4.0 package metadata still requires only Python 3.9 or later, and the 4.2 changelog is where it is removed. The blog's claim is contradicted by the project's records; the 4.2 removal stands.",
+ "findings": [
+  {
+   "url": "https://devnotes.example/velo-4-upgrade",
+   "title": "Upgrading to Velo 4.0",
+   "query": "Velo 4.0 Python 3.9 support",
+   "content": "Upgrading to Velo 4.0: what you need to know. Velo 4.0 dropped support for Python 3.9, so teams still on 3.9 must upgrade their interpreter before moving to the new release."
+  },
+  {
+   "url": "https://velo.example/changelog/4.0",
+   "title": "Velo 4.0 changelog",
+   "query": "Velo 4.0 changelog",
+   "content": "Velo 4.0.0 (2026-02-10). Added: async session pool. Changed: the default timeout is now 30 seconds. Deprecated: Python 3.9; it continues to work in all 4.0 and 4.1 releases."
+  },
+  {
+   "url": "https://velo.example/changelog/4.2",
+   "title": "Velo 4.2 changelog",
+   "query": "Velo 4.2 changelog Python",
+   "content": "Velo 4.2.0 (2026-07-01). Removed: support for Python 3.9; python_requires is now >=3.10. Package metadata for 4.0.x and 4.1.x declares python_requires >=3.9."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "Velo 4.0 dropped support for Python 3.9.",
+   "scope": "Velo 4.0",
+   "sources": ["https://devnotes.example/velo-4-upgrade"]
+  },
+  {
+   "id": "c2",
+   "claim": "Velo 4.2 removed support for Python 3.9.",
+   "scope": "Velo 4.2",
+   "sources": ["https://velo.example/changelog/4.2"]
+  }
+ ],
+ "expect": {
+  "supported": ["c2"],
+  "not_supported": ["c1"]
+ }
+}

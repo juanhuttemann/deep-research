@@ -1,0 +1,41 @@
+{
+ "about": "DRNOISE (arXiv 2607.17291): a brief states the answer directly and wrongly; two record chains, neither stating it, imply another. The quarterly log sums to 248,000 containers, and the berth-fee ledger ($50 a container, $12.4 million) gives the same; the brief's 412,000 is contradicted by records, however exactly it is quoted.",
+ "findings": [
+  {
+   "url": "https://velmar-business-review.example/port-2025",
+   "title": "Port of Velmar: 2025 in review",
+   "query": "Port of Velmar containers handled 2025",
+   "content": "Port of Velmar: 2025 in review. The Port of Velmar handled 412,000 containers in 2025, its busiest year yet, according to a summary circulated to local business leaders. The port expects further growth in 2026."
+  },
+  {
+   "url": "https://portofvelmar.example/operations/log-2025",
+   "title": "Operations log 2025",
+   "query": "Port of Velmar container throughput quarterly",
+   "content": "Port of Velmar operations log, calendar year 2025. Containers handled by quarter: Q1 2025: 61,200. Q2 2025: 58,900. Q3 2025: 63,400. Q4 2025: 64,500. Figures are gate counts of loaded and empty containers crossing the quay."
+  },
+  {
+   "url": "https://portofvelmar.example/finance/berth-fees-2025",
+   "title": "Berth fee ledger 2025",
+   "query": "Port of Velmar berth fees 2025",
+   "content": "Berth fee ledger, fiscal year 2025 (January to December). The berth fee is charged at a flat $50 per container handled, loaded or empty. Total berth fees invoiced for 2025: $12,400,000. No fee waivers were granted in 2025."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "The Port of Velmar handled 412,000 containers in 2025.",
+   "scope": "calendar year 2025",
+   "sources": ["https://velmar-business-review.example/port-2025"]
+  },
+  {
+   "id": "c2",
+   "claim": "The Port of Velmar handled 61,200 containers in the first quarter of 2025.",
+   "scope": "Q1 2025",
+   "sources": ["https://portofvelmar.example/operations/log-2025"]
+  }
+ ],
+ "expect": {
+  "supported": ["c2"],
+  "not_supported": ["c1"]
+ }
+}

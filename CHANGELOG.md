@@ -5,6 +5,44 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- A position the evidence resolves against stays out of the answer. Given
+  one planted page stating a wrong answer outright (as DRNOISE, arXiv
+  2607.17291, does), the fact-check was not fooled, but the analyzer wrote
+  "a page states X" claims, rightly supported, and built answer statements
+  on them: "One source claims the highest crewed inclination is 72.4°" was
+  approved into an answer. `analyzer_instructions` now says to follow the
+  records over a page that only states the answer, and to keep a rejected
+  position in `conflicts`, out of the conclusions. On replays of five real
+  runs with the planted page on a realistic domain (20 per side), an
+  approved statement rested on the page in 15 before and 5 after, the true
+  value was in the approved answer in 18 before and 20 after, and graded
+  blind, 2 answers before and none after were damaged by the page (its
+  value restated as the answer, the true one missing). On an obviously
+  fake domain, 14 before and 1 after. Runs without the page stayed right.
+- The summarizer's quotations of sources are checked against the pages. A
+  double-quoted passage of six words or more, with a link in its sentence,
+  that is in no fetched page nor in the question keeps its words and loses
+  its quotation marks. Elisions (pieces on one page, in order), bracketed
+  edits, a changed capital, either nested quotation mark, bold and links
+  are accepted; a quote with code is compared with code as written;
+  quotation marks in code and link titles are left alone. On 12 fresh runs
+  the rules were not worked out on, it removed 6 of 184 such quotations, 5
+  of them paraphrases or added words presented as a source's, and kept no
+  linked one the pages do not hold. The check narrows what reaches the
+  reader as a source's words and does not prove the rest: shorter or
+  unlinked quotations are not checked, and one that matches a page only
+  once Markdown is read as prose (code quoted without its backticks) keeps
+  its marks.
+- A report whose fact-check approved none of its statements says low
+  confidence: the analyzer rates its confidence before the check. The case
+  did not come up in the 68 A/B replays; it is a rule for it, not a
+  measured change.
+- `make eval-replay` with `EVAL_REPEAT` above 1 lists each claim or
+  statement whose outcome changed between repeats, and the checker cases
+  gain three DRNOISE cases (`drnoise-*`).
+
 ## [0.20.0] - 2026-10-22
 
 ### Changed
