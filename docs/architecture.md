@@ -120,9 +120,25 @@ written by the program from what passed, so no statement the check blocked
 is stated there, and every claim it stands on quotes a passage that is in a
 page the run fetched. Whether a passage supports a claim, and whether claims
 justify a statement, are the checking model's judgements. The explanation
-the summarizer writes below the answer is model prose held only by its
+the summarizer writes below the answer is model prose held mostly by its
 instructions: it is given nothing but checked material, and told never to
-assert what was not established.
+assert what was not established. One thing in it is held in code, its
+quotations of sources (`ui/quotes.go`): a double-quoted passage of six
+words or more with a link in its sentence that is in no fetched page, nor
+in the question, loses its quotation marks and keeps its words. An elision
+(its pieces on one page, in order), a bracketed letter, a capital the
+sentence needed, trailing punctuation, either quotation mark nested inside,
+bold and links are accepted, as a reader accepts them; a quote containing
+code is compared with code kept as written on both sides, and quotation
+marks in code and in link titles are left alone. The analysis's own wording
+is not a source: quoted beside a link, it reads as the source's words. The
+check narrows what reaches the reader as a source's words, and does not
+prove the rest: a quotation under six words, one with no link in its
+sentence, or one that matches a page only once Markdown is read as prose
+(code quoted without its backticks) is left as the summarizer wrote it.
+The run's confidence is the analyzer's own rating, made before the check,
+so it is lowered to low when the check did not run, left a share of the
+claims unchecked, or approved none of the answer's statements.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the

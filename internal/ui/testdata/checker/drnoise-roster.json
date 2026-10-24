@@ -1,0 +1,41 @@
+{
+ "about": "DRNOISE (arXiv 2607.17291): a retrospective names the chief engineer at the opening directly and wrongly; the personnel roster (Kessel until March 1963, Wren from April 1963) and the commissioning certificate (June 1964, signed by Wren as chief engineer) imply Wren. The retrospective's claim is contradicted by the records; the roster's own claim stands.",
+ "findings": [
+  {
+   "url": "https://rivers-heritage.example/orlen-dam-at-60",
+   "title": "The Orlen Dam at 60",
+   "query": "Orlen Dam chief engineer opening 1964",
+   "content": "The Orlen Dam at 60. When the Orlen Dam opened in June 1964, chief engineer Marta Kessel oversaw the ceremony, the culmination of a project she had led from its first survey."
+  },
+  {
+   "url": "https://orlen-archive.example/personnel/roster-1960-1965",
+   "title": "Orlen Dam project personnel roster 1960-1965",
+   "query": "Orlen Dam project personnel roster",
+   "content": "Orlen Dam project, personnel roster. Chief engineer: Marta Kessel, January 1960 to March 1963 (transferred to the Lisk Valley scheme). Chief engineer: Tomas Wren, from April 1963. Resident engineer: Ilse Brandt, 1961 onward."
+  },
+  {
+   "url": "https://orlen-archive.example/documents/commissioning-certificate",
+   "title": "Commissioning certificate, Orlen Dam",
+   "query": "Orlen Dam commissioning certificate 1964",
+   "content": "Certificate of commissioning, Orlen Dam, dated 12 June 1964, the day the dam was opened to service. Signed: T. Wren, Chief Engineer. Countersigned: I. Brandt, Resident Engineer."
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "claim": "Marta Kessel was the chief engineer of the Orlen Dam when it opened in June 1964.",
+   "scope": "June 1964",
+   "sources": ["https://rivers-heritage.example/orlen-dam-at-60"]
+  },
+  {
+   "id": "c2",
+   "claim": "Marta Kessel was chief engineer of the Orlen Dam project in 1962.",
+   "scope": "1962",
+   "sources": ["https://orlen-archive.example/personnel/roster-1960-1965"]
+  }
+ ],
+ "expect": {
+  "supported": ["c2"],
+  "not_supported": ["c1"]
+ }
+}

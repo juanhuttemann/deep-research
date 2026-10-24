@@ -271,3 +271,31 @@ func TestPartlyFailedCheckLowersConfidence(t *testing.T) {
 		t.Errorf("fact-check %v, confidence %q; want the answered share kept and confidence low", res.FactCheck != nil, res.Summary.Confidence)
 	}
 }
+
+// blockingChecker makes a confident analysis whose one conclusion rests on a
+// claim the check finds insufficient.
+type blockingChecker struct{ *fakeAssistant }
+
+func (b *blockingChecker) Analyze(context.Context, string) (*agent.Analysis, error) {
+	return &agent.Analysis{Answer: "a", Confidence: "high", Claims: claimsN(1),
+		Conclusions: []agent.Recommendation{{Statement: "s", Claims: []string{"c1"}}}}, nil
+}
+
+func (b *blockingChecker) FactCheck(_ context.Context, prompt string) (*agent.FactCheckResult, error) {
+	if isInferenceCheck(prompt) {
+		return &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "k1", Follows: true}}}, nil
+	}
+	return &agent.FactCheckResult{Verdicts: []agent.Verdict{{ID: "c1", Status: "insufficient"}}}, nil
+}
+
+// A check that ran and blocked every conclusion left the analyzer's "high"
+// on a report whose answer section says nothing was established.
+func TestNothingApprovedLowersConfidence(t *testing.T) {
+	res, err := NewDriver(&blockingChecker{&fakeAssistant{}}, &MultiSink{}, nil, 1).Run(context.Background(), newTestPlan("quick", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Summary.Confidence != "low" {
+		t.Errorf("confidence %q with nothing approved; want low", res.Summary.Confidence)
+	}
+}

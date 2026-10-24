@@ -384,6 +384,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err != nil {
 		return d.partial(ctx, plan, findings, analysis, fc, "report writing failed", err)
 	}
+	d.checkQuotes(summary, plan.Question, findings)
 	summary = withAnswer(summary, analysis)
 	// The summarizer writes prose, so it reports no confidence of its own. The
 	// analyzer's is the run's, and without carrying it over the report prints
@@ -394,12 +395,45 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if summary.Confidence == "" {
 		summary.Confidence = analysis.Confidence
 	}
-	if (fc == nil || checkErr != nil) && len(analysis.Claims) > 0 {
+	if (fc == nil || checkErr != nil) && len(analysis.Claims) > 0 || nothingApproved(analysis) {
 		summary.Confidence = "low"
 	}
 	return d.finish(&agent.ResearchResult{
 		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
 	}), nil
+}
+
+// nothingApproved reports whether the analysis stated an answer and the
+// fact-check let none of it stand. Its confidence was the analyzer's, rated
+// before the check: a report whose answer section says nothing was
+// established printed "Confidence: high" beneath it.
+func nothingApproved(a *agent.Analysis) bool {
+	return len(units(a)) > 0 && len(approvedUnits(a)) == 0
+}
+
+// checkQuotes holds the summarizer's quotations to the fetched pages (see
+// unquoteUnfound) and says how many it found in none. The question counts
+// as a source: the summarizer quotes what it was asked. The analysis's own
+// words do not, claims or conclusions: they are its account of the sources,
+// and quoted beside a source's link they read as the source's words. In the
+// runs measured that was the commonest quotation no source wrote, and
+// accepting the conclusions' wording let four of them stand to spare one
+// quotation of a conclusion.
+// With no fetched page there is nothing to hold a quote to, and a run
+// without search is reported unverified already.
+func (d *Driver) checkQuotes(summary *agent.Summary, question string, findings []agent.Finding) {
+	pages := fetchedPages(findings)
+	if len(pages) == 0 {
+		return
+	}
+	pages["question:"] = newPageText(question)
+	report, n := unquoteUnfound(summary.Report, pages)
+	if n == 0 {
+		return
+	}
+	summary.Report = report
+	d.emit(Event{Type: Info, Phase: "Summarize", Detail: fmt.Sprintf(
+		"%d quoted %s in no fetched page: shown without quotation marks", n, plural(n, "passage is", "passages are"))})
 }
 
 // applyVerdicts holds the analysis to the fact-check (see govern) and says
@@ -636,7 +670,7 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 		// A fact-check that did not run verified nothing, whatever the
 		// analyzer thought of its own answer.
 		confidence = analysis.Confidence
-		if fc == nil {
+		if fc == nil || nothingApproved(analysis) {
 			confidence = "low"
 		}
 	case analysis != nil && strings.TrimSpace(analysis.Answer) != "":

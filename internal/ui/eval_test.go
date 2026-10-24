@@ -59,42 +59,89 @@ func TestEvalChecker(t *testing.T) {
 	asst.SetProgress(func(string) {})
 
 	var total evalScore
+	var flips []string
 	for _, c := range cases {
 		// EVAL_CASE runs the cases whose name contains it, to measure one
 		// failure without paying for the rest.
 		if only := os.Getenv("EVAL_CASE"); only != "" && !strings.Contains(c.Name, only) {
 			continue
 		}
+		runs := map[string][]string{}
 		for run := range repeat {
 			// The check's wall time, to compare how a change to it costs.
 			start := time.Now()
-			s, detail := evalCase(t.Context(), asst, c)
+			s, detail, got := evalCase(t.Context(), asst, c)
 			total = addScore(total, s)
+			for id, o := range got {
+				runs[id] = append(runs[id], o)
+			}
 			t.Logf("%-20s run %d (%.1fs): %s%s", c.Name, run+1, time.Since(start).Seconds(), s, detail)
 		}
+		flips = append(flips, flipped(c.Name, runs)...)
 	}
 	t.Logf("TOTAL over %d cases x %d: %s", len(cases), repeat, total)
+	// The totals of several repeats hide a checker that is right on a claim
+	// one run in two: summed, it reads as two errors anywhere. A judgement that
+	// changes between repeats of the same input is noise a single run cannot
+	// tell from a fix, so it is listed by name.
+	if repeat > 1 {
+		t.Logf("FLIPS: %d judgements changed between repeats", len(flips))
+		for _, f := range flips {
+			t.Logf("  %s", f)
+		}
+	}
+}
+
+// flipped names each judgement of a case that was not the same in every
+// repeat, with the outcome of each run.
+func flipped(name string, runs map[string][]string) []string {
+	var out []string
+	for id, got := range runs {
+		if slices.ContainsFunc(got, func(o string) bool { return o != got[0] }) {
+			out = append(out, name+" "+id+": "+strings.Join(got, ", "))
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // evalCase runs the fact-check and governance on one case and scores them.
-func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalScore, string) {
+// It also returns each claim's status and each unit's outcome by ID, for
+// telling apart a judgement that changed between repeats.
+func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalScore, string, map[string]string) {
 	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations),
 		Conclusions: slices.Clone(c.Conclusions)}
 	checkAnalysis(a, c.Findings)
 	// The check as a run makes it: split into parallel calls (see checkParts).
 	fc, err := checkAll(ctx, checkParts(a, c.Findings, true), asst.FactCheck)
 	if err != nil {
-		return evalScore{errors: 1}, " (" + err.Error() + ")"
+		return evalScore{errors: 1}, " (" + err.Error() + ")", map[string]string{"check": "error"}
 	}
 	govern(a, fc, nil, c.Findings)
 	var s evalScore
 	misses := scoreClaims(&s, c, a)
 	misses = append(misses, scoreInferences(&s, c, fc)...)
 	misses = append(misses, scoreRecommendations(&s, c, a)...)
+	got := outcomes(a)
 	if len(misses) == 0 {
-		return s, ""
+		return s, "", got
 	}
-	return s, "\n    " + strings.Join(misses, "\n    ")
+	return s, "\n    " + strings.Join(misses, "\n    "), got
+}
+
+// outcomes is each claim's status and whether each unit passed, by ID.
+func outcomes(a *agent.Analysis) map[string]string {
+	out := map[string]string{}
+	for _, cl := range a.Claims {
+		out[cl.ID] = cl.Status
+	}
+	for _, u := range units(a) {
+		out[u.id] = "approved"
+		if u.r.Blocked != "" {
+			out[u.id] = "blocked"
+		}
+	}
+	return out
 }
 
 func scoreClaims(s *evalScore, c checkerCase, a *agent.Analysis) (misses []string) {

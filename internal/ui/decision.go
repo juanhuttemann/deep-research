@@ -234,6 +234,11 @@ type pageText struct {
 	joined     []string
 	hasVisible bool
 	hasJoined  bool
+	// loose is the visible text without the space before punctuation, for
+	// the report's quotes only (locateLoose); literal is the page as a quote
+	// of code is compared (literalForm).
+	loose, literal       string
+	hasLoose, hasLiteral bool
 }
 
 func newPageText(page string) *pageText {
