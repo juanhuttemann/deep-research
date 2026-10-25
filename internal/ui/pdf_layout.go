@@ -253,17 +253,9 @@ func (p *pdfParser) add(s string) {
 	p.addRun(pdfRun{text: s, bold: p.bold > 0, italic: p.italic > 0, mono: p.mono, url: p.url})
 }
 
-// pdfFallbacks spells the symbols reports use that WinAnsi has no glyph for
-// the way plain text would, rather than printing them as '?'.
-var pdfFallbacks = strings.NewReplacer(
-	"→", "->", "←", "<-", "↔", "<->", "⇒", "=>",
-	"≤", "<=", "≥", ">=", "≠", "!=", "≈", "~", "−", "-",
-)
-
-// pdfDisplay is parsed text as the PDF can draw it: the symbols spelled out
-// and emoji left out. An emoji is decoration (a source titled "Top 20
-// Raspberry Pi Projects of 2025🤯!"); drawn as '?' it made the run warn that
-// the PDF lost text. It is done to parsed text, never to the Markdown, whose
+// pdfDisplay is parsed text as the PDF can draw it: emoji left out. An emoji
+// is decoration (a source titled "Top 20 Raspberry Pi Projects of 2025🤯!");
+// drawn as '?' it made the run warn that the PDF lost text. It is done to parsed text, never to the Markdown, whose
 // syntax and link targets a rune changed in the source would change.
 func pdfDisplay(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -271,7 +263,7 @@ func pdfDisplay(s string) string {
 			return -1
 		}
 		return r
-	}, pdfFallbacks.Replace(s))
+	}, s)
 }
 
 // pdfBMPEmoji are the emoji outside the pictograph blocks that reports and

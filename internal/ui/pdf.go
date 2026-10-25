@@ -7,14 +7,16 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Minimal, dependency-free PDF writer. The report is laid out by
 // pdf_layout.go into pages of positioned text, rules and link rectangles;
 // this file turns those pages into a valid PDF 1.4 document: every object is
 // written, the xref lists them all as in-use, and each content stream
-// declares its exact byte length. The fonts are the standard Helvetica and
-// Courier faces, which every viewer has, so nothing is embedded.
+// declares its exact byte length. The fonts are the standard Helvetica,
+// Courier and Symbol faces, which every viewer has, so nothing is embedded.
 
 // US Letter layout, in PDF user-space units (1/72").
 const (
@@ -31,10 +33,13 @@ const (
 	fontItalic
 	fontBoldItalic
 	fontMono
+	// fontSymbol is no style of its own: text draws in it the runes its
+	// style's font has no glyph for and Symbol does (see pdfGlyph).
+	fontSymbol
 )
 
 // pdfFontNames are the resource order: fontRegular is /F1.
-var pdfFontNames = [...]string{"Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique", "Courier"}
+var pdfFontNames = [...]string{"Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique", "Courier", "Symbol"}
 
 // pdfLink is a clickable rectangle on a page that opens uri.
 type pdfLink struct {
@@ -49,10 +54,35 @@ type pdfPage struct {
 }
 
 // text draws s with its baseline starting at (x, y). Each string sets its own
-// font and colour so no graphics state leaks from one to the next.
+// font and colour so no graphics state leaks from one to the next. A run of
+// runes drawn from the Symbol font is a string of its own, placed where the
+// layout measured it (pdfWidth measures each rune in the font it is drawn in).
 func (p *pdfPage) text(x, y float64, f pdfFont, size float64, rgb, s string) {
-	fmt.Fprintf(&p.ops, "BT /F%d %s Tf %s rg 1 0 0 1 %s %s Tm (%s) Tj ET\n",
-		f+1, pdfNum(size), rgb, pdfNum(x), pdfNum(y), escapePDF(s))
+	for s != "" {
+		run, rest, symbol := nextFontRun(s)
+		font := f
+		if symbol {
+			font = fontSymbol
+		}
+		fmt.Fprintf(&p.ops, "BT /F%d %s Tf %s rg 1 0 0 1 %s %s Tm (%s) Tj ET\n",
+			font+1, pdfNum(size), rgb, pdfNum(x), pdfNum(y), escapePDF(run))
+		x += pdfWidth(run, font, size)
+		s = rest
+	}
+}
+
+// nextFontRun splits off s's leading runes that draw in one font: the
+// Symbol font when symbol is true, the text's own otherwise.
+func nextFontRun(s string) (run, rest string, symbol bool) {
+	for i, r := range s {
+		_, sym, _ := pdfGlyph(r)
+		if i == 0 {
+			symbol = sym
+		} else if sym != symbol {
+			return s[:i], s[i:], symbol
+		}
+	}
+	return s, "", symbol
 }
 
 // fill paints a grey rectangle whose lower-left corner is (x, y).
@@ -93,7 +123,13 @@ func writePDF(pages []*pdfPage) []byte {
 	catalog, tree := add(""), add("")
 	var fonts []string
 	for i, name := range pdfFontNames {
-		n := add("<< /Type /Font /Subtype /Type1 /BaseFont /" + name + " /Encoding /WinAnsiEncoding >>")
+		// Symbol's glyphs are reachable only through its built-in encoding:
+		// WinAnsi names Latin glyphs it does not have.
+		encoding := " /Encoding /WinAnsiEncoding"
+		if pdfFont(i) == fontSymbol {
+			encoding = ""
+		}
+		n := add("<< /Type /Font /Subtype /Type1 /BaseFont /" + name + encoding + " >>")
 		fonts = append(fonts, fmt.Sprintf("/F%d %d 0 R", i+1, n))
 	}
 	resources := "<< /Font << " + strings.Join(fonts, " ") + " >> >>"
@@ -164,8 +200,9 @@ func escapeURI(s string) string {
 
 // winAnsi maps the typographic runes the report text actually uses onto their
 // WinAnsiEncoding slots. WinAnsi is Latin-1 except for 0x80-0x9F, so anything
-// else in Latin-1 passes through as its own byte and the rest becomes '?'.
-// The fact-check marks have no WinAnsi glyph and get the nearest that
+// else in Latin-1 passes through as its own byte; the rest is drawn from the
+// Symbol font when it has the glyph (symbolCodes), and as '?' when not.
+// The fact-check marks have no glyph in either and get the nearest that
 // prints, rather than a '?' on every unverified claim.
 var winAnsi = map[rune]byte{
 	'€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85,
@@ -175,7 +212,33 @@ var winAnsi = map[rune]byte{
 	'›': 0x9b, '✗': 0xd7, '⚠': '!',
 }
 
-// escapePDF encodes a string as a PDF literal string in WinAnsiEncoding.
+// symbolCodes maps the Greek letters and mathematical signs WinAnsi lacks
+// onto their slots in the Symbol font's built-in encoding, by glyph name as
+// the Adobe Glyph List gives each. A report on π printed "How ?'s decimal
+// digits are produced" with a '?' for each of its thirty π. The arrows and
+// comparison signs were spelled out ("->", "<=") before, and ≈ became a "~"
+// a reader cannot tell from a tilde.
+var symbolCodes = map[rune]byte{
+	'Α': 0x41, 'Β': 0x42, 'Χ': 0x43, 'Δ': 0x44, 'Ε': 0x45, 'Φ': 0x46, 'Γ': 0x47, 'Η': 0x48,
+	'Ι': 0x49, 'Κ': 0x4b, 'Λ': 0x4c, 'Μ': 0x4d, 'Ν': 0x4e, 'Ο': 0x4f, 'Π': 0x50, 'Θ': 0x51,
+	'Ρ': 0x52, 'Σ': 0x53, 'Τ': 0x54, 'Υ': 0x55, 'Ω': 0x57, 'Ξ': 0x58, 'Ψ': 0x59, 'Ζ': 0x5a,
+	'α': 0x61, 'β': 0x62, 'χ': 0x63, 'δ': 0x64, 'ε': 0x65, 'φ': 0x66, 'γ': 0x67, 'η': 0x68,
+	'ι': 0x69, 'ϕ': 0x6a, 'κ': 0x6b, 'λ': 0x6c, 'μ': 0x6d, 'ν': 0x6e, 'ο': 0x6f, 'π': 0x70,
+	'θ': 0x71, 'ρ': 0x72, 'σ': 0x73, 'τ': 0x74, 'υ': 0x75, 'ϖ': 0x76, 'ω': 0x77, 'ξ': 0x78,
+	'ψ': 0x79, 'ζ': 0x7a, 'ς': 0x56, 'ϑ': 0x4a, 'ϒ': 0xa1,
+	'∀': 0x22, '∃': 0x24, '∋': 0x27, '∗': 0x2a, '−': 0x2d, '≅': 0x40, '∴': 0x5c, '⊥': 0x5e,
+	'∼': 0x7e, '′': 0xa2, '≤': 0xa3, '⁄': 0xa4, '∕': 0xa4, '∞': 0xa5, '♣': 0xa7, '♦': 0xa8,
+	'♥': 0xa9, '♠': 0xaa, '↔': 0xab, '←': 0xac, '↑': 0xad, '→': 0xae, '↓': 0xaf, '″': 0xb2,
+	'≥': 0xb3, '∝': 0xb5, '∂': 0xb6, '≠': 0xb9, '≡': 0xba, '≈': 0xbb, '↵': 0xbf, 'ℵ': 0xc0,
+	'ℑ': 0xc1, 'ℜ': 0xc2, '℘': 0xc3, '⊗': 0xc4, '⊕': 0xc5, '∅': 0xc6, '∩': 0xc7, '∪': 0xc8,
+	'⊃': 0xc9, '⊇': 0xca, '⊄': 0xcb, '⊂': 0xcc, '⊆': 0xcd, '∈': 0xce, '∉': 0xcf, '∠': 0xd0,
+	'∇': 0xd1, '∆': 0x44, '∏': 0xd5, '√': 0xd6, '⋅': 0xd7, '∧': 0xd9, '∨': 0xda, '⇔': 0xdb,
+	'⇐': 0xdc, '⇑': 0xdd, '⇒': 0xde, '⇓': 0xdf, '◊': 0xe0, '〈': 0xe1, '⟨': 0xe1, '∑': 0xe5,
+	'〉': 0xf1, '⟩': 0xf1, '∫': 0xf2,
+}
+
+// escapePDF encodes a string as a PDF literal string, each rune as its byte
+// in the font it draws in (pdfGlyph): text calls it on one font's run.
 // Non-ASCII bytes are written as octal escapes rather than raw: a raw UTF-8
 // sequence is read byte-per-glyph by the viewer and renders as mojibake.
 func escapePDF(s string) string {
@@ -188,7 +251,8 @@ func escapePDF(s string) string {
 		case r >= 0x20 && r < 0x7f:
 			sb.WriteRune(r)
 		default:
-			fmt.Fprintf(&sb, "\\%03o", pdfGlyph(r))
+			b, _, _ := pdfGlyph(r)
+			fmt.Fprintf(&sb, "\\%03o", b)
 		}
 	}
 	return sb.String()
@@ -205,24 +269,37 @@ func pdfByte(r rune) (byte, bool) {
 	return 0, false
 }
 
-// pdfGlyph is the byte the PDF draws for r: its own, or '?' when it has none.
-func pdfGlyph(r rune) byte {
-	if b, ok := pdfByte(r); ok {
-		return b
+// pdfGlyph is the byte the PDF draws for r, and whether that byte is in the
+// Symbol font rather than the text's own; ok is false when neither has r,
+// which then draws as the text font's '?'. A letter or digit styled as
+// mathematics ("𝜋", "𝐱") is drawn as itself: a model writing formulas
+// uses them, and they mean the plain letter set in italic or bold.
+func pdfGlyph(r rune) (b byte, symbol, ok bool) {
+	if r >= 0x1d400 && r <= 0x1d7ff { // Mathematical Alphanumeric Symbols
+		if plain := []rune(norm.NFKC.String(string(r))); len(plain) == 1 {
+			r = plain[0]
+		}
 	}
-	return '?'
+	if b, ok := pdfByte(r); ok {
+		return b, false, true
+	}
+	if b, ok := symbolCodes[r]; ok {
+		return b, true, true
+	}
+	return '?', false, false
 }
 
 // pdfHasUnsupportedText reports whether escapePDF would write a '?' for any of
-// text. It asks pdfByte, as escapePDF does, so accented Latin and the mapped
-// punctuation never warn. Whitespace is skipped: layout draws every kind as a
-// plain space, or as a line break, before a line is encoded.
+// text. It asks pdfGlyph, as escapePDF does, so accented Latin, the mapped
+// punctuation and the Symbol font's glyphs never warn. Whitespace is skipped:
+// layout draws every kind as a plain space, or as a line break, before a
+// line is encoded.
 func pdfHasUnsupportedText(text string) bool {
 	for _, r := range text {
 		if unicode.IsSpace(r) {
 			continue
 		}
-		if _, ok := pdfByte(r); !ok {
+		if _, _, ok := pdfGlyph(r); !ok {
 			return true
 		}
 	}
@@ -230,15 +307,18 @@ func pdfHasUnsupportedText(text string) bool {
 }
 
 // pdfWidth is the advance width of s in points, measured glyph by glyph as
-// the viewer will draw it.
+// the viewer will draw it: a rune drawn from the Symbol font has Symbol's
+// width whatever f is.
 func pdfWidth(s string, f pdfFont, size float64) float64 {
 	units := 0
 	for _, r := range s {
-		b := pdfGlyph(r)
-		switch f {
-		case fontMono:
+		b, symbol, _ := pdfGlyph(r)
+		switch {
+		case symbol:
+			units += int(symbolWidths[b-0x20])
+		case f == fontMono:
 			units += 600
-		case fontBold, fontBoldItalic:
+		case f == fontBold, f == fontBoldItalic:
 			units += int(helveticaBoldWidths[b-0x20])
 		default:
 			units += int(helveticaWidths[b-0x20])
@@ -282,4 +362,25 @@ var helveticaBoldWidths = [224]uint16{
 	722, 722, 778, 778, 778, 778, 778, 584, 778, 722, 722, 722, 722, 667, 667, 611,
 	556, 556, 556, 556, 556, 556, 889, 556, 556, 556, 556, 556, 278, 278, 278, 278,
 	611, 611, 611, 611, 611, 611, 611, 584, 611, 611, 611, 611, 611, 556, 611, 556,
+}
+
+// symbolWidths are the Symbol font's advance widths in 1/1000 em for codes
+// 0x20-0xFF of its built-in encoding, from the URW Standard Symbols PS AFM
+// (urw-base35), which is metric-compatible with Symbol. Codes with no glyph
+// are 0; symbolCodes maps no rune onto them.
+var symbolWidths = [224]uint16{
+	250, 333, 713, 500, 549, 833, 778, 439, 333, 333, 500, 549, 250, 549, 250, 278,
+	500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 278, 278, 549, 549, 549, 444,
+	549, 722, 667, 722, 612, 611, 763, 603, 722, 333, 631, 722, 686, 889, 722, 722,
+	768, 741, 556, 592, 611, 690, 439, 768, 645, 795, 611, 333, 863, 333, 658, 500,
+	500, 631, 549, 549, 494, 439, 521, 411, 603, 329, 603, 549, 549, 576, 521, 549,
+	549, 521, 549, 603, 439, 576, 713, 686, 493, 686, 494, 480, 200, 480, 549, 0,
+	790, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	750, 620, 247, 549, 167, 713, 500, 753, 753, 753, 753, 1042, 987, 603, 987, 603,
+	400, 549, 411, 549, 549, 713, 494, 460, 549, 549, 549, 549, 1000, 603, 1000, 658,
+	823, 686, 795, 987, 768, 768, 823, 768, 768, 713, 713, 713, 713, 713, 713, 713,
+	768, 713, 790, 790, 890, 823, 549, 250, 713, 603, 603, 1042, 987, 603, 987, 603,
+	494, 329, 790, 790, 786, 713, 384, 384, 384, 384, 384, 384, 494, 494, 494, 494,
+	0, 329, 274, 686, 686, 686, 384, 384, 384, 384, 384, 384, 494, 494, 494, 0,
 }

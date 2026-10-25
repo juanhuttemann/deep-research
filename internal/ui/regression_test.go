@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2056,7 +2057,7 @@ func TestPDFDropsEmojiWithoutWarning(t *testing.T) {
 		t.Errorf("warned for emoji: %+v", parsePDFBlocks(report))
 	}
 	pdf := string(BuildPDF(report))
-	for _, want := range []string{"-> $1,813.0M", "value != ranking", "of 2025!", "example.com/%F0%9F%A4%AF"} {
+	for _, want := range []string{"$580.0M", " $1,813.0M", "of 2025!", "example.com/%F0%9F%A4%AF"} {
 		if !strings.Contains(pdf, want) {
 			t.Errorf("PDF lacks %q", want)
 		}
@@ -2384,8 +2385,8 @@ func TestFallbackQueryIsThePlannersTerms(t *testing.T) {
 }
 
 // pdfText is one string the PDF draws: the font slot it uses (1 Helvetica,
-// 2 Bold, 3 Oblique, 4 BoldOblique, 5 Courier), its size, where its baseline
-// starts, and the page it is on.
+// 2 Bold, 3 Oblique, 4 BoldOblique, 5 Courier, 6 Symbol), its size, where its
+// baseline starts, and the page it is on.
 type pdfText struct {
 	page       int
 	font       int
@@ -2406,7 +2407,7 @@ func pdfTexts(t *testing.T, pdf []byte) []pdfText {
 			size, _ := strconv.ParseFloat(m[2], 64)
 			x, _ := strconv.ParseFloat(m[3], 64)
 			y, _ := strconv.ParseFloat(m[4], 64)
-			out = append(out, pdfText{page, font, size, x, y, unescapePDF(m[5])})
+			out = append(out, pdfText{page, font, size, x, y, unescapePDF(m[5], pdfFont(font-1))})
 		}
 	}
 	if len(out) == 0 {
@@ -2415,17 +2416,24 @@ func pdfTexts(t *testing.T, pdf []byte) []pdfText {
 	return out
 }
 
-// unescapePDF undoes escapePDF, giving each WinAnsi byte back as the rune it
-// stands for, so tests match "•" and pdfWidth measures the glyph drawn.
-func unescapePDF(s string) string {
-	fromWinAnsi := map[byte]rune{}
+// unescapePDF undoes escapePDF for a string drawn in font f, giving each
+// byte back as the rune it stands for, so tests match "•" and "π" and
+// pdfWidth measures the glyph drawn. A Symbol slot two runes share gives
+// back the lower ("Δ", not "∆").
+func unescapePDF(s string, f pdfFont) string {
+	from := map[byte]rune{}
 	for r, b := range winAnsi {
-		if b >= 0x80 && b < 0xa0 {
-			fromWinAnsi[b] = r
+		if f != fontSymbol && b >= 0x80 && b < 0xa0 {
+			from[b] = r
+		}
+	}
+	for r, b := range symbolCodes {
+		if prev, ok := from[b]; f == fontSymbol && (!ok || r < prev) {
+			from[b] = r
 		}
 	}
 	decode := func(b byte) rune {
-		if r, ok := fromWinAnsi[b]; ok {
+		if r, ok := from[b]; ok {
 			return r
 		}
 		return rune(b)
@@ -2743,9 +2751,10 @@ func TestPDFWarningMatchesWhatIsDrawn(t *testing.T) {
 }
 
 // Found in an end-to-end run: "string → string" printed as "string ? string"
-// and set off the lost-characters warning. Arrows and comparison signs have
-// no WinAnsi glyph but a plain-text spelling.
-func TestPDFSpellsArrowsAndComparisons(t *testing.T) {
+// and set off the lost-characters warning. The fix spelled the arrows and
+// comparison signs "->" and "<=", and ≈ as a "~"; the Symbol font draws them
+// as themselves, in code as in prose.
+func TestPDFDrawsArrowsAndComparisons(t *testing.T) {
 	src := "`string → string` and x ≤ y ≥ z ≠ w ≈ v, a ⇒ b, −3"
 	if pdfDropsText(src) {
 		t.Error("arrows and comparisons still count as lost text")
@@ -2755,10 +2764,55 @@ func TestPDFSpellsArrowsAndComparisons(t *testing.T) {
 		drawn = append(drawn, tx.text)
 	}
 	got := strings.Join(drawn, "")
-	for _, want := range []string{"string -> string", "x <= y >= z != w ~ v", "a => b", "-3"} {
+	for _, want := range []string{"string → string", "x ≤ y ≥ z ≠ w ≈ v", "a ⇒ b", "−3"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("printed %q, want %q in it", got, want)
 		}
+	}
+}
+
+// A report on π printed its heading as "How ?'s decimal digits are
+// produced" and every one of its thirty π as '?': Helvetica's WinAnsi
+// encoding has no Greek. The Symbol font, standard in every viewer like
+// Helvetica, draws them, each run of its glyphs a string of its own set
+// where the line's measured width puts it.
+func TestPDFDrawsGreekFromTheSymbolFont(t *testing.T) {
+	pdf := BuildPDF("## How π's decimal digits are produced")
+	if !strings.Contains(string(pdf), "/BaseFont /Symbol >>") {
+		t.Error("the Symbol font is not declared with its built-in encoding")
+	}
+	heading := pdfTexts(t, pdf)[:3]
+	if heading[0].text != "How " || heading[1].text != "π" || heading[2].text != "'s decimal digits are produced" {
+		t.Fatalf("heading drawn as %+v", heading)
+	}
+	if heading[1].font != int(fontSymbol)+1 || heading[0].font == heading[1].font || heading[2].font != heading[0].font {
+		t.Errorf("π not drawn alone in Symbol: %+v", heading)
+	}
+	for i := 1; i < len(heading); i++ {
+		prev := heading[i-1]
+		if want := prev.x + pdfWidth(prev.text, pdfFont(prev.font-1), prev.size); math.Abs(heading[i].x-want) > 0.01 || heading[i].y != prev.y {
+			t.Errorf("%q starts at %.2f, want %.2f, where %q ends", heading[i].text, heading[i].x, want, prev.text)
+		}
+	}
+}
+
+// The Greek the Symbol font draws no longer warns, nor a letter styled as
+// mathematics ("𝜋"), which it draws as the plain letter; Greek with its
+// accents is a script Symbol does not have, and still warns.
+func TestPDFWarnsOnlyForGreekSymbolLacks(t *testing.T) {
+	src := "Archimedes bounded 𝜋 with αβ-polygons."
+	if pdfDropsText(src) {
+		t.Errorf("Greek counts as lost text: %+v", parsePDFBlocks(src))
+	}
+	var drawn []string
+	for _, tx := range pdfTexts(t, BuildPDF(src)) {
+		drawn = append(drawn, tx.text)
+	}
+	if got := strings.Join(drawn, ""); !strings.Contains(got, "Archimedes bounded π with αβ-polygons.") {
+		t.Errorf("drawn as %q", got)
+	}
+	if !pdfDropsText("Ελληνικά") {
+		t.Error("accented Greek stopped warning")
 	}
 }
 

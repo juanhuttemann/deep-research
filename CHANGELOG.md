@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The PDF printed every Greek letter as `?`: a report on π opened its
+  section "How ?'s decimal digits are produced" and lost each of its thirty
+  π. Greek letters and mathematical signs Helvetica lacks are now drawn
+  from the standard Symbol font, which every viewer has, so nothing is
+  embedded; `→`, `≤`, `≠` and `≈` print as themselves instead of `->`,
+  `<=`, `!=` and `~`, and a styled letter such as `𝜋` prints as `π`.
+  Accented Greek, Cyrillic and CJK still become `?`, with the warning.
+
 ## [0.21.1] - 2026-10-25
 
 ### Fixed
