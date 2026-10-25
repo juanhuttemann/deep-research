@@ -711,9 +711,10 @@ header repeated on each page, code blocks and page numbers. Links are
 clickable, and each link's URL is printed once, at its last link, so a
 source the report cites shows its URL in the citation list rather than in
 every paragraph that cites it. The PDF uses Helvetica with
-WinAnsi encoding: Latin-1 and supported typographic punctuation render,
-arrows and comparison signs are spelled `->`, `<=`, `>=`, `!=` and `~`, and
-other scripts (including Cyrillic, Greek and CJK) become `?`. The CLI
+WinAnsi encoding, and the standard Symbol font for what that lacks: Latin-1,
+supported typographic punctuation, Greek letters (π, α, Δ, without accents)
+and mathematical signs (→, ≤, ≥, ≠, ≈, −, ∞, √, ∑) render, and other scripts
+(including Cyrillic, accented Greek and CJK) become `?`. The CLI
 warns on stderr when characters are lost; use `.md` or `.json` for the full
 Unicode text. Artifact filenames use a readable
 question stem plus a 128-bit hash; reports created with the earlier short
