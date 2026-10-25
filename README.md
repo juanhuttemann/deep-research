@@ -1,5 +1,11 @@
 # deep-research
 
+![A run: the question is planned into sub-topics, researched by parallel sub-agents and one follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
+
+An AI-powered deep research agent for the terminal and the browser. Its
+answer states only what passed a fact-check against the pages it read, and
+it writes a cited report as Markdown, PDF and JSON.
+
 <div align="center">
 
 [![Go version](https://img.shields.io/github/go-mod/go-version/juanhuttemann/deep-research?style=for-the-badge&logo=go&logoColor=white)](https://github.com/juanhuttemann/deep-research/blob/main/go.mod)
@@ -10,12 +16,6 @@
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-E8EDF2?style=for-the-badge&labelColor=1B2127)
 
 </div>
-
-An AI-powered deep research agent for the terminal and the browser. Its
-answer states only what passed a fact-check against the pages it read, and
-it writes a cited report as Markdown, PDF and JSON.
-
-![A run: the question is planned into sub-topics, researched by parallel sub-agents and one follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
 
 ![deep-research planning, researching, fact-checking and reporting on a question about mixture-of-experts LLMs](demo.gif)
 
