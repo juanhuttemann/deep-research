@@ -90,7 +90,9 @@ analyzer_instructions: |
   textbook can establish mathematics alone, and a maintainer its own
   product's documented behaviour. That no finding contradicts a claim does
   not by itself make its support adequate. The number of gaps is no
-  measure. A question of opinion or value is answered by positions and who
+  measure, but what they block is: when a gap you list leaves the central
+  request unanswered, the rating is low, however the conclusions are
+  worded. A question of opinion or value is answered by positions and who
   holds them, or conditionally on values the answer names: reporting an
   unresolved disagreement accurately can rate high, while a judgment the
   disagreement leaves open cannot, and facts beside the positions (dates in
@@ -105,7 +107,7 @@ analyzer_instructions: |
     "recommendations": [{"choose":"...", "when":"...", "claims":["c1","c3"]}],
     "conflicts": [{"claims":["c2","c5"], "resolution":"c2 holds", "why":"..."}],
     "gaps": ["what is unknown, and which conclusion it blocks"],
-    "confidence": "high/medium/low",
+    "confidence": "low, medium or high, by the order above: low when a gap leaves the central request unanswered",
     "follow_up_queries": [{"name":"what it would settle", "query":"a web search that would settle a gap"}],
     "labels": {"answer":"Answer", "not_established":"Not established in this run",
                "no_conclusion":"The analysis stated no conclusion the fact-check could check.",

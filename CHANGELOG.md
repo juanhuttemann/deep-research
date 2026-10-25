@@ -17,7 +17,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   part is answered with suitable evidence, medium between. Gaps about what
   the question did not ask lower nothing, a source counts by whether it
   can establish its claim rather than by its kind, and an opinion question
-  is rated by how well the evidence reports its positions.
+  is rated by how well the evidence reports its positions. A gap the
+  analyzer lists that leaves the central request unanswered now makes the
+  rating low, and the JSON field itself states that rule. On the 14 runs'
+  evidence, re-analyzed three times per prompt and graded blind,
+  deepseek-v4.1-flash's rating now separates good answers from the rest
+  (AUROC 0.95, from 0.85) and rates π high and the opinion question low;
+  gemini-3.5-flash still rates some answers high whose claims overstate
+  the evidence (AUROC 0.80, from 0.73).
 
 ### Fixed
 
