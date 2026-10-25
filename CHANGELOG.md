@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-24
+
 ### Changed
 
 - A position the evidence resolves against stays out of the answer. Given
@@ -1115,7 +1117,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/juanhuttemann/deep-research/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/juanhuttemann/deep-research/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/juanhuttemann/deep-research/compare/v0.18.2...v0.19.0
 [0.18.2]: https://github.com/juanhuttemann/deep-research/compare/v0.18.1...v0.18.2
