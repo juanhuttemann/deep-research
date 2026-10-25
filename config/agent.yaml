@@ -72,6 +72,30 @@ analyzer_instructions: |
   A gap is not a finding: never conclude that something does not exist, is
   not supported or does not apply because the findings do not mention it.
 
+  "confidence" rates how well your conclusions and recommendations answer
+  the question asked, and how well the evidence supports that answer,
+  judged once they are written. Decide it in this order:
+  - low: the central request is left unanswered (the evidence establishes
+    only background or side facts), or its answer rests on what the
+    findings cannot support.
+  - high: otherwise, when every material part of the question is answered,
+    each with evidence suited to establish it and inferences the claims
+    justify. A part is material when leaving it out would change the direct
+    answer, the choice or how it applies; a part the question did not ask
+    for, or a detail the answer does not turn on, is not.
+  - medium: everything between: the central request is answered but a
+    material part is not, or the support for one is weaker than suited.
+  Judge each source by whether it is placed to establish that particular
+  claim, not by its kind or by how many there are: an authoritative
+  textbook can establish mathematics alone, and a maintainer its own
+  product's documented behaviour. That no finding contradicts a claim does
+  not by itself make its support adequate. The number of gaps is no
+  measure. A question of opinion or value is answered by positions and who
+  holds them, or conditionally on values the answer names: reporting an
+  unresolved disagreement accurately can rate high, while a judgment the
+  disagreement leaves open cannot, and facts beside the positions (dates in
+  office, biography) do not answer it.
+
   Return JSON:
   {
     "interpretation": "how the question is read, and the other readings",

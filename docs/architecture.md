@@ -150,10 +150,14 @@ close of a quote begun on the line above, which pairs with its opening
 mark), one cut inside a number at its separator ("costs 1" from "costs
 1,000", a comma that also parts a list's items), or one that matches a page only once Markdown is read as prose
 (code quoted without its backticks) is left as the summarizer wrote it.
-The run's confidence is the analyzer's own rating, made before the check,
-so it is lowered to low when the check did not run, left a share of the
-claims unchecked, or approved none of the answer's statements, whether the
-report was written or the run fell back to the checked decision.
+The run's confidence is the analyzer's own rating of how well its
+conclusions and recommendations answer the question asked and how well the
+evidence supports them (the prompt defines high, medium and low): a rating
+of the answer's adequacy, not a probability that everything printed is
+true. It is made before the check, so it is lowered to low when the check
+did not run, left a share of the claims unchecked, or approved none of the
+answer's statements, whether the report was written or the run fell back
+to the checked decision.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the
