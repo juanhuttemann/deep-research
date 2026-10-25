@@ -1,4 +1,4 @@
-.PHONY: catalog test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools
+.PHONY: catalog diagram test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -37,6 +37,12 @@ catalog:
 	test -s internal/catalog/catwalk.json.tmp && \
 	mv internal/catalog/catwalk.json.tmp internal/catalog/catwalk.json; \
 	status=$$?; rm -f internal/catalog/catwalk.raw.tmp internal/catalog/catwalk.json.tmp; exit $$status
+
+# The README's picture of a run, docs/images/pipeline.svg, drawn from the
+# tables in scripts/pipeline-diagram. Its test (part of verify) fails while
+# the checked-in SVG differs from what they draw.
+diagram:
+	go run ./scripts/pipeline-diagram
 
 # VERSION is stamped into the binary so --version reports the build rather
 # than the hardcoded "dev" it used to print for every release.

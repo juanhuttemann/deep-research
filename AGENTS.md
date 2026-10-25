@@ -30,6 +30,9 @@ request per fact-check call, two for most cases, per case and repeat; not
 part of the gate). Add a case there for
 each checker failure found in a real run.
 `./drsh -p "question"` to exercise the CLI (needs an API key).
+`make diagram` redraws the README's run diagram (`docs/images/pipeline.svg`)
+from the tables in `scripts/pipeline-diagram/main.go`; edit those, never the
+SVG. Its test fails while the two differ.
 
 `make verify` does not cross-compile. CI does
 (`.github/workflows/ci.yml`), and so should you after touching a

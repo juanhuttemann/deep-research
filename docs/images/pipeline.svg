@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 404" width="960" height="404" role="img" aria-label="A deep-research run: the question is planned into sub-topics, each researched by a parallel sub-agent that searches, ranks by its terms and reads pages; one follow-up round adds a few searches. The analysis states claims and the answer, the fact-check judges them against the pages, code keeps only what passed and blocked statements get one repair, then the summary is written from the checked result and saved as Markdown, PDF and JSON.">
+<title>How a deep-research run works</title>
+<style>
+.bg{fill:#f6f8fa}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1f2328}
+.title{font-size:14px;font-weight:600}
+.detail{font-size:12px;fill:#59636e}
+.count{font-size:11px;font-weight:600;fill:#5a4bd1;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.edge{font-size:11.5px;fill:#59636e;font-style:italic}
+.lane{font-size:12px}
+.llm{fill:#efedff;stroke:#5a4bd1;stroke-width:1.5}
+.web{fill:#e3f4f1;stroke:#0f766e;stroke-width:1.5}
+.code{fill:#ffffff;stroke:#1f2328;stroke-width:1.5}
+.you{fill:#fdf3dc;stroke:#9a6700;stroke-width:1.5}
+.group{fill:none;stroke:#0f766e;stroke-width:1.2;stroke-dasharray:5 4}
+.a{stroke:#59636e;stroke-width:1.5;fill:none}
+.loop{stroke:#5a4bd1;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+.ah{fill:#59636e}.ahl{fill:#5a4bd1}
+.key{font-size:11.5px;fill:#59636e}
+@media (prefers-color-scheme:dark){
+.bg{fill:#151b23}
+text{fill:#e6edf3}
+.detail,.edge,.key{fill:#9198a1}
+.count{fill:#a99fff}
+.llm{fill:#26234a;stroke:#a99fff}
+.web{fill:#0f2e2a;stroke:#3fbfae}
+.code{fill:#151b23;stroke:#e6edf3}
+.you{fill:#33280f;stroke:#e3b341}
+.group{stroke:#3fbfae}
+.a{stroke:#9198a1}.ah{fill:#9198a1}
+.loop{stroke:#a99fff}.ahl{fill:#a99fff}
+}
+</style>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+<marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ahl" d="M0,0 L10,5 L0,10 z"/></marker>
+</defs>
+<rect class="bg" x="0" y="0" width="960" height="404" rx="12"/>
+<rect class="you" x="40" y="59" width="90" height="64" rx="8"/>
+<text class="title" x="52" y="82">Question</text>
+<text class="detail" x="52" y="101">drsh -p, or</text>
+<text class="detail" x="52" y="116">drsh serve</text>
+<rect class="llm" x="217" y="59" width="132" height="64" rx="8"/>
+<text class="title" x="229" y="82">Plan</text>
+<text class="count" x="337" y="82" text-anchor="end">1 call</text>
+<text class="detail" x="229" y="101">3–6 sub-topics,</text>
+<text class="detail" x="229" y="116">query + terms each</text>
+<rect class="llm" x="780" y="59" width="156" height="64" rx="8"/>
+<text class="title" x="792" y="82">Follow-ups</text>
+<text class="count" x="924" y="82" text-anchor="end">1 call</text>
+<text class="detail" x="792" y="101">up to 3 more searches</text>
+<text class="detail" x="792" y="116">for what is still open</text>
+<line class="a" x1="130" y1="91" x2="215" y2="91" marker-end="url(#ah)"/>
+<rect class="group" x="436" y="24" width="257" height="134" rx="10"/>
+<text class="title" x="450" y="46">Sub-agents, in parallel</text>
+<rect class="web" x="450" y="58" width="229" height="24" rx="6"/>
+<text class="lane" x="462" y="74"><tspan font-weight="600">sub-topic 1</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
+<line class="a" x1="349" y1="91" x2="448" y2="70" marker-end="url(#ah)"/>
+<line class="a" x1="679" y1="70" x2="778" y2="91" marker-end="url(#ah)"/>
+<rect class="web" x="450" y="90" width="229" height="24" rx="6"/>
+<text class="lane" x="462" y="106"><tspan font-weight="600">sub-topic 2</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
+<line class="a" x1="349" y1="91" x2="448" y2="102" marker-end="url(#ah)"/>
+<line class="a" x1="679" y1="102" x2="778" y2="91" marker-end="url(#ah)"/>
+<rect class="web" x="450" y="122" width="229" height="24" rx="6"/>
+<text class="lane" x="462" y="138"><tspan font-weight="600">sub-topic n</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
+<line class="a" x1="349" y1="91" x2="448" y2="134" marker-end="url(#ah)"/>
+<line class="a" x1="679" y1="134" x2="778" y2="91" marker-end="url(#ah)"/>
+<path class="a" d="M936,91 H936 Q948,91 948,103 V182 Q948,194 936,194 H26 Q14,194 14,206 V254 Q14,266 26,266 H38" marker-end="url(#ah)"/>
+<text class="edge" x="488" y="186" text-anchor="middle">every page found, each one source</text>
+<rect class="llm" x="40" y="234" width="162" height="64" rx="8"/>
+<text class="title" x="52" y="257">Analyze</text>
+<text class="count" x="190" y="257" text-anchor="end">1 call</text>
+<text class="detail" x="52" y="276">claims with sources,</text>
+<text class="detail" x="52" y="291">the answer&#39;s statements</text>
+<rect class="llm" x="228" y="234" width="175" height="64" rx="8"/>
+<text class="title" x="240" y="257">Fact-check</text>
+<text class="count" x="391" y="257" text-anchor="end">1–7 calls</text>
+<text class="detail" x="240" y="276">claims vs. the pages;</text>
+<text class="detail" x="240" y="291">do statements follow?</text>
+<line class="a" x1="202" y1="266" x2="226" y2="266" marker-end="url(#ah)"/>
+<rect class="code" x="429" y="234" width="174" height="64" rx="8"/>
+<text class="title" x="441" y="257">Keep what passed</text>
+<text class="detail" x="441" y="276">quotes found on the page;</text>
+<text class="detail" x="441" y="291">the rest blocked, named</text>
+<line class="a" x1="403" y1="266" x2="427" y2="266" marker-end="url(#ah)"/>
+<rect class="llm" x="629" y="234" width="147" height="64" rx="8"/>
+<text class="title" x="641" y="257">Summarize</text>
+<text class="count" x="764" y="257" text-anchor="end">1 call</text>
+<text class="detail" x="641" y="276">written from checked</text>
+<text class="detail" x="641" y="291">material only</text>
+<line class="a" x1="603" y1="266" x2="627" y2="266" marker-end="url(#ah)"/>
+<rect class="web" x="802" y="234" width="132" height="64" rx="8"/>
+<text class="title" x="814" y="257">Report</text>
+<text class="detail" x="814" y="276">.md · .pdf · .json</text>
+<text class="detail" x="814" y="291">+ run history</text>
+<line class="a" x1="776" y1="266" x2="800" y2="266" marker-end="url(#ah)"/>
+<path class="loop" d="M516,298 V320 Q516,330 506,330 H325 Q315,330 315,320 V300" marker-end="url(#ahl)"/>
+<text class="edge" x="415" y="348" text-anchor="middle">a blocked statement is rewritten</text>
+<text class="edge" x="415" y="363" text-anchor="middle">from passed claims and checked once (0–2 calls)</text>
+<rect class="llm" x="575" y="346" width="16" height="12" rx="3"/>
+<text class="key" x="597" y="356">model call</text>
+<rect class="web" x="674" y="346" width="16" height="12" rx="3"/>
+<text class="key" x="696" y="356">web or files</text>
+<rect class="code" x="785" y="346" width="16" height="12" rx="3"/>
+<text class="key" x="807" y="356">rule in code</text>
+<rect class="you" x="896" y="346" width="16" height="12" rx="3"/>
+<text class="key" x="918" y="356">you</text>
+</svg>

@@ -11,12 +11,11 @@
 
 </div>
 
-An AI-powered deep research agent for the terminal and the browser. It plans
-a question into sub-topics, researches them in parallel on the web, then runs
-**research → analyze → fact-check → summarize** and writes a cited report as
-Markdown, PDF and JSON. `drsh serve` opens the same run on a local
-web page, with the plan to edit, the live progress, and an audit of every
-claim the fact-check passed or blocked.
+An AI-powered deep research agent for the terminal and the browser. Its
+answer states only what passed a fact-check against the pages it read, and
+it writes a cited report as Markdown, PDF and JSON.
+
+![A run: the question is planned into sub-topics, researched by parallel sub-agents and one follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
 
 ![deep-research planning, researching, fact-checking and reporting on a question about mixture-of-experts LLMs](demo.gif)
 
@@ -165,7 +164,7 @@ for a local vLLM, llama.cpp or LM Studio server.
 
 The default, `openrouter/free`, costs nothing and picks a free model per
 request, so every report records what served it. Free models are capped per
-minute and per day; a run with web search takes 4 to 7 model requests, and
+minute and per day; a run with web search takes 4 to 13 model requests, and
 `drsh doctor` shows how many free requests an OpenRouter key has left today. On Claude: [docs/configuration.md](docs/configuration.md#claude).
 
 ## Common commands
