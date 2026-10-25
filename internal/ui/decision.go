@@ -574,9 +574,13 @@ func writeClaims(sb *strings.Builder, claims []agent.Claim) {
 // them reached the report through the summarizer.
 func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCheckResult, findings []agent.Finding, retrieved bool) string {
 	var sb strings.Builder
-	sb.WriteString("Question: " + question + "\n\n")
+	sb.WriteString("Question: ")
+	sb.WriteString(question)
+	sb.WriteString("\n\n")
 	if a.Interpretation != "" {
-		sb.WriteString("How the question is read: " + a.Interpretation + "\n\n")
+		sb.WriteString("How the question is read: ")
+		sb.WriteString(a.Interpretation)
+		sb.WriteString("\n\n")
 	}
 	writeDecided(&sb, a)
 	var supported, failed []agent.Claim
@@ -615,7 +619,9 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 // approved recommendations and conclusions, and names the ones not
 // established, which it may explain but never assert.
 func writeDecided(sb *strings.Builder, a *agent.Analysis) {
-	sb.WriteString("The report's \"## " + label(a, "answer") + "\" section is written by the program: it states the" +
+	sb.WriteString("The report's \"## ")
+	sb.WriteString(label(a, "answer"))
+	sb.WriteString("\" section is written by the program: it states the" +
 		" approved recommendations and conclusions and names the others as not established. Do not write an answer" +
 		" or restate it: open with a heading for the supporting explanation.\n")
 	ok := approvedUnits(a)
@@ -647,13 +653,17 @@ func writeDecided(sb *strings.Builder, a *agent.Analysis) {
 // against, since then there is no reason per option to give.
 func renderAnswer(a *agent.Analysis) string {
 	var sb strings.Builder
-	sb.WriteString("## " + label(a, "answer") + "\n\n")
+	sb.WriteString("## ")
+	sb.WriteString(label(a, "answer"))
+	sb.WriteString("\n\n")
 	ok := approvedUnits(a)
 	switch {
 	case len(units(a)) == 0:
-		sb.WriteString(label(a, "no_conclusion") + "\n")
+		sb.WriteString(label(a, "no_conclusion"))
+		sb.WriteString("\n")
 	case len(ok) == 0:
-		sb.WriteString(label(a, noApproval(a)) + "\n")
+		sb.WriteString(label(a, noApproval(a)))
+		sb.WriteString("\n")
 	}
 	for _, r := range ok {
 		writeChoice(&sb, r, "")
@@ -663,7 +673,9 @@ func renderAnswer(a *agent.Analysis) string {
 	}
 	blocked := notEstablishedUnits(a)
 	if len(blocked) > 0 {
-		sb.WriteString("\n" + label(a, "not_established") + ":\n\n")
+		sb.WriteString("\n")
+		sb.WriteString(label(a, "not_established"))
+		sb.WriteString(":\n\n")
 		for _, r := range blocked {
 			writeChoice(&sb, r, notEstablished(a, r))
 		}
@@ -688,15 +700,21 @@ func notEstablishedUnits(a *agent.Analysis) []agent.Recommendation {
 // established when it is not.
 func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
 	if st := readerText(r.Statement); st != "" {
-		sb.WriteString("- " + st)
+		sb.WriteString("- ")
+		sb.WriteString(st)
 	} else {
-		sb.WriteString("- **" + readerText(r.Choose) + "**")
+		sb.WriteString("- **")
+		sb.WriteString(readerText(r.Choose))
+		sb.WriteString("**")
 		if when := readerText(r.When); when != "" {
-			sb.WriteString(": " + when)
+			sb.WriteString(": ")
+			sb.WriteString(when)
 		}
 	}
 	if why != "" {
-		sb.WriteString(" (" + why + ")")
+		sb.WriteString(" (")
+		sb.WriteString(why)
+		sb.WriteString(")")
 	}
 	sb.WriteString("\n")
 }
@@ -902,7 +920,9 @@ func blockedUnits(a *agent.Analysis) []unit {
 // claim a statement needs.
 func repairPrompt(question string, a *agent.Analysis) string {
 	var sb strings.Builder
-	sb.WriteString("Question: " + question + "\n\n")
+	sb.WriteString("Question: ")
+	sb.WriteString(question)
+	sb.WriteString("\n\n")
 	sb.WriteString("These were not established: a claim they rest on did not pass the fact-check, or the check" +
 		" found they do not follow from their claims.\n")
 	for _, u := range blockedUnits(a) {

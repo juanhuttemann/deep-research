@@ -408,27 +408,37 @@ func (m ServicesModel) View() tea.View {
 	}
 	var b strings.Builder
 	title, about := m.heading()
-	b.WriteString(m.st.title.Render("deep-research · "+title) + "\n")
+	b.WriteString(m.st.title.Render("deep-research · " + title))
+	b.WriteString("\n")
 	if about != "" {
-		b.WriteString(m.st.dim.Render(about) + "\n")
+		b.WriteString(m.st.dim.Render(about))
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 	switch m.step {
 	case svcEngine, svcScraper:
 		b.WriteString(m.list.view(m.st))
 	case svcKey:
-		b.WriteString(m.input.View() + "\n" + m.st.dim.Render("  saved to auth.json, readable only by you") + "\n")
+		b.WriteString(m.input.View())
+		b.WriteString("\n")
+		b.WriteString(m.st.dim.Render("  saved to auth.json, readable only by you"))
+		b.WriteString("\n")
 	default:
-		b.WriteString(m.input.View() + "\n")
+		b.WriteString(m.input.View())
+		b.WriteString("\n")
 	}
 	if m.err != nil {
-		b.WriteString("\n" + m.st.err.Render(m.err.Error()) + "\n")
+		b.WriteString("\n")
+		b.WriteString(m.st.err.Render(m.err.Error()))
+		b.WriteString("\n")
 	}
 	help := "enter confirm · esc quit"
 	if m.step == svcEngine || m.step == svcScraper {
 		help = "↑/↓ move · enter select · esc quit"
 	}
-	b.WriteString("\n" + m.st.dim.Render(help) + "\n")
+	b.WriteString("\n")
+	b.WriteString(m.st.dim.Render(help))
+	b.WriteString("\n")
 	return tea.NewView(b.String())
 }
 

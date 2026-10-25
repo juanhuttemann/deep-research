@@ -488,15 +488,22 @@ func (m Model) render() string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(m.st.title.Render("deep-research · "+m.heading()) + "\n")
+	b.WriteString(m.st.title.Render("deep-research · " + m.heading()))
+	b.WriteString("\n")
 	if cur := m.opts.Current; cur.Model != "" && m.step == stepPick {
-		b.WriteString(m.st.dim.Render("now: "+cur.Provider+" · "+cur.Model) + "\n")
+		b.WriteString(m.st.dim.Render("now: " + cur.Provider + " · " + cur.Model))
+		b.WriteString("\n")
 	}
-	b.WriteString("\n" + m.body())
+	b.WriteString("\n")
+	b.WriteString(m.body())
 	if m.checkErr != nil && m.step != stepCheckFailed {
-		b.WriteString("\n" + m.st.err.Render(m.checkErr.Error()) + "\n")
+		b.WriteString("\n")
+		b.WriteString(m.st.err.Render(m.checkErr.Error()))
+		b.WriteString("\n")
 	}
-	b.WriteString("\n" + m.st.dim.Render(m.help()) + "\n")
+	b.WriteString("\n")
+	b.WriteString(m.st.dim.Render(m.help()))
+	b.WriteString("\n")
 	return b.String()
 }
 

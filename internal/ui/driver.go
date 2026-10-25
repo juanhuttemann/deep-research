@@ -1254,7 +1254,15 @@ func writeFindingsFor(sb *strings.Builder, findings []agent.Finding, claims []ag
 			mark = " " + neverFetched
 		}
 		first, second := excerptQueries(f, claims)
-		sb.WriteString("  " + strconv.Itoa(i+1) + ". " + f.Title + " (" + f.URL + ")" + mark + "\n    ")
+		sb.WriteString("  ")
+		sb.WriteString(strconv.Itoa(i + 1))
+		sb.WriteString(". ")
+		sb.WriteString(f.Title)
+		sb.WriteString(" (")
+		sb.WriteString(f.URL)
+		sb.WriteString(")")
+		sb.WriteString(mark)
+		sb.WriteString("\n    ")
 		sb.WriteString(clipPromptContent(f.Content, first, second))
 		sb.WriteString("\n")
 	}
@@ -1294,7 +1302,9 @@ func excerptQueries(f agent.Finding, claims []agent.Claim) (first, second []stri
 
 func analyzePrompt(question string, findings []agent.Finding, uncovered []string) string {
 	var sb strings.Builder
-	sb.WriteString("Question: " + question + "\n\nFindings:\n")
+	sb.WriteString("Question: ")
+	sb.WriteString(question)
+	sb.WriteString("\n\nFindings:\n")
 	writeFindings(&sb, findings)
 	// Naming the facets that came back empty is the only way the analysis can
 	// report them: the findings list says what was gathered and never what was
@@ -1303,7 +1313,9 @@ func analyzePrompt(question string, findings []agent.Finding, uncovered []string
 	if len(uncovered) > 0 {
 		sb.WriteString("\nPlanned sub-topics with no evidence gathered:\n")
 		for _, name := range uncovered {
-			sb.WriteString("  - " + name + "\n")
+			sb.WriteString("  - ")
+			sb.WriteString(name)
+			sb.WriteString("\n")
 		}
 	}
 	return sb.String()
@@ -1344,7 +1356,9 @@ func writeGaps(sb *strings.Builder, gaps []string) {
 	sb.WriteString("Open questions the evidence does not settle. State them as open where they" +
 		" limit the answer, never as a negative answer:\n")
 	for _, g := range gaps {
-		sb.WriteString("  - " + g + "\n")
+		sb.WriteString("  - ")
+		sb.WriteString(g)
+		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
 }
@@ -1365,9 +1379,15 @@ func writeTopicEvidence(sb *strings.Builder, topics []agent.Topic) {
 	}
 	sb.WriteString("Evidence by topic (with the analyzer's confidence):\n")
 	for _, t := range topics {
-		sb.WriteString("  - " + t.Name + " (" + t.Confidence + ")\n")
+		sb.WriteString("  - ")
+		sb.WriteString(t.Name)
+		sb.WriteString(" (")
+		sb.WriteString(t.Confidence)
+		sb.WriteString(")\n")
 		for _, f := range t.Findings {
-			sb.WriteString("      " + f + "\n")
+			sb.WriteString("      ")
+			sb.WriteString(f)
+			sb.WriteString("\n")
 		}
 	}
 	sb.WriteString("\n")
@@ -1420,7 +1440,11 @@ func summarizePrompt(question string, analysis *agent.Analysis, fc *agent.FactCh
 		return checkedSummarizePrompt(question, analysis, fc, findings, retrieved)
 	}
 	var sb strings.Builder
-	sb.WriteString("Question: " + question + "\n\nSynthesized answer:\n" + analysis.Answer + "\n\n")
+	sb.WriteString("Question: ")
+	sb.WriteString(question)
+	sb.WriteString("\n\nSynthesized answer:\n")
+	sb.WriteString(analysis.Answer)
+	sb.WriteString("\n\n")
 	writeTopicEvidence(&sb, analysis.Topics)
 	writeGaps(&sb, analysis.Gaps)
 	sb.WriteString("Sources (title, URL, content) — link and quote these:\n")
@@ -1439,13 +1463,25 @@ func summarizePrompt(question string, analysis *agent.Analysis, fc *agent.FactCh
 			if c.Verified {
 				verdict = "verified"
 			}
-			sb.WriteString("  - " + verdict + ": " + c.Claim + " (" + c.Evidence + ")\n")
+			sb.WriteString("  - ")
+			sb.WriteString(verdict)
+			sb.WriteString(": ")
+			sb.WriteString(c.Claim)
+			sb.WriteString(" (")
+			sb.WriteString(c.Evidence)
+			sb.WriteString(")\n")
 		}
 		for _, c := range fc.Unverified {
-			sb.WriteString("  - unverified: " + c + "\n")
+			sb.WriteString("  - unverified: ")
+			sb.WriteString(c)
+			sb.WriteString("\n")
 		}
 		for _, c := range fc.Contradictions {
-			sb.WriteString("  - contradiction on " + c.Claim + " between: " + strings.Join(c.Sources, "; ") + "\n")
+			sb.WriteString("  - contradiction on ")
+			sb.WriteString(c.Claim)
+			sb.WriteString(" between: ")
+			sb.WriteString(strings.Join(c.Sources, "; "))
+			sb.WriteString("\n")
 		}
 	} else {
 		sb.WriteString("\nFact-check did not run: present claims as unverified.\n")

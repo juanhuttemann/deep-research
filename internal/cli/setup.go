@@ -313,7 +313,8 @@ func reviewAndCheck(ctx context.Context, out io.Writer, st loginState, d setupDr
 // goes to, and what in the environment would override it.
 func review(st loginState, d setupDraft) string {
 	var b strings.Builder
-	b.WriteString(setup.Title("review") + "\n\n")
+	b.WriteString(setup.Title("review"))
+	b.WriteString("\n\n")
 	if d.asked.model {
 		fmt.Fprintf(&b, "  %-8s %s\n", "model", modelLine(st, d.model))
 	}
@@ -344,7 +345,9 @@ func review(st loginState, d setupDraft) string {
 		}
 	}
 	if (d.services.SearchAsked || d.services.ScraperAsked) && full.Engine != "off" {
-		b.WriteString("\n" + setup.Dim("  Saving checks it first: one search query and one page read (a hosted service may charge).") + "\n")
+		b.WriteString("\n")
+		b.WriteString(setup.Dim("  Saving checks it first: one search query and one page read (a hosted service may charge)."))
+		b.WriteString("\n")
 	}
 	return b.String()
 }

@@ -188,20 +188,24 @@ func (l list) update(msg tea.Msg) (list, tea.Cmd) {
 func (l list) view(st styles) string {
 	var b strings.Builder
 	if !l.plain {
-		b.WriteString(l.filter.View() + "\n\n")
+		b.WriteString(l.filter.View())
+		b.WriteString("\n\n")
 	}
 	if len(l.shown) == 0 {
 		msg := "  no match"
 		if l.freeText && strings.TrimSpace(l.filter.Value()) != "" {
 			msg = "  no match — Enter uses " + fmt.Sprintf("%q", strings.TrimSpace(l.filter.Value()))
 		}
-		b.WriteString(st.dim.Render(msg) + "\n")
+		b.WriteString(st.dim.Render(msg))
+		b.WriteString("\n")
 		return b.String()
 	}
 	lines, start, end := l.window(st)
-	b.WriteString(strings.Join(lines, "\n") + "\n")
+	b.WriteString(strings.Join(lines, "\n"))
+	b.WriteString("\n")
 	if start > 0 || end < len(l.shown) {
-		b.WriteString(st.dim.Render(fmt.Sprintf("  %d–%d of %d", start+1, end, len(l.shown))) + "\n")
+		b.WriteString(st.dim.Render(fmt.Sprintf("  %d–%d of %d", start+1, end, len(l.shown))))
+		b.WriteString("\n")
 	}
 	return b.String()
 }
