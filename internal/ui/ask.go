@@ -36,18 +36,26 @@ func LoadMeta(path string) (*Meta, error) {
 // not, are read through SourceTools.
 func RunOverview(m *Meta) string {
 	var sb strings.Builder
-	sb.WriteString("Research question: " + m.Question + "\n\n")
+	sb.WriteString("Research question: ")
+	sb.WriteString(m.Question)
+	sb.WriteString("\n\n")
 	if a := m.Analysis; a != nil && a.Interpretation != "" {
-		sb.WriteString("How it was read: " + a.Interpretation + "\n\n")
+		sb.WriteString("How it was read: ")
+		sb.WriteString(a.Interpretation)
+		sb.WriteString("\n\n")
 	}
-	sb.WriteString("The report:\n" + m.Report + "\n\n")
+	sb.WriteString("The report:\n")
+	sb.WriteString(m.Report)
+	sb.WriteString("\n\n")
 	if a := m.Analysis; a != nil && len(a.Claims) > 0 {
 		sb.WriteString("Claims, with the fact-check's status (only \"supported\" was established):\n")
 		for _, c := range a.Claims {
 			fmt.Fprintf(&sb, "  %s [%s] %s %v\n", c.ID, cmp.Or(c.Status, "unchecked"), c.Text, c.Sources)
 		}
 		for _, g := range a.Gaps {
-			sb.WriteString("  open question: " + g + "\n")
+			sb.WriteString("  open question: ")
+			sb.WriteString(g)
+			sb.WriteString("\n")
 		}
 		sb.WriteString("\n")
 	}
