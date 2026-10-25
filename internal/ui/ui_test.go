@@ -1300,7 +1300,7 @@ func TestRecommendationStandsOnlyOnSupportedPremises(t *testing.T) {
 		verdict("c2", "contradicted", "https://p.example/pricing", "save up to 55%"),
 		verdict("c3", "supported", "https://p.example/pricing", "Serverless has no minimum charge."),
 	}, Inferences: follows("r1", "r2", "r3")}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	if ok := approvedUnits(a); len(ok) != 1 || ok[0].Choose != "Serverless" {
 		t.Fatalf("approved = %+v, want only the one resting on c1", ok)
 	}
@@ -1335,7 +1335,7 @@ func TestMalformedVerdictsNeverSupportAClaim(t *testing.T) {
 		verdict("c9", "supported", "1", quote),
 		verdict("c3", "true", "1", quote),
 	}}
-	unknown := govern(a, fc, nil, findings)
+	unknown := governAll(a, fc, nil, findings)
 	if len(unknown) != 1 || unknown[0] != "c9" {
 		t.Errorf("unknown = %v, want the invented c9", unknown)
 	}
@@ -1356,7 +1356,7 @@ func TestMalformedVerdictsNeverSupportAClaim(t *testing.T) {
 // so, without the candidates being called wrong.
 func TestFailedFactCheckApprovesNothing(t *testing.T) {
 	findings, a := decisionFixture()
-	govern(a, nil, errors.New("deadline exceeded"), findings)
+	governAll(a, nil, errors.New("deadline exceeded"), findings)
 	if len(approvedUnits(a)) != 0 {
 		t.Error("a recommendation was approved with no fact-check")
 	}
@@ -1394,9 +1394,9 @@ func TestFailedSummaryDeliversTheCheckedDecision(t *testing.T) {
 	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 	}, Inferences: follows("r1")}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
-	res, err := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, fc, "report writing failed", errors.New("500"))
+	res, err := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, fc, nil, "report writing failed", errors.New("500"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1421,7 +1421,7 @@ func TestCheckAnalysisKeepsModelFindingsWhenNothingWasFetched(t *testing.T) {
 // through untouched, and it could state a blocked choice.
 func TestNoApprovedRecommendationReplacesTheSummarizersAnswer(t *testing.T) {
 	findings, a := decisionFixture()
-	govern(a, &agent.FactCheckResult{}, nil, findings)
+	governAll(a, &agent.FactCheckResult{}, nil, findings)
 	sum := withAnswer(&agent.Summary{Report: "## Answer\n\nChoose Node-based.\n\n## Why\n\nx"}, a)
 	if strings.Contains(sum.Report, "Choose Node-based") || !strings.Contains(sum.Report, englishLabels[noApprovalEvidence]) {
 		t.Errorf("report = %q, want the no-approval answer in place of the summarizer's", sum.Report)
@@ -1436,7 +1436,7 @@ func TestAnalysisWithoutClaimsApprovesNothing(t *testing.T) {
 	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		{ID: "p1", Claim: "X is cheap", Status: "supported", Evidence: []agent.Evidence{{Source: "1", Quote: "not on the page"}}},
 	}}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	if len(approvedUnits(a)) != 0 {
 		t.Error("a recommendation naming no claim was approved")
 	}
@@ -1454,7 +1454,7 @@ func TestModelFindingsCannotSupportAClaim(t *testing.T) {
 	fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 	}}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	if a.Claims[0].Status == statusSupported || len(approvedUnits(a)) != 0 {
 		t.Errorf("c1 = %s (%s): a claim was supported by the model's own recollection", a.Claims[0].Status, a.Claims[0].Note)
 	}
@@ -1499,7 +1499,7 @@ func TestDropAnswerSectionVariants(t *testing.T) {
 func TestOlderVerdictListsDoNotOutliveTheCheck(t *testing.T) {
 	findings, a := decisionFixture()
 	fc := &agent.FactCheckResult{Verified: []agent.VerifiedClaim{{Claim: "c1", Verified: true}}}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	if len(fc.Verified) != 0 {
 		t.Errorf("verified = %v, want none: no claim had a verdict", fc.Verified)
 	}
@@ -1511,7 +1511,7 @@ func TestEveryQuotedPassageMustBeLocated(t *testing.T) {
 	findings, a := decisionFixture()
 	v := verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored.")
 	v.Evidence = append(v.Evidence, agent.Evidence{Source: "1", Quote: "and it is free under 1 GB"})
-	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{v}}, nil, findings)
+	governAll(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{v}}, nil, findings)
 	if a.Claims[0].Status == statusSupported {
 		t.Error("a verdict with an invented passage stood on the genuine one")
 	}
@@ -1522,9 +1522,9 @@ func TestEveryQuotedPassageMustBeLocated(t *testing.T) {
 func TestFallbackAfterFailedCheckIsLowConfidence(t *testing.T) {
 	findings, a := decisionFixture()
 	a.Confidence = "high"
-	govern(a, nil, errors.New("timeout"), findings)
+	governAll(a, nil, errors.New("timeout"), findings)
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
-	res, _ := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, nil, "report writing failed", errors.New("500"))
+	res, _ := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, nil, nil, "report writing failed", errors.New("500"))
 	if res.Summary.Confidence != "low" || !strings.Contains(res.Summary.Report, englishLabels[noApprovalUnchecked]) {
 		t.Errorf("fallback = %q, %q; want low confidence and no approval", res.Summary.Confidence, res.Summary.Report)
 	}
@@ -1581,14 +1581,14 @@ func TestRecommendationMustFollowFromItsClaims(t *testing.T) {
 		findings, a := decisionFixture()
 		a.Recommendations = a.Recommendations[:1]
 		fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{verdict("c1", "supported", "1", quote)}, Inferences: tc.inf}
-		govern(a, fc, nil, findings)
+		governAll(a, fc, nil, findings)
 		if got := len(approvedUnits(a)) == 1; got != tc.want {
 			t.Errorf("%s: approved = %v (%s), want %v", tc.name, got, a.Recommendations[0].Blocked, tc.want)
 		}
 	}
 	findings, a := decisionFixture()
 	fc := &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "r9", Follows: true}}}
-	if unknown := govern(a, fc, nil, findings); !slices.Contains(unknown, "r9") {
+	if unknown := governAll(a, fc, nil, findings); !slices.Contains(unknown, "r9") {
 		t.Errorf("unknown = %v, want the invented recommendation r9", unknown)
 	}
 }
@@ -1602,13 +1602,13 @@ func TestAnswerNamesTheOptionsNotEstablished(t *testing.T) {
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2", "r3")}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	got := renderAnswer(a)
 	if !strings.Contains(got, "Not established in this run") ||
 		!strings.Contains(got, "- **Node-based**: traffic is steady (partial: \u201cReserved nodes save 90%\u201d)") {
 		t.Errorf("answer does not name the blocked option and its failed claim:\n%s", got)
 	}
-	govern(a, nil, errors.New("timeout"), findings)
+	governAll(a, nil, errors.New("timeout"), findings)
 	if got := renderAnswer(a); strings.Contains(got, "Not established") {
 		t.Errorf("with no fact-check there is no per-option reason to give:\n%s", got)
 	}
@@ -1618,7 +1618,7 @@ func TestAnswerNamesTheOptionsNotEstablished(t *testing.T) {
 // paragraph above its first heading.
 func TestRestatedAnswerAboveTheFirstHeadingIsDropped(t *testing.T) {
 	findings, a := decisionFixture()
-	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+	governAll(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 	}, Inferences: follows("r1")}, nil, findings)
 	sum := withAnswer(&agent.Summary{Report: "Serverless is the pick for everyone.\n\n## How billing works\n\nx"}, a)
@@ -1634,7 +1634,7 @@ func TestRestatedAnswerAboveTheFirstHeadingIsDropped(t *testing.T) {
 // recommendation; the pass cannot add more than maxRevisions.
 func TestAcceptRevisionsOnlyOnSupportedClaims(t *testing.T) {
 	findings, a := decisionFixture()
-	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+	governAll(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2", "r3")}, nil, findings)
@@ -1648,7 +1648,7 @@ func TestAcceptRevisionsOnlyOnSupportedClaims(t *testing.T) {
 		t.Errorf("accepted %v, want only the revision of a blocked recommendation on supported claims", added)
 	}
 	_, fresh := decisionFixture()
-	govern(fresh, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+	governAll(fresh, &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 	}}, nil, findings)
 	var many []agent.Recommendation
@@ -1670,7 +1670,7 @@ func TestApprovedRevisionReplacesItsOriginal(t *testing.T) {
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2")}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	added := acceptRevisions(a, &agent.Analysis{Recommendations: []agent.Recommendation{{Revises: "r2", Choose: "Node-based", When: "hourly billing suits you", Claims: []string{"c1"}}}})
 	judgeRevisions(a, added, fc, &agent.FactCheckResult{Inferences: follows("r3")})
 	got := renderAnswer(a)
@@ -1691,7 +1691,7 @@ func TestAnswerUsesTheAnalysisLabels(t *testing.T) {
 	findings, a := decisionFixture()
 	a.Labels = map[string]string{"answer": "Respuesta", "not_established": "No establecido en esta ejecuci\u00f3n",
 		"partial": "parcial", "does_not_follow": "## injected"}
-	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+	governAll(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2", "r3")}, nil, findings)
@@ -1813,7 +1813,7 @@ func conclusionFixture() ([]agent.Finding, *agent.Analysis) {
 // premises: conclusions are governed the same way, by k IDs.
 func TestConclusionsAreGovernedLikeRecommendations(t *testing.T) {
 	findings, a := conclusionFixture()
-	govern(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
+	governAll(a, &agent.FactCheckResult{Verdicts: []agent.Verdict{
 		verdict("c1", "supported", "1", "Raft elects a leader when a follower's election timeout expires."),
 		verdict("c2", "supported", "1", "A candidate needs votes from a majority of servers."),
 		verdict("c3", "insufficient", "1", "A candidate needs votes"),
@@ -1838,7 +1838,7 @@ func TestConclusionsAreGovernedLikeRecommendations(t *testing.T) {
 func TestNoConclusionStatedIsSaid(t *testing.T) {
 	findings, a := conclusionFixture()
 	a.Conclusions = nil
-	govern(a, &agent.FactCheckResult{}, nil, findings)
+	governAll(a, &agent.FactCheckResult{}, nil, findings)
 	sum := withAnswer(&agent.Summary{Report: "## Answer\n\nRaft is simple.\n\n## How it works\n\nx"}, a)
 	if strings.Contains(sum.Report, "Raft is simple") || !strings.Contains(sum.Report, englishLabels["no_conclusion"]) {
 		t.Errorf("report = %q, want the no-conclusion answer in place of the summarizer's", sum.Report)
@@ -1853,7 +1853,7 @@ func TestRepairRevisesAConclusion(t *testing.T) {
 		verdict("c1", "supported", "1", "Raft elects a leader when a follower's election timeout expires."),
 		verdict("c2", "supported", "1", "A candidate needs votes from a majority of servers."),
 	}, Inferences: []agent.Inference{{ID: "k1", Follows: false, Reason: "says nothing of ties"}, {ID: "k2", Follows: true}}}
-	govern(a, fc, nil, findings)
+	governAll(a, fc, nil, findings)
 	added := acceptRevisions(a, &agent.Analysis{
 		Conclusions:     []agent.Recommendation{{Revises: "k1", Statement: "A follower whose timeout expires stands for election.", Claims: []string{"c1"}}},
 		Recommendations: []agent.Recommendation{{Revises: "k1", Choose: "x", When: "y", Claims: []string{"c1"}}},

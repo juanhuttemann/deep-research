@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -359,7 +360,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
 	analysis, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
 	if err != nil {
-		return d.partial(ctx, plan, findings, nil, nil, "analysis failed", err)
+		return d.partial(ctx, plan, findings, nil, nil, nil, "analysis failed", err)
 	}
 	checkAnalysis(analysis, findings)
 
@@ -375,32 +376,50 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// deliver, so the failure is surfaced and the run continues rather than
 	// discarding every search and the analysis behind it.
 	fc, checkErr := d.factCheckAll(ctx, analysis, findings, retrieved)
-	d.applyVerdicts(analysis, fc, checkErr, findings)
+	// The fetched pages' texts, read once for the verdicts' quotes and the
+	// report's: each keeps the normalised forms it was compared in.
+	pages := fetchedPages(findings)
+	d.applyVerdicts(analysis, fc, checkErr, findings, pages)
 	d.repair(ctx, plan.Question, analysis, fc)
 
 	d.emit(Event{Type: Phase, Phase: "Summarize", Detail: "Writing the report"})
 	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved)
 	summary, err := d.Agent.Summarize(ctx, prompt)
 	if err != nil {
-		return d.partial(ctx, plan, findings, analysis, fc, "report writing failed", err)
+		return d.partial(ctx, plan, findings, analysis, fc, checkErr, "report writing failed", err)
 	}
-	d.checkQuotes(summary, plan.Question, findings)
 	summary = withAnswer(summary, analysis)
-	// The summarizer writes prose, so it reports no confidence of its own. The
-	// analyzer's is the run's, and without carrying it over the report prints
-	// a bare "Confidence:" line and the exports record an empty string. A run
-	// whose fact-check did not run approved nothing, whatever the analyzer
-	// thought of its own answer, and one whose check left a share of the
-	// claims unverified is not the answer the analyzer was confident in.
-	if summary.Confidence == "" {
-		summary.Confidence = analysis.Confidence
-	}
-	if (fc == nil || checkErr != nil) && len(analysis.Claims) > 0 || nothingApproved(analysis) {
-		summary.Confidence = "low"
+	d.checkQuotes(summary, plan.Question, pages, decidedAnswer(analysis))
+	// The summarizer writes prose, so it reports no confidence of its own.
+	// Without the run's the report prints a bare "Confidence:" line and the
+	// exports record an empty string.
+	if summary.Confidence == "" || checkedDown(analysis, fc, checkErr) {
+		summary.Confidence = runConfidence(analysis, fc, checkErr)
 	}
 	return d.finish(&agent.ResearchResult{
 		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
 	}), nil
+}
+
+// runConfidence is the run's confidence: the analyzer's own rating, made
+// before the check, or low where the check took it down (checkedDown). Run
+// and partial decided it each in its own words, and partial, missing the
+// check's error, kept "high" over an answer a partly failed check had left
+// unverified when the report could not be written.
+func runConfidence(a *agent.Analysis, fc *agent.FactCheckResult, checkErr error) string {
+	if checkedDown(a, fc, checkErr) {
+		return "low"
+	}
+	return a.Confidence
+}
+
+// checkedDown reports whether the fact-check leaves the analyzer's
+// confidence standing on nothing: a check that did not run approved
+// nothing, whatever the analyzer thought of its own answer, one that left a
+// share of the claims unverified is not the answer it was confident in, and
+// one that approved none of the answer leaves no answer to be confident in.
+func checkedDown(a *agent.Analysis, fc *agent.FactCheckResult, checkErr error) bool {
+	return (fc == nil || checkErr != nil) && len(a.Claims) > 0 || nothingApproved(a)
 }
 
 // nothingApproved reports whether the analysis stated an answer and the
@@ -421,17 +440,34 @@ func nothingApproved(a *agent.Analysis) bool {
 // quotation of a conclusion.
 // With no fetched page there is nothing to hold a quote to, and a run
 // without search is reported unverified already.
-func (d *Driver) checkQuotes(summary *agent.Summary, question string, findings []agent.Finding) {
-	pages := fetchedPages(findings)
+//
+// written is the answer section the program put at the top of the report
+// (withAnswer), which is not checked: it is the program's, not the
+// summarizer's. The check runs after withAnswer, on what the reader gets:
+// run before it, the quotes in an answer section the summarizer wrote anyway
+// were counted, then dropped with the section.
+func (d *Driver) checkQuotes(summary *agent.Summary, question string, pages map[string]*pageText, written string) {
 	if len(pages) == 0 {
 		return
 	}
+	pages = maps.Clone(pages)
 	pages["question:"] = newPageText(question)
-	report, n := unquoteUnfound(summary.Report, pages)
+	head, body := "", summary.Report
+	if written != "" && strings.HasPrefix(body, written) {
+		head, body = body[:len(written)], body[len(written):]
+	}
+	report, n := unquoteUnfound(body, pages)
 	if n == 0 {
 		return
 	}
-	summary.Report = report
+	summary.Report = head + report
+	// The executive summary was cut from the report before it was checked,
+	// and kept the marks the report lost wherever the decided answer does not
+	// replace it: the JSON export's executive_summary, and a report body that
+	// no longer opened with it printed the paragraph twice.
+	if head == "" {
+		summary.Executive, _ = unquoteUnfound(summary.Executive, pages)
+	}
 	d.emit(Event{Type: Info, Phase: "Summarize", Detail: fmt.Sprintf(
 		"%d quoted %s in no fetched page: shown without quotation marks", n, plural(n, "passage is", "passages are"))})
 }
@@ -439,8 +475,9 @@ func (d *Driver) checkQuotes(summary *agent.Summary, question string, findings [
 // applyVerdicts holds the analysis to the fact-check (see govern) and says
 // how it went: how many claims passed, and which did not only because their
 // quote was not found, the number to watch for the check being too strict.
-func (d *Driver) applyVerdicts(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings []agent.Finding) {
-	unknown := govern(a, fc, fcErr, findings)
+func (d *Driver) applyVerdicts(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings []agent.Finding,
+	pages map[string]*pageText) {
+	unknown := govern(a, fc, fcErr, findings, pages)
 	if len(unknown) > 0 {
 		d.emit(Event{Type: Error, Phase: "Fact-Check",
 			Detail: "fact-check judged claims the analysis does not make, ignored: " + strings.Join(unknown, ", ")})
@@ -650,7 +687,7 @@ func (d *Driver) finish(result *agent.ResearchResult) *agent.ResearchResult {
 // A cancellation is the reader stopping the run, not a failure to recover
 // from, so it is passed through.
 func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Finding,
-	analysis *agent.Analysis, fc *agent.FactCheckResult, what string, err error) (*agent.ResearchResult, error) {
+	analysis *agent.Analysis, fc *agent.FactCheckResult, checkErr error, what string, err error) (*agent.ResearchResult, error) {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return nil, err
 	}
@@ -667,12 +704,7 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 		} else {
 			report += label(analysis, noApproval(analysis))
 		}
-		// A fact-check that did not run verified nothing, whatever the
-		// analyzer thought of its own answer.
-		confidence = analysis.Confidence
-		if fc == nil || nothingApproved(analysis) {
-			confidence = "low"
-		}
+		confidence = runConfidence(analysis, fc, checkErr)
 	case analysis != nil && strings.TrimSpace(analysis.Answer) != "":
 		report += "The analysis it would have been written from:\n\n" + analysis.Answer
 		confidence = analysis.Confidence

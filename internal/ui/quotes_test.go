@@ -240,7 +240,7 @@ func TestCheckQuotesAcceptsTheQuestionNotTheAnalysisWording(t *testing.T) {
 	report := `Nobody defines "the best bang for the buck in 2026"` + src + `. One source uses "a team larger than one engineer" as its line` + src + `.`
 	findings := []agent.Finding{{URL: "https://a.example/", Content: "PostgreSQL the moment you need a team larger than one.", Status: "ok"}}
 	sum := &agent.Summary{Report: report}
-	NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1).checkQuotes(sum, "Which GPU is the best bang for the buck in 2026?", findings)
+	NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1).checkQuotes(sum, "Which GPU is the best bang for the buck in 2026?", fetchedPages(findings), "")
 	want := `Nobody defines "the best bang for the buck in 2026"` + src + `. One source uses a team larger than one engineer as its line` + src + `.`
 	if sum.Report != want {
 		t.Errorf("got  %q\nwant %q", sum.Report, want)
@@ -252,7 +252,7 @@ func TestCheckQuotesAcceptsTheQuestionNotTheAnalysisWording(t *testing.T) {
 func TestCheckQuotesWithoutPagesChangesNothing(t *testing.T) {
 	report := `It says "these words are in no page at all"` + src + `.`
 	sum := &agent.Summary{Report: report}
-	NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1).checkQuotes(sum, "q", nil)
+	NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1).checkQuotes(sum, "q", fetchedPages(nil), "")
 	if sum.Report != report {
 		t.Errorf("got %q; want the report as it was", sum.Report)
 	}

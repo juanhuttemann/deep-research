@@ -122,23 +122,38 @@ page the run fetched. Whether a passage supports a claim, and whether claims
 justify a statement, are the checking model's judgements. The explanation
 the summarizer writes below the answer is model prose held mostly by its
 instructions: it is given nothing but checked material, and told never to
-assert what was not established. One thing in it is held in code, its
+assert what was not established. A supported claim on the side of a
+conflict the approved answer was decided against (the conflict names a
+claim an approved statement rests on, and this one, which none does) is
+given apart from the facts to state, as true of what a source says and
+never to be stated as fact. One thing in it is held in code, its
 quotations of sources (`ui/quotes.go`): a double-quoted passage of six
 words or more with a link in its sentence that is in no fetched page, nor
-in the question, loses its quotation marks and keeps its words. An elision
+in the question, loses its quotation marks and keeps its words, as does
+the executive summary taken from it. A quote must begin and end where the
+page's words do, so "size is 10" is not found in "size is 100". An elision
 (its pieces on one page, in order), a bracketed letter, a capital the
 sentence needed, trailing punctuation, either quotation mark nested inside,
 bold and links are accepted, as a reader accepts them; a quote containing
-code is compared with code kept as written on both sides, and quotation
-marks in code and in link titles are left alone. The analysis's own wording
+code is compared with code kept as written on both sides, and with its
+quotation marks as written in its prose too (a page that lost its
+backticks shows its code as prose); quotation marks in code and in link
+titles are left alone. Words that would open a block once their marks are
+gone ("1. Install …" at a line's start) are escaped. Only the
+summarizer's text is checked, after the program has put its answer at the
+top. The analysis's own wording
 is not a source: quoted beside a link, it reads as the source's words. The
 check narrows what reaches the reader as a source's words, and does not
 prove the rest: a quotation under six words, one with no link in its
-sentence, or one that matches a page only once Markdown is read as prose
+sentence, one after a lone quotation mark on its line (an inch mark, the
+close of a quote begun on the line above, which pairs with its opening
+mark), one cut inside a number at its separator ("costs 1" from "costs
+1,000", a comma that also parts a list's items), or one that matches a page only once Markdown is read as prose
 (code quoted without its backticks) is left as the summarizer wrote it.
 The run's confidence is the analyzer's own rating, made before the check,
 so it is lowered to low when the check did not run, left a share of the
-claims unchecked, or approved none of the answer's statements.
+claims unchecked, or approved none of the answer's statements, whether the
+report was written or the run fell back to the checked decision.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the
