@@ -5,6 +5,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The report's confidence had no definition: the analyzer was asked for
+  "high/medium/low" and nothing else. In the 14 saved runs it put eight of
+  nine good answers at "medium", a run on how π's digits are computed
+  among them, and an opinion question it barely answered at "high". The
+  analyzer prompt now defines the scale as how well the answer covers the
+  question asked and how well the evidence supports it, decided in order:
+  low when the central request goes unanswered, high when every material
+  part is answered with suitable evidence, medium between. Gaps about what
+  the question did not ask lower nothing, a source counts by whether it
+  can establish its claim rather than by its kind, and an opinion question
+  is rated by how well the evidence reports its positions.
+
 ### Fixed
 
 - The PDF printed every Greek letter as `?`: a report on π opened its
