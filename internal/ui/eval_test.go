@@ -115,9 +115,16 @@ func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalSco
 	// The check as a run makes it: split into parallel calls (see checkParts).
 	fc, err := checkAll(ctx, checkParts(a, c.Findings, true), asst.FactCheck)
 	if err != nil {
-		return evalScore{errors: 1}, " (" + err.Error() + ")", map[string]string{"check": "error"}
+		// Every judgement of the case is an error in this repeat: under a key
+		// of its own, an errored repeat never differed from the others by
+		// claim, and a case right twice and errored once listed no flip.
+		got := outcomes(a)
+		for id := range got {
+			got[id] = "error"
+		}
+		return evalScore{errors: 1}, " (" + err.Error() + ")", got
 	}
-	govern(a, fc, nil, c.Findings)
+	governAll(a, fc, nil, c.Findings)
 	var s evalScore
 	misses := scoreClaims(&s, c, a)
 	misses = append(misses, scoreInferences(&s, c, fc)...)

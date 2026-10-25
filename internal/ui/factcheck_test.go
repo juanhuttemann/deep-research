@@ -12,6 +12,11 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/agent"
 )
 
+// governAll is govern on the findings' own fetched pages.
+func governAll(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings []agent.Finding) []string {
+	return govern(a, fc, fcErr, findings, fetchedPages(findings))
+}
+
 func claimsN(n int) []agent.Claim {
 	out := make([]agent.Claim, n)
 	for i := range out {
@@ -131,7 +136,7 @@ func TestFailedCheckCallLeavesOnlyItsClaimsUnchecked(t *testing.T) {
 	if fc == nil || err == nil || !strings.Contains(err.Error(), "claims c7-c12: provider timed out") {
 		t.Fatalf("fc %v, err %v; want the first call's verdicts and the second call named in the error", fc, err)
 	}
-	govern(a, fc, err, findings)
+	governAll(a, fc, err, findings)
 	if a.Claims[0].Status != statusSupported {
 		t.Errorf("c1 = %s %q, want supported: its call answered", a.Claims[0].Status, a.Claims[0].Note)
 	}
@@ -203,7 +208,7 @@ func TestStrayJudgementsFromAnotherCallAreIgnored(t *testing.T) {
 	if len(fc.Inferences) != 1 || fc.Inferences[0].ID != "k4" {
 		t.Errorf("inferences %+v, want only k4, from the call that was given it", fc.Inferences)
 	}
-	govern(a, fc, err, findings)
+	governAll(a, fc, err, findings)
 	if c := a.Claims[6]; c.Status == statusSupported || !strings.HasPrefix(c.Note, "fact_check_unavailable") {
 		t.Errorf("c7 = %s %q, want unchecked: its own call failed", c.Status, c.Note)
 	}

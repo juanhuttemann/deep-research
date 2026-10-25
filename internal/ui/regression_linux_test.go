@@ -62,12 +62,15 @@ func TestKeyReaderEndsWhenTheInputCloses(t *testing.T) {
 func TestKilledRunGivesTheTerminalBack(t *testing.T) {
 	if os.Getenv("UI_KILLED_RUN_HELPER") != "" {
 		tty := os.NewFile(3, "tty")
+		// A run that finished before the signal wrote its report to the
+		// default reports/ beside the package, and one was committed.
 		_, _ = Run(context.Background(), Options{
 			Question:  "q",
 			Assistant: &fakeAssistant{summary: "s"},
 			Input:     tty,
 			Stdout:    tty,
 			Stderr:    tty,
+			OutDir:    t.TempDir(),
 		})
 		return
 	}

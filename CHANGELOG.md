@@ -5,6 +5,41 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The report's quote check matched a quote anywhere in a page's text,
+  inside its words too, so a quoted "size is 10" stood on a page's "size is
+  100 MB" and "secure for production" on its "insecure for production". A
+  quote, and each piece of an elided one, now has to begin and end where
+  the page's words do; a bracketed edit may still change part of a word
+  ("[t]he", "reduce[]").
+- A quote resumed after an elision at a recapitalised word ("… [t]he") lost
+  its marks unless the two passages sat a few bytes apart on the page.
+- The executive summary kept an invented quote's marks that the report had
+  lost, so the JSON export's `executive_summary` still showed it as the
+  source's words, and the export printed the paragraph twice.
+- A claim stating a position the answer was decided against ("one source
+  claims the highest inclination is 72.4°") passed the check as an accurate
+  report of the page and reached the summarizer among the only facts to
+  state, while the analyzer's resolution against it was withheld. When a
+  conflict names a claim an approved statement rests on and supported
+  claims none does, those reach the summarizer apart, never to be stated as
+  fact. Not measured on replays yet.
+- When the report could not be written, the fallback kept the analyzer's
+  confidence after a fact-check that left a share of the claims unchecked;
+  it is now low, as for a written report.
+- More of the quote check: a sentence opening with a lower-case quotation,
+  or following "the answer is no.", is no longer read as part of the
+  sentence before, whose link then attributed its quote; the prose of a
+  quote containing code is normalised as prose is (a PDF's "ﬁle" is
+  "file"); an elided quote of a PDF passage broken across lines is found
+  as the whole one was; words that would open a Markdown block once their
+  marks are gone ("1. Install …", "# of users") are escaped; quotes in an
+  answer section the summarizer wrote anyway are no longer counted in the
+  "n quoted passages" message, since the section is dropped; and the check
+  reuses the fact-check's page texts instead of normalising every page
+  again.
+
 ## [0.21.0] - 2026-10-24
 
 ### Changed

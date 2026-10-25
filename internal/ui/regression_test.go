@@ -3029,3 +3029,231 @@ func TestReadPlanKeepsTheTypedQuestion(t *testing.T) {
 		t.Errorf("plan.Asked = %q, want the typed question kept", plan.Asked)
 	}
 }
+
+// The report's quote check matched a quote anywhere in a page's text, inside
+// its words too: a quoted "size is 10" stood on a page's "size is 100 MB",
+// and "secure for production" on its "insecure for production", so a wrong
+// number or the opposite word kept the marks that present it as the
+// source's.
+func TestQuoteCheckHoldsQuotesToWholeWords(t *testing.T) {
+	for _, tc := range []struct {
+		name, quote, page string
+		removed           int
+	}{
+		{"a number cut short", "the maximum request size is 10", "The maximum request size is 100 MB.", 1},
+		{"a word cut at its start", "secure for production use, the vendor says", "It is insecure for production use, the vendor says.", 1},
+		{"a piece after an elision inside a word", "The policy applies to all staff … will", "The policy applies to all staff who are willing.", 1},
+		{"a piece after an edit inside a word", "The system [now] uses reliable storage for all users", "The system reuses reliable storage for all users.", 1},
+		{"whole words", "the maximum request size is 10", "The maximum request size is 10 MB.", 0},
+		{"a list of numbers elided", "The first few prime numbers are 2,3,5 …", "The first few prime numbers are 2,3,5,7,11,13.", 0},
+		{"a list of codes elided", "The supported status codes are 200,201 …", "The supported status codes are 200,201,202,204.", 0},
+		{"a list's item elided to", "The supported status codes are … 201 … and 204", "The supported status codes are 200,201,202 and 204.", 0},
+		{"a footnote marker after the last word", "The reported benefits substantially outweigh the risks",
+			"The reported benefits **substantially** outweigh the risks¹.\n\n¹ Evidence certainty was moderate.", 0},
+		{"a letter footnote marker after the last word", "The reported benefits substantially outweigh the risks",
+			"The reported benefits substantially outweigh the risksᵃ.", 0},
+		{"a letter footnote marker on a page with emphasis", "The reported benefits substantially outweigh the risks",
+			"The reported benefits **substantially** outweigh the risksᵃ.", 0},
+		{"a letter footnote marker and an elision", "The reported benefits … outweigh the risks",
+			"The reported benefits substantially outweigh the risksᵃ.", 0},
+		{"a footnote marker after a number", "The measured response time was only 10",
+			"The measured response time was **only** 10¹.", 0},
+		{"a two-item list elided to", "The supported status codes are … 201", "The supported status codes are 200,201.", 0},
+		{"a number at a sentence's end", "the maximum request size is 10", "The maximum request size is 10. Larger requests fail.", 0},
+		{"after a dash", "secure for production use, the vendor says", "It is fast—secure for production use, the vendor says.", 0},
+		{"an edit inside a word", "[t]he maximum request size is 10 MB", "The maximum request size is 10 MB.", 0},
+		{"empty brackets inside a word", "It significantly reduce[] operational overhead by removing", "It significantly reduced operational overhead by removing it.", 0},
+		{"an edit beside bold", "[t]**he** maximum request size is 10 MB", "The maximum request size is 10 MB.", 0},
+		{"bold beside empty brackets", "It significantly **reduce**[] operational overhead by removing", "It significantly reduced operational overhead by removing it.", 0},
+		{"an entity beside an edit", "[t]&#104;e maximum request size is 10 MB", "The maximum request size is 10 MB.", 0},
+		{"an entity before empty brackets", "It significantly reduc&#101;[] operational overhead by removing", "It significantly reduced operational overhead by removing it.", 0},
+	} {
+		_, n := unquoteUnfound(`It says "`+tc.quote+`"`+src+`.`, quotePages(tc.page))
+		if n != tc.removed {
+			t.Errorf("%s: removed %d, want %d", tc.name, n, tc.removed)
+		}
+	}
+}
+
+// An elision followed by an edit ("… [t]he") is the usual way to resume a
+// quote at a recapitalised word. The empty piece between the two was
+// dropped and the edit alone decided, so the words after it had to sit
+// within a few bytes of the words before the elision, and a valid quote of
+// two passages a paragraph apart lost its marks.
+func TestQuoteCheckReadsAnElisionBeforeAnEditAsAnElision(t *testing.T) {
+	page := "The policy applies to all staff on site.\n\n" + strings.Repeat("Other rules follow here. ", 6) +
+		"The exemption covers contractors too."
+	for _, quote := range []string{
+		"The policy applies to all staff … [t]he exemption covers contractors too",
+		"The policy applies to all staff [...] [t]he exemption covers contractors too",
+	} {
+		if _, n := unquoteUnfound(`It says "`+quote+`"`+src+`.`, quotePages(page)); n != 0 {
+			t.Errorf("%q: removed %d, want the quote kept", quote, n)
+		}
+	}
+}
+
+// The executive summary is cut from the report before its quotes are
+// checked. Where the decided answer did not replace it, it kept an invented
+// quote's marks: the JSON export's executive_summary showed the quote as the
+// source's, and the export printed the paragraph twice, with and without.
+func TestCheckQuotesUnquotesTheExecutiveSummaryToo(t *testing.T) {
+	opening := `It says "widgets will double in price next year"` + src + `.`
+	sum := &agent.Summary{Report: opening + "\n\n## Details\n\nMore.", Executive: opening}
+	findings := []agent.Finding{{URL: "https://a.example/", Content: "Widget prices stayed flat.", Status: "ok"}}
+	NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1).checkQuotes(sum, "q", fetchedPages(findings), "")
+	want := `It says widgets will double in price next year` + src + `.`
+	if sum.Executive != want || !strings.HasPrefix(sum.Report, want) {
+		t.Errorf("executive %q, report %q; want both unquoted", sum.Executive, sum.Report)
+	}
+}
+
+// When the report could not be written, partial rated the run without the
+// fact-check's error: a check that left a share of the claims unverified
+// lowered the confidence of a written report but not of the fallback, which
+// kept the analyzer's "high" over the same partly unverified answer.
+func TestFailedSummaryAfterAPartlyFailedCheckLowersConfidence(t *testing.T) {
+	for _, tc := range []struct {
+		checkErr error
+		want     string
+	}{{nil, "high"}, {errors.New("claims part: provider timed out"), "low"}} {
+		findings, a := decisionFixture()
+		a.Confidence = "high"
+		fc := &agent.FactCheckResult{Verdicts: []agent.Verdict{
+			verdict("c1", "supported", "1", "Serverless is billed per GB-hour of data stored."),
+		}, Inferences: follows("r1")}
+		governAll(a, fc, tc.checkErr, findings)
+		d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+		res, err := d.partial(context.Background(), newTestPlan("quick", nil), findings, a, fc, tc.checkErr, "report writing failed", errors.New("500"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Summary.Confidence != tc.want {
+			t.Errorf("check error %v: confidence %q, want %q", tc.checkErr, res.Summary.Confidence, tc.want)
+		}
+	}
+}
+
+// With one planted page stating a wrong answer, the analyzer kept the
+// rejected position in its conflicts as told, but the claim stating it
+// ("one source claims ... 72.4°") passed the check as an accurate report of
+// the page and reached the summarizer among "the only facts to state", while
+// the resolution against it was withheld: the report could restate the
+// planted value with nothing to rebut it.
+func TestSummarizerIsToldWhichClaimsTheAnswerWasDecidedAgainst(t *testing.T) {
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "The mission records list a 62° inclination.", Status: statusSupported},
+			{ID: "c2", Text: "One source claims the highest crewed inclination is 72.4°.", Status: statusSupported},
+			{ID: "c3", Text: "The flight lasted four days.", Status: statusSupported},
+		},
+		Conclusions: []agent.Recommendation{{Statement: "The highest crewed inclination is 62°.", Claims: []string{"c1"}}},
+		Conflicts:   []agent.Conflict{{Claims: []string{"c1", "c2"}, Resolution: "c1 holds"}},
+	}
+	prompt := checkedSummarizePrompt("q", a, &agent.FactCheckResult{}, nil, true)
+	facts, against, ok := strings.Cut(prompt, "decided against")
+	if !ok {
+		t.Fatalf("no list of claims the answer was decided against:\n%s", prompt)
+	}
+	if strings.Contains(facts, "72.4°") || !strings.Contains(against, "72.4°") || !strings.Contains(facts, "62° inclination") ||
+		!strings.Contains(facts, "four days") {
+		t.Errorf("want c2 only among the claims decided against, c1 and c3 among the facts:\n%s", prompt)
+	}
+	// A conflict no approved statement takes a side in moves nothing.
+	a.Conclusions[0].Blocked = "c1 did not pass"
+	if prompt := checkedSummarizePrompt("q", a, &agent.FactCheckResult{}, nil, true); strings.Contains(prompt, "decided against") {
+		t.Errorf("a conflict with no approved side moved claims:\n%s", prompt)
+	}
+}
+
+// A sentence was taken to end only before a capital or a digit, and "no"
+// was always an abbreviation ("No. 5"). A quotation opening the next
+// sentence in lower case, or a sentence after "the answer is no.", was read
+// as part of the sentence before, whose link then attributed it: a named
+// phrase with no link of its own lost its quotation marks.
+func TestQuoteCheckFindsTheSentenceAQuoteIsIn(t *testing.T) {
+	for _, tc := range []struct {
+		name, report string
+		removed      int
+	}{
+		{"a lower-case quotation opening a sentence", `See it` + src + `. "always start with SQLite and migrate later" is the rule.`, 0},
+		{"a sentence after \"no.\"", `The answer` + src + ` is no. The rule is "always start with SQLite and migrate later".`, 0},
+		{"no. before a number", `See [src](https://a.example/) No. 5 says "widgets will double in price next year".`, 1},
+		{"a lower-case quotation in its linked sentence", `"always start with SQLite and migrate later" is the rule` + src + `.`, 1},
+	} {
+		if _, n := unquoteUnfound(tc.report, quotePages("unrelated")); n != tc.removed {
+			t.Errorf("%s: removed %d, want %d", tc.name, n, tc.removed)
+		}
+	}
+}
+
+// A quote with code in it was compared literally, its prose included, and
+// lost the normalisation prose gets: a PDF page's ligature ("ﬁle") did not
+// match the quote's "file".
+func TestQuoteCheckReadsProseInAQuoteOfCodeAsProse(t *testing.T) {
+	report := "\"Run `ls` to list every file in the current directory\"" + src
+	if _, n := unquoteUnfound(report, quotePages("Run `ls` to list every \ufb01le in the current directory.")); n != 0 {
+		t.Errorf("removed %d, want the quote kept", n)
+	}
+	// Code itself stays as written: a ligature inside it is not its letters.
+	report = "\"Run `cat file` to print it to the terminal\"" + src
+	if _, n := unquoteUnfound(report, quotePages("Run `cat \ufb01le` to print it to the terminal.")); n != 1 {
+		t.Errorf("removed %d, want the quote of other code unquoted", n)
+	}
+}
+
+// Taking the marks off a quotation at the start of a line could make its
+// words Markdown block syntax: "1. Install the package" became a numbered
+// list item and "# of users doubled" a heading, losing the "1." and "#".
+func TestUnquotingAtALineStartKeepsTheWordsInline(t *testing.T) {
+	for _, tc := range []struct{ name, report, want string }{
+		{"a number", `"1. Install the package before anything else"` + src,
+			`1\. Install the package before anything else` + src},
+		{"a hash", "Intro.\n\"# of users doubled after the new pricing launched\"" + src,
+			"Intro.\n\\# of users doubled after the new pricing launched" + src},
+		{"in a list item", `- "- the docs say this is the default for everyone"` + src,
+			`- \- the docs say this is the default for everyone` + src},
+		{"mid-line", `The docs say "1. Install the package before anything else"` + src,
+			`The docs say 1. Install the package before anything else` + src},
+	} {
+		if got, _ := unquoteUnfound(tc.report, quotePages("unrelated")); got != tc.want {
+			t.Errorf("%s:\n got %s\nwant %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+// An elided quote was matched in the page's loose text only, without the
+// hyphen-joined forms a whole quote is located in: a PDF passage broken
+// across lines ("re-\nserves") was found quoted whole and not elided.
+func TestQuoteCheckJoinsPDFLinesForElidedQuotes(t *testing.T) {
+	pages := quotePages("capital re-\nserves must be kept, the rule says, at all times by the bank")
+	for _, quote := range []string{
+		"capital reserves must be kept, the rule says",
+		"capital reserves must be kept … at all times by the bank",
+	} {
+		if _, n := unquoteUnfound(`It says "`+quote+`"`+src+`.`, pages); n != 0 {
+			t.Errorf("%q: removed %d, want the quote kept", quote, n)
+		}
+	}
+}
+
+// The quote check ran before the program put its answer at the top, which
+// drops an answer section the summarizer wrote anyway: quotes there were
+// counted in "n quoted passages are in no fetched page", then dropped with
+// the section. It runs on the report as delivered, and leaves the
+// program's answer section, and the executive summary taken from it, alone.
+func TestCheckQuotesCountsOnlyQuotesTheReaderGets(t *testing.T) {
+	written := "## Answer\n\n- The guide says \"widgets will double in price next year\" in its own words.\n"
+	sum := &agent.Summary{Report: written + "\n## Why\n\nIt says \"widgets will triple in price next year\"" + src + ".",
+		Executive: "The guide says \"widgets will double in price next year\" in its own words."}
+	findings := []agent.Finding{{URL: "https://a.example/", Content: "Widget prices stayed flat.", Status: "ok"}}
+	sink := &MultiSink{}
+	NewDriver(&fakeAssistant{}, sink, nil, 1).checkQuotes(sum, "q", fetchedPages(findings), written)
+	if !strings.HasPrefix(sum.Report, written) || !strings.Contains(sum.Report, "It says widgets will triple") ||
+		!strings.Contains(sum.Executive, `"widgets will double`) {
+		t.Errorf("want the program's answer and executive untouched and the summarizer's quote unquoted:\n%s\n%s", sum.Report, sum.Executive)
+	}
+	if !slices.ContainsFunc(sink.TimelineSnapshot(), func(e Event) bool { return strings.HasPrefix(e.Detail, "1 quoted passage is") }) {
+		t.Errorf("want one quote counted: %v", sink.TimelineSnapshot())
+	}
+}

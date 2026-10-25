@@ -104,8 +104,11 @@ func resolveSource(s string, findings []agent.Finding) string {
 //
 // It returns the IDs the checker judged that the analysis does not contain,
 // which are ignored: a verdict can only judge a claim, never add one.
-func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings []agent.Finding) (unknown []string) {
-	pages := fetchedPages(findings)
+//
+// pages are the findings' fetched pages (fetchedPages), which the run then
+// holds the report's quotes to as well.
+func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings []agent.Finding,
+	pages map[string]*pageText) (unknown []string) {
 	// An analysis with no claims gives its recommendations nothing to stand
 	// on: they are blocked like any other that names no claim, and prose
 	// verdicts are held to the same quote check before the reports list them.
@@ -234,10 +237,11 @@ type pageText struct {
 	joined     []string
 	hasVisible bool
 	hasJoined  bool
-	// loose is the visible text without the space before punctuation, for
-	// the report's quotes only (locateLoose); literal is the page as a quote
-	// of code is compared (literalForm).
-	loose, literal       string
+	// loose are the visible and joined texts as the report's quotes are
+	// held to them (looseTexts); literal is the page as a quote of code is
+	// compared (literalForm).
+	loose                []string
+	literal              string
 	hasLoose, hasLiteral bool
 }
 
@@ -260,37 +264,57 @@ func (p *pageText) locate(quote string) bool {
 	if q == "" {
 		return false
 	}
-	if strings.Contains(p.text, q) {
-		return true
-	}
-	vq := visibleText(q)
+	return strings.Contains(p.text, q) || p.locateVisible(visibleText(q), strings.Contains)
+}
+
+// locateVisible is locate's comparison as visible text, of a quote already
+// made visible text, with has deciding whether a form of the page holds it:
+// the report's quote check also wants word edges kept.
+func (p *pageText) locateVisible(vq string, has func(s, sub string) bool) bool {
 	if vq == "" {
 		return false
 	}
-	if !p.hasVisible {
-		p.visible, p.hasVisible = visibleText(p.text), true
-	}
-	if strings.Contains(p.visible, vq) {
+	if has(p.visibleForm(), vq) {
 		return true
 	}
-	// PDF text breaks words across lines with a hyphen ("capital re-\nserves"),
-	// and a real hyphen can fall at a line end too ("well-\nknown"): the line
-	// is joined both ways, only as a last attempt. A page with no "-\n" has
-	// nothing to join, and its joined forms are the visible text itself.
-	if !p.hasJoined {
-		if strings.Contains(p.text, "-\n") {
-			for _, join := range []string{"$1$2", "$1-$2"} {
-				p.joined = append(p.joined, visibleText(lineHyphen.ReplaceAllString(p.text, join)))
-			}
-		}
-		p.hasJoined = true
-	}
-	for _, j := range p.joined {
-		if strings.Contains(j, vq) {
+	for _, j := range p.joinedForms() {
+		if has(j, vq) {
 			return true
 		}
 	}
 	return false
+}
+
+// visibleForm is the page's visible text, worked out the first time.
+func (p *pageText) visibleForm() string {
+	if !p.hasVisible {
+		p.visible, p.hasVisible = visibleText(p.text), true
+	}
+	return p.visible
+}
+
+// joinedForms are the page's visible text with words hyphenated across a
+// line joined, worked out the first time. PDF text breaks words across
+// lines with a hyphen ("capital re-\nserves"), and a real hyphen can fall at
+// a line end too ("well-\nknown"): the line is joined both ways, only as a
+// last attempt.
+func (p *pageText) joinedForms() []string {
+	if !p.hasJoined {
+		for _, j := range hyphenJoins(p.text) {
+			p.joined = append(p.joined, visibleText(j))
+		}
+		p.hasJoined = true
+	}
+	return p.joined
+}
+
+// hyphenJoins is s with its line-end hyphens joined both ways. A text with
+// no "-\n" has nothing to join, and none.
+func hyphenJoins(s string) []string {
+	if !strings.Contains(s, "-\n") {
+		return nil
+	}
+	return []string{lineHyphen.ReplaceAllString(s, "$1$2"), lineHyphen.ReplaceAllString(s, "$1-$2")}
 }
 
 // lineHyphen is a word hyphenated across a line break.
@@ -583,17 +607,28 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 		sb.WriteString("\n\n")
 	}
 	writeDecided(&sb, a)
-	var supported, failed []agent.Claim
+	var supported, against, failed []agent.Claim
+	lost := overruled(a)
 	for _, c := range a.Claims {
-		if c.Status == statusSupported {
-			supported = append(supported, c)
-		} else {
+		switch {
+		case c.Status != statusSupported:
 			failed = append(failed, c)
+		case lost[c.ID]:
+			against = append(against, c)
+		default:
+			supported = append(supported, c)
 		}
 	}
 	if len(supported) > 0 {
 		sb.WriteString("Supported claims, the only facts to state:\n")
 		writeClaims(&sb, supported)
+		sb.WriteString("\n")
+	}
+	if len(against) > 0 {
+		sb.WriteString("Claims that are true of what a source says, on the side of a disagreement the approved answer" +
+			" was decided against. Never state one as fact or as the answer: leave it out, or name it only beside the" +
+			" supported claims that overrule it:\n")
+		writeClaims(&sb, against)
 		sb.WriteString("\n")
 	}
 	if len(failed) > 0 {
@@ -613,6 +648,36 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 		sb.WriteString(unretrievedNote)
 	}
 	return sb.String()
+}
+
+// overruled are the supported claims on the losing side of a conflict: the
+// conflict names a claim an approved statement rests on, and these, which
+// none does. The analyzer keeps a position the evidence resolves against in
+// its conflicts, and its resolutions are withheld from the summarizer as
+// unchecked; but the claim stating that position ("one source claims the
+// highest inclination is 72.4°") passed the check as an accurate report of
+// the page, and reached the summarizer among the only facts to state, with
+// nothing to say it lost. Which side lost is read from what the approved
+// answer rests on, not from the resolution's words.
+func overruled(a *agent.Analysis) map[string]bool {
+	used := map[string]bool{}
+	for _, r := range approvedUnits(a) {
+		for _, id := range r.Claims {
+			used[id] = true
+		}
+	}
+	lost := map[string]bool{}
+	for _, c := range a.Conflicts {
+		if !slices.ContainsFunc(c.Claims, func(id string) bool { return used[id] }) {
+			continue
+		}
+		for _, id := range c.Claims {
+			if !used[id] {
+				lost[id] = true
+			}
+		}
+	}
+	return lost
 }
 
 // writeDecided tells the summarizer the program writes the answer, from the

@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"html"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -52,7 +54,18 @@ var (
 	// an initial, letters and stops ("U.S.", "e.g."), or a common title or
 	// short form ("Dr.", "Inc.", "vs.").
 	abbreviation = regexp.MustCompile(`^(?:\p{L}{1,3}\.)+\p{L}{0,3}$|^\p{L}$|` +
-		`^(?i:dr|mr|mrs|ms|prof|st|jr|sr|vs|no|fig|vol|inc|ltd|co|approx)$`)
+		`^(?i:dr|mr|mrs|ms|prof|st|jr|sr|vs|inc|ltd|co|approx)$`)
+	// numberAbbreviation is a short form a full stop ends only before a
+	// number ("No. 5", "Fig. 3"): taken for one everywhere, "the answer is
+	// no." ran into the next sentence and its link attributed a quote there.
+	numberAbbreviation = regexp.MustCompile(`^(?i:no|fig|vol|pp?)$`)
+	// containerPrefix is what may stand before a block's text on its line:
+	// indentation, blockquote and list markers.
+	containerPrefix = regexp.MustCompile(`^(?:[ \t]*(?:>|[-+*]|[0-9]{1,9}[.)])?[ \t]*)*$`)
+	// blockOpener is text that may open a block where a block starts: a
+	// heading, a list item, a blockquote, a thematic break, a table row or a
+	// setext underline. Its last character is the one an escape goes before.
+	blockOpener = regexp.MustCompile(`^(?:[0-9]{1,9}[.)]|[#\-+*>|=_])`)
 	// mdLinkTarget is a Markdown link to a web page, inline or an autolink.
 	mdLinkTarget = regexp.MustCompile(`\]\(https?://|<https?://`)
 	// typography is what quoting changes in a passage's characters:
@@ -61,6 +74,11 @@ var (
 	// quoteMark is any quotation mark once visibleText has made curly ones
 	// straight: a quote nested in a quotation may use either.
 	quoteMark = strings.NewReplacer("'", `"`)
+	// markdownParser reads the report and the pages as the PDF does (GFM).
+	// It is built once: proseMask and plainText built one on every call, a
+	// page and two pieces a quote, and goldmark keeps each parse's state to
+	// the call, as internal/web relies on.
+	markdownParser = goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser()
 	// spaceBeforePunct is the space scraped text keeps before a comma
 	// ("value for money , as"), which a quote of it writes without.
 	spaceBeforePunct = regexp.MustCompile(`\s+([,.;:!?])`)
@@ -76,10 +94,9 @@ var (
 // words; in the runs measured, 10 of the 11 invented quotations had one,
 // and 8 of the 17 spans wrongly unquoted without the rule had none.
 func unquoteUnfound(report string, sources map[string]*pageText) (string, int) {
-	masked := proseMask(report)
 	var sb strings.Builder
 	n, at := 0, 0
-	for _, m := range proseQuote.FindAllSubmatchIndex(masked, -1) {
+	for _, m := range proseQuote.FindAllSubmatchIndex(proseMask(report), -1) {
 		lo, hi := m[2], m[3]
 		if lo < 0 {
 			lo, hi = m[4], m[5]
@@ -93,12 +110,30 @@ func unquoteUnfound(report string, sources map[string]*pageText) (string, int) {
 			start, words = dropEscapes(report, start, inner)
 		}
 		sb.WriteString(report[at:start])
-		sb.WriteString(words)
+		sb.WriteString(keepInline(report[strings.LastIndexByte(report[:start], '\n')+1:start], words))
 		at = m[1]
 		n++
 	}
 	sb.WriteString(report[at:])
 	return sb.String(), n
+}
+
+// keepInline is words, taken out of their quotation marks, escaped where
+// they would otherwise open a block: at the start of a line, past only
+// list and blockquote markers (before), "1. Install the package" became a
+// numbered list item and "# of users doubled" a heading, losing the "1." or
+// the "#" the words said.
+func keepInline(before, words string) string {
+	if !containerPrefix.MatchString(before) {
+		return words
+	}
+	m := blockOpener.FindStringIndex(words)
+	if m == nil {
+		return words
+	}
+	// Any ASCII punctuation may be escaped, so an escape where none was
+	// needed ("\#hashtag") reads the same.
+	return words[:m[1]-1] + `\` + words[m[1]-1:]
 }
 
 // dropEscapes returns where straight quotation marks' removal starts and the
@@ -139,7 +174,7 @@ func proseMask(report string) []byte {
 			masked[i] = c
 		}
 	}
-	doc := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser().Parse(text.NewReader(src))
+	doc := markdownParser.Parse(text.NewReader(src))
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		switch t := n.(type) {
 		case *ast.CodeSpan, *ast.RawHTML, *ast.AutoLink:
@@ -181,16 +216,23 @@ func linkedSentence(report string, lo, hi int) bool {
 }
 
 // endsSentence reports whether the mark at s[i:j] ends a sentence: what
-// follows opens with a capital or a digit, past any opening marks, and the
-// word before it is not an abbreviation. The stop in "the U.S. agency" ended
-// the sentence, and cut a quote off from the link that attributed it.
+// follows opens with a capital, a digit or a quotation mark, past any other
+// opening marks, and the word before it is not an abbreviation. The stop in
+// "the U.S. agency" ended the sentence, and cut a quote off from the link
+// that attributed it. A quotation may open a sentence in lower case
+// ("always start with SQLite" is the rule); read as the sentence before
+// going on, it took that sentence's link as its own.
 func endsSentence(s string, i, j int) bool {
-	next := strings.TrimLeft(s[j:], "\"“'(*_[")
+	next := strings.TrimLeft(s[j:], "(*_[")
 	r, _ := utf8.DecodeRuneInString(next)
-	if next != "" && !unicode.IsUpper(r) && !unicode.IsDigit(r) {
+	if next != "" && !unicode.IsUpper(r) && !unicode.IsDigit(r) && !strings.ContainsRune("\"“'", r) {
 		return false
 	}
-	return !abbreviation.MatchString(s[strings.LastIndexAny(s[:i], " \t(")+1 : i])
+	word := s[strings.LastIndexAny(s[:i], " \t(")+1 : i]
+	if numberAbbreviation.MatchString(word) {
+		return !unicode.IsDigit(r)
+	}
+	return !abbreviation.MatchString(word)
 }
 
 // checkable reports whether a quoted span reads as a quotation. A span that
@@ -205,7 +247,8 @@ func checkable(q string) bool {
 // quoteFound reports whether a quote is in some fetched page. It accepts
 // what a reader accepts as quoting: an elision, a bracketed edit, a capital
 // the sentence needed, trailing punctuation. The words, their order and the
-// numbers must still be the page's, and a quote's pieces must all be in one
+// numbers must still be the page's, a quote must begin and end where the
+// page's words do (keepsEdges), and a quote's pieces must all be in one
 // page, in the quote's order: pieces found on different pages, or out of
 // order, vouched for a sentence no source wrote ("The default timeout for
 // this service is … 75 seconds" from a page with 30 seconds and another with
@@ -221,8 +264,12 @@ func quoteFound(q string, pages map[string]*pageText) bool {
 	case 0:
 		return true
 	case 1:
+		pc := pieces[0]
+		if !literal {
+			pc = pc.withForms()
+		}
 		for _, p := range pages {
-			if !literal && p.holds(pieces[0].text) || literal && p.holdsLiteral(pieces[0]) {
+			if !literal && p.holds(pc) || literal && p.holdsLiteral(pc) {
 				return true
 			}
 		}
@@ -236,21 +283,20 @@ func quoteFound(q string, pages map[string]*pageText) bool {
 	return false
 }
 
-// holds reports whether one piece is on the page, with either capital.
-func (p *pageText) holds(piece string) bool {
-	for _, f := range []string{piece, flipFirst(piece)} {
-		if p.locate(f) || p.locateLoose(f) {
+// holds reports whether one piece is on the page, with either capital: as
+// locate finds it, or failing that in the loose text, the quote check's
+// fallback and never the fact-check's, whose quotes are held to locate.
+func (p *pageText) holds(pc quotePiece) bool {
+	for k, q := range pc.nfc {
+		if q != "" && (pc.within(p.text, q) || p.locateVisible(pc.visible[k], pc.within)) {
 			return true
 		}
 	}
-	return false
+	return slices.ContainsFunc(p.looseTexts(), pc.inText)
 }
 
 // holdsLiteral is holds for a piece of a quote of code.
-func (p *pageText) holdsLiteral(pc quotePiece) bool {
-	t := p.literalText()
-	return pc.loose != "" && (strings.Contains(t, pc.loose) || strings.Contains(t, pc.flipped))
-}
+func (p *pageText) holdsLiteral(pc quotePiece) bool { return pc.inText(p.literalText()) }
 
 // quotePiece is a run of a quote's own words between gaps.
 type quotePiece struct {
@@ -261,7 +307,79 @@ type quotePiece struct {
 	// near marks a piece after a bracketed edit: it starts within
 	// maxEditGap bytes of the piece before it.
 	near bool
+	// open and close say whether the piece starts and ends where a word of
+	// the page does (keepsEdges).
+	open, close bool
+	// nfc and visible are text and its other capital as locate compares
+	// them (withForms), for a quote of one piece only.
+	nfc, visible [2]string
 }
+
+// withForms is pc with the forms locate compares worked out once, rather
+// than again for every page.
+func (pc quotePiece) withForms() quotePiece {
+	for k, s := range []string{pc.text, flipFirst(pc.text)} {
+		pc.nfc[k] = strings.TrimSpace(norm.NFC.String(s))
+		pc.visible[k] = visibleText(pc.nfc[k])
+	}
+	return pc
+}
+
+// inText reports whether t holds the piece, with either capital.
+func (pc quotePiece) inText(t string) bool { return pc.within(t, pc.loose) || pc.within(t, pc.flipped) }
+
+// within reports whether s holds sub at the word edges pc keeps.
+func (pc quotePiece) within(s, sub string) bool { return pc.index(s, sub, 0, len(s)) >= 0 }
+
+// index is the first place in s[from:to] that holds sub at the word edges
+// pc keeps, or -1. The edges are read in all of s, not in the window: a
+// window that ended at "10" of "100" saw a number end.
+func (pc quotePiece) index(s, sub string, from, to int) int {
+	for sub != "" && from < to {
+		j := strings.Index(s[from:to], sub)
+		if j < 0 {
+			return -1
+		}
+		if pc.keepsEdges(s, from+j, from+j+len(sub)) {
+			return from + j
+		}
+		from += j + 1
+	}
+	return -1
+}
+
+// keepsEdges reports whether s[i:j] begins and ends at a word's edge where
+// pc must. Matched anywhere in the page's text, a quote of "the maximum
+// request size is 10" stood on a page's 100 MB, and "secure for production"
+// on its "insecure for production". A word runs on only from a letter to a
+// letter or a digit to a digit: a footnote marker after a word ("risks¹",
+// made "risks1" by visibleText, or "risksᵃ") is not part of it. A comma
+// between digits parts a list's items as often as a number's
+// thousands ("200,201" is either), and read as a number's it unquoted a
+// list's valid excerpt, so "costs 1" still stands on "costs 1,000". A hyphen
+// does not either, since the page's dashes are made one ("result—secure" is
+// read as "result-secure").
+func (pc quotePiece) keepsEdges(s string, i, j int) bool {
+	return (!pc.open || !joinedAt(s, i)) && (!pc.close || !joinedAt(s, j))
+}
+
+// joinedAt reports whether one word of s runs on across position k.
+func joinedAt(s string, k int) bool {
+	p, n := utf8.DecodeLastRuneInString(s[:k])
+	r, _ := utf8.DecodeRuneInString(s[k:])
+	if n == 0 || k == len(s) {
+		return false
+	}
+	return letter(p) && letter(r) || unicode.IsDigit(p) && unicode.IsDigit(r)
+}
+
+// letter is a letter of a word: not a modifier letter, which a superscript
+// footnote marker is (ᵃ).
+func letter(r rune) bool {
+	return unicode.IsLetter(r) && !unicode.Is(unicode.Lm, r) || unicode.IsMark(r)
+}
+
+func wordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) }
 
 // maxEditGap is how far on the page a bracketed edit may move the next
 // piece: the word or two the edit stands for.
@@ -296,33 +414,52 @@ func labelLinks(q string) string {
 // quotePieces splits a quote at its gaps (quoteGap) outside its code spans:
 // a gap is looked for on a copy whose code is blanked out. Stripping the
 // backticks first made code a pattern, and a quoted data[0] matched a page's
-// data[9]. The code itself is compared as visible text, as the page's is. A
-// link is its label first: "[angle](...)" is not a bracketed edit.
+// data[9]. The code itself is compared as written (literalForm). A link is
+// its label first: "[angle](...)" is not a bracketed edit.
+//
+// A piece is near the one before it only when nothing but bracketed edits
+// lies between them. An elision followed by an edit ("… [t]he") left an
+// empty piece between them, and the edit alone decided: the piece after it
+// had to sit within maxEditGap of the words before the elision. A piece
+// keeps the word edges of the quote, except where an edit touches it with
+// no space between: "[t]he" begins inside the page's "The", and "reduce[]"
+// ends inside its "reduced".
 func quotePieces(q string, literal bool) []quotePiece {
 	q = labelLinks(q)
 	masked := maskCode(q)
 	var out []quotePiece
-	near, at := false, 0
-	add := func(text string) {
-		if text = strings.Trim(text, " ,.;:!?"); text != "" {
-			out = append(out, quotePiece{text: text, loose: comparable(text, literal),
-				flipped: comparable(flipFirst(text), literal), near: near && len(out) > 0})
+	elided, open, at := false, true, 0
+	add := func(text string, closed bool) {
+		if text = strings.Trim(text, " ,.;:!?"); text == "" {
+			return
 		}
+		pc := quotePiece{text: text, loose: comparable(text, literal), near: !elided && len(out) > 0, open: open, close: closed}
+		// Only the first piece may take the other capital (inOrder).
+		if len(out) == 0 {
+			pc.flipped = comparable(flipFirst(text), literal)
+		}
+		out = append(out, pc)
+		elided = false
 	}
 	for _, g := range quoteGap.FindAllIndex(masked, -1) {
-		add(q[at:g[0]])
 		gap := q[g[0]:g[1]]
-		near = !strings.Contains(gap, "…") && !strings.Contains(gap, "...")
-		at = g[1]
+		edit := !strings.Contains(gap, "…") && !strings.Contains(gap, "...")
+		// Emphasis does not part an edit from its word ("[t]**he**"), and an
+		// entity is the letter it shows ("[t]&#104;e").
+		last, _ := utf8.DecodeLastRuneInString(html.UnescapeString(strings.TrimRight(q[:g[0]], "*_~")))
+		add(q[at:g[0]], !edit || !wordRune(last))
+		next, _ := utf8.DecodeRuneInString(html.UnescapeString(strings.TrimLeft(q[g[1]:], "*_~")))
+		elided, open, at = elided || !edit, !edit || !wordRune(next), g[1]
 	}
-	add(q[at:])
+	add(q[at:], true)
 	return out
 }
 
-// inOrder reports whether the pieces are in the page's loose text in order,
-// each after the one before it, and a near one close after it. Only the
-// first piece may differ in its first letter's case. The hyphen-joined
-// forms locate tries for PDF text are not tried here.
+// inOrder reports whether the pieces are in one of the page's loose texts
+// in order, each after the one before it, and a near one close after it.
+// Only the first piece may differ in its first letter's case. The
+// hyphen-joined texts are tried too: without them a PDF passage quoted whole
+// was found and the same passage elided was not.
 //
 // A piece with its near ones is a cluster, and clusters are matched each at
 // its earliest place after the one before: past an elision any later place
@@ -330,10 +467,15 @@ func quotePieces(q string, literal bool) []quotePiece {
 // retried. Backtracking over every place of every piece took eight seconds
 // on repetitive pages, and the budget that bounded it removed a valid quote.
 func (p *pageText) inOrder(pieces []quotePiece, literal bool) bool {
-	text, at := p.looseText(), 0
 	if literal {
-		text = p.literalText()
+		return inOrderIn(p.literalText(), pieces)
 	}
+	return slices.ContainsFunc(p.looseTexts(), func(t string) bool { return inOrderIn(t, pieces) })
+}
+
+// inOrderIn is inOrder in one text.
+func inOrderIn(text string, pieces []quotePiece) bool {
+	at := 0
 	for i := 0; i < len(pieces); {
 		j := i + 1
 		for j < len(pieces) && pieces[j].near {
@@ -358,18 +500,18 @@ func matchCluster(text string, c []quotePiece, at int, first bool) (int, bool) {
 	}
 	best, failed := -1, map[[2]int]bool{}
 	for _, h := range heads {
-		for off := at; h != ""; {
-			j := strings.Index(text[off:], h)
+		for off := at; ; {
+			j := c[0].index(text, h, off, len(text))
 			if j < 0 {
 				break
 			}
-			if end, ok := followNear(text, c[1:], off+j+len(h), failed); ok {
+			if end, ok := followNear(text, c[1:], j+len(h), failed); ok {
 				if best < 0 || end < best {
 					best = end
 				}
 				break
 			}
-			off += j + 1
+			off = j + 1
 		}
 	}
 	return best, best >= 0
@@ -390,16 +532,16 @@ func followNear(text string, rest []quotePiece, pos int, failed map[[2]int]bool)
 		return 0, false
 	}
 	pc := rest[0]
-	window := text[pos:min(len(text), pos+maxEditGap+len(pc.loose))]
-	for off := 0; pc.loose != ""; {
-		k := strings.Index(window[off:], pc.loose)
+	to := min(len(text), pos+maxEditGap+len(pc.loose))
+	for off := pos; ; {
+		k := pc.index(text, pc.loose, off, to)
 		if k < 0 {
 			break
 		}
-		if end, ok := followNear(text, rest[1:], pos+off+k+len(pc.loose), failed); ok {
+		if end, ok := followNear(text, rest[1:], k+len(pc.loose), failed); ok {
 			return end, true
 		}
-		off += k + 1
+		off = k + 1
 	}
 	failed[state] = true
 	return 0, false
@@ -416,24 +558,41 @@ func flipFirst(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-// locateLoose is locate on the visible text with the space before
-// punctuation removed and every quotation mark made one, on both sides. It is a quote check's fallback, never
-// the fact-check's: a supported verdict's quote is held to locate.
-func (p *pageText) locateLoose(quote string) bool {
-	q := looseForm(quote)
-	return q != "" && strings.Contains(p.looseText(), q)
+// looseTexts are the page's visible text and its hyphen-joined forms
+// (joinedForms) without the space before punctuation, with one quotation
+// mark and footnote markers read as spaces, worked out the first time they
+// are needed. A page with no footnote marker reuses the forms locate keeps.
+func (p *pageText) looseTexts() []string {
+	if p.hasLoose {
+		return p.loose
+	}
+	var forms []string
+	if strings.IndexFunc(p.text, footnoteMark) >= 0 {
+		clean := strings.Map(func(r rune) rune {
+			if footnoteMark(r) {
+				return ' '
+			}
+			return r
+		}, p.text)
+		for _, t := range append([]string{clean}, hyphenJoins(clean)...) {
+			forms = append(forms, visibleText(t))
+		}
+	} else {
+		forms = append([]string{p.visibleForm()}, p.joinedForms()...)
+	}
+	for i, f := range forms {
+		forms[i] = quoteMark.Replace(spaceBeforePunct.ReplaceAllString(f, "$1"))
+	}
+	p.loose, p.hasLoose = forms, true
+	return forms
 }
 
-// looseText is the page's visible text without the space before
-// punctuation, worked out the first time it is needed.
-func (p *pageText) looseText() string {
-	if !p.hasLoose {
-		if !p.hasVisible {
-			p.visible, p.hasVisible = visibleText(p.text), true
-		}
-		p.loose, p.hasLoose = quoteMark.Replace(spaceBeforePunct.ReplaceAllString(p.visible, "$1")), true
-	}
-	return p.loose
+// footnoteMark is a superscript or modifier letter, as a footnote marker is
+// written. visibleText's NFKC makes one the plain letter or digit ("risksᵃ"
+// read "risksa", "10¹" read "101"), joining it to the word before; the loose
+// texts, which only the report's quotes are held to, read one as a space.
+func footnoteMark(r rune) bool {
+	return r == '¹' || r == '²' || r == '³' || r >= 0x2070 && r <= 0x209f || r >= 0x1d2c && r <= 0x1d6a
 }
 
 // literalText is the page as a quote of code is compared (literalForm).
@@ -443,8 +602,6 @@ func (p *pageText) literalText() string {
 	}
 	return p.literal
 }
-
-func looseForm(s string) string { return comparable(s, false) }
 
 // comparable is s as a quote is compared: visible text without the space
 // before punctuation and with one quotation mark, or literalForm for a
@@ -459,8 +616,9 @@ func comparable(s string, literal bool) string {
 // literalForm is a page as a quote of code is compared with it, and
 // literalPiece a piece of the quote: the text a reader sees rendered
 // (plainText), its code exactly as written, typography made plain and
-// spaces collapsed. Quotation marks are not made one, as they are for prose:
-// in code print('x') is not print("x").
+// spaces collapsed. Quotation marks are not made one, as they are for prose,
+// in the quote's prose either: in code print('x') is not print("x"), and a
+// page that lost its backticks shows its code as prose.
 //
 // Both sides are read by goldmark, the parser the PDF is laid out with,
 // because every approximation failed one way or the other. Read as visible
@@ -495,7 +653,7 @@ func plainText(md string, fragment bool) string {
 		md = "x " + md
 	}
 	src := []byte(md)
-	doc := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser().Parse(text.NewReader(src))
+	doc := markdownParser.Parse(text.NewReader(src))
 	var sb strings.Builder
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -517,7 +675,9 @@ func plainText(md string, fragment bool) string {
 func plainNode(sb *strings.Builder, n ast.Node, src []byte) ast.WalkStatus {
 	switch t := n.(type) {
 	case *ast.Text:
-		sb.Write(util.ResolveNumericReferences(util.ResolveEntityNames(util.UnescapePunctuations(t.Segment.Value(src)))))
+		// Prose is NFKC, as visibleText reads it: a PDF's "ﬁle" is "file".
+		// Code is left as written.
+		sb.WriteString(norm.NFKC.String(string(util.ResolveNumericReferences(util.ResolveEntityNames(util.UnescapePunctuations(t.Segment.Value(src)))))))
 		if t.SoftLineBreak() || t.HardLineBreak() {
 			sb.WriteByte(' ')
 		}
