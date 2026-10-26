@@ -109,6 +109,10 @@ type Renderer struct {
 	promptText  string
 	// briefNote is a one-line notice shown above the brief's key hints.
 	briefNote string
+	// setup and example are the start screen's: what runs will use, and
+	// the question shown dimmed in the empty box.
+	setup   agent.Setup
+	example string
 
 	startTime time.Time
 	detached  bool
@@ -244,9 +248,14 @@ func (r *Renderer) SetPrompt(label, text string) {
 	r.paintLocked(true)
 }
 
-// promptRow renders the in-progress line with a block cursor.
+// promptRow renders the in-progress line with a block cursor, and the
+// example after it while nothing is typed.
 func (r *Renderer) promptRow() string {
-	return "  " + r.T.magenta(r.promptLabel+" ▸ ") + r.promptText + r.T.cyan("█")
+	row := "  " + r.T.magenta(r.promptLabel+" ▸ ") + r.promptText + r.T.cyan("█")
+	if r.promptText == "" {
+		row += r.T.dim(r.example)
+	}
+	return row
 }
 
 // apply folds one event into the live state. It must be called with mu held.
@@ -532,6 +541,8 @@ func (r *Renderer) frameLines() []string {
 		lines = r.reportLines()
 	case "brief":
 		lines = r.briefLines()
+	case "start":
+		lines = r.startLines()
 	default:
 		lines = r.treeLines()
 	}

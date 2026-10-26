@@ -77,9 +77,6 @@ h1, h2, h3 { font-size: inherit; margin: 0; }
   background: none; color: var(--dim); cursor: pointer; flex-shrink: 0; }
 .theme-btn:hover { color: var(--fg); border-color: var(--fg); }
 .theme-btn svg { width: 16px; height: 16px; }
-.setup-list { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: 0 2ch; margin: 14px 0 0; }
-.setup-list dt { color: var(--dim); }
-.setup-list dd { margin: 0; overflow-wrap: anywhere; }
 .state { display: inline-flex; gap: 1ch; color: var(--dim); white-space: nowrap; }
 .state.live { color: var(--cyan); }
 
@@ -385,7 +382,7 @@ mark { background: var(--yellow); color: var(--bg); }
   .composer textarea { font-size: 16px; }
   .agent { grid-template-columns: 1ch minmax(0, 1fr); }
   .agent .meter, .agent .ln { grid-column: 2; }
-  .step-sep, #home .hint { display: none; }
+  .step-sep { display: none; }
   .row { flex-direction: column; gap: 2px; }
   .prose { padding: 18px 2ch; }
 }
@@ -443,8 +440,6 @@ mark { background: var(--yellow); color: var(--bg); }
         <p id="domains-note" class="note" hidden>Separate sites with commas. Each is checked before research starts; one that can't be searched or read is skipped.</p>
       </div>
     </form>
-    <p class="hint">[enter] research   [shift+enter] new line   [tab] use the example</p>
-    <dl id="setup-list" class="setup-list" hidden></dl>
     <p id="msg" class="form-msg" role="alert"></p>
     <div id="stopped-wrap" hidden>
       <h2 class="heading section-title">Interrupted runs</h2>
@@ -637,15 +632,12 @@ async function loadSetup() {
     setup = s;
     fillChip("setup-search", searchChip(s), "Search: " + s.search + "\nPage text: " + s.pages);
     $("setup").hidden = false;
-    $("setup-list").replaceChildren(...[["model", s.model], ["provider", s.provider], ["search", s.search], ["page text", s.pages]]
-      .filter(([, v]) => v).flatMap(([k, v]) => [el("dt", "", k), el("dd", "", v)]));
-    $("setup-list").hidden = false;
   } catch {}
 }
 // searchChip names the engine and what reads the pages, without their hosts:
 // "searxng (localhost:8888)" alone left out Firecrawl, which reads every
-// page a claim is checked against. The hosts are in the tooltip and on the
-// start screen.
+// page a claim is checked against. The hosts are in the tooltip. The
+// terminal's start screen names it the same way (ui.searchChip).
 function searchChip(s) {
   const bare = v => v.replace(/ \(.*\)$/, ""), search = bare(s.search);
   if (!s.pages || s.pages === "none" || s.pages === "page text included") return search;

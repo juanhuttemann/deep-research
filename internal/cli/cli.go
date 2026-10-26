@@ -42,7 +42,13 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A question is a flag on the root, not a subcommand: `drsh -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only", "resume"}, cmd.Flags().Changed) {
-			return cmd.Help()
+			// A script piping a bare drsh still gets the help it always did.
+			silent, _ := cmd.Flags().GetBool("silent")
+			jsonl, _ := cmd.Flags().GetBool("jsonl")
+			if !drawsUI(cmd, silent, jsonl) {
+				return cmd.Help()
+			}
+			return interactive(cmd, load)
 		}
 		res, err := research(cmd, load)
 		if jsonl, _ := cmd.Flags().GetBool("jsonl"); jsonl {
@@ -125,6 +131,29 @@ func New(load func() (Deps, error)) *cobra.Command {
 		},
 	)
 	return root
+}
+
+// interactive is a bare drsh on a terminal: the browser page's start
+// screen, in the terminal. Each question runs as `drsh -p` with the same
+// flags would, brief, live frame and follow-up questions included, and
+// then the screen asks for the next; Esc or Ctrl-C there ends it. A run
+// that fails is reported and the screen comes back, as the page does.
+func interactive(cmd *cobra.Command, load func() (Deps, error)) error {
+	d, err := load()
+	if err != nil {
+		return err
+	}
+	noColor, _ := cmd.Flags().GetBool("no-color")
+	for {
+		q := ui.AskQuestion(cmd.InOrStdin(), cmd.OutOrStdout(), noColor || os.Getenv("NO_COLOR") != "", d.Config.Describe())
+		if q == "" {
+			return nil
+		}
+		_ = cmd.Flags().Set("prompt", q)
+		if _, err := research(cmd, load); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+		}
+	}
 }
 
 // runInit writes the config files and, with --docker, a local SearXNG setup.

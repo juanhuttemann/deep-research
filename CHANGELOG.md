@@ -5,7 +5,29 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A bare `drsh` on a terminal opens a start screen instead of the help,
+  as `serve`'s page does in the browser, and in the page's words: the
+  title with the model and search in use, as the page's top bar names
+  them, and the `research ▸` box with an example that Tab takes. It is
+  drawn like the live frame, key hints included. Each question runs as `-p` would, brief and follow-up
+  questions included, and the screen then asks for the next; Esc ends it.
+  Piped, or with `--silent` or `--jsonl`, it still prints the help.
+
+### Fixed
+
+- In the brief's add and rename prompts an arrow key, which arrives as a
+  sequence starting with Esc, was taken for Esc and threw away the typed
+  name. It now does nothing, and Ctrl-C abandons the prompt as Esc does,
+  where it was ignored.
+
 ### Changed
+
+- The page's start screen no longer lists the key hints and the setup
+  (model, provider, search, page text) under the question box. The box's
+  own button says Enter, and the top bar already names the model and the
+  search, with the hosts on hover.
 
 - The activity tail gave each page two rows, `read www.example.com` and
   then how it went, so a branch of five sources pushed ten rows through it.

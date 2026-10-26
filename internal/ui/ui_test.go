@@ -2209,3 +2209,47 @@ func TestJSONLCarriesThinking(t *testing.T) {
 		t.Errorf("thinking = %+v, want the Analyze reasoning whole", got)
 	}
 }
+
+// ---- start screen ---------------------------------------------------------
+
+func TestAskQuestion(t *testing.T) {
+	cases := []struct{ name, keys, want string }{
+		{"tab takes the example", "\t\r", "what is inside a neutron star?"},
+		{"typed, trimmed", "  why is the sky blue \r", "why is the sky blue"},
+		// An empty Enter is no question: the planner would refuse it after
+		// the screen had gone.
+		{"empty enter waits", "\r\rabc\r", "abc"},
+		{"esc quits", "half typed\x1b", ""},
+		{"ctrl-c quits", "half typed\x03", ""},
+		// An arrow key is a sequence starting with Esc; it quit the screen,
+		// and the question typed so far with it.
+		{"arrow is not esc", "ab\x1b[Dc\r", "abc"},
+	}
+	for _, c := range cases {
+		r := NewRenderer(&bytes.Buffer{}, Theme{})
+		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, "what is inside a neutron star?")
+		if got != c.want {
+			t.Errorf("%s: askQuestion = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The start screen is the live frame's: its title with the page's model and
+// search chips, the page's "research ▸" label, the example dimmed in the
+// empty box, and key hints like the brief's.
+func TestStartScreenFrame(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 30, false
+	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, "an example?")
+	frame := strings.Join(r.frameLines(), "\n")
+	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
+		"research ▸ █an example?", "[enter] research   [tab] use the example   [esc] quit"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("start screen lacks %q:\n%s", want, frame)
+		}
+	}
+	r.SetPrompt("research", "typed")
+	if frame := strings.Join(r.frameLines(), "\n"); strings.Contains(frame, "an example?") {
+		t.Errorf("the example stays once something is typed:\n%s", frame)
+	}
+}
