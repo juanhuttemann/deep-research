@@ -154,6 +154,38 @@ func TestSearchTools_Search(t *testing.T) {
 	}
 }
 
+// A page is announced before its scrape, not after: the frame shows it being
+// read while it is.
+func TestSearchTools_AnnouncesEachFetchAsItStarts(t *testing.T) {
+	searxServer := newSearXNGServer(t, []map[string]any{
+		{"title": "A", "url": "https://a.example/test", "content": "test query a", "engine": "google", "score": 1.0},
+		{"title": "B", "url": "https://b.example/test", "content": "test query b", "engine": "bing", "score": 0.9},
+	})
+	var started sync.Map
+	fcServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			URL string `json:"url"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		if _, ok := started.Load(req.URL); !ok {
+			t.Errorf("%s scraped before it was announced", req.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"markdown": "body"}})
+	}))
+	t.Cleanup(fcServer.Close)
+
+	ctx := WithFetchStart(context.Background(), func(url string) { started.Store(url, true) })
+	if _, err := newSearchTools(searxServer.URL, fcServer.URL, 0).Search(ctx, "test query", nil); err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	for _, u := range []string{"https://a.example/test", "https://b.example/test"} {
+		if _, ok := started.Load(u); !ok {
+			t.Errorf("%s was never announced", u)
+		}
+	}
+}
+
 // When scraping fails, the finding must survive with the search snippet.
 func TestSearchTools_Search_ScrapeFailureFallback(t *testing.T) {
 	searxServer := newSearXNGServer(t, []map[string]any{

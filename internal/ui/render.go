@@ -5,9 +5,11 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 )
@@ -57,6 +59,10 @@ type activity struct {
 	at   time.Duration
 	sub  string
 	text string
+	// url marks a page's read: its row shows a spinner while status is
+	// empty, then a dot coloured by the status its verify brought.
+	url    string
+	status string
 }
 
 // Renderer paints the live run. On a terminal it keeps one frame pinned to the
@@ -298,8 +304,66 @@ func (r *Renderer) applySourceEvent(e Event) {
 			n.Sources++
 		}
 	}
-	r.pushActivity(e.SubID, e.Line)
+	switch {
+	case e.Type == Read && e.URL != "":
+		r.pushRead(e)
+	case e.Type == Verify && r.settleRead(e):
+	default:
+		if e.Type == Search {
+			r.dropReads(e.SubID)
+		}
+		r.pushActivity(e.SubID, e.Line)
+	}
 	r.sources = max(r.sources, e.Sources)
+}
+
+// pushRead adds the row of a page being read. It names the page, not only its
+// site: two pages of one site read as the same page twice.
+func (r *Renderer) pushRead(e Event) {
+	page := e.Domain
+	if u, err := url.Parse(e.URL); err == nil && u.Host != "" {
+		page = u.Host + strings.TrimRight(u.Path, "/")
+	}
+	// The path is decoded, so a %1b in a URL a search engine returned would
+	// reach the terminal as an escape.
+	page = strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) {
+			return -1
+		}
+		return c
+	}, page)
+	r.pushActivity(e.SubID, page)
+	if n := len(r.acts); n > 0 {
+		r.acts[n-1].url = e.URL
+	}
+}
+
+// settleRead turns the row of the page e reports on into its dot, in place:
+// a row for the read and another for how it went filled the tail twice as
+// fast.
+func (r *Renderer) settleRead(e Event) bool {
+	for i := len(r.acts) - 1; i >= 0; i-- {
+		a := &r.acts[i]
+		if a.url != e.URL || a.sub != e.SubID || a.status != "" {
+			continue
+		}
+		if slices.Contains([]string{"ok", "degraded", "dropped"}, e.Status) {
+			a.status = e.Status
+		} else {
+			a.url, a.text = "", e.Line
+		}
+		return true
+	}
+	return false
+}
+
+// dropReads removes sub's reads still spinning. Once its search has returned
+// none is in flight: what is left was fetched past the branch's budget and
+// will never be verified.
+func (r *Renderer) dropReads(sub string) {
+	r.acts = slices.DeleteFunc(r.acts, func(a activity) bool {
+		return a.sub == sub && a.url != "" && a.status == ""
+	})
 }
 
 // applySubAgent updates a node's lifecycle state. Progress only ever advances:
@@ -315,6 +379,7 @@ func (r *Renderer) applySubAgent(e Event) {
 	}
 	if e.SubState == "done" {
 		n.Progress = 100
+		r.dropReads(e.SubID)
 	}
 	if e.Line != "" {
 		n.Line = e.Line
@@ -589,7 +654,7 @@ func (r *Renderer) briefFoot() []string {
 		return []string{
 			r.rule(),
 			r.promptRow(),
-			"  " + r.T.gray("[enter] confirm   [esc] cancel"),
+			"  " + r.T.hints("[enter] confirm   [esc] cancel"),
 		}
 	}
 	out := []string{r.rule()}
@@ -597,7 +662,7 @@ func (r *Renderer) briefFoot() []string {
 		out = append(out, "  "+r.T.yellow(r.briefNote))
 	}
 	return append(out,
-		"  "+r.T.gray("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"))
+		"  "+r.T.hints("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"))
 }
 
 // SetBriefNote shows note above the brief's key hints; empty clears it.
@@ -864,7 +929,7 @@ func (r *Renderer) activityLines(n int) []string {
 			sub = clip(a.sub, 2)
 		}
 		out = append(out, fmt.Sprintf("  %s %s %s",
-			r.T.dim(formatDuration(a.at)), r.T.gray(pad(sub, 2)), a.text))
+			r.T.dim(formatDuration(a.at)), r.T.gray(pad(sub, 2)), r.activityText(a)))
 	}
 	// Keep the section a constant height: without the blank filler the rows
 	// below it would march up the screen as the tail fills.
@@ -872,6 +937,48 @@ func (r *Renderer) activityLines(n int) []string {
 		out = append(out, "")
 	}
 	return out
+}
+
+// activityText is a row's text, a read's behind its spinner or dot.
+func (r *Renderer) activityText(a activity) string {
+	if a.url == "" {
+		return a.text
+	}
+	mark, text := r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)]), a.text
+	switch a.status {
+	case "ok":
+		mark, text = r.dot(r.T.green, "✓"), r.T.link(linkTarget(a.url), text)
+	case "degraded":
+		mark, text = r.dot(r.T.yellow, "!"), r.T.link(linkTarget(a.url), text)
+	case "dropped":
+		mark = r.dot(r.T.red, "✗")
+	}
+	return mark + " " + text
+}
+
+// linkTarget is raw as a link safe to put in the frame: http(s) only, since
+// clicking opens it, and printable ASCII, since the URL came from a search
+// engine and a control in it would end the escape and write to the terminal.
+// It is "" for anything else.
+func linkTarget(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	s := u.String()
+	if strings.IndexFunc(s, func(c rune) bool { return c <= ' ' || c > '~' }) >= 0 {
+		return ""
+	}
+	return s
+}
+
+// dot is a settled read's mark: a coloured dot, or without colour, where
+// every dot reads alike, the outcome's glyph.
+func (r *Renderer) dot(paint func(string) string, glyph string) string {
+	if !r.T.Enabled {
+		return glyph
+	}
+	return paint("●")
 }
 
 func (r *Renderer) footerLines() []string {
@@ -885,9 +992,9 @@ func (r *Renderer) footerLines() []string {
 	out := []string{counters}
 	switch {
 	case r.promptLabel != "":
-		out = append(out, r.promptRow(), r.T.gray("  [enter] send   [esc] cancel"))
+		out = append(out, r.promptRow(), "  "+r.T.hints("[enter] send   [esc] cancel"))
 	case !r.done:
-		out = append(out, r.T.gray("  [b] release display   [esc] cancel"))
+		out = append(out, "  "+r.T.hints("[b] release display   [esc] cancel"))
 	}
 	return out
 }

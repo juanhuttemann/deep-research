@@ -895,6 +895,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 	duplicates, offTopic := 0, 0
 	d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "running", Line: "starting"})
 
+	sctx, read := d.announceReads(ctx, id)
 	queries := subQueries(question, sub)
 	for qi, q := range queries {
 		if ctx.Err() != nil {
@@ -906,7 +907,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		}
 		d.emit(Event{Type: Search, Query: q, Terms: sub.Terms, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
 
-		det, err := d.Agent.ResearchDetail(ctx, q, sub.Terms)
+		det, err := d.Agent.ResearchDetail(sctx, q, sub.Terms)
 		d.noteSearch(err, det)
 		if err != nil {
 			// A limiter or a challenge is a state of the run, so it travels on
@@ -958,7 +959,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 			// Carry the signal onto the finding: it is the only thing that
 			// survives into the report and the exports.
 			f.Status = signal.Status
-			d.emit(Event{Type: Read, URL: f.URL, Domain: signal.Domain, SubID: id, Line: "read " + signal.Domain})
+			read(f.URL, signal.Domain)
 			d.emit(Event{Type: Verify, URL: f.URL, Domain: signal.Domain, Status: signal.Status, Code: signal.Code, SubID: id, Line: verifyLabel(signal)})
 
 			// A dropped source retrieved nothing at all: no page text, not even
@@ -1004,6 +1005,26 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 	d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "done", Progress: 100,
 		Line: contributionLine(kept, duplicates, offTopic)})
 	return found, kept
+}
+
+// announceReads emits each page's Read as its fetch begins, under the ctx it
+// returns, so the frame shows the page being read rather than only once it
+// was. read emits the Read of a page no fetch announced, an LLM search's or a
+// replay's, and nothing for one already announced.
+func (d *Driver) announceReads(ctx context.Context, id string) (_ context.Context, read func(url, domain string)) {
+	var announced sync.Map
+	emit := func(url, domain string) {
+		d.emit(Event{Type: Read, URL: url, Domain: domain, SubID: id, Line: "read " + domain})
+	}
+	ctx = tools.WithFetchStart(ctx, func(url string) {
+		announced.Store(url, true)
+		emit(url, tools.DomainOf(url))
+	})
+	return ctx, func(url, domain string) {
+		if _, ok := announced.Load(url); !ok {
+			emit(url, domain)
+		}
+	}
 }
 
 // offTopicLine is a search's off-topic results in one line, naming the first

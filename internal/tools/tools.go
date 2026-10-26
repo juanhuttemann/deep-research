@@ -274,8 +274,9 @@ type SearchTools struct {
 	// ScrapeParallelism bounds how many pages are scraped concurrently within
 	// a single search. Zero or less means sequential.
 	ScrapeParallelism int
-	// logf, when set, receives a line per sub-step (the search query and each
-	// scrape) so the runner can show exactly what each tool does.
+	// logf, when set, receives a line per search: what it returned and from
+	// where. Each page's outcome is the run's to report, on its SourceSignal;
+	// a line here too showed every page twice.
 	logf func(string)
 	// Skip, when set, names pages the run already has in full. They are not
 	// fetched again and take no slot of the budget: a page another search
@@ -553,6 +554,17 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped, Known: known}, nil
 }
 
+// fetchStartKey carries the function WithFetchStart gives a search.
+type fetchStartKey struct{}
+
+// WithFetchStart has the searches made under ctx call onStart with each
+// page's URL as its fetch begins, from the fetch's own goroutine. A scrape
+// takes seconds, and a page announced only once read was never seen being
+// read.
+func WithFetchStart(ctx context.Context, onStart func(url string)) context.Context {
+	return context.WithValue(ctx, fetchStartKey{}, onStart)
+}
+
 // offTopicRester is an engine that can rest the instance whose answer was
 // all off-topic, as it rests one that refused.
 type offTopicRester interface {
@@ -583,7 +595,6 @@ func (s *SearchTools) splitKnown(ranked []ScoredResult) (fresh []ScoredResult, k
 			continue
 		}
 		known = append(known, SkippedSource{URL: r.URL, Domain: DomainOf(r.URL), Title: r.Title, Score: r.Score})
-		s.log(fmt.Sprintf("    known    %s", DomainOf(r.URL)))
 	}
 	return fresh, known
 }
@@ -599,6 +610,9 @@ func (s *SearchTools) body(ctx context.Context, r SearchResult) (*ScrapedContent
 
 // fetch scrapes one search result and labels how its content was obtained.
 func (s *SearchTools) fetch(ctx context.Context, r SearchResult) (SearchFinding, SourceSignal) {
+	if onStart, ok := ctx.Value(fetchStartKey{}).(func(string)); ok {
+		onStart(r.URL)
+	}
 	title, content := r.Title, r.Content
 	signal := SourceSignal{URL: r.URL, Domain: DomainOf(r.URL), Status: "ok"}
 	scraped, err := s.body(ctx, r)
@@ -614,18 +628,15 @@ func (s *SearchTools) fetch(ctx context.Context, r SearchResult) (SearchFinding,
 			title = scraped.Title
 		}
 		content = scraped.Content
-		s.log(fmt.Sprintf("    ok       %s", DomainOf(r.URL)))
 	case strings.TrimSpace(content) != "":
 		// Scraping failed but the search snippet survives: keep it and flag
 		// the source as degraded rather than dropping it.
 		signal.Status, signal.Code = "degraded", scrapeCode(err)
-		s.log(fmt.Sprintf("    snippet  %s", DomainOf(r.URL)))
 	default:
 		// Nothing was scraped and there is no snippet either, so this source
 		// contributed no content at all. Saying "degraded" would claim a body
 		// the finding does not have.
 		signal.Status, signal.Code = "dropped", scrapeCode(err)
-		s.log(fmt.Sprintf("    dropped  %s", DomainOf(r.URL)))
 	}
 	// No confidence is claimed: every fetched source was labelled "high", a
 	// snippet-only one included, and the report printed it beside each

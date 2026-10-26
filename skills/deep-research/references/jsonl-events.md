@@ -13,7 +13,7 @@ stderr. Every field except `type` and `time` is optional. The full struct is
 | `phase` | a pipeline phase starts | `phase`, `detail` |
 | `subagent` | a sub-agent changes state | `sub_id`, `sub_name`, `sub_state` (`running`, `queued`, `done`, `error`), `progress`, `line` |
 | `search` | a sub-agent issues a query | `query`, `terms`, `sub_id` |
-| `read` | a page was fetched | `url`, `domain` |
+| `read` | a page fetch starts; its `verify` follows (none for a page fetched past the branch's budget) | `url`, `domain` |
 | `verify` | a source's availability | `url`, `status` (`ok`, `degraded`, `dropped`), `code` |
 | `citation` | a distinct source joins the run | `source_title`, `source_url`, `sources` (running count) |
 | `token` | running token total | `tokens` |

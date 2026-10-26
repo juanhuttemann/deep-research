@@ -92,6 +92,10 @@ func clip(s string, w int) string {
 	if styled {
 		b.WriteString(cReset)
 	}
+	// A link cut before its close would run on into the rest of the frame.
+	if strings.Contains(b.String(), "\x1b]8;;") {
+		b.WriteString(linkClose)
+	}
 	return b.String()
 }
 
@@ -128,9 +132,21 @@ func forEachCell(s string, fn func(r rune, width int) bool) {
 }
 
 // escapeEnd returns the index just past the ANSI escape sequence starting at
-// i, or i+1 when the sequence is malformed.
+// i, or i+1 when the sequence is malformed. An OSC, a hyperlink's, ends at ST
+// or BEL; counted as text, its URL overflowed the row it was on.
 func escapeEnd(s string, i int) int {
 	j := i + 1
+	if j < len(s) && s[j] == ']' {
+		for j++; j < len(s); j++ {
+			if s[j] == 0x07 {
+				return j + 1
+			}
+			if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
+				return j + 2
+			}
+		}
+		return j
+	}
 	if j >= len(s) || s[j] != '[' {
 		return j
 	}

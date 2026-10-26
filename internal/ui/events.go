@@ -20,7 +20,8 @@ const (
 	Phase EventType = "phase"
 	// Search is a fresh search query issued by a sub-agent.
 	Search EventType = "search"
-	// Read is a page fetch/scrape that produced source content.
+	// Read is a page fetch beginning; its Verify says how it went. A page
+	// fetched past its branch's budget is never verified.
 	Read EventType = "read"
 	// Verify reports the quality/availability of a specific URL.
 	Verify EventType = "verify"

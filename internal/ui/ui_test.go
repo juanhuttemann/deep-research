@@ -155,7 +155,7 @@ func TestRenderBrief(t *testing.T) {
 	r.RenderBrief(plan)
 
 	out := buf.String()
-	for _, want := range []string{"RESEARCH BRIEF", "How will solid-state", "Anode materials", "Market timelines", "[enter] launch"} {
+	for _, want := range []string{"RESEARCH BRIEF", "How will solid-state", "Anode materials", "Market timelines", "[enter]", "launch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("brief output missing %q:\n%s", want, out)
 		}
@@ -1065,7 +1065,7 @@ func TestWaitBriefDrawsBriefBeforeBlocking(t *testing.T) {
 		t.Error("plan changed unexpectedly")
 	}
 	out := buf.String()
-	for _, want := range []string{"RESEARCH BRIEF", "Anode materials", "[enter] launch"} {
+	for _, want := range []string{"RESEARCH BRIEF", "Anode materials", "[enter]", "launch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("brief missing %q; drew:\n%s", want, out)
 		}

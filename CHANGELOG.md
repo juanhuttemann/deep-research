@@ -5,6 +5,32 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The activity tail gave each page two rows, `read www.example.com` and
+  then how it went, so a branch of five sources pushed ten rows through it.
+  A page is now one row: a spinner while it is read, which starts as the
+  fetch does instead of once it is over, and then a dot in the same row,
+  green when read in full, yellow for snippet only, red when dropped (with
+  colour off, `✓`, `!` or `✗`). The row names the page, site and path,
+  where it named only the site, so two pages of one site read as the same
+  page twice. In `--jsonl`, `read` now arrives as a fetch starts rather
+  than after it ends.
+- A page read in full or as a snippet is a link to it in the activity tail
+  (an OSC 8 hyperlink, which most terminals open on ctrl-click), so a
+  source can be checked while the run goes on. Only `http`/`https`
+  addresses are linked, and a URL with anything a terminal would read as a
+  control is not. A path's percent-encoded control characters are dropped
+  from the row: decoded, a `%1b` reached the terminal as an escape.
+- The key hints were gray from end to end, so the keys were lost among the
+  words around them. Each key (`[enter]`, `[esc]`, `[b]`, …) is now in the
+  terminal's own text colour and what it does stays gray.
+- The search tool logged every page's outcome too (`ok en.wikipedia.org`,
+  `snippet …`, `known …`), so each page also got a third row in the tail,
+  and a page fetched past the branch's budget, never used, got one of its
+  own. The search's own line, how many results and from where, is the only
+  one it logs now; the pages are reported once, by the run.
+
 ## [0.22.0] - 2026-10-25
 
 ### Changed
