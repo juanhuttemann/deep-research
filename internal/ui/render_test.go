@@ -332,7 +332,7 @@ func TestBriefAlwaysKeepsTheKeyHints(t *testing.T) {
 	r.RenderBrief(briefPlan(8))
 
 	out := buf.String()
-	if !strings.Contains(out, "[enter] launch") {
+	if !strings.Contains(out, "[enter]") {
 		t.Errorf("key hints dropped from a cramped brief:\n%s", out)
 	}
 	if !strings.Contains(out, "more") {
@@ -663,5 +663,169 @@ func TestThinkingIsWrappedUnderTheStatusRow(t *testing.T) {
 				t.Errorf("%d rows: row is %d columns wide: %q", rows, w, l)
 			}
 		}
+	}
+}
+
+// A page's read and how it went share one row: a spinner while the page is
+// read, then a dot coloured by its status. They took a row each, so every
+// source cost the tail two.
+func TestReadSettlesInPlace(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 24, 80)
+	read := func(sub, domain string) {
+		r.Emit(Event{Type: Read, SubID: sub, URL: "https://" + domain + "/p", Domain: domain, Line: "read " + domain})
+	}
+	verify := func(sub, domain, status, line string) {
+		r.Emit(Event{Type: Verify, SubID: sub, URL: "https://" + domain + "/p", Domain: domain, Status: status, Line: line})
+	}
+	rows := func() []string {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		var out []string
+		for _, a := range r.acts {
+			out = append(out, r.activityText(a))
+		}
+		return out
+	}
+	for _, d := range []string{"ok.example", "snip.example", "gone.example", "late.example"} {
+		read("1", d)
+	}
+	spin := r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)])
+	if got := rows(); len(got) != 4 || got[0] != spin+" ok.example/p" {
+		t.Fatalf("reads in flight = %q, want four spinner rows", got)
+	}
+
+	verify("1", "ok.example", "ok", "✓ ok.example 200 OK")
+	verify("1", "snip.example", "degraded", "! snip.example snippet only")
+	verify("1", "gone.example", "dropped", "✗ 404 dropped")
+	// Another branch reading the same page is its own row.
+	read("2", "ok.example")
+	verify("2", "ok.example", "unverified", "~ ok.example unverified")
+	want := []string{
+		r.T.green("●") + " " + r.T.link("https://ok.example/p", "ok.example/p"),
+		r.T.yellow("●") + " " + r.T.link("https://snip.example/p", "snip.example/p"),
+		r.T.red("●") + " gone.example/p",
+		spin + " late.example/p",
+		"~ ok.example unverified",
+	}
+	if got := rows(); !slices.Equal(got, want) {
+		t.Errorf("settled rows = %q, want %q", got, want)
+	}
+
+	// Fetched past the budget, never verified: gone once the branch is done.
+	r.Emit(Event{Type: SubAgent, SubID: "1", SubState: "done"})
+	if got := rows(); !slices.Equal(got, slices.Delete(want, 3, 4)) {
+		t.Errorf("rows after done = %q, want the unverified read dropped", got)
+	}
+
+	// Without colour the dots read alike, so each outcome keeps its glyph.
+	r = liveRenderer(&buf, 24, 80)
+	r.T.Enabled = false
+	read("1", "snip.example")
+	verify("1", "snip.example", "degraded", "! snip.example snippet only")
+	if got := rows(); !slices.Equal(got, []string{"! snip.example/p"}) {
+		t.Errorf("no-colour rows = %q", got)
+	}
+
+	// Two pages of one site are two rows that say so.
+	r = liveRenderer(&buf, 24, 80)
+	r.Emit(Event{Type: Read, SubID: "1", URL: "https://en.wikipedia.org/wiki/Asunci%C3%B3n", Domain: "en.wikipedia.org"})
+	r.Emit(Event{Type: Read, SubID: "1", URL: "https://en.wikipedia.org/wiki/Juan_de_Salazar/", Domain: "en.wikipedia.org"})
+	r.mu.Lock()
+	got := []string{r.acts[0].text, r.acts[1].text}
+	r.mu.Unlock()
+	if !slices.Equal(got, []string{"en.wikipedia.org/wiki/Asunción", "en.wikipedia.org/wiki/Juan_de_Salazar"}) {
+		t.Errorf("rows name %q, want each page", got)
+	}
+}
+
+// A page that was read, in full or as a snippet, links to itself; one that
+// was dropped or is still being read does not.
+func TestReadRowsLinkToTheirPages(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 24, 80)
+	cases := []struct {
+		domain, status string
+		linked         bool
+	}{{"ok.example", "ok", true}, {"snip.example", "degraded", true}, {"gone.example", "dropped", false}, {"late.example", "", false}}
+	for _, c := range cases {
+		u := "https://" + c.domain + "/p"
+		r.Emit(Event{Type: Read, SubID: "1", URL: u, Domain: c.domain})
+		if c.status != "" {
+			r.Emit(Event{Type: Verify, SubID: "1", URL: u, Domain: c.domain, Status: c.status, Line: "x"})
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, c := range cases {
+		row := r.activityText(r.acts[i])
+		link := "\x1b]8;;https://" + c.domain + "/p\x1b\\" + c.domain + "/p" + linkClose
+		if strings.Contains(row, link) != c.linked {
+			t.Errorf("%s row %q: linked = %v, want %v", c.status, row, !c.linked, c.linked)
+		}
+	}
+	r.T.Enabled = false
+	if row := r.activityText(r.acts[0]); strings.Contains(row, "\x1b") {
+		t.Errorf("without colour the row carries an escape: %q", row)
+	}
+}
+
+// The URL comes from a search engine and goes into a terminal escape: only a
+// clickable web address that cannot end the escape early is linked.
+func TestLinkTargetTakesOnlySafeWebAddresses(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://a.example/p?q=1":     "https://a.example/p?q=1",
+		"http://a.example":            "http://a.example",
+		"javascript:alert(1)":         "",
+		"file:///etc/passwd":          "",
+		"https://a.example/\x1b\\":    "",
+		"https://a.example/?q=\u009c": "",
+	} {
+		if got := linkTarget(raw); got != want {
+			t.Errorf("linkTarget(%q) = %q, want %q", raw, got, want)
+		}
+	}
+	if got := linkTarget("https://a.example/%1b%07"); strings.ContainsAny(got, "\x1b\x07") {
+		t.Errorf("an encoded control came back raw: %q", got)
+	}
+}
+
+// A decoded path is printed as the row's text, so an encoded escape in a URL
+// must not reach the terminal through it.
+func TestReadRowDropsControlsFromThePath(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 24, 80)
+	r.Emit(Event{Type: Read, SubID: "1", URL: "https://a.example/%1b%5B2Jx", Domain: "a.example"})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if got := r.acts[0].text; got != "a.example/[2Jx" {
+		t.Errorf("row text = %q, want the controls dropped", got)
+	}
+}
+
+// A link's URL takes no columns, and a row cut inside its text still closes
+// it: open, it would make the rest of the frame part of the link.
+func TestLinkedRowsMeasureAndClipAsText(t *testing.T) {
+	th := Theme{Enabled: true}
+	row := th.link("https://a.example/"+strings.Repeat("x", 200), "abcdefgh")
+	if w := dispWidth(row); w != 8 {
+		t.Errorf("dispWidth = %d, want 8, the text's", w)
+	}
+	cut := clip(row, 5)
+	if !strings.HasSuffix(cut, linkClose) || dispWidth(cut) != 5 {
+		t.Errorf("clip = %q (%d columns), want 5 columns ending on the link's close", cut, dispWidth(cut))
+	}
+}
+
+// Each key stands out from what it does: the key in the terminal's own text
+// colour, the action gray.
+func TestKeyHintsPaintKeysApartFromActions(t *testing.T) {
+	th := Theme{Enabled: true}
+	want := "[enter]" + th.gray(" launch") + "   [b]" + th.gray(" release display")
+	if got := th.hints("[enter] launch   [b] release display"); got != want {
+		t.Errorf("hints = %q, want %q", got, want)
+	}
+	if got := (Theme{}).hints("[enter] launch   [q] cancel"); got != "[enter] launch   [q] cancel" {
+		t.Errorf("without colour hints = %q, want the text unchanged", got)
 	}
 }

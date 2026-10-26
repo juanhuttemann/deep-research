@@ -1,5 +1,7 @@
 package ui
 
+import "strings"
+
 // Theme holds the colours and styles used by the live UI and completion card.
 // All colour is emitted as ANSI escape sequences.
 type Theme struct {
@@ -48,6 +50,31 @@ func (t Theme) yellow(s string) string  { return t.paint(cYellow, s) }
 func (t Theme) magenta(s string) string { return t.paint(cMagenta, s) }
 func (t Theme) cyan(s string) string    { return t.paint(cCyan, s) }
 func (t Theme) gray(s string) string    { return t.paint(cGray, s) }
+
+// hints paints a row of key hints, "[enter] launch   [q] cancel": each key in
+// the terminal's own text colour, what it does in gray. All gray, the keys
+// were lost among the words around them.
+func (t Theme) hints(s string) string {
+	parts := strings.Split(s, "   ")
+	for i, p := range parts {
+		key, action, _ := strings.Cut(p, " ")
+		parts[i] = key + t.gray(" "+action)
+	}
+	return strings.Join(parts, "   ")
+}
+
+// linkClose ends an OSC 8 hyperlink.
+const linkClose = "\x1b]8;;\x1b\\"
+
+// link makes text a hyperlink to target (OSC 8): a terminal that knows it
+// opens target on click, one that does not shows the text. target must be
+// printable ASCII, or it can end the escape early.
+func (t Theme) link(target, text string) string {
+	if !t.Enabled || target == "" {
+		return text
+	}
+	return "\x1b]8;;" + target + "\x1b\\" + text + linkClose
+}
 
 // truncate shortens s to at most n runes, appending an ellipsis when cut.
 func truncate(s string, n int) string {

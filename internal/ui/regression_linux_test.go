@@ -145,7 +145,7 @@ func runPressingAfterReport(t *testing.T, key string) bool {
 	go func() {
 		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 			mu.Lock()
-			shown := bytes.Contains(screen.Bytes(), []byte("[enter] launch"))
+			shown := bytes.Contains(screen.Bytes(), []byte("[enter]"))
 			mu.Unlock()
 			if shown {
 				_, _ = master.Write([]byte("\r"))

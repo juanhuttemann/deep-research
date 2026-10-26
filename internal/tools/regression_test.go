@@ -898,3 +898,32 @@ func TestSearXNGEmptyPageWithFailedEnginesIsAnError(t *testing.T) {
 		t.Errorf("an honest empty page = %v, %v", res, err)
 	}
 }
+
+// Each page's outcome was logged here as well as reported by the run, so the
+// activity tail showed "ok en.wikipedia.org" under the row that already said
+// so, and a page fetched past the budget, never used, got a line too. The
+// search's own line is the only one left.
+func TestSearchLogsNoLinePerPage(t *testing.T) {
+	sx := newSearXNGServer(t, []map[string]any{
+		{"title": "A", "url": "https://a.example/test", "content": "test query a", "engine": "google", "score": 1.0},
+		{"title": "B", "url": "https://b.example/test", "content": "test query b", "engine": "bing", "score": 0.9},
+		{"title": "C", "url": "https://c.example/known", "content": "test query c", "engine": "bing", "score": 0.8},
+	})
+	st := newSearchTools(sx.URL, newFirecrawlServer(t).URL, 0)
+	st.Skip = func(url string) bool { return strings.Contains(url, "known") }
+	var mu sync.Mutex
+	var lines []string
+	st.SetLogger(func(msg string) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, msg)
+	})
+	if _, err := st.Search(context.Background(), "test query", nil); err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	for _, l := range lines {
+		if strings.Contains(l, ".example") {
+			t.Errorf("logged a page: %q", l)
+		}
+	}
+}
