@@ -170,6 +170,7 @@ minute and per day; a run with web search takes 4 to 13 model requests, and
 ## Common commands
 
 ```bash
+drsh                                     # ask on the start screen, one run after another
 drsh -p "question" --mode deep          # quick | standard | deep
 drsh -p "question" --output report.md   # also save to a file
 drsh -p "question" --silent             # just the report

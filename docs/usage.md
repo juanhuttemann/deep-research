@@ -1,6 +1,7 @@
 # Usage
 
-A research run is `drsh -p "question"`; `setup`, `serve`, `ask`, `list`,
+A research run is `drsh -p "question"`, or a bare `drsh` on a terminal,
+which asks for the question ([below](#a-bare-drsh)); `setup`, `serve`, `ask`, `list`,
 `init`, `doctor` and `update` are subcommands of the same binary, built by `make build`. `drsh --version` reports the version stamped in at
 build time (`dev` for a plain `go build`).
 
@@ -34,11 +35,25 @@ replaces a word, or alters a word with a digit in it or one of three letters
 or fewer ("not"), is ignored, the progress log says so, and the question runs
 as typed. Grammar is left as typed.
 
+### A bare `drsh`
+
+On a terminal, `drsh` with no question opens a start screen, the
+terminal's side of what [`serve`](#serve)'s page offers, drawn as the
+live frame is: the title with the model and search the runs will use, as
+the page's top bar names them, and the page's `research ▸` box for the
+question, with an example in it that Tab takes. Enter runs it as `-p` would, the brief, the
+live frame and the follow-up questions included, and then the screen comes
+back for the next question; Esc or Ctrl-C there ends it. A run that fails,
+or that the brief cancels, returns to the screen too. Flags given with it
+(`--mode`, `--sources`, `--domains`, `--reports`, `-o`, `--trace`) apply to
+every run it starts. With `--silent`, `--jsonl` or a pipe on either side
+it prints the help, as it always did.
+
 ### Flags
 
 | Flag | Default | Meaning |
 | ---- | ------- | ------- |
-| `--prompt`, `-p QUESTION` | — | the question to research; without it the binary prints help |
+| `--prompt`, `-p QUESTION` | — | the question to research; without it a terminal gets the start screen, and a pipe the help |
 | `--output`, `-o FILE` | — | write the report to a file as well |
 | `--mode quick\|standard\|deep` | `standard` | research budget tier |
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
@@ -380,7 +395,6 @@ in the tab and starts again when another run is opened.
 
 - The top bar shows what the next run uses: the model, and the search
   engine with what reads the pages (`searxng + firecrawl`), without their
-  hosts. The start screen lists the provider's host and both services'
   hosts. Page text comes from `firecrawl`,
   `exa`, `tavily`, `page text included` when the engine sends it with each
   result, or `snippets only`; a search setting a run would refuse shows

@@ -136,19 +136,28 @@ func keyFromByte(b byte) Key {
 // readEscape resolves the byte after an Esc. A key sequence (ESC [ ... final,
 // ESC O final) is swallowed whole and reported as unknown so an arrow press
 // does nothing; a bare Esc, with no byte following it, is the cancel key.
+// ESC followed by something else (alt-<key>) is not a cancel, and not a
+// sequence we act on either.
 func readEscape(in Input) Key {
+	if escapeAfter(in) == 0 {
+		return KeyEsc
+	}
+	return KeyUnknown
+}
+
+// escapeAfter reads what follows an Esc: 0 for a bare Esc, '[' or 'O' for a
+// key sequence, whose remaining bytes it swallows, or an alt-<key>'s key.
+func escapeAfter(in Input) byte {
 	t, ok := in.(timedInput)
 	if !ok {
-		return KeyEsc
+		return 0
 	}
 	b, err := t.NextWithin(escapeWindow)
 	if err != nil {
-		return KeyEsc
+		return 0
 	}
 	if b != '[' && b != 'O' {
-		// ESC followed by something else (alt-<key>): not a cancel, and not a
-		// sequence we act on either.
-		return KeyUnknown
+		return b
 	}
 	// CSI parameter bytes run 0x30-0x3f and intermediates 0x20-0x2f; the
 	// sequence ends at the first final byte (0x40-0x7e). ESC O takes exactly
@@ -162,7 +171,7 @@ func readEscape(in Input) Key {
 			break
 		}
 	}
-	return KeyUnknown
+	return b
 }
 
 // readKey reads one keystroke.
@@ -337,7 +346,7 @@ func readPromptSeeded(in Input, seed string, echo func(string)) (string, bool) {
 		}
 		return line, line != ""
 	}
-	return readPromptRaw(in, nil, echo)
+	return readPromptRaw(in, nil, "", echo)
 }
 
 // readPromptEdit opens the prompt with current already in the buffer, so a
@@ -348,11 +357,12 @@ func readPromptEdit(in Input, current string, echo func(string)) (string, bool) 
 	if !in.Raw() {
 		return readPromptSeeded(in, "", echo)
 	}
-	return readPromptRaw(in, []byte(current), echo)
+	return readPromptRaw(in, []byte(current), "", echo)
 }
 
-// readPromptRaw runs the keystroke-at-a-time edit loop over buf.
-func readPromptRaw(in Input, buf []byte, echo func(string)) (string, bool) {
+// readPromptRaw runs the keystroke-at-a-time edit loop over buf. Tab in an
+// empty buffer takes example, as the page's question box does.
+func readPromptRaw(in Input, buf []byte, example string, echo func(string)) (string, bool) {
 	show := func() {
 		if echo != nil {
 			echo(string(buf))
@@ -367,8 +377,20 @@ func readPromptRaw(in Input, buf []byte, echo func(string)) (string, bool) {
 		switch c {
 		case '\r', '\n':
 			return strings.TrimSpace(string(buf)), true
-		case 0x1b: // Esc abandons the edit
+		case 0x1b:
+			// An arrow or function key arrives as a sequence that starts
+			// with Esc. The line has no cursor to move, so the key does
+			// nothing; taken as Esc, it threw the typed line away.
+			if b := escapeAfter(in); b == '[' || b == 'O' {
+				continue
+			}
 			return "", false
+		case byte(KeyCtrlC): // as Esc: raw mode makes it a key
+			return "", false
+		case '\t':
+			if len(buf) == 0 {
+				buf = []byte(example)
+			}
 		case 0x7f, 0x08: // Backspace deletes a whole rune, not a byte
 			if _, n := utf8.DecodeLastRune(buf); n > 0 {
 				buf = buf[:len(buf)-n]
