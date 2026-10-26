@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-25
+
 ### Added
 
 - A bare `drsh` on a terminal opens a start screen instead of the help,
@@ -14,13 +16,6 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   drawn like the live frame, key hints included. Each question runs as `-p` would, brief and follow-up
   questions included, and the screen then asks for the next; Esc ends it.
   Piped, or with `--silent` or `--jsonl`, it still prints the help.
-
-### Fixed
-
-- In the brief's add and rename prompts an arrow key, which arrives as a
-  sequence starting with Esc, was taken for Esc and threw away the typed
-  name. It now does nothing, and Ctrl-C abandons the prompt as Esc does,
-  where it was ignored.
 
 ### Changed
 
@@ -52,6 +47,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   and a page fetched past the branch's budget, never used, got one of its
   own. The search's own line, how many results and from where, is the only
   one it logs now; the pages are reported once, by the run.
+
+### Fixed
+
+- In the brief's add and rename prompts an arrow key, which arrives as a
+  sequence starting with Esc, was taken for Esc and threw away the typed
+  name. It now does nothing, and Ctrl-C abandons the prompt as Esc does,
+  where it was ignored.
 
 ## [0.22.0] - 2026-10-25
 
@@ -1235,7 +1237,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/juanhuttemann/deep-research/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/juanhuttemann/deep-research/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/juanhuttemann/deep-research/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/juanhuttemann/deep-research/compare/v0.20.0...v0.21.0
