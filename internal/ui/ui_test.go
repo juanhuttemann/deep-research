@@ -2227,7 +2227,7 @@ func TestAskQuestion(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := NewRenderer(&bytes.Buffer{}, Theme{})
-		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, "what is inside a neutron star?")
+		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, "what is inside a neutron star?", "")
 		if got != c.want {
 			t.Errorf("%s: askQuestion = %q, want %q", c.name, got, c.want)
 		}
@@ -2240,10 +2240,13 @@ func TestAskQuestion(t *testing.T) {
 func TestStartScreenFrame(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	r.width, r.rows, r.plain = 100, 30, false
-	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, "an example?")
+	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, "an example?", "research failed: no key")
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
-		"research ▸ █an example?", "[enter] research   [tab] use the example   [esc] quit"} {
+		"research ▸ █an example?", "[enter] research   [tab] use the example   [/resume] past runs   [esc] quit",
+		// The screen's first paint erases what was printed before it, so
+		// why the last run ended is said on it.
+		"research failed: no key"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("start screen lacks %q:\n%s", want, frame)
 		}
@@ -2251,5 +2254,158 @@ func TestStartScreenFrame(t *testing.T) {
 	r.SetPrompt("research", "typed")
 	if frame := strings.Join(r.frameLines(), "\n"); strings.Contains(frame, "an example?") {
 		t.Errorf("the example stays once something is typed:\n%s", frame)
+	}
+}
+
+// The picker narrows its rows to those holding every word typed, arrows
+// move the highlight, Enter takes it, Esc and Ctrl-C go back.
+func TestPick(t *testing.T) {
+	rows := []Choice{{Title: "Is fusion power close?"}, {Title: "Who founded Asunción?", Note: "stopped"}, {Title: "Fusion vs fission costs"}}
+	cases := []struct {
+		name, keys string
+		want       int
+	}{
+		{"enter takes the first", "\r", 0},
+		{"every word must match", "fusion costs\r", 2},
+		{"case and accents as typed", "asunción\r", 1},
+		{"down moves", "\x1b[B\x1b[B\r", 2},
+		{"up stops at the top", "\x1b[A\r", 0},
+		{"down stays inside the filter", "fusion\x1b[B\x1b[B\x1b[B\r", 2},
+		{"typing resets the highlight", "\x1b[Bf\r", 0},
+		{"no match takes nothing", "zzz\r\x1b", -1},
+		{"esc goes back", "fus\x1b", -1},
+		{"ctrl-c goes back", "\x03", -1},
+	}
+	for _, c := range cases {
+		r := NewRenderer(&bytes.Buffer{}, Theme{})
+		if got := pick(NewByteReader([]byte(c.keys)), r, "RESUME", "resume", rows); got != c.want {
+			t.Errorf("%s: pick = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// The picker is drawn as the start screen is: its title, the filter box,
+// the rows with the highlighted one marked, and key hints.
+func TestPickFrame(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 30, false
+	r.RenderPick("RESUME", "resume", "", []Choice{{Title: "first run", Note: "2h ago"}, {Title: "second run"}}, []int{0, 1}, 1)
+	frame := strings.Join(r.frameLines(), "\n")
+	for _, want := range []string{"RESUME", "resume ▸ █", "    first run", "  ▸ second run", "2h ago",
+		"[enter] open   [↑↓] move   [esc] back"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("picker lacks %q:\n%s", want, frame)
+		}
+	}
+}
+
+// A session's questions and answers outlive the process, beside its .json;
+// a torn line (a crash mid-write) loses that turn, not the conversation.
+func TestTurnsPersist(t *testing.T) {
+	run := filepath.Join(t.TempDir(), "q-abc.json")
+	if got, err := LoadTurns(run); len(got) != 0 || err != nil {
+		t.Fatalf("LoadTurns before any = %+v, %v", got, err)
+	}
+	for _, turn := range []agent.Turn{{Question: "q1", Answer: "a1"}, {Question: "q2", Answer: "a2"}} {
+		if err := AppendTurn(run, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := os.OpenFile(ChatLog(run), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString(`{"question":"q3","ans`)
+	_ = f.Close()
+	// The next turn is not glued to the torn one.
+	if err := AppendTurn(run, agent.Turn{Question: "q4", Answer: "a4"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadTurns(run)
+	if err != nil || len(got) != 3 || got[0].Answer != "a1" || got[1].Question != "q2" || got[2].Question != "q4" {
+		t.Fatalf("LoadTurns = %+v, %v", got, err)
+	}
+	if ChatLog(run) != strings.TrimSuffix(run, ".json")+".chat.jsonl" {
+		t.Errorf("ChatLog = %s", ChatLog(run))
+	}
+}
+
+// A run's files are written over when its question is asked again; the
+// conversation about the earlier report must not attach to the new one.
+func TestWriteMetadataDropsTheEarlierConversation(t *testing.T) {
+	dir := t.TempDir()
+	path, err := WriteMetadata(Meta{Question: "q"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTurn(path, agent.Turn{Question: "about the old report", Answer: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteMetadata(Meta{Question: "q"}, dir); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := LoadTurns(path); len(got) != 0 {
+		t.Errorf("the new run inherited %+v", got)
+	}
+}
+
+// Sessions are the reports directory's runs and interrupted runs, titled by
+// their question, the last asked about first.
+func TestSessions(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string, age time.Duration) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-age)
+		if err := os.Chtimes(p, when, when); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	old := write("old-1.json", `{"version":"1","question":"Old run?","pages":{"u":"x"}}`, 3*time.Hour)
+	write("new-2.json", `{"version":"1","question":"New run?"}`, 2*time.Hour)
+	write("cut-3.abc.partial.json", `{"version":1,"question":"Cut short?"}`, time.Hour)
+	write("new-2.trace.json", `{"question":"a trace"}`, 0)
+	write("notes.md", "x", 0)
+	if err := os.Mkdir(filepath.Join(dir, "replay"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Asked about a minute ago: the oldest run is the latest session.
+	if err := AppendTurn(old, agent.Turn{Question: "q", Answer: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Sessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, s := range got {
+		titles = append(titles, fmt.Sprintf("%s %v", s.Title, s.Interrupted))
+	}
+	want := []string{"Old run? false", "Cut short? true", "New run? false"}
+	if !slices.Equal(titles, want) {
+		t.Fatalf("Sessions = %q, want %q", titles, want)
+	}
+	if got[0].Path != old {
+		t.Errorf("Path = %s, want %s", got[0].Path, old)
+	}
+}
+
+// The ask box is the start screen's: the label between rules, the keys
+// under it, and the cursor left after the label, where the terminal echoes
+// what is typed. A key may hold a space.
+func TestAskBox(t *testing.T) {
+	var b bytes.Buffer
+	AskBox(&b, true, "new research")
+	want := "\n  " + strings.Repeat("─", 78) + "\n  ask ▸ \n  " + strings.Repeat("─", 78) +
+		"\n  [enter] ask   [empty enter] new research   [/resume] past runs" + "\x1b[2A\r  ask ▸ "
+	if b.String() != want {
+		t.Errorf("AskBox = %q, want %q", b.String(), want)
+	}
+	th := Theme{Enabled: true}
+	if got := th.hints("[empty enter] back"); got != "[empty enter]"+th.gray(" back") {
+		t.Errorf("hints = %q", got)
 	}
 }

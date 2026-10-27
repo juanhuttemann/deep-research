@@ -159,6 +159,27 @@ func TestSelectionRoundTrip(t *testing.T) {
 	}
 }
 
+// /model offers the models picked before, newest first, each once, and
+// never the one runs use now.
+func TestSaveSelectionKeepsRecent(t *testing.T) {
+	dir := t.TempDir()
+	a := Selection{Provider: "openrouter", Transport: "openai", BaseURL: "https://openrouter.ai/api/v1", Model: "a"}
+	b := Selection{Provider: "deepseek", Transport: "openai", BaseURL: "https://api.deepseek.com", Model: "b"}
+	c := Selection{Provider: "anthropic", Transport: "claude", Model: "c"}
+	for _, s := range []Selection{a, b, a, c} {
+		if err := SaveSelection(dir, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _, err := LoadSelection(dir); err != nil || got != c {
+		t.Fatalf("LoadSelection = %+v, %v; want %+v", got, err, c)
+	}
+	got, err := Recent(dir)
+	if err != nil || len(got) != 2 || got[0] != a || got[1] != b {
+		t.Fatalf("Recent = %+v, %v; want [a b]", got, err)
+	}
+}
+
 // TestNullFileIsAnEmptyStore: auth.json holding null decoded to a nil map,
 // and the first Set — login's save — panicked.
 func TestNullFileIsAnEmptyStore(t *testing.T) {

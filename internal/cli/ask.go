@@ -34,7 +34,7 @@ func askCmd(load func() (Deps, error)) *cobra.Command {
 			if q, _ := cmd.Flags().GetString("prompt"); q != "" {
 				return answer(cmd, chat, q)
 			}
-			return converse(cmd, chat, "")
+			return converse(cmd, chat)
 		},
 	}
 	cmd.Flags().StringP("prompt", "p", "", "one question; without it, questions are read one per line")
@@ -55,36 +55,39 @@ func chatAbout(d Deps, path string) (*agent.Chat, error) {
 	return chat, nil
 }
 
-// askAfter offers a conversation about the run that just finished, in the
-// terminal that watched it. ui.Run has closed its raw input by now, so what
-// is typed here is a question, not a key for a run that is over.
+// askAfter offers a conversation about the -p run that just finished, in
+// the terminal that watched it: a session with no research box, which an
+// empty line ends. ui.Run has closed its raw input by now, so what is typed
+// here is a question, not a key for a run that is over.
 func askAfter(cmd *cobra.Command, d Deps, path string, interactive bool) error {
 	if !interactive || path == "" {
 		return nil
 	}
 	// The run is delivered by now; a chat that cannot start costs the offer,
 	// not the run's exit status.
-	chat, err := chatAbout(d, path)
+	m, err := ui.LoadMeta(path)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Questions about this report are unavailable: %v\n", err)
 		return nil
 	}
-	return converse(cmd, chat, "Ask about this report (empty line to finish)")
+	s := newSession(cmd, d, false)
+	if !s.open(path, m, nil) {
+		return nil
+	}
+	return s.loop()
 }
 
 // converse answers one question per line of input until an empty line or the
 // input ends. A question that fails is reported and the conversation goes
 // on: a provider that refused once may answer the next.
-func converse(cmd *cobra.Command, chat *agent.Chat, header string) error {
+func converse(cmd *cobra.Command, chat *agent.Chat) error {
 	f, ok := cmd.InOrStdin().(*os.File)
 	tty := ok && ui.IsTTYFile(f)
-	if tty && header != "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), header)
-	}
 	in := bufio.NewScanner(cmd.InOrStdin())
 	for {
 		if tty {
-			fmt.Fprint(cmd.ErrOrStderr(), "› ")
+			noColor, _ := cmd.Flags().GetBool("no-color")
+			fmt.Fprint(cmd.ErrOrStderr(), ui.AskPrompt(noColor))
 		}
 		if !in.Scan() {
 			return in.Err()

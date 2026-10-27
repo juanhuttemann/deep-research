@@ -185,6 +185,15 @@ back the conversation it shows; the server keeps none. Answers are not
 fact-checked: the prompt tells the model to state as fact only supported
 claims, and nothing checks that it did.
 
+In the terminal a run is a session (`cli/session.go`): the questions asked
+about it after the run, or after `/resume` reopens it, are appended to
+`<name>.chat.jsonl` beside its `.json` (`ui.AppendTurn`), and handed back
+to `agent.Chat` as its turns when it is reopened. The log is append-only so
+the run's own files are never rewritten, and `ui.WriteMetadata` removes it
+when the same question writes over the run. `ui.Sessions` lists the reports
+directory's runs and checkpoints by the question at the head of each file.
+`ask` and the page keep no session.
+
 ## Providers
 
 `agent.connect` is the one place that knows the provider. It builds the
@@ -214,7 +223,8 @@ internal/
             through Claude Code or the Messages API)
   auth      auth.json (stored keys, 0600, atomic, each bound to its
             endpoint; "!command" keys; search services' keys as flat
-            "service:<name>" entries) and model.json (the selection)
+            "service:<name>" entries) and model.json (the selection, and
+            the ones before it for /model)
   catalog   the provider/model list for login: Catwalk's catalog, a
             snapshot embedded, refreshed and cached when online
   cli       cobra commands (run / ask / serve / list / setup / init /

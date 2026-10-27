@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -334,6 +336,11 @@ func WritePDF(res *agent.ResearchResult, dir string) (string, error) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return path, err
 	}
+	// The question asked again writes over the earlier run's files, and the
+	// questions asked about that run's report are not about this one.
+	if err := os.Remove(ChatLog(path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return path, err
+	}
 	return path, nil
 }
 
@@ -505,6 +512,11 @@ func WriteMetadata(m Meta, dir string) (string, error) {
 		return path, err
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return path, err
+	}
+	// The question asked again writes over the earlier run's files, and the
+	// questions asked about that run's report are not about this one.
+	if err := os.Remove(ChatLog(path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return path, err
 	}
 	return path, nil

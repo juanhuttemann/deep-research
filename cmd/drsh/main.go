@@ -4,9 +4,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/cli"
-	"github.com/juanhuttemann/deep-research/internal/config"
 )
 
 // version is stamped at link time by the build:
@@ -20,18 +18,7 @@ var version = "dev"
 func main() {
 	// Deferred: `init` writes the config files, so it has to run before
 	// there is a config to load.
-	load := sync.OnceValues(func() (cli.Deps, error) {
-		cfg, err := config.Load()
-		if err != nil {
-			return cli.Deps{}, err
-		}
-		// A fresh assistant per call: it accumulates token usage and served
-		// models, and `serve` launches one run after another in one process.
-		return cli.Deps{
-			Assistant: func() (agent.Assistant, error) { return agent.New(cfg.Config) },
-			Config:    cfg,
-		}, nil
-	})
+	load := sync.OnceValues(cli.LoadDeps)
 	root := cli.New(load)
 	root.Version = version
 	if err := root.Execute(); err != nil {

@@ -58,7 +58,9 @@ Two files, in `$DEEP_RESEARCH_CONFIG_DIR` when set, else
 - `auth.json` holds the keys, one per provider, each with the endpoint it was
   entered for. It is created `0600` in a `0700` directory and replaced
   atomically. A group- or world-readable file loads with a warning.
-- `model.json` holds the selection: provider, transport, endpoint and model.
+- `model.json` holds the selection: provider, transport, endpoint and model;
+  and under `recent`, the last ten selections before it, which a session's
+  `/model` offers.
   It has no secrets.
 
 A search service's key is stored as its own entry, `service:exa`,

@@ -5,6 +5,32 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A run is a session. Its questions and answers are kept beside its
+  `.json`, in `<name>.chat.jsonl`, and `/resume`, typed in the `research ▸`
+  or `ask ▸` box, lists the runs in the reports directory, the last one run
+  or asked about first, filtered as you type. Enter on a finished run
+  prints its report and the conversation so far and takes the next
+  question; on an interrupted one it continues the run, as `--resume`
+  does. A question asked again writes over the earlier run's files, and
+  its conversation goes with them.
+- `/model`, in the same boxes, lists the model runs use and the ones picked
+  before it, newest first; "other model…" opens `drsh model`'s picker. The
+  pick is saved as `drsh model` saves it, and the next run and the open
+  report's questions use it. `model.json` keeps the last ten picks under
+  `recent`.
+
+### Changed
+
+- In a bare `drsh`, the questions about a report are the session: an
+  empty line goes back to the `research ▸` box for the next run, where it
+  used to end the questions and the screen came back on its own. After a
+  `-p` run an empty line still ends them. Either way the question is typed
+  in an `ask ▸` box drawn like the start screen's, the keys under it.
+- A run that fails, or a command the screen does not know, is said on the
+  start screen, whose first paint erased the error printed before it.
+
 ## [0.23.0] - 2026-10-25
 
 ### Added

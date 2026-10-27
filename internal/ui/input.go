@@ -139,25 +139,26 @@ func keyFromByte(b byte) Key {
 // ESC followed by something else (alt-<key>) is not a cancel, and not a
 // sequence we act on either.
 func readEscape(in Input) Key {
-	if escapeAfter(in) == 0 {
+	if lead, _ := escapeAfter(in); lead == 0 {
 		return KeyEsc
 	}
 	return KeyUnknown
 }
 
-// escapeAfter reads what follows an Esc: 0 for a bare Esc, '[' or 'O' for a
-// key sequence, whose remaining bytes it swallows, or an alt-<key>'s key.
-func escapeAfter(in Input) byte {
+// escapeAfter reads what follows an Esc: lead is 0 for a bare Esc, '[' or
+// 'O' for a key sequence, whose remaining bytes it swallows and whose final
+// byte it returns ('A' up, 'B' down), or an alt-<key>'s key.
+func escapeAfter(in Input) (lead, final byte) {
 	t, ok := in.(timedInput)
 	if !ok {
-		return 0
+		return 0, 0
 	}
 	b, err := t.NextWithin(escapeWindow)
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	if b != '[' && b != 'O' {
-		return b
+		return b, 0
 	}
 	// CSI parameter bytes run 0x30-0x3f and intermediates 0x20-0x2f; the
 	// sequence ends at the first final byte (0x40-0x7e). ESC O takes exactly
@@ -168,10 +169,10 @@ func escapeAfter(in Input) byte {
 			break
 		}
 		if b == 'O' || (c >= 0x40 && c <= 0x7e) {
-			break
+			return b, c
 		}
 	}
-	return b
+	return b, 0
 }
 
 // readKey reads one keystroke.
@@ -346,7 +347,7 @@ func readPromptSeeded(in Input, seed string, echo func(string)) (string, bool) {
 		}
 		return line, line != ""
 	}
-	return readPromptRaw(in, nil, "", echo)
+	return readPromptRaw(in, nil, "", echo, nil)
 }
 
 // readPromptEdit opens the prompt with current already in the buffer, so a
@@ -357,12 +358,13 @@ func readPromptEdit(in Input, current string, echo func(string)) (string, bool) 
 	if !in.Raw() {
 		return readPromptSeeded(in, "", echo)
 	}
-	return readPromptRaw(in, []byte(current), "", echo)
+	return readPromptRaw(in, []byte(current), "", echo, nil)
 }
 
 // readPromptRaw runs the keystroke-at-a-time edit loop over buf. Tab in an
-// empty buffer takes example, as the page's question box does.
-func readPromptRaw(in Input, buf []byte, example string, echo func(string)) (string, bool) {
+// empty buffer takes example, as the page's question box does. arrow, when
+// set, is handed each arrow key's final byte.
+func readPromptRaw(in Input, buf []byte, example string, echo func(string), arrow func(byte)) (string, bool) {
 	show := func() {
 		if echo != nil {
 			echo(string(buf))
@@ -381,7 +383,10 @@ func readPromptRaw(in Input, buf []byte, example string, echo func(string)) (str
 			// An arrow or function key arrives as a sequence that starts
 			// with Esc. The line has no cursor to move, so the key does
 			// nothing; taken as Esc, it threw the typed line away.
-			if b := escapeAfter(in); b == '[' || b == 'O' {
+			if lead, final := escapeAfter(in); lead == '[' || lead == 'O' {
+				if arrow != nil {
+					arrow(final)
+				}
 				continue
 			}
 			return "", false
