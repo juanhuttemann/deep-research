@@ -57,8 +57,9 @@ func (t Theme) gray(s string) string    { return t.paint(cGray, s) }
 func (t Theme) hints(s string) string {
 	parts := strings.Split(s, "   ")
 	for i, p := range parts {
-		key, action, _ := strings.Cut(p, " ")
-		parts[i] = key + t.gray(" "+action)
+		// A key ends at its bracket: "[empty enter]" is one key.
+		key, action, _ := strings.Cut(p, "] ")
+		parts[i] = key + "]" + t.gray(" "+action)
 	}
 	return strings.Join(parts, "   ")
 }

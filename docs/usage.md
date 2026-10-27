@@ -41,13 +41,35 @@ On a terminal, `drsh` with no question opens a start screen, the
 terminal's side of what [`serve`](#serve)'s page offers, drawn as the
 live frame is: the title with the model and search the runs will use, as
 the page's top bar names them, and the page's `research ▸` box for the
-question, with an example in it that Tab takes. Enter runs it as `-p` would, the brief, the
-live frame and the follow-up questions included, and then the screen comes
-back for the next question; Esc or Ctrl-C there ends it. A run that fails,
-or that the brief cancels, returns to the screen too. Flags given with it
-(`--mode`, `--sources`, `--domains`, `--reports`, `-o`, `--trace`) apply to
-every run it starts. With `--silent`, `--jsonl` or a pipe on either side
-it prints the help, as it always did.
+question, with an example in it that Tab takes. Enter runs it as `-p` would, the brief and the
+live frame included, and then takes questions about its report in an
+`ask ▸` box drawn like the start screen's (see [`ask`](#ask)). An empty
+line there brings the screen back for the next question; Esc or Ctrl-C on
+the screen ends it, and Ctrl-C at `ask ▸` ends `drsh` at once. A run that
+fails, or that the brief cancels, returns to the screen, which says why.
+Flags given with it (`--mode`, `--sources`, `--domains`, `--reports`, `-o`,
+`--trace`) apply to every run it starts. With `--silent`, `--jsonl` or a
+pipe on either side it prints the help, as it always did.
+
+Each run is a session. Its questions and answers are kept beside its
+`.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box
+takes two commands:
+
+- `/resume` lists the runs in the reports directory by their question, the
+  last one run or asked about first, and keeps those holding every word
+  typed; the arrows move and Enter opens one. A finished run prints its
+  report and its conversation so far and takes the next question, which
+  the model is asked with the earlier ones ahead of it. An interrupted run,
+  marked `stopped`, continues as `--resume` would. Esc goes back to where
+  you were. Sessions are the `--reports` directory's, so a `drsh` started
+  elsewhere lists that directory's. A question asked again writes over the
+  earlier run's files, and its conversation goes with them.
+- `/model` lists the model runs use and the ones picked before it, newest
+  first; `other model…` opens the [`drsh model`](#setup) picker. The pick is
+  saved as `drsh model` saves it (`model.json` keeps the last ten under
+  `recent`), and the next run and the open report's questions use it. A
+  model set in the environment (`OPENAI_MODEL`, `.env`) still wins, and the
+  switch says so.
 
 ### Flags
 
@@ -445,8 +467,11 @@ first question fails at once and says to set `OPENAI_MODEL` to one that does.
 With `provider: claude` it needs `ANTHROPIC_API_KEY`, even when Claude Code is
 signed in: `claude -p` cannot call the two tools.
 
-A run watched in the terminal UI asks "Ask about this report (empty line to
-finish)" once its report is printed; an empty line or Ctrl-D ends it.
+A run watched in the terminal UI takes questions under "Ask about this
+report" once its report is printed, in an `ask ▸` box with its keys under
+it; an empty line or Ctrl-D ends them, and `/resume` and `/model` work as
+in [a bare `drsh`](#a-bare-drsh). Those questions, unlike `ask`'s, are kept
+in the run's session.
 
 | Flag | Default | Meaning |
 |---|---|---|

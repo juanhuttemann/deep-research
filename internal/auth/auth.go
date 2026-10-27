@@ -226,29 +226,68 @@ func SameEndpoint(a, b string) bool {
 	return norm(a) != "" && norm(a) == norm(b)
 }
 
-// LoadSelection reads dir/model.json; ok is false when there is none.
-func LoadSelection(dir string) (sel Selection, ok bool, err error) {
+// modelFile is model.json: the selection, and the ones picked before it,
+// newest first, which a session's /model offers. An older binary reads the
+// selection alone and drops the rest on its next save.
+type modelFile struct {
+	Selection
+	Recent []Selection `json:"recent,omitempty"`
+}
+
+// maxRecent bounds the models /model lists.
+const maxRecent = 10
+
+func loadModelFile(dir string) (modelFile, error) {
+	var f modelFile
 	p := filepath.Join(dir, ModelFile)
 	b, err := os.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Selection{}, false, nil
+		return f, nil
 	}
 	if err != nil {
-		return Selection{}, false, err
+		return f, err
 	}
-	if err := json.Unmarshal(b, &sel); err != nil {
-		return Selection{}, false, fmt.Errorf("read %s: %w", p, err)
+	if err := json.Unmarshal(b, &f); err != nil {
+		return modelFile{}, fmt.Errorf("read %s: %w", p, err)
 	}
-	return sel, sel.Model != "" || sel.Transport != "", nil
+	return f, nil
 }
 
-// SaveSelection writes sel to dir/model.json.
+// LoadSelection reads dir/model.json; ok is false when there is none.
+func LoadSelection(dir string) (sel Selection, ok bool, err error) {
+	f, err := loadModelFile(dir)
+	return f.Selection, f.Model != "" || f.Transport != "", err
+}
+
+// Recent lists the selections picked before the current one, newest first.
+func Recent(dir string) ([]Selection, error) {
+	f, err := loadModelFile(dir)
+	return f.Recent, err
+}
+
+// SaveSelection writes sel to dir/model.json, the selection it replaces
+// first among the recent ones.
 func SaveSelection(dir string, sel Selection) error {
-	b, err := json.MarshalIndent(sel, "", "  ")
+	// A model.json that does not parse is replaced, as it was before it
+	// kept recent selections.
+	old, _ := loadModelFile(dir)
+	f := modelFile{Selection: sel}
+	for _, s := range append([]Selection{old.Selection}, old.Recent...) {
+		if s.Model != "" && !slices.ContainsFunc(append(f.Recent, sel), s.same) && len(f.Recent) < maxRecent {
+			f.Recent = append(f.Recent, s)
+		}
+	}
+	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
 	return WriteFile(filepath.Join(dir, ModelFile), append(b, '\n'))
+}
+
+// same reports whether s and o run the same model at the same endpoint.
+func (s Selection) same(o Selection) bool {
+	return s.Provider == o.Provider && s.Model == o.Model &&
+		strings.EqualFold(strings.TrimRight(s.BaseURL, "/"), strings.TrimRight(o.BaseURL, "/"))
 }
 
 // WriteFile replaces p with data, readable by the owner only. It writes a

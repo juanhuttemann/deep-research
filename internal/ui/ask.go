@@ -1,18 +1,25 @@
 package ui
 
 import (
+	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/microsoft/agent-framework-go/tool"
 	"github.com/microsoft/agent-framework-go/tool/functool"
 
+	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
@@ -155,4 +162,121 @@ func searchPages(m *Meta, query string) string {
 		fmt.Fprintf(&sb, "%s\n%s\n\n", h.url, tools.ExcerptFor(m.Pages[h.url], []string{query}, nil, searchPassage))
 	}
 	return sb.String()
+}
+
+// ChatLog is where the questions about the run whose .json is at path are
+// kept: beside it, one JSON line per question and its answer, appended, so
+// a session can be resumed and the run's own files are never rewritten.
+func ChatLog(path string) string { return strings.TrimSuffix(path, ".json") + ".chat.jsonl" }
+
+// AppendTurn adds t to the run's chat log.
+func AppendTurn(path string, t agent.Turn) error {
+	line, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(ChatLog(path), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	// A line a crash cut short is ended first, or this turn would be glued
+	// to it and lost with it.
+	last := make([]byte, 1)
+	if fi, err := f.Stat(); err == nil && fi.Size() > 0 {
+		if _, err := f.ReadAt(last, fi.Size()-1); err == nil && last[0] != '\n' {
+			line = append([]byte{'\n'}, line...)
+		}
+	}
+	_, err = f.Write(append(line, '\n'))
+	return errors.Join(err, f.Close())
+}
+
+// LoadTurns reads the run's chat log; a run never asked about has none. A
+// line that does not parse, cut short by a crash, is skipped.
+func LoadTurns(path string) ([]agent.Turn, error) {
+	data, err := os.ReadFile(ChatLog(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var turns []agent.Turn
+	for line := range bytes.Lines(data) {
+		var t agent.Turn
+		if json.Unmarshal(line, &t) == nil && t.Question != "" {
+			turns = append(turns, t)
+		}
+	}
+	return turns, nil
+}
+
+// Session is a run in the reports directory: a finished one, asked about
+// by resuming it, or an interrupted one's checkpoint, resumed by running it.
+type Session struct {
+	Path        string
+	Title       string
+	Modified    time.Time
+	Interrupted bool
+}
+
+// Sessions lists the runs in dir, the last run or asked about first. Traces
+// hold no report, and a replay's runs are under dir/replay, not in dir.
+func Sessions(dir string) ([]Session, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []Session
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".trace.json") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		s := Session{Path: path, Modified: info.ModTime(), Interrupted: strings.HasSuffix(name, ".partial.json")}
+		if fi, err := os.Stat(ChatLog(path)); err == nil && fi.ModTime().After(s.Modified) {
+			s.Modified = fi.ModTime()
+		}
+		s.Title = cmp.Or(questionOf(path), strings.TrimSuffix(name, ".json"))
+		out = append(out, s)
+	}
+	slices.SortFunc(out, func(a, b Session) int { return b.Modified.Compare(a.Modified) })
+	return out, nil
+}
+
+// questionOf is the question a run's .json or checkpoint was asked, read
+// from the head of the file: it is among the first keys of both, and a
+// finished run's pages, megabytes of them, come long after.
+func questionOf(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	dec := json.NewDecoder(bufio.NewReader(f))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return ""
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		var v json.RawMessage
+		if key != "question" {
+			if dec.Decode(&v) != nil {
+				return ""
+			}
+			continue
+		}
+		var q string
+		_ = dec.Decode(&q)
+		return q
+	}
+	return ""
 }

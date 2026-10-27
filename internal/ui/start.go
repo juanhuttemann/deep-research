@@ -26,31 +26,32 @@ var examples = []string{
 // AskQuestion is the start screen of a bare drsh, the terminal's side of
 // the browser page's: the model and search runs will use, and a box for the
 // question with an example in it that Tab takes. It is drawn and read as the brief
-// is, so the two look and answer keys alike. It returns "" when the reader
-// quit (Esc, Ctrl-C).
-func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup) string {
+// is, so the two look and answer keys alike. note, when set, says why the
+// last step ended: the screen's first paint erases what was printed before
+// it. It returns "" when the reader quit (Esc, Ctrl-C).
+func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup, note string) string {
 	sig := catchSignals(true)
 	in := NewInput(stdin, nil)
 	r := NewRenderer(stdout, Theme{Enabled: !noColor})
 	defer guardTerminal(sig, in, r)()
-	return askQuestion(in, r, s, examples[rand.IntN(len(examples))])
+	return askQuestion(in, r, s, examples[rand.IntN(len(examples))], note)
 }
 
-func askQuestion(in Input, r *Renderer, s agent.Setup, example string) string {
-	r.RenderStart(s, example)
+func askQuestion(in Input, r *Renderer, s agent.Setup, example, note string) string {
+	r.RenderStart(s, example, note)
 	echo := func(text string) { r.SetPrompt("research", text) }
 	q, ok := "", true
 	for ok && q == "" {
-		q, ok = readPromptRaw(in, nil, example, echo)
+		q, ok = readPromptRaw(in, nil, example, echo, nil)
 	}
 	return q
 }
 
 // RenderStart shows the start screen.
-func (r *Renderer) RenderStart(s agent.Setup, example string) {
+func (r *Renderer) RenderStart(s agent.Setup, example, note string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.mode, r.setup, r.example = "start", s, example
+	r.mode, r.setup, r.example, r.briefNote = "start", s, example, note
 	r.promptLabel, r.promptText = "research", ""
 	if !r.plain {
 		r.paintLocked(true)
@@ -61,9 +62,44 @@ func (r *Renderer) RenderStart(s agent.Setup, example string) {
 // top bar are: the title, and the page's model and search chips.
 func (r *Renderer) startLines() []string {
 	chips := "model " + r.setup.Model + " · search " + searchChip(r.setup)
-	return []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule(),
-		"  " + r.T.hints("[enter] research   [tab] use the example   [esc] quit")}
+	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule(),
+		"  " + r.T.hints("[enter] research   [tab] use the example   [/resume] past runs   [esc] quit")}
+	if r.briefNote != "" {
+		out = append(out, "")
+		for _, l := range wrapWords(r.briefNote, r.width-4) {
+			out = append(out, "  "+r.T.yellow(l))
+		}
+	}
+	return out
 }
+
+// AskPrompt is the label a question about a report is typed after, the
+// page's for its box.
+func AskPrompt(noColor bool) string {
+	return "  " + Theme{Enabled: !noColor}.magenta("ask ▸ ")
+}
+
+// AskHeading heads the questions about a report, as the page's card is
+// headed.
+func AskHeading(noColor bool) string {
+	t := Theme{Enabled: !noColor}
+	return "\n  " + t.bold(t.cyan("Ask about this report"))
+}
+
+// AskBox draws the box a question about a report is typed in, as the start
+// screen draws its own: the label between rules, the keys under it, back
+// saying what an empty line does. The cursor is left after the label, where
+// the terminal echoes and edits the line; EndAsk erases what is under it
+// once it is read.
+func AskBox(w io.Writer, noColor bool, back string) {
+	r := NewRenderer(w, Theme{Enabled: !noColor})
+	label := AskPrompt(noColor)
+	_, _ = io.WriteString(w, "\n"+r.rule()+"\n"+label+"\n"+r.rule()+"\n  "+
+		r.T.hints("[enter] ask   [empty enter] "+back+"   [/resume] past runs")+"\x1b[2A\r"+label)
+}
+
+// EndAsk erases the box's lower rule and keys, under the line just read.
+func EndAsk(w io.Writer) { _, _ = io.WriteString(w, eraseToEnd) }
 
 // searchChip names the engine and what reads the pages, without their hosts,
 // as the page's chip of that name does (web/index.html).

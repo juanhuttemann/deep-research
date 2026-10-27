@@ -113,6 +113,12 @@ type Renderer struct {
 	// the question shown dimmed in the empty box.
 	setup   agent.Setup
 	example string
+	// The picker's: its rows, the ones the filter keeps, and the highlighted
+	// one among those.
+	pickTitle string
+	pickRows  []Choice
+	pickShown []int
+	pickAt    int
 
 	startTime time.Time
 	detached  bool
@@ -543,6 +549,8 @@ func (r *Renderer) frameLines() []string {
 		lines = r.briefLines()
 	case "start":
 		lines = r.startLines()
+	case "pick":
+		lines = r.pickLines()
 	default:
 		lines = r.treeLines()
 	}

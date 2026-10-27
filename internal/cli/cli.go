@@ -54,7 +54,14 @@ func New(load func() (Deps, error)) *cobra.Command {
 		if jsonl, _ := cmd.Flags().GetBool("jsonl"); jsonl {
 			ui.JSONL{W: cmd.OutOrStdout()}.Emit(doneEvent(res, err))
 		}
-		return err
+		if err != nil || res.Cancelled {
+			return err
+		}
+		// A run watched in the terminal then takes questions about it.
+		d, _ := load()
+		silent, _ := cmd.Flags().GetBool("silent")
+		jsonl, _ := cmd.Flags().GetBool("jsonl")
+		return askAfter(cmd, d, res.JSONPath, drawsUI(cmd, silent, jsonl) && !res.Detached)
 	}
 	root.Flags().StringP("prompt", "p", "", "the question to research")
 	root.Flags().StringP("output", "o", "", "write report to file")
@@ -133,27 +140,19 @@ func New(load func() (Deps, error)) *cobra.Command {
 	return root
 }
 
-// interactive is a bare drsh on a terminal: the browser page's start
-// screen, in the terminal. Each question runs as `drsh -p` with the same
-// flags would, brief, live frame and follow-up questions included, and
-// then the screen asks for the next; Esc or Ctrl-C there ends it. A run
-// that fails is reported and the screen comes back, as the page does.
-func interactive(cmd *cobra.Command, load func() (Deps, error)) error {
-	d, err := load()
+// LoadDeps loads the configuration commands run on. main loads it once
+// per process; a session's /model loads it again.
+func LoadDeps() (Deps, error) {
+	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return Deps{}, err
 	}
-	noColor, _ := cmd.Flags().GetBool("no-color")
-	for {
-		q := ui.AskQuestion(cmd.InOrStdin(), cmd.OutOrStdout(), noColor || os.Getenv("NO_COLOR") != "", d.Config.Describe())
-		if q == "" {
-			return nil
-		}
-		_ = cmd.Flags().Set("prompt", q)
-		if _, err := research(cmd, load); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
-		}
-	}
+	// A fresh assistant per call: it accumulates token usage and served
+	// models, and `serve` launches one run after another in one process.
+	return Deps{
+		Assistant: func() (agent.Assistant, error) { return agent.New(cfg.Config) },
+		Config:    cfg,
+	}, nil
 }
 
 // runInit writes the config files and, with --docker, a local SearXNG setup.
@@ -530,7 +529,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 
 // finish delivers a run that ended and, once it finished in full, removes its
 // checkpoint: nothing is left to resume. A cancelled, failed or incomplete
-// run keeps it. A run watched in the terminal then takes questions about it.
+// run keeps it.
 func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, res ui.RunResult, save, silent, jsonl bool) error {
 	if err := deliver(cmd, d, res.Report, save, silent || jsonl); err != nil {
 		// An incomplete run keeps its checkpoint, and nothing said so: the
@@ -546,7 +545,7 @@ func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, res ui.RunResult, 
 	if err := rec.Discard(); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not remove the checkpoint: %v\n", err)
 	}
-	return askAfter(cmd, d, res.JSONPath, drawsUI(cmd, silent, jsonl) && !res.Detached)
+	return nil
 }
 
 // deliver warns about an empty run, saves it to the history and prints it.
