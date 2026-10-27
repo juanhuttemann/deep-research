@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-26
+
 ### Added
 
 - A run is a session. Its questions and answers are kept beside its
@@ -1263,7 +1265,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/juanhuttemann/deep-research/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/juanhuttemann/deep-research/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/juanhuttemann/deep-research/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/juanhuttemann/deep-research/compare/v0.21.0...v0.21.1
