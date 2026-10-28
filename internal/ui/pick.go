@@ -93,7 +93,9 @@ func (r *Renderer) RenderPick(title, label, text string, rows []Choice, shown []
 // view.
 func (r *Renderer) pickLines() []string {
 	out := []string{r.heading(r.pickTitle, ""), r.rule(), r.promptRow(), r.rule()}
-	room := max(r.rows-1-len(out)-2, 1)
+	// The rule, the keys and the blank row under them, as the start screen
+	// ends, are kept below the rows.
+	room := max(r.rows-1-len(out)-3, 1)
 	from := max(r.pickAt-room+1, 0)
 	for i := from; i < len(r.pickShown) && i < from+room; i++ {
 		c := r.pickRows[r.pickShown[i]]
@@ -109,5 +111,5 @@ func (r *Renderer) pickLines() []string {
 	if len(r.pickShown) == 0 {
 		out = append(out, "  "+r.T.dim("nothing matches"))
 	}
-	return append(out, r.rule(), "  "+r.T.hints("[enter] open   [↑↓] move   [esc] back"))
+	return append(out, r.rule(), "  "+r.T.hints("[enter] open   [↑↓] move   [esc] back"), "")
 }

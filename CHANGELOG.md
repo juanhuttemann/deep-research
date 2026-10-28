@@ -15,8 +15,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
-- The live frame and the brief end on a blank row under their key hints,
-  as the start screen does.
+- The live frame, the brief, the `ask ▸` box and the `/resume` and
+  `/model` pickers end on a blank row under their key hints, as the start
+  screen does.
+
+### Fixed
+
+- The `ask ▸` box could draw its label twice, the second over its lower
+  rule, in terminals that wrap a line filling the row: its rules now stop
+  a column short of the edge.
 
 ## [0.24.0] - 2026-10-26
 

@@ -2431,8 +2431,11 @@ func TestSessions(t *testing.T) {
 func TestAskBox(t *testing.T) {
 	var b bytes.Buffer
 	AskBox(&b, true, "new research")
-	want := "\n  " + strings.Repeat("─", 78) + "\n  ask ▸ \n  " + strings.Repeat("─", 78) +
-		"\n  [enter] ask   [empty enter] new research   [/resume] past runs" + "\x1b[2A\r  ask ▸ "
+	// Rules a column short of the 80-column edge: a full one wrapped in
+	// some terminals, and the label was drawn a second time over the lower
+	// rule. A blank row under the keys, as the start screen ends.
+	want := "\n  " + strings.Repeat("─", 77) + "\n  ask ▸ \n  " + strings.Repeat("─", 77) +
+		"\n  [enter] ask   [empty enter] new research   [/resume] past runs" + "\n\x1b[3A\r  ask ▸ "
 	if b.String() != want {
 		t.Errorf("AskBox = %q, want %q", b.String(), want)
 	}
