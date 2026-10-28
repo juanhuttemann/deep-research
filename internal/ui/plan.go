@@ -60,6 +60,9 @@ type Plan struct {
 	// each run of the plan checks them again, since a site that failed once
 	// may answer the next time.
 	Domains []string `json:"domains,omitempty"`
+	// NoFollowUps skips the follow-up round. It is a negative so that a plan
+	// or trace written before the round could be turned off still runs it.
+	NoFollowUps bool `json:"no_follow_ups,omitempty"`
 }
 
 // PerTopic is the source budget for a single sub-agent: the whole-
@@ -139,6 +142,7 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	// The browser hands back the plan it reviewed, typed question included,
 	// so a run of it still reports what the planner corrected.
 	plan.Asked = strings.TrimSpace(p.Asked)
+	plan.NoFollowUps = p.NoFollowUps
 	return plan, nil
 }
 
@@ -156,6 +160,9 @@ func PlanFor(question string, depth DepthMode, topics []SubTopic, pin int) *Plan
 type Planner struct {
 	Assistant agent.Assistant
 	Depth     DepthMode
+	// SubTopics, when positive, asks for exactly that many sub-topics;
+	// otherwise the planner chooses up to the tier's count.
+	SubTopics int
 }
 
 func NewPlanner(a agent.Assistant, depth DepthMode) *Planner {
@@ -167,7 +174,8 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	// A question pasted over two lines kept its line break into the report's
 	// title.
 	question = strings.Join(strings.Fields(question), " ")
-	out, err := pl.Assistant.Plan(ctx, question, pl.Depth.SubTopics)
+	b := pl.Breadth()
+	out, err := pl.Assistant.Plan(ctx, question, b)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +192,8 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	// is sized for this many sub-agents, so an assistant that returns more
 	// would spend more than the tier allows. Asked-for counts are honoured by
 	// models only approximately.
-	if n := pl.Depth.SubTopics; n > 0 && len(topics) > n {
-		topics = topics[:n]
+	if b.Max > 0 && len(topics) > b.Max {
+		topics = topics[:b.Max]
 	}
 	trimSharedSubject(question, topics)
 	return &Plan{
@@ -195,6 +203,19 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 		MaxSources: pl.MaxSourcesFor(len(topics)),
 		SubTopics:  topics,
 	}, nil
+}
+
+// MaxSubTopics bounds an exact sub-topic request. The run's source budget is
+// capped anyway (maxRunSources), so more branches would only thin each one.
+const MaxSubTopics = 8
+
+// Breadth is what the planner is asked for: exactly SubTopics when set,
+// else up to the tier's count.
+func (pl *Planner) Breadth() agent.Breadth {
+	if pl.SubTopics > 0 {
+		return agent.Breadth{Max: min(pl.SubTopics, MaxSubTopics), Exact: true}
+	}
+	return agent.Breadth{Max: pl.Depth.SubTopics}
 }
 
 func (pl *Planner) MaxSourcesFor(n int) int { return maxSourcesFor(pl.Depth, n) }

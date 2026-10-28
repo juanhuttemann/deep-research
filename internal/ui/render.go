@@ -720,10 +720,11 @@ func (r *Renderer) briefHead() []string {
 		// The per-sub-agent figure is what the reader asked for with --sources
 		// and what each branch actually gets, so a run budget that reduced the
 		// request is visible in the brief instead of only in the run.
-		fmt.Sprintf("  %s  %s   %s  %d   %s  %d",
+		fmt.Sprintf("  %s  %s   %s  %d   %s  %d   %s  %s",
 			r.T.dim("depth"), r.plan.Depth.Label,
 			r.T.dim("max sources"), r.plan.MaxSources,
-			r.T.dim("per sub-agent"), r.plan.PerTopic()),
+			r.T.dim("per sub-agent"), r.plan.PerTopic(),
+			r.T.dim("follow-ups"), onOff(!r.plan.NoFollowUps)),
 		"",
 		"  "+r.T.dim("planned sub-topics"),
 	)
@@ -744,8 +745,34 @@ func (r *Renderer) briefFoot() []string {
 	if r.briefNote != "" {
 		out = append(out, "  "+r.T.yellow(r.briefNote))
 	}
-	return append(out,
-		"  "+r.T.hints("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"), "")
+	out = append(out, r.hintRows("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [f] follow-ups   [q] cancel")...)
+	return append(out, "")
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
+}
+
+// hintRows lays key hints out on as many rows as the width needs. Clipped
+// to one row, a narrow terminal lost the last hint, which is the one that
+// says how to cancel.
+func (r *Renderer) hintRows(s string) []string {
+	var rows []string
+	row := ""
+	for _, h := range strings.Split(s, "   ") {
+		if row != "" && r.width > 0 && dispWidth("  "+row+"   "+h) > r.width {
+			rows = append(rows, "  "+r.T.hints(row))
+			row = ""
+		}
+		if row != "" {
+			row += "   "
+		}
+		row += h
+	}
+	return append(rows, "  "+r.T.hints(row))
 }
 
 // SetBriefNote shows note above the brief's key hints; empty clears it.

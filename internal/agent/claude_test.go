@@ -427,7 +427,7 @@ func TestClaudeAPIRequestShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Plan(context.Background(), "question", 1); err != nil {
+	if _, err := a.Plan(context.Background(), "question", Breadth{Max: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.ResearchDetail(context.Background(), "query", nil); err != nil {

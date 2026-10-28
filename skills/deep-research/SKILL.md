@@ -122,6 +122,11 @@ cmd /c "drsh -p ""QUESTION"" --jsonl --reports ""$dir"" > ""$dir\events.jsonl"""
 - `--mode quick|standard|deep` sets the budget (default `standard`). Use
   `quick` for a narrow factual question, `deep` only when the user asks for
   thoroughness; it spends more requests.
+- The planner chooses how many sub-topics the question needs, up to the
+  tier's count. `--topics N` asks for exactly N (1-8) when the user names
+  the facets to cover.
+- `--no-follow-ups` skips the follow-up searches after the planned ones:
+  one model request fewer, for a question the plan already covers.
 - `--domains go.dev,pkg.go.dev` confines the search to those sites. Each
   site is checked first; one that fails is dropped with a reason (a
   `source` event). `drsh doctor --domains LIST` checks a list
@@ -136,8 +141,9 @@ drsh -p "QUESTION" --plan-only > plan.json   # one model request
 drsh --plan plan.json --jsonl --reports "$dir" > "$dir/events.jsonl"
 ```
 
-`--plan` carries its own question and tier, so it takes no `-p`, `--mode`
-or `--sources`.
+`--plan` carries its own question, tier and follow-up setting
+(`no_follow_ups`), so it takes no `-p`, `--mode`, `--sources`, `--topics` or
+`--no-follow-ups`.
 
 ## 3. Wait for the `done` line
 

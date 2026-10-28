@@ -21,6 +21,7 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
 	"github.com/juanhuttemann/deep-research/internal/replay"
+	"github.com/juanhuttemann/deep-research/internal/web"
 )
 
 func TestHistoryPreservesResearchAndVerification(t *testing.T) {
@@ -450,5 +451,66 @@ func TestDoctorSaysWhatToDoNext(t *testing.T) {
 	}
 	if got := configSource(); !strings.Contains(got, "drsh init") {
 		t.Errorf("no config found, and no word on how to make one: %q", got)
+	}
+}
+
+// followUpCounter counts the follow-up calls a run makes.
+type followUpCounter struct {
+	stub
+	calls *int
+}
+
+func (f followUpCounter) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
+	*f.calls++
+	return nil, nil
+}
+
+// --no-follow-ups skips the round's call, and a resumed run keeps the
+// setting of the run it continues rather than asking for a round that run
+// never made.
+func TestNoFollowUpsReachesTheRunAndItsResume(t *testing.T) {
+	dir := t.TempDir()
+	calls := 0
+	if _, err := runCLI(t, dir, followUpCounter{calls: &calls}, "-p", "q", "--silent", "--reports", dir); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("default run made %d follow-up calls, want 1", calls)
+	}
+	calls = 0
+	if _, err := runCLI(t, dir, followUpCounter{calls: &calls}, "-p", "q", "--silent", "--reports", dir, "--no-follow-ups"); err != nil {
+		t.Fatal(err)
+	}
+	cp := filepath.Join(dir, "q.abc.partial.json")
+	b, _ := json.Marshal(replay.Trace{Version: 1, Question: "q", Mode: "quick", Plan: []agent.SubTopic{{ID: "1", Name: "A"}}, NoFollowUps: true})
+	if err := os.WriteFile(cp, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCLI(t, dir, followUpCounter{calls: &calls}, "--resume", cp, "--silent", "--reports", dir); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Errorf("%d follow-up calls with the round off, want none", calls)
+	}
+}
+
+// --topics above the bound is refused before any model call, as a
+// misspelt --mode is, rather than quietly cut to the bound.
+func TestTooManyTopicsIsRejected(t *testing.T) {
+	_, err := runCLI(t, t.TempDir(), stub{}, "-p", "q", "--silent", "--topics", "40")
+	if err == nil || !strings.Contains(err.Error(), "40") {
+		t.Fatalf("err = %v, want --topics 40 refused", err)
+	}
+}
+
+// The page's sub-topic count reaches its run as --topics, the flag a
+// terminal run takes, so the web and the CLI plan alike.
+func TestWebArgsPassTopics(t *testing.T) {
+	args, _ := webArgs(web.Request{Question: "q", Topics: 2, PlanOnly: true}, "reports")
+	if !slices.Contains(args, "--topics=2") {
+		t.Errorf("args = %v, want --topics=2", args)
+	}
+	if args, _ = webArgs(web.Request{Question: "q"}, "reports"); slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--topics") }) {
+		t.Errorf("args = %v, want no --topics when the planner chooses", args)
 	}
 }

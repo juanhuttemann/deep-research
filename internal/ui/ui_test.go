@@ -47,7 +47,7 @@ type fakeAssistant struct {
 	tokens        atomic.Int64
 }
 
-func (f *fakeAssistant) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
+func (f *fakeAssistant) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
 	if f.planTopics != nil {
 		return agent.Outline{SubTopics: f.planTopics}, nil
 	}

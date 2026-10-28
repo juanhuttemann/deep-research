@@ -33,11 +33,14 @@ type Trace struct {
 	// Mode and Sources are the run's depth tier and per-sub-agent source
 	// budget: a replay at another budget would cut the recorded results
 	// differently and no longer see the same evidence.
-	Mode     string           `json:"mode"`
-	Sources  int              `json:"sources,omitempty"`
-	Model    string           `json:"model,omitempty"`
-	Plan     []agent.SubTopic `json:"plan"`
-	Searches []Search         `json:"searches"`
+	Mode    string           `json:"mode"`
+	Sources int              `json:"sources,omitempty"`
+	Model   string           `json:"model,omitempty"`
+	Plan    []agent.SubTopic `json:"plan"`
+	// NoFollowUps is the plan's: a resumed run that skipped the round would
+	// otherwise ask for one the run it continues never made.
+	NoFollowUps bool     `json:"no_follow_ups,omitempty"`
+	Searches    []Search `json:"searches"`
 	// Pages holds each distinct page text once, keyed by URL. Searches return
 	// the same page over and over (a vendor's pricing page came back from five
 	// searches in one run), and storing it with every result made the page
@@ -95,8 +98,8 @@ func Record(a agent.Assistant, question, mode string, sources int) *Recorder {
 	return &Recorder{Assistant: a, trace: Trace{Version: 1, Question: question, Mode: mode, Sources: sources}}
 }
 
-func (r *Recorder) Plan(ctx context.Context, question string, n int) (agent.Outline, error) {
-	out, err := r.Assistant.Plan(ctx, question, n)
+func (r *Recorder) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
+	out, err := r.Assistant.Plan(ctx, question, b)
 	r.mu.Lock()
 	r.trace.Plan = out.SubTopics
 	// A replay or resume runs the trace's question, so it is the one this
@@ -142,6 +145,7 @@ func (r *Recorder) Seed(t *Trace) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
+	r.trace.NoFollowUps = t.NoFollowUps
 	if r.finished == nil {
 		r.finished = map[string]bool{}
 	}
@@ -198,10 +202,11 @@ func (r *Recorder) phase(name, prompt string, out any, err error) {
 // Load refused. The flags are not it either: --plan carries its own tier and
 // budget, and a replay at the flags' tier cut the recorded results
 // differently from the run it reproduces.
-func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int) {
+func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int, noFollowUps bool) {
 	r.mu.Lock()
 	r.trace.Plan = slices.Clone(subs)
 	r.trace.Mode, r.trace.Sources = mode, sources
+	r.trace.NoFollowUps = noFollowUps
 	r.mu.Unlock()
 	r.save()
 }
@@ -385,7 +390,7 @@ func Play(live agent.Assistant, t *Trace) *Player {
 	return p
 }
 
-func (p *Player) Plan(context.Context, string, int) (agent.Outline, error) {
+func (p *Player) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
 	return agent.Outline{SubTopics: p.trace.Plan}, nil
 }
 

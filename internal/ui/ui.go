@@ -28,6 +28,8 @@ type Options struct {
 	Assistant       agent.Assistant
 	DepthMode       string    // "quick" | "standard" | "deep" | "" (standard)
 	SourcesPerTopic int       // sources per sub-agent; 0 => derived from depth
+	SubTopics       int       // exact sub-topic count; 0 => the planner chooses up to the tier's
+	NoFollowUps     bool      // skip the follow-up round
 	Parallelism     int       // sub-agents searching concurrently; 0 => 3
 	JSONL           bool      // emit structured JSONL events
 	Quiet           bool      // minimal, non-interactive output
@@ -223,11 +225,14 @@ func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
 		// non-interactive phases expect.
 		defer o.Assistant.SetProgress(func(msg string) { _, _ = fmt.Fprintf(o.Stderr, "%s\n", msg) })
 	}
-	plan, err := NewPlanner(o.Assistant, depthMode(o.DepthMode)).Plan(ctx, o.Question)
+	planner := NewPlanner(o.Assistant, depthMode(o.DepthMode))
+	planner.SubTopics = o.SubTopics
+	plan, err := planner.Plan(ctx, o.Question)
 	stopStatus()
 	if err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
+	plan.NoFollowUps = o.NoFollowUps
 	if o.SourcesPerTopic <= 0 {
 		return plan, nil
 	}
@@ -434,6 +439,9 @@ func waitBrief(in Input, r *Renderer, plan *Plan, rebudget func(*Plan, DepthMode
 				})
 				plan = renumbered(plan, rebudget)
 			}
+			r.RenderBrief(plan)
+		case KeyF:
+			plan.NoFollowUps = !plan.NoFollowUps
 			r.RenderBrief(plan)
 		case KeyR:
 			renameTopic(in, r, plan, k.Rest)

@@ -260,6 +260,8 @@ API: they reject adaptive thinking.
 | `model_call_retries` | `2` | extra attempts for a failed call; each retry doubles that timeout. A rejected key (401) is not retried |
 | `run_timeout` | `30m` | the whole run, including search and scraping |
 | `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works |
+| `sub_topics` | `0` | sub-topics per plan; `0` lets the planner choose as few as the question needs, up to the `--mode` tier's count (quick 3, standard 4, deep 6); 1–8 asks for exactly that many in every mode. `--topics` overrides it |
+| `follow_ups` | `true` | run the follow-up round between the planned searches and the analysis; `false` skips it (`--no-follow-ups` for one run, `f` in the brief) |
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |
 | `reasoning_effort.<phase>` | see below | how hard each phase's model reasons: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
 

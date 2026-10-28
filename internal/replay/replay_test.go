@@ -16,7 +16,7 @@ import (
 // phase with a fixed value.
 type live struct{ searches int }
 
-func (l *live) Plan(context.Context, string, int) (agent.Outline, error) {
+func (l *live) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
 	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: "Alpha", Query: "alpha query"}}}, nil
 }
 func (l *live) ResearchDetail(_ context.Context, q string, _ []string) (*agent.ResearchDetail, error) {
@@ -46,7 +46,7 @@ func (l *live) TokensUsed() int               { return 0 }
 func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	ctx := context.Background()
 	rec := Record(&live{}, "q", "deep", 4)
-	_, _ = rec.Plan(ctx, "q", 4)
+	_, _ = rec.Plan(ctx, "q", agent.Breadth{Max: 4})
 	_, _ = rec.ResearchDetail(ctx, "alpha query", []string{"alpha"})
 	_, _ = rec.ResearchDetail(ctx, "broken", nil)
 	_, _ = rec.Analyze(ctx, "analyze prompt")
@@ -64,7 +64,7 @@ func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	}
 	fresh := &live{}
 	p := Play(fresh, tr)
-	if plan, _ := p.Plan(ctx, "ignored", 9); len(plan.SubTopics) != 1 || plan.SubTopics[0].Query != "alpha query" {
+	if plan, _ := p.Plan(ctx, "ignored", agent.Breadth{Max: 9}); len(plan.SubTopics) != 1 || plan.SubTopics[0].Query != "alpha query" {
 		t.Errorf("plan = %+v, want the recorded one", plan)
 	}
 	det, err := p.ResearchDetail(ctx, "alpha query", nil)
@@ -220,7 +220,7 @@ func TestCheckpointIsSavedAsTheRunGoes(t *testing.T) {
 	if _, err := os.Stat(path); err == nil {
 		t.Error("a checkpoint with no plan was saved; there is nothing to resume yet")
 	}
-	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "deep", 5)
+	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "deep", 5, false)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, _ = rec.ResearchDetail(cancelled, "cut short", nil)
@@ -283,7 +283,7 @@ func TestResumedRecordingKeepsTheSavedSearches(t *testing.T) {
 	rec := Record(Resume(l, saved), "q", "standard", 0)
 	rec.Seed(saved)
 	rec.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
-	rec.SetPlan(saved.Plan, "deep", 0)
+	rec.SetPlan(saved.Plan, "deep", 0, false)
 	if _, err := rec.ResearchDetail(context.Background(), "done", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -346,8 +346,32 @@ func TestWrappersForwardScopingButAPlayerHasNone(t *testing.T) {
 // two lines made every one of them a query the replay had never seen.
 func TestTraceKeepsThePlannedQuestion(t *testing.T) {
 	rec := Record(&live{}, "cloud\nstorage", "quick", 0)
-	_, _ = rec.Plan(context.Background(), "cloud storage", 3)
+	_, _ = rec.Plan(context.Background(), "cloud storage", agent.Breadth{Max: 3})
 	if rec.trace.Question != "cloud storage" {
 		t.Errorf("trace question = %q, want the planned %q", rec.trace.Question, "cloud storage")
+	}
+}
+
+// A run with the follow-up round off, stopped and resumed, asked for a
+// follow-up round the run it continued never made: the checkpoint and the
+// seeded recording both keep the setting.
+func TestCheckpointKeepsTheFollowUpSetting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.partial.json")
+	rec := Record(&live{}, "q", "standard", 0)
+	rec.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
+	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "quick", 0, true)
+	tr, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tr.NoFollowUps {
+		t.Fatal("checkpoint lost the follow-up round being off")
+	}
+	again := Record(&live{}, "q", "standard", 0)
+	again.Seed(tr)
+	again.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
+	again.save()
+	if tr, err = Load(path); err != nil || !tr.NoFollowUps {
+		t.Errorf("a resumed recording dropped the setting: %+v, %v", tr, err)
 	}
 }

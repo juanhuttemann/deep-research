@@ -419,10 +419,15 @@ mark { background: var(--yellow); color: var(--bg); }
       <div class="composer-bar">
         <span class="group"><span class="k">depth</span>
         <span class="segmented" role="radiogroup" aria-label="Depth">
-          <input type="radio" name="mode" id="m-quick" value="quick"><label for="m-quick">quick<small>3</small></label>
-          <input type="radio" name="mode" id="m-standard" value="standard" checked><label for="m-standard">standard<small>4</small></label>
-          <input type="radio" name="mode" id="m-deep" value="deep"><label for="m-deep">deep<small>6</small></label>
+          <input type="radio" name="mode" id="m-quick" value="quick"><label for="m-quick">quick<small>≤3</small></label>
+          <input type="radio" name="mode" id="m-standard" value="standard" checked><label for="m-standard">standard<small>≤4</small></label>
+          <input type="radio" name="mode" id="m-deep" value="deep"><label for="m-deep">deep<small>≤6</small></label>
         </span></span>
+        <label class="field" title="How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.">sub-topics
+          <select id="topics-n">
+            <option value="0">auto</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
+          </select>
+        </label>
         <label class="field" title="How many pages each sub-topic reads. Auto lets the depth decide.">pages per topic
           <select id="sources">
             <option value="0">auto</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option>
@@ -464,6 +469,11 @@ mark { background: var(--yellow); color: var(--bg); }
           <input type="radio" name="bdepth" id="b-quick" value="quick"><label for="b-quick">quick</label>
           <input type="radio" name="bdepth" id="b-standard" value="standard"><label for="b-standard">standard</label>
           <input type="radio" name="bdepth" id="b-deep" value="deep"><label for="b-deep">deep</label>
+        </span></span>
+        <span class="group" title="After the planned searches, up to three more for what the findings leave open."><span class="k">follow-ups</span>
+        <span class="segmented" role="radiogroup" aria-label="Follow-up searches">
+          <input type="radio" name="bfollow" id="f-on" value="on"><label for="f-on">on</label>
+          <input type="radio" name="bfollow" id="f-off" value="off"><label for="f-off">off</label>
         </span></span>
         <span id="brief-budget" class="muted"></span>
       </div>
@@ -981,6 +991,7 @@ function showBrief(plan) {
   $("brief-domains").hidden = !sites.length;
   const depth = $("b-" + brief.depth.key) || $("b-standard");
   depth.checked = true;
+  $(brief.no_follow_ups ? "f-off" : "f-on").checked = true;
   $("brief-msg").textContent = "";
   renderTopics();
   show("brief");
@@ -1061,6 +1072,9 @@ function editedPlan() {
     depth: { key: brief.depth.key },
     pinned_per_topic: brief.pinned_per_topic || 0,
     domains: brief.domains || [],
+    // The round's setting is the plan's, as in the CLI brief's f key; left
+    // out, an edited plan ran the round the reader turned off.
+    no_follow_ups: !!brief.no_follow_ups,
     sub_topics: brief.sub_topics.filter(t => t.name.trim()).map(t => {
       const name = t.name.trim(), query = (t.query || "").trim(), notes = t.notes || "";
       // The planner's terms judge results for the planner's query, so they
@@ -1078,6 +1092,9 @@ for (const r of document.querySelectorAll("input[name=bdepth]")) {
     brief.depth = { key: r.value }; brief.pinned_per_topic = 0;
     renderTopics();
   };
+}
+for (const r of document.querySelectorAll("input[name=bfollow]")) {
+  r.onchange = () => { brief.no_follow_ups = r.value === "off"; };
 }
 $("add-topic").onsubmit = ev => {
   ev.preventDefault();
@@ -1505,6 +1522,7 @@ $("launch").onsubmit = async ev => {
     question: $("q").value.trim(),
     mode: document.querySelector("input[name=mode]:checked").value,
     sources: Number($("sources").value) || 0,
+    topics: Number($("topics-n").value) || 0,
     domains: onlySites() ? $("domains").value.split(/[\s,]+/).filter(Boolean) : [],
     // The plan first, for review; Start research in the review runs it.
     plan_only: true,
