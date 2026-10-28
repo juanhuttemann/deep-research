@@ -2,7 +2,6 @@ package ui
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -29,8 +28,7 @@ func Ask(stdin io.Reader, w io.Writer, noColor bool, back string) (q string, ok 
 		return strings.TrimSpace(strings.ReplaceAll(line, "\x1b", "")), err == nil || line != ""
 	}
 	keys := &keptInput{Input: in}
-	b := &askBox{r: r, back: back, height: 1, locate: func() int { return cursorRow(keys, r.write) }}
-	return b.read(keys)
+	return newAskBox(r, back, func() int { return cursorRow(keys, r.write) }).read(keys)
 }
 
 // keptInput is an Input with bytes put back ahead of it: the keys typed
@@ -73,22 +71,18 @@ func (k *keptInput) raw(d time.Duration) (byte, error) {
 	return 0, errNoKeyPending
 }
 
-// askBox is the ask ▸ box in the scrolling output under a report. The
-// rows it holds are found by asking the terminal where the cursor is, and
-// each is drawn at its own position: moving back up by a count of rows
-// landed a row short in Warp after the start screen had painted, and the
-// label was drawn a second time over the lower rule. A terminal that does
-// not answer gets the relative moves.
+// askBox is the ask ▸ box in the scrolling output under a report, drawn in
+// a region of its own.
 type askBox struct {
 	r    *Renderer
 	back string
-	// top is the screen row, from 1, of the box's first row; 0 when the
-	// terminal did not say, and moves are relative to row.
-	top    int
-	height int // rows held, the cursor's line the first
-	row    int // the row the cursor is on, from the box's first
-	// locate asks the terminal for the cursor's row; nil in tests.
-	locate func() int
+	g    *region
+}
+
+// newAskBox is the box for r, locate asking the terminal where the cursor
+// is (nil in tests).
+func newAskBox(r *Renderer, back string, locate func() int) *askBox {
+	return &askBox{r: r, back: back, g: newRegion(r.write, r.rows, r.width, locate)}
 }
 
 func (b *askBox) read(in Input) (string, bool) {
@@ -98,7 +92,7 @@ func (b *askBox) read(in Input) (string, bool) {
 	}
 	b.r.write(cursorHide)
 	b.r.hidden = true
-	e := &commandEditor{paint: func(text string, at int) { b.paint(b.lines(text, at, true)) }}
+	e := &commandEditor{paint: func(text string, at int) { b.g.paint(b.lines(text, at, true)) }}
 	q, ok := e.read(keys, false)
 	if !ok {
 		q = ""
@@ -113,9 +107,7 @@ func (b *askBox) read(in Input) (string, bool) {
 	if q != "" && !strings.HasPrefix(q, "/") {
 		keep = b.lines(q, 0, false)[:2+len(b.prompt(q, false))]
 	}
-	b.paint(keep)
-	b.moveTo(b.height)
-	b.r.write(eraseToEnd)
+	b.g.paint(keep)
 	return q, ok
 }
 
@@ -148,64 +140,6 @@ func (b *askBox) prompt(text string, cursor bool) []string {
 		rows[i] = lead + rows[i]
 	}
 	return rows
-}
-
-// paint draws lines over the rows the box holds, taking more first and
-// giving back the ones it no longer needs.
-func (b *askBox) paint(lines []string) {
-	b.hold(len(lines))
-	var sb strings.Builder
-	for i, l := range lines {
-		sb.WriteString(b.move(i))
-		sb.WriteString(clip(l, b.r.width))
-		sb.WriteString(eraseLine)
-	}
-	if len(lines) < b.height {
-		sb.WriteString(b.move(len(lines)))
-		sb.WriteString(eraseToEnd)
-		b.height = len(lines)
-	}
-	b.r.write(sb.String())
-}
-
-// hold takes rows under the box until it has n, the screen scrolling when
-// they run past its foot, and asks again where the box now starts.
-func (b *askBox) hold(n int) {
-	if n <= b.height {
-		return
-	}
-	b.r.write(b.move(b.height-1) + strings.Repeat("\n", n-b.height))
-	b.row, b.height = n-1, n
-	// Rows the screen had room for leave the box where it was.
-	if b.top > 0 && b.top+n-1 <= b.r.rows {
-		return
-	}
-	if b.locate != nil {
-		if y := b.locate(); y > 0 {
-			b.top = y - b.row
-			return
-		}
-		// One terminal that did not answer will not the next time either.
-		b.locate = nil
-	}
-	b.top = 0
-}
-
-func (b *askBox) moveTo(i int) { b.r.write(b.move(i)) }
-
-// move is the sequence that puts the cursor at the start of the box's row i.
-func (b *askBox) move(i int) string {
-	d := i - b.row
-	b.row = i
-	switch {
-	case b.top > 0:
-		return fmt.Sprintf("\x1b[%d;1H", b.top+i)
-	case d < 0:
-		return fmt.Sprintf("\r\x1b[%dA", -d)
-	case d > 0:
-		return fmt.Sprintf("\r\x1b[%dB", d)
-	}
-	return "\r"
 }
 
 // wrapCells cuts s into rows of at most w columns, at any cell: the text

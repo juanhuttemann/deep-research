@@ -115,6 +115,9 @@ type Renderer struct {
 	example string
 	// commandAt is the highlighted row of the start screen's command menu.
 	commandAt int
+	// inline, when set, is where the frame is drawn instead of from the top
+	// of the screen (see Inline).
+	inline *region
 	// The picker's: its rows, the ones the filter keeps, and the highlighted
 	// one among those.
 	pickTitle string
@@ -500,6 +503,11 @@ func (r *Renderer) paintLocked(force bool) {
 		return
 	}
 
+	if r.inline != nil {
+		r.paintInlineLocked()
+		return
+	}
+
 	// Re-probe on every frame: a terminal resized mid-run must not keep
 	// painting to the old geometry, which is a guaranteed wrap-and-scroll.
 	if r.tty != nil {
@@ -537,6 +545,46 @@ func (r *Renderer) paintLocked(force bool) {
 	}
 	r.painted = len(lines)
 	r.write(sb.String())
+}
+
+// paintInlineLocked draws the frame into its region, at the cursor in the
+// scrolling output, where paintLocked draws it from the top of the screen.
+func (r *Renderer) paintInlineLocked() {
+	rows := r.inline.rows
+	if r.tty != nil {
+		if h, cols := termSize(r.tty); cols > 0 {
+			rows, r.width = h, cols
+		}
+	}
+	if !r.hidden {
+		r.write(cursorHide)
+		r.hidden = true
+	}
+	// A blank row first, as the ask box starts, sets it off from what is
+	// above; the frame is laid out in the rows left under it.
+	r.rows = rows - 1
+	r.inline.rows, r.inline.width = rows, r.width
+	r.inline.paint(append([]string{""}, r.frameLines()...))
+}
+
+// Inline draws the start screen and the picker in place, at the cursor, in
+// rows that keys reads the terminal's answers from (see region), where they
+// were drawn from the top of the screen. It returns what clears them, which
+// leaves the cursor where they began. It does nothing for a renderer that
+// is not drawing to a terminal.
+func (r *Renderer) Inline(keys *keptInput) (end func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.plain {
+		return func() {}
+	}
+	r.inline = newRegion(r.write, r.rows, r.width, func() int { return cursorRow(keys, r.write) })
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.inline.paint(nil)
+		r.inline = nil
+	}
 }
 
 // frameLines builds the whole frame, already clipped to the terminal width and

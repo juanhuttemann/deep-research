@@ -8,13 +8,6 @@ import (
 // Choice is one row of a picker.
 type Choice struct{ Title, Note string }
 
-// Alternate screen: the picker opens over a session's report and conversation,
-// and leaving it shows them again as they were.
-const (
-	altScreenOn  = "\x1b[?1049h"
-	altScreenOff = "\x1b[?1049l"
-)
-
 // Pick shows rows under a filter box, drawn and read as the start screen is:
 // typing keeps the rows holding every word typed, the arrows move, Enter
 // takes the highlighted row. It returns the row's index, or -1 when the
@@ -23,13 +16,14 @@ func Pick(stdin io.Reader, stdout io.Writer, noColor bool, title, label string, 
 	sig := catchSignals(true)
 	in := NewInput(stdin, nil)
 	r := NewRenderer(stdout, Theme{Enabled: !noColor})
-	if !r.plain {
-		r.write(altScreenOn)
-		// Written past the renderer, which ignores writes once closed.
-		defer func() { _, _ = io.WriteString(r.W, altScreenOff) }()
-	}
 	defer guardTerminal(sig, in, r)()
-	return pick(in, r, title, label, rows)
+	// Drawn in place, as the boxes it opens from are, and cleared after, so
+	// what was above it shows as it was. It opened on the alternate screen,
+	// which Warp shows from the top of the window while the boxes sit at
+	// its foot.
+	keys := &keptInput{Input: in}
+	defer r.Inline(keys)()
+	return pick(keys, r, title, label, rows)
 }
 
 func pick(in Input, r *Renderer, title, label string, rows []Choice) int {

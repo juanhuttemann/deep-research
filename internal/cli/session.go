@@ -117,7 +117,7 @@ func (s *session) noColor() bool {
 }
 
 // say tells the reader something: on the start screen when that is where
-// they are going, since its first paint erases what was printed before it.
+// they are going, beside the box they will type in next, where it is read.
 func (s *session) say(msg string) {
 	if s.run == "" && s.home {
 		s.note = msg

@@ -2253,8 +2253,7 @@ func TestStartScreenFrame(t *testing.T) {
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
 		"research ▸ █an example?", "[enter] research   [tab] use the example   [esc] quit",
-		// The screen's first paint erases what was printed before it, so
-		// why the last run ended is said on it.
+		// Why the last run ended is said on the screen, where it is read.
 		"research failed: no key"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("start screen lacks %q:\n%s", want, frame)
@@ -2462,7 +2461,7 @@ func TestAskBoxRead(t *testing.T) {
 		{"tab has no example here", "\tq\r", "q", true},
 	}
 	for _, c := range cases {
-		b := &askBox{r: NewRenderer(&bytes.Buffer{}, Theme{}), back: "new research", height: 1}
+		b := newAskBox(NewRenderer(&bytes.Buffer{}, Theme{}), "new research", nil)
 		if got, ok := b.read(NewByteReader([]byte(c.keys))); got != c.want || ok != c.ok {
 			t.Errorf("%s: read = %q, %v; want %q, %v", c.name, got, ok, c.want, c.ok)
 		}
@@ -2474,7 +2473,7 @@ func TestAskBoxRead(t *testing.T) {
 // row under them. A question longer than the row wraps under its first
 // column, where the terminal's own line wrapped it.
 func TestAskBoxLines(t *testing.T) {
-	b := &askBox{r: NewRenderer(&bytes.Buffer{}, Theme{}), back: "new research"}
+	b := newAskBox(NewRenderer(&bytes.Buffer{}, Theme{}), "new research", nil)
 	b.r.width = 40
 	plain := b.lines("", 0, true)
 	if got := plain[len(plain)-2]; got != "  [enter] ask   [empty enter] new research" || plain[len(plain)-1] != "" {
@@ -2537,5 +2536,54 @@ func TestCursorRowKeepsKeys(t *testing.T) {
 		if row != c.row || string(rest) != c.kept {
 			t.Errorf("%s: row %d, keys %q; want %d, %q", c.name, row, rest, c.row, c.kept)
 		}
+	}
+}
+
+// A region draws each row at the position the terminal reported, asks again
+// only when taking rows scrolls the screen, and leaves the cursor where it
+// began once cleared. Moving back up by a count of rows landed a row short
+// in Warp, and the ask box's label was drawn twice.
+func TestRegionDrawsWhereTheTerminalSays(t *testing.T) {
+	var out strings.Builder
+	asked, at := 0, 22
+	g := newRegion(func(s string) { out.WriteString(s) }, 24, 80, func() int { asked++; return at })
+
+	g.paint([]string{"a", "b", "c"})
+	if s := out.String(); asked != 1 || !strings.Contains(s, "\x1b[20;1Ha") || !strings.Contains(s, "\x1b[22;1Hc") {
+		t.Fatalf("asked %d times; first paint %q, want rows 20-22 drawn at their positions", asked, s)
+	}
+	out.Reset()
+	g.paint([]string{"a", "b", "c", "d"}) // row 23 is on the screen
+	if asked != 1 || !strings.Contains(out.String(), "\x1b[23;1Hd") {
+		t.Errorf("asked %d times for a row the screen had; paint %q", asked, out.String())
+	}
+	out.Reset()
+	at = 24 // two more rows scroll the screen by one
+	g.paint([]string{"a", "b", "c", "d", "e", "f"})
+	if asked != 2 || !strings.Contains(out.String(), "\x1b[19;1Ha") {
+		t.Errorf("asked %d times after scrolling; paint %q, want the region found again at 19", asked, out.String())
+	}
+	out.Reset()
+	g.paint(nil)
+	if s := out.String(); s != "\x1b[19;1H"+eraseToEnd {
+		t.Errorf("clear = %q, want the cursor where the region began and what was under it erased", s)
+	}
+}
+
+// A terminal that does not say where the cursor is gets moves relative to
+// the row the region left it on, and is not asked again.
+func TestRegionWithoutAnAnswer(t *testing.T) {
+	var out strings.Builder
+	asked := 0
+	g := newRegion(func(s string) { out.WriteString(s) }, 24, 80, func() int { asked++; return 0 })
+	g.paint([]string{"a", "b", "c"})
+	g.paint([]string{"a", "b", "c", "d"})
+	if asked != 1 {
+		t.Errorf("asked %d times, want once", asked)
+	}
+	want := "\r\n\n" + "\r\x1b[2Aa" + eraseLine + "\r\x1b[1Bb" + eraseLine + "\r\x1b[1Bc" + eraseLine +
+		"\r\n" + "\r\x1b[3Aa" + eraseLine + "\r\x1b[1Bb" + eraseLine + "\r\x1b[1Bc" + eraseLine + "\r\x1b[1Bd" + eraseLine
+	if out.String() != want {
+		t.Errorf("relative paint = %q\nwant %q", out.String(), want)
 	}
 }
