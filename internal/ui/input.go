@@ -403,22 +403,31 @@ func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(stri
 			if len(buf) == 0 {
 				return "", false
 			}
-		case '\t':
-			if tab != nil {
-				buf = []byte(tab(string(buf)))
-			}
-		case 0x7f, 0x08: // Backspace deletes a whole rune, not a byte
-			if _, n := utf8.DecodeLastRune(buf); n > 0 {
-				buf = buf[:len(buf)-n]
-			}
 		default:
-			// Printable bytes only: control codes would corrupt the frame,
-			// and UTF-8 continuation bytes (>= 0x80) are appended as they
-			// arrive so multi-byte characters survive.
-			if c >= 0x20 {
-				buf = append(buf, c)
-			}
+			buf = editLine(buf, c, tab)
 		}
 		show()
 	}
+}
+
+// editLine is buf after a key that edits it rather than ends it.
+func editLine(buf []byte, c byte, tab func(string) string) []byte {
+	switch c {
+	case '\t':
+		if tab != nil {
+			return []byte(tab(string(buf)))
+		}
+	case 0x7f, 0x08: // Backspace deletes a whole rune, not a byte
+		if _, n := utf8.DecodeLastRune(buf); n > 0 {
+			return buf[:len(buf)-n]
+		}
+	default:
+		// Printable bytes only: control codes would corrupt the frame,
+		// and UTF-8 continuation bytes (>= 0x80) are appended as they
+		// arrive so multi-byte characters survive.
+		if c >= 0x20 {
+			return append(buf, c)
+		}
+	}
+	return buf
 }
