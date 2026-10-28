@@ -133,6 +133,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	driver.now = o.Now
 	driver.detached = o.Detach
 	driver.domains = usable
+	driver.toggleActivity = renderer.ToggleActivity
 	if interactive || o.JSONL {
 		// A retried model call is the assistant's own progress line. Without
 		// routing it into the events, a retry that takes minutes looks like a

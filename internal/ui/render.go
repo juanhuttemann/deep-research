@@ -101,6 +101,10 @@ type Renderer struct {
 	tokens  int
 	sources int
 	acts    []activity
+	// showActivity draws the activity tail. It starts off: the tree and the
+	// status row say where the run is, and the tail's stream of searches and
+	// pages is detail most runs never need, so it waits for a.
+	showActivity bool
 
 	// promptLabel is non-empty while the reader is typing a line; promptText
 	// is what they have typed so far. Raw mode echoes nothing, so the frame
@@ -246,6 +250,17 @@ func (r *Renderer) Emit(e Event) {
 		r.startTickerLocked()
 	}
 	r.paintLocked(e.Type == Detach)
+}
+
+// ToggleActivity shows the activity tail if it is hidden and hides it if not.
+func (r *Renderer) ToggleActivity() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.showActivity = !r.showActivity
+	if r.plain || r.mode != "tree" || r.detached {
+		return
+	}
+	r.paintLocked(true)
 }
 
 // SetPrompt draws the line the reader is typing. label empty closes it.
@@ -812,7 +827,7 @@ func (r *Renderer) treeLines() []string {
 	agents = append(agents, thinking...)
 	budget -= len(thinking)
 	var tail []string
-	if budget >= 2 {
+	if r.showActivity && budget >= 2 {
 		tail = append(tail, r.rule())
 		tail = append(tail, r.activityLines(budget-1)...)
 	}
@@ -1127,7 +1142,11 @@ func (r *Renderer) footerLines() []string {
 	case r.promptLabel != "":
 		out = append(out, r.promptRow(), "  "+r.T.hints("[enter] send   [esc] cancel"))
 	case !r.done:
-		out = append(out, "  "+r.T.hints("[b] release display   [esc] cancel"))
+		activity := "[a] show activity"
+		if r.showActivity {
+			activity = "[a] hide activity"
+		}
+		out = append(out, "  "+r.T.hints(activity+"   [b] release display   [esc] cancel"))
 	}
 	return out
 }

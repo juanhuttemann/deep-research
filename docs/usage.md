@@ -16,7 +16,8 @@ drsh -p "What are the latest advances in fusion energy?"
 On a terminal this draws a live UI: a research brief you confirm, then a
 frame showing the pipeline stage, one row per parallel sub-agent with its
 progress meter, a rolling activity tail, and running source/token counters.
-Each row of the tail names the sub-agent it is about as the tree does, in
+The activity tail is hidden until you press `a`, which shows it; `a` again
+hides it. Each row of the tail names the sub-agent it is about as the tree does, in
 the colour of its tree row, then what it did: a search's query, a page,
 or a note on the results. A phase starting heads the rows under it, and
 what the run reports of itself (the search engine, the model a phase
@@ -740,6 +741,7 @@ During a run:
 
 | Key | Action |
 | --- | ------ |
+| `a` | show or hide the activity tail (hidden at the start) |
 | `b` | release the display; the run continues (see below) |
 | `Esc` / `Ctrl-C` | cancel the run |
 
