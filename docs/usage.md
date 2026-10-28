@@ -16,7 +16,11 @@ drsh -p "What are the latest advances in fusion energy?"
 On a terminal this draws a live UI: a research brief you confirm, then a
 frame showing the pipeline stage, one row per parallel sub-agent with its
 progress meter, a rolling activity tail, and running source/token counters.
-Each page in the tail is one row naming it, site and path: a spinner while
+Each row of the tail names the sub-agent it is about as the tree does, in
+the colour of its tree row, then what it did: a search's query, a page,
+or a note on the results. A phase starting heads the rows under it, and
+what the run reports of itself (the search engine, the model a phase
+uses) is gray. Each page in the tail is one row naming it, site and path: a spinner while
 it is read, then a dot, green when read in full, yellow for snippet only,
 red when dropped (with `--no-color` or `NO_COLOR`, `✓`, `!` or `✗`). A
 page read in full or as a snippet is a link to it: in a terminal that

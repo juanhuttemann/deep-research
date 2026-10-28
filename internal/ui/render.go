@@ -860,7 +860,7 @@ func (r *Renderer) agentLines() []string {
 		}
 		out = append(out, fmt.Sprintf("  %s %s %s %s",
 			r.stateMark(n),
-			pad(n.Name, nameCol),
+			r.hue(id, pad(n.Name, nameCol)),
 			r.progressBar(n),
 			r.T.dim(n.Line)))
 	}
@@ -994,14 +994,16 @@ func (r *Renderer) activityLines(n int) []string {
 	if len(acts) > n {
 		acts = acts[len(acts)-n:]
 	}
+	col := r.whoCol()
 	out := make([]string, 0, n)
 	for _, a := range acts {
-		sub := "  "
-		if a.sub != "" {
-			sub = clip(a.sub, 2)
+		at := r.T.dim(pad(formatDuration(a.at), 5))
+		// A phase heads the rows under it, from the column the names start.
+		if a.sub == "" && strings.HasPrefix(a.text, "▸ ") {
+			out = append(out, fmt.Sprintf("  %s  %s", at, r.activityText(a)))
+			continue
 		}
-		out = append(out, fmt.Sprintf("  %s %s %s",
-			r.T.dim(formatDuration(a.at)), r.T.gray(pad(sub, 2)), r.activityText(a)))
+		out = append(out, fmt.Sprintf("  %s  %s  %s", at, r.who(a.sub, col), r.activityText(a)))
 	}
 	// Keep the section a constant height: without the blank filler the rows
 	// below it would march up the screen as the tail fills.
@@ -1011,10 +1013,56 @@ func (r *Renderer) activityLines(n int) []string {
 	return out
 }
 
-// activityText is a row's text, a read's behind its spinner or dot.
+// whoCol is the width of the tail's column naming the sub-agent of each
+// row: its name as the tree above shows it, cut to fit, where it showed the
+// sub-agent's ID ("1", "f3"), which only someone who knew the IDs could
+// read.
+func (r *Renderer) whoCol() int {
+	w := 0
+	for _, id := range r.order {
+		w = max(w, dispWidth(r.nodes[id].Name))
+	}
+	return min(w, maxWhoCol, max(r.width/5, 8))
+}
+
+// maxWhoCol bounds the tail's sub-agent column: enough of a name to tell
+// it from the others, the row's own text the rest.
+const maxWhoCol = 24
+
+// who is the sub-agent column of a row: the sub-agent's name, in its colour
+// in the tree, or blank for the run's own rows.
+func (r *Renderer) who(sub string, col int) string {
+	if col == 0 {
+		return ""
+	}
+	n := r.nodes[sub]
+	if sub == "" || n == nil {
+		return strings.Repeat(" ", col)
+	}
+	return r.hue(sub, pad(clip(n.Name, col), col))
+}
+
+// agentHues tell the sub-agents apart, the same in the tree and the tail.
+// None is the green, yellow or red that a source's dot and a bar's state
+// are told by.
+var agentHues = []string{"\x1b[96m", "\x1b[95m", "\x1b[94m", "\x1b[36m", "\x1b[35m", "\x1b[34m"}
+
+// hue paints s in the colour of sub-agent id, by its place in the tree.
+func (r *Renderer) hue(id, s string) string {
+	i := slices.Index(r.order, id)
+	if i < 0 {
+		return s
+	}
+	return r.T.paint(agentHues[i%len(agentHues)], s)
+}
+
+// activityText is a row's text, a read's behind its spinner or dot. The
+// rest are told apart by weight: a phase starting is bold, a search's query
+// is the row, and what the run reports of itself (the engine, the model, a
+// filter's count) is gray, under the rows that are the research.
 func (r *Renderer) activityText(a activity) string {
 	if a.url == "" {
-		return a.text
+		return r.styleRow(a)
 	}
 	mark, text := r.T.cyan(spinnerFrames[r.frame%len(spinnerFrames)]), a.text
 	switch a.status {
@@ -1026,6 +1074,21 @@ func (r *Renderer) activityText(a activity) string {
 		mark = r.dot(r.T.red, "✗")
 	}
 	return mark + " " + text
+}
+
+func (r *Renderer) styleRow(a activity) string {
+	switch t := a.text; {
+	case strings.HasPrefix(t, "▸ "):
+		return r.T.cyan("▸") + " " + r.T.bold(t[len("▸ "):])
+	case strings.HasPrefix(t, "! "):
+		return r.T.red("!") + " " + t[len("! "):]
+	case strings.HasPrefix(t, "Searching: "):
+		return r.T.gray("search") + "  " + t[len("Searching: "):]
+	case a.sub == "", strings.HasPrefix(t, "= "), strings.Contains(t, "results off-topic"):
+		return r.T.gray(t)
+	default:
+		return t
+	}
 }
 
 // linkTarget is raw as a link safe to put in the frame: http(s) only, since

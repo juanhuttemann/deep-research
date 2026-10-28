@@ -15,6 +15,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The live frame's activity tail names each row's sub-agent as the tree
+  does, in the colour its tree row now has, where it showed the
+  sub-agent's ID (`1`, `f3`). A phase starting is bold and heads the rows
+  under it, a search reads `search` and its query, and what the run
+  reports of itself, the search engine's results, the model a phase uses,
+  a filter's count, is gray.
 - The `ask ▸` box is read a key at a time, as the `research ▸` box is,
   where the terminal used to read the line: a question longer than a row
   still wraps, under its first column, and Esc goes back as an empty line
