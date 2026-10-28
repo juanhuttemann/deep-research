@@ -37,21 +37,78 @@ func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup,
 	return askQuestion(in, r, s, examples[rand.IntN(len(examples))], note)
 }
 
+// commands are the session's (cli/session.go), offered in a menu under the
+// box while a "/" is being typed.
+var commands = []Choice{{Title: "/resume", Note: "past runs"}, {Title: "/model", Note: "change the model"}}
+
+// completions is the commands text is the start of, while it can still be
+// one: a "/" and no space.
+func completions(text string) []Choice {
+	if !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \t") {
+		return nil
+	}
+	var out []Choice
+	for _, c := range commands {
+		if strings.HasPrefix(c.Title, strings.ToLower(text)) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func askQuestion(in Input, r *Renderer, s agent.Setup, example, note string) string {
 	r.RenderStart(s, example, note)
-	echo := func(text string) { r.SetPrompt("research", text) }
+	text, at := "", 0
+	echo := func(t string) {
+		if t != text {
+			text, at = t, 0
+		}
+		r.SetCommand(text, at)
+	}
+	arrow := func(k byte) {
+		switch k {
+		case 'A':
+			at = max(at-1, 0)
+		case 'B':
+			at = max(min(at+1, len(completions(text))-1), 0)
+		}
+		r.SetCommand(text, at)
+	}
+	// Tab takes the highlighted command over the example, and Enter on
+	// the start of one runs it, rather than "unknown command /r".
+	pick := func(t string) string {
+		if m := completions(t); len(m) > 0 {
+			return m[min(at, len(m)-1)].Title
+		}
+		return t
+	}
+	tab := func(t string) string {
+		if t == "" {
+			return example
+		}
+		return pick(t)
+	}
 	q, ok := "", true
 	for ok && q == "" {
-		q, ok = readPromptRaw(in, nil, example, echo, nil)
+		q, ok = readPromptRaw(in, nil, tab, echo, arrow)
 	}
-	return q
+	return pick(q)
+}
+
+// SetCommand is SetPrompt for the start screen, with the command menu's
+// highlighted row.
+func (r *Renderer) SetCommand(text string, at int) {
+	r.mu.Lock()
+	r.commandAt = at
+	r.mu.Unlock()
+	r.SetPrompt("research", text)
 }
 
 // RenderStart shows the start screen.
 func (r *Renderer) RenderStart(s agent.Setup, example, note string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.mode, r.setup, r.example, r.briefNote = "start", s, example, note
+	r.mode, r.setup, r.example, r.briefNote, r.commandAt = "start", s, example, note, 0
 	r.promptLabel, r.promptText = "research", ""
 	if !r.plain {
 		r.paintLocked(true)
@@ -62,13 +119,33 @@ func (r *Renderer) RenderStart(s agent.Setup, example, note string) {
 // top bar are: the title, and the page's model and search chips.
 func (r *Renderer) startLines() []string {
 	chips := "model " + r.setup.Model + " · search " + searchChip(r.setup)
-	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule(),
-		"  " + r.T.hints("[enter] research   [tab] use the example   [/resume] past runs   [esc] quit")}
+	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule()}
+	if m := completions(r.promptText); len(m) > 0 {
+		out = append(append(out, r.commandLines(m)...), "",
+			"  "+r.T.hints("[tab] complete   [enter] run   [↑↓] move   [esc] quit"), "")
+	} else {
+		out = append(out, "  "+r.T.hints("[enter] research   [tab] use the example   [esc] quit"), "")
+	}
 	if r.briefNote != "" {
-		out = append(out, "")
 		for _, l := range wrapWords(r.briefNote, r.width-4) {
 			out = append(out, "  "+r.T.yellow(l))
 		}
+		out = append(out, "")
+	}
+	return out
+}
+
+// commandLines is the command menu, the picker's rows: what is typed bold
+// in each, the highlighted one marked.
+func (r *Renderer) commandLines(m []Choice) []string {
+	n := len(r.promptText)
+	out := make([]string, 0, len(m))
+	for i, c := range m {
+		row := "    " + r.T.bold(c.Title[:n]) + r.T.gray(c.Title[n:])
+		if i == min(r.commandAt, len(m)-1) {
+			row = "  " + r.T.magenta("▸ ") + r.T.bold(c.Title[:n]) + c.Title[n:]
+		}
+		out = append(out, row+"  "+r.T.gray(c.Note))
 	}
 	return out
 }

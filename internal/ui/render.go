@@ -113,6 +113,8 @@ type Renderer struct {
 	// the question shown dimmed in the empty box.
 	setup   agent.Setup
 	example string
+	// commandAt is the highlighted row of the start screen's command menu.
+	commandAt int
 	// The picker's: its rows, the ones the filter keeps, and the highlighted
 	// one among those.
 	pickTitle string
@@ -674,6 +676,7 @@ func (r *Renderer) briefFoot() []string {
 			r.rule(),
 			r.promptRow(),
 			"  " + r.T.hints("[enter] confirm   [esc] cancel"),
+			"",
 		}
 	}
 	out := []string{r.rule()}
@@ -681,7 +684,7 @@ func (r *Renderer) briefFoot() []string {
 		out = append(out, "  "+r.T.yellow(r.briefNote))
 	}
 	return append(out,
-		"  "+r.T.hints("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"))
+		"  "+r.T.hints("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [q] cancel"), "")
 }
 
 // SetBriefNote shows note above the brief's key hints; empty clears it.
@@ -749,7 +752,9 @@ func (r *Renderer) treeLines() []string {
 		r.rule(),
 	}
 	agents := r.agentLines()
-	foot := r.footerLines()
+	// A blank row under the keys, as the start screen ends: counted in the
+	// footer so the tail gives it up rather than the frame overflowing.
+	foot := append(r.footerLines(), "")
 
 	// The activity tail is the elastic section: it takes whatever rows the
 	// fixed sections leave, so the frame height is constant and the header,

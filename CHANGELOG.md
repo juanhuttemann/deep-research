@@ -5,6 +5,19 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- The `research ▸` box completes its commands: typing `/` opens a menu of
+  `/resume` and `/model` under it, the part typed bold, where Tab
+  completes the highlighted one, the arrows move, and Enter on the start
+  of one runs it. The screen's key hints no longer list `/resume`, which
+  the menu shows.
+
+### Changed
+
+- The live frame and the brief end on a blank row under their key hints,
+  as the start screen does.
+
 ## [0.24.0] - 2026-10-26
 
 ### Added

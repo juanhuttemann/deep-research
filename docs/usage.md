@@ -53,7 +53,10 @@ pipe on either side it prints the help, as it always did.
 
 Each run is a session. Its questions and answers are kept beside its
 `.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box
-takes two commands:
+takes two commands. In the `research ▸` box, a `/` opens a menu of the
+commands what is typed can still become, that part of each bold: Tab
+completes the highlighted one, the arrows move, and Enter on the start of
+one (`/r`) runs it.
 
 - `/resume` lists the runs in the reports directory by their question, the
   last one run or asked about first, and keeps those holding every word
