@@ -44,8 +44,9 @@ the page's top bar names them, and the page's `research ▸` box for the
 question, with an example in it that Tab takes. Enter runs it as `-p` would, the brief and the
 live frame included, and then takes questions about its report in an
 `ask ▸` box drawn like the start screen's (see [`ask`](#ask)). An empty
-line there brings the screen back for the next question; Esc or Ctrl-C on
-the screen ends it, and Ctrl-C at `ask ▸` ends `drsh` at once. A run that
+line or Esc there brings the screen back for the next question; Esc or
+Ctrl-C on the screen ends it, and Ctrl-C or Ctrl-D at `ask ▸` ends `drsh`
+at once. A run that
 fails, or that the brief cancels, returns to the screen, which says why.
 Flags given with it (`--mode`, `--sources`, `--domains`, `--reports`, `-o`,
 `--trace`) apply to every run it starts. With `--silent`, `--jsonl` or a
@@ -53,10 +54,10 @@ pipe on either side it prints the help, as it always did.
 
 Each run is a session. Its questions and answers are kept beside its
 `.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box
-takes two commands. In the `research ▸` box, a `/` opens a menu of the
-commands what is typed can still become, that part of each bold: Tab
-completes the highlighted one, the arrows move, and Enter on the start of
-one (`/r`) runs it.
+takes two commands. In either box, a `/` opens a menu of the commands
+what is typed can still become, that part of each bold: Tab completes the
+highlighted one, the arrows move, and Enter on the start of one (`/r`)
+runs it.
 
 - `/resume` lists the runs in the reports directory by their question, the
   last one run or asked about first, and keeps those holding every word
@@ -472,7 +473,7 @@ signed in: `claude -p` cannot call the two tools.
 
 A run watched in the terminal UI takes questions under "Ask about this
 report" once its report is printed, in an `ask ▸` box with its keys under
-it; an empty line or Ctrl-D ends them, and `/resume` and `/model` work as
+it; an empty line, Esc, Ctrl-C or Ctrl-D ends them, and `/resume` and `/model` work as
 in [a bare `drsh`](#a-bare-drsh). Those questions, unlike `ask`'s, are kept
 in the run's session.
 

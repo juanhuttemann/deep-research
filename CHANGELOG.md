@@ -7,23 +7,28 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Added
 
-- The `research ▸` box completes its commands: typing `/` opens a menu of
-  `/resume` and `/model` under it, the part typed bold, where Tab
-  completes the highlighted one, the arrows move, and Enter on the start
-  of one runs it. The screen's key hints no longer list `/resume`, which
-  the menu shows.
+- The `research ▸` and `ask ▸` boxes complete their commands: typing `/`
+  opens a menu of `/resume` and `/model` under the box, the part typed
+  bold, where Tab completes the highlighted one, the arrows move, and
+  Enter on the start of one runs it. Their key hints no longer list
+  `/resume`, which the menu shows.
 
 ### Changed
 
+- The `ask ▸` box is read a key at a time, as the `research ▸` box is,
+  where the terminal used to read the line: a question longer than a row
+  still wraps, under its first column, and Esc goes back as an empty line
+  does. A terminal that will not go raw reads the line as before.
 - The live frame, the brief, the `ask ▸` box and the `/resume` and
   `/model` pickers end on a blank row under their key hints, as the start
   screen does.
 
 ### Fixed
 
-- The `ask ▸` box could draw its label twice, the second over its lower
-  rule, in terminals that wrap a line filling the row: its rules now stop
-  a column short of the edge.
+- The `ask ▸` box drew its label twice, the second over its lower rule,
+  in Warp after `/resume`: it moved back up to the label by a count of
+  rows, which landed a row short there. It now asks the terminal where the
+  cursor is and draws each row at its own position.
 
 ## [0.24.0] - 2026-10-26
 

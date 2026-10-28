@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/signal"
@@ -39,6 +40,11 @@ const (
 // to cover a sequence already sitting in the terminal buffer and short enough
 // that Esc still feels immediate.
 const escapeWindow = 40 * time.Millisecond
+
+// errNoKeyPending reports that nothing arrived inside the escape window. It
+// is here, not with the unix reader that returns it, because the ask box
+// waits on it on every platform's build.
+var errNoKeyPending = errors.New("no key pending")
 
 // Keystroke is one key press: the key itself plus, in line mode, whatever else
 // was typed on the same line. A terminal that could not be switched to raw
@@ -393,6 +399,10 @@ func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(stri
 			return "", false
 		case byte(KeyCtrlC): // as Esc: raw mode makes it a key
 			return "", false
+		case 0x04: // Ctrl-D on an empty line ends it, as at a shell
+			if len(buf) == 0 {
+				return "", false
+			}
 		case '\t':
 			if tab != nil {
 				buf = []byte(tab(string(buf)))
