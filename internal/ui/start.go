@@ -165,14 +165,20 @@ func AskHeading(noColor bool) string {
 
 // AskBox draws the box a question about a report is typed in, as the start
 // screen draws its own: the label between rules, the keys under it, back
-// saying what an empty line does. The cursor is left after the label, where
-// the terminal echoes and edits the line; EndAsk erases what is under it
-// once it is read.
+// saying what an empty line does, a blank row under them as the start
+// screen ends. The cursor is left after the label, where the terminal echoes
+// and edits the line; EndAsk erases what is under it once it is read.
 func AskBox(w io.Writer, noColor bool, back string) {
 	r := NewRenderer(w, Theme{Enabled: !noColor})
+	// The rules stop a column short of the edge. One that filled the row
+	// left the cursor waiting to wrap, a terminal that wrapped it took a
+	// row more, and the move back up landed on the lower rule: the label
+	// drawn twice, once over the rule. The frame clears that state with
+	// its erase-line; a line drawn once, scrolling, has no such row to own.
+	r.width--
 	label := AskPrompt(noColor)
 	_, _ = io.WriteString(w, "\n"+r.rule()+"\n"+label+"\n"+r.rule()+"\n  "+
-		r.T.hints("[enter] ask   [empty enter] "+back+"   [/resume] past runs")+"\x1b[2A\r"+label)
+		r.T.hints("[enter] ask   [empty enter] "+back+"   [/resume] past runs")+"\n\x1b[3A\r"+label)
 }
 
 // EndAsk erases the box's lower rule and keys, under the line just read.
