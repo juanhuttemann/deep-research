@@ -38,6 +38,15 @@ reasoning_effort:
 # research brief change the plan. Set it to pin the budget regardless of mode.
 # The old name for this key, max_depth, still works.
 sources_per_topic: 0
+# Sub-topics per plan. Left at 0 the planner chooses as few as the question
+# needs, up to the --mode tier's count (quick 3, standard 4, deep 6). Set it
+# to ask for exactly that many (at most 8) in every mode; --topics overrides.
+sub_topics: 0
+# The follow-up round: after the planned searches, one call names up to three
+# searches for what the findings leave open, and they run before the analysis.
+# false skips it (one model call and up to three searches fewer); --no-follow-ups
+# skips it for one run, and f in the research brief turns it on or off.
+follow_ups: true
 # Sub-agents searching at the same time. A deep plan has more sub-topics than
 # this, and they queue: raise it to finish a wide plan sooner, lower it when the
 # search backend or a rate-limited model provider cannot take the concurrency.

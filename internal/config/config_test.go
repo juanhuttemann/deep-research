@@ -431,3 +431,25 @@ func TestReasoningEffortRejectsWhatItCannotUse(t *testing.T) {
 		}
 	}
 }
+
+// sub_topics and follow_ups shape the plan, so they take all three channels
+// every key does: the embedded default, config.yaml and the environment.
+func TestBreadthAndFollowUpKeys(t *testing.T) {
+	cfg := loadIn(t, "model_call_retries: 2\n")
+	if cfg.SubTopics != 0 || cfg.NoFollowUps {
+		t.Errorf("defaults: sub_topics %d, follow-ups off=%v; want 0 and on", cfg.SubTopics, cfg.NoFollowUps)
+	}
+	cfg = loadIn(t, "sub_topics: 5\nfollow_ups: false\n")
+	if cfg.SubTopics != 5 || !cfg.NoFollowUps {
+		t.Errorf("config.yaml: sub_topics %d, follow-ups off=%v; want 5 and off", cfg.SubTopics, cfg.NoFollowUps)
+	}
+	if got := loadIn(t, "sub_topics: -3\n").SubTopics; got != 0 {
+		t.Errorf("negative sub_topics: got %d, want 0 (the planner chooses)", got)
+	}
+	t.Setenv("DEEP_RESEARCH_SUB_TOPICS", "2")
+	t.Setenv("DEEP_RESEARCH_FOLLOW_UPS", "true")
+	cfg = loadIn(t, "sub_topics: 5\nfollow_ups: false\n")
+	if cfg.SubTopics != 2 || cfg.NoFollowUps {
+		t.Errorf("env: sub_topics %d, follow-ups off=%v; want 2 and on", cfg.SubTopics, cfg.NoFollowUps)
+	}
+}

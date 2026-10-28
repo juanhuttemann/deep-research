@@ -30,6 +30,11 @@ type Config struct {
 	// is its own setting rather than a multiple of ModelCallTimeout.
 	RunTimeout      time.Duration
 	SourcesPerTopic int // sources per sub-agent; 0 => the --mode tier decides
+	SubTopics       int // exact sub-topics per plan; 0 => the planner chooses up to the --mode tier's
+	// NoFollowUps skips the follow-up round between research and analysis
+	// (follow_ups: false). A negative, so that a Config built without Load
+	// runs the round as the default does.
+	NoFollowUps bool
 	// Parallelism is how many sub-agents search at once. Every other budget
 	// in the tool is configurable; this one used to be a literal 3 in the UI,
 	// so a deep run with six sub-topics could not be widened or, on a rate-
@@ -491,6 +496,8 @@ func Load() (Config, error) {
 	v.SetDefault("run_timeout", "30m")
 	v.SetDefault("sources_per_topic", 0)
 	v.SetDefault("parallelism", defaultParallelism)
+	v.SetDefault("sub_topics", 0)
+	v.SetDefault("follow_ups", true)
 	// The setting was originally spelled max_depth back when it capped a run's
 	// total sources. Config files on disk still use that name, so it keeps
 	// resolving to the same value.
@@ -500,6 +507,8 @@ func Load() (Config, error) {
 		DataFile:        v.GetString("data_file"),
 		RunTimeout:      v.GetDuration("run_timeout"),
 		SourcesPerTopic: v.GetInt("sources_per_topic"),
+		SubTopics:       max(v.GetInt("sub_topics"), 0),
+		NoFollowUps:     !v.GetBool("follow_ups"),
 		Parallelism:     v.GetInt("parallelism"),
 	}
 	// A file or env var setting this to 0 or a negative number would

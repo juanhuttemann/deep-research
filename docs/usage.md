@@ -90,6 +90,8 @@ runs it.
 | `--output`, `-o FILE` | — | write the report to a file as well |
 | `--mode quick\|standard\|deep` | `standard` | research budget tier |
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
+| `--topics N` | `0` | plan exactly N sub-topics (1–8); `0` lets the planner choose as few as the question needs, up to the `--mode` tier's count (quick 3, standard 4, deep 6). `sub_topics` in `config.yaml` sets it for every run |
+| `--no-follow-ups` | off | skip the follow-up round: one model call and up to three searches fewer, and the analysis gets what the planned searches found. `follow_ups: false` in `config.yaml` makes it the default |
 | `--reports DIR` | `reports` | where the `.md` / `.pdf` / `.json` artifacts are written |
 | `--jsonl` | off | machine-readable event stream instead of the live UI |
 | `--silent`, `-s` | off | no live UI; print only the report |
@@ -117,9 +119,10 @@ $EDITOR plan.json                                     # sub_topics: add, delete,
 drsh --plan plan.json
 ```
 
-A plan carries its question, depth tier (`depth.key`) and any pinned
-`pinned_per_topic` budget, so `--plan` cannot be combined with `-p`,
-`--mode` or `--sources`. It is checked before it runs: the tier must exist,
+A plan carries its question, depth tier (`depth.key`), any pinned
+`pinned_per_topic` budget and whether the follow-up round is off
+(`no_follow_ups`, absent for on), so `--plan` cannot be combined with `-p`,
+`--mode`, `--sources`, `--topics` or `--no-follow-ups`. It is checked before it runs: the tier must exist,
 at least one sub-topic must have a name, sub-topics are renumbered in
 order, and the source budget is worked out again from the tier rather than
 read from the file. When you rename a sub-topic, clear its `query` and
@@ -225,7 +228,8 @@ keeps saving to the same checkpoint, so it can be stopped and resumed again.
 Its sub-agents may take saved results in another order than the first run
 did, so its evidence is close to, not always identical with, what that run
 would have reached. `--resume` cannot be combined with `-p`, `--plan`,
-`--replay`, `--mode` or `--sources`: the checkpoint carries all of them.
+`--replay`, `--mode`, `--sources`, `--topics` or `--no-follow-ups`: the
+checkpoint carries all of them.
 
 A run killed before its plan was confirmed has nothing saved beyond the
 question; run it again.
@@ -366,7 +370,8 @@ in the default browser once it is listening (`$BROWSER` if set; `wslview` or
 Windows' browser under WSL; nothing on a Linux session with no display, such
 as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
-question, `--mode` and `--sources` (as "Pages per topic"), and Search: the
+question, `--mode`, `--topics` (as "Sub-topics", auto by default) and
+`--sources` (as "Pages per topic"), and Search: the
 web, or "Only these sites", which opens a box for the list (`--domains`)
 and keeps the last one typed. The empty question box shows an example, and
 Tab takes it as the question: a hot question from Stack Exchange's space,
@@ -376,8 +381,9 @@ that answers or when it cannot. The run then opens with a checklist of the
 sites, each marked usable, from snippets only, or dropped with the reason,
 and the plan review shows them. Research makes the plan first (the same
 as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
-add and remove sub-topics, change the search each one runs, or change the
-depth. Under each name is the planner's description of the sub-topic, which
+add and remove sub-topics, change the search each one runs, change the
+depth, or turn the follow-up round off or on (the brief's `f`; the plan
+carries it as `no_follow_ups`). Under each name is the planner's description of the sub-topic, which
 is for reading: research never sends it. Below that is the query the
 sub-agent searches, editable in place; a sub-topic added here can be given
 one too. A renamed sub-topic drops the query the planner wrote for its old
@@ -731,6 +737,7 @@ In the brief:
 | `r` | rename a sub-topic (pick its number, then edit); it is then searched by its new name, not the planner's query |
 | `x` | delete a sub-topic (pick its number; one must stay) |
 | `d` | cycle depth: quick → standard → deep |
+| `f` | turn the follow-up round on or off (the brief's `follow-ups` field says which) |
 | `q` / `Esc` / `Ctrl-C` | cancel |
 
 Keys pressed while the plan is still being made are discarded — a plan

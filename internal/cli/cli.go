@@ -74,6 +74,8 @@ func New(load func() (Deps, error)) *cobra.Command {
 	root.Flags().Int("depth", 0, "deprecated alias for --sources")
 	_ = root.Flags().MarkDeprecated("depth", "use --sources")
 	root.Flags().String("mode", "standard", "research depth: quick | standard | deep")
+	root.Flags().Int("topics", 0, "plan exactly this many sub-topics, 1-8 (0 = the planner chooses, up to the --mode tier's)")
+	root.Flags().Bool("no-follow-ups", false, "skip the follow-up round: analyse what the planned searches found")
 	root.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts")
 	root.Flags().Bool("jsonl", false, "emit machine-readable JSONL events instead of the live UI")
 	root.Flags().Bool("no-color", false, "disable ANSI colour")
@@ -95,10 +97,13 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A plan carries its own question, depth and budget. Taking them from
 	// flags as well would leave two answers to each, and a replay carries
 	// its recorded plan.
-	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only"} {
+	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only", "topics", "no-follow-ups"} {
 		root.MarkFlagsMutuallyExclusive("plan", other)
 	}
 	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
+	for _, other := range []string{"topics", "no-follow-ups"} {
+		root.MarkFlagsMutuallyExclusive("replay", other)
+	}
 	root.Flags().StringSlice("domains", nil, "research only these sites (comma-separated); each is checked before planning")
 	// A replay searches nothing to confine, and a plan or a checkpoint
 	// carries the list it was made with.
@@ -108,7 +113,8 @@ func New(load func() (Deps, error)) *cobra.Command {
 	root.Flags().String("resume", "", "continue an interrupted run from its checkpoint (<reports>/*.partial.json), without searching again what it searched")
 	// A checkpoint carries the question, the confirmed plan, its tier and
 	// budget, and the searches already made.
-	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth", "domains"} {
+	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth", "domains",
+		"topics", "no-follow-ups"} {
 		root.MarkFlagsMutuallyExclusive("resume", other)
 	}
 
@@ -337,6 +343,9 @@ func webArgs(r web.Request, reports string) ([]string, io.Reader) {
 	if r.Sources > 0 {
 		args = append(args, "--sources="+strconv.Itoa(r.Sources))
 	}
+	if r.Topics > 0 {
+		args = append(args, "--topics="+strconv.Itoa(r.Topics))
+	}
 	if len(r.Domains) > 0 {
 		args = append(args, "--domains="+strings.Join(r.Domains, ","))
 	}
@@ -395,6 +404,22 @@ func sourceBudget(cmd *cobra.Command, d Deps) int {
 		}
 	}
 	return sources
+}
+
+// subTopics is the exact sub-topic count asked for: the config value unless
+// --topics overrides it, 0 for the planner's choice.
+func subTopics(cmd *cobra.Command, d Deps) int {
+	if cmd.Flags().Changed("topics") {
+		n, _ := cmd.Flags().GetInt("topics")
+		return max(n, 0)
+	}
+	return d.Config.SubTopics
+}
+
+// noFollowUps reports whether the follow-up round is off for this run.
+func noFollowUps(cmd *cobra.Command, d Deps) bool {
+	off, _ := cmd.Flags().GetBool("no-follow-ups")
+	return off || d.Config.NoFollowUps
 }
 
 // runDeadline is the whole-run budget, defaulted when unconfigured.
@@ -462,6 +487,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if _, err := ui.ParseDepthMode(mode); err != nil {
 		return ui.RunResult{}, err
 	}
+	if n := subTopics(cmd, d); n > ui.MaxSubTopics {
+		return ui.RunResult{}, fmt.Errorf("%d sub-topics asked for: at most %d", n, ui.MaxSubTopics)
+	}
 	rawDomains, _ := cmd.Flags().GetStringSlice("domains")
 	domains, err := agent.ParseDomains(rawDomains)
 	if err != nil {
@@ -502,6 +530,8 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		Assistant:       assistant,
 		DepthMode:       mode,
 		SourcesPerTopic: sourceBudget(cmd, d),
+		SubTopics:       subTopics(cmd, d),
+		NoFollowUps:     noFollowUps(cmd, d),
 		Parallelism:     d.Config.Parallelism,
 		JSONL:           jsonl,
 		Quiet:           silent,
@@ -627,6 +657,7 @@ func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*
 			return nil, "", err
 		}
 		plan := ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d))
+		plan.NoFollowUps = tr.NoFollowUps
 		// A resumed run searches live for what it lacks, on the sites it was
 		// confined to; a replay searches nothing.
 		if replaying, _ := cmd.Flags().GetString("replay"); replaying == "" {
@@ -731,7 +762,7 @@ func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
 	}
 	return func(p *ui.Plan) {
 		rec.SetDomains(p.Domains)
-		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic)
+		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps)
 	}
 }
 
@@ -743,7 +774,7 @@ func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
 		return
 	}
 	if p := res.Plan; p != nil {
-		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic)
+		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps)
 	}
 	path := strings.TrimSuffix(res.MDPath, ".md") + ".trace.json"
 	if err := rec.Write(path); err != nil {

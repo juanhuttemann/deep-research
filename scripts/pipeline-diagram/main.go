@@ -47,7 +47,7 @@ var (
 	group    = "Sub-agents, in parallel"
 	lanes    = []string{"sub-topic 1", "sub-topic 2", "sub-topic n"}
 	laneWork = "search · rank · read"
-	followUp = box{model, "Follow-ups", "1 call",
+	followUp = box{model, "Follow-ups", "0–1 call",
 		[]string{fmt.Sprintf("up to %d more searches", ui.MaxFollowUps), "for what is still open"}}
 	handoff = "every page found, each one source"
 
@@ -71,14 +71,12 @@ var (
 // subTopicRange is the planner's sub-topic counts across the depth tiers,
 // "3–6" for quick 3 and deep 6.
 func subTopicRange() string {
-	lo, hi := math.MaxInt, 0
+	hi := 0
 	for _, m := range ui.DepthModes {
-		lo, hi = min(lo, m.SubTopics), max(hi, m.SubTopics)
+		hi = max(hi, m.SubTopics)
 	}
-	if lo == hi {
-		return fmt.Sprint(lo)
-	}
-	return fmt.Sprintf("%d–%d", lo, hi)
+	// The planner chooses as few as the question needs, down to one.
+	return fmt.Sprintf("1–%d", hi)
 }
 
 // The canvas. Content spans left..right; the hand-off between the rows runs
@@ -300,7 +298,7 @@ func header(height int) string {
 }
 
 const summary = "A deep-research run: the question is planned into sub-topics, each researched by a parallel " +
-	"sub-agent that searches, ranks by its terms and reads pages; one follow-up round adds a few searches. " +
+	"sub-agent that searches, ranks by its terms and reads pages; an optional follow-up round adds a few searches. " +
 	"The analysis states claims and the answer, the fact-check judges them against the pages, code keeps only " +
 	"what passed and blocked statements get one repair, then the summary is written from the checked result " +
 	"and saved as Markdown, PDF and JSON."

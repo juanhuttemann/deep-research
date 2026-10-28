@@ -5,7 +5,24 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `--topics N` and the `sub_topics` key ask the planner for exactly N
+  sub-topics (1–8) in any mode; the serve page's form has a "Sub-topics"
+  choice for it.
+- `--no-follow-ups` and the `follow_ups` key skip the follow-up round. The
+  terminal brief's `f` and a "follow-ups" switch in the serve page's plan
+  review turn it on or off for one run; plans, checkpoints and traces carry
+  it as `no_follow_ups`.
+
 ### Changed
+
+- The planner chooses how many sub-topics a question needs, up to the
+  mode's count (quick 3, standard 4, deep 6), instead of always that many,
+  and a plan of fewer reads fewer pages. The follow-up call is told an empty
+  list is the right answer when the findings already cover the question.
+- The brief's key hints wrap onto a second row on a narrow terminal rather
+  than losing the last hint.
 
 - The live frame's activity tail is hidden at the start of a run; `a`
   shows it and hides it again, and the key hints say which.

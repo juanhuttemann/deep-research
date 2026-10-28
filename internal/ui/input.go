@@ -22,6 +22,7 @@ const (
 	KeyQ     Key = 'q' // cancel the run
 	KeyD     Key = 'd' // change depth mode
 	KeyE     Key = 'e' // add a sub-topic
+	KeyF     Key = 'f' // turn the follow-up round on or off
 	KeyR     Key = 'r' // rename a sub-topic
 	KeyX     Key = 'x' // delete a sub-topic
 	KeyEsc   Key = 27  // escape: cancel the run
@@ -127,6 +128,8 @@ func keyFromByte(b byte) Key {
 		return KeyD
 	case KeyE:
 		return KeyE
+	case KeyF:
+		return KeyF
 	case KeyR:
 		return KeyR
 	case KeyX:

@@ -311,13 +311,13 @@ type Assistant interface {
 	FactCheck(ctx context.Context, claims string) (*FactCheckResult, error)
 	// Summarize turns analysis and fact-check output into a report.
 	Summarize(ctx context.Context, prompt string) (*Summary, error)
-	// Plan breaks a question into subTopics ordered research sub-topics used
-	// to seed the parallel sub-agent tree. Breadth is the caller's to choose:
-	// the run's total effort is sources-per-branch times branches, so a depth
+	// Plan breaks a question into ordered research sub-topics used to seed
+	// the parallel sub-agent tree. Breadth is the caller's to bound: the
+	// run's total effort is sources-per-branch times branches, so a depth
 	// tier that set only the former left the model deciding half of it. It
 	// returns an error only when the model call itself fails; a usable plan is
 	// always derived as a fallback.
-	Plan(ctx context.Context, question string, subTopics int) (Outline, error)
+	Plan(ctx context.Context, question string, b Breadth) (Outline, error)
 	// SetSourceBudget caps how many sources a single query may gather. It is
 	// what gives the depth tier its effect: without it the search tool's own
 	// fixed per-query limit bounds every run identically, and picking a deeper
@@ -1589,27 +1589,42 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 
 const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. The question field is the question as asked, written as a title: misspelled words, capitalization (a capital first letter, proper names, acronyms), hyphenation, punctuation and unclosed brackets corrected, word for word. Never add, remove, reorder or replace a word, never expand an abbreviation, never change a number, never answer, narrow or broaden it; when nothing needs correcting repeat it exactly. Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
 
+// Breadth is how many sub-topics a plan may have. Exact asks for Max of
+// them; otherwise Max is a ceiling and the planner chooses fewer when the
+// question needs fewer. Asking for exactly four gave a one-fact question four
+// overlapping branches, and every run the same shape.
+type Breadth struct {
+	Max   int
+	Exact bool
+}
+
 // planPrompt is the planner's user message: the breadth and the question.
 // How to plan is the system message, planner_instructions, which is only
 // editable if it is the only copy: the built-in text used to be sent here as
 // well, so an edited agent.yaml was contradicted on every call by the
 // instructions it was meant to replace.
-func planPrompt(question string, subTopics int) string {
-	if subTopics < 1 {
-		subTopics = defaultSubTopicCount
+func planPrompt(question string, b Breadth) string {
+	n := b.Max
+	if n < 1 {
+		n = defaultSubTopicCount
 	}
-	return fmt.Sprintf("Plan exactly %d sub-topics.\n\nQuestion: %s", subTopics, question)
+	if b.Exact {
+		return fmt.Sprintf("Plan exactly %d sub-topics.\n\nQuestion: %s", n, question)
+	}
+	return fmt.Sprintf("Plan as few sub-topics as the question needs, at most %d: one or two for a narrow "+
+		"factual question, more only for distinct subjects, alternatives, periods or positions that one "+
+		"search would not cover.\n\nQuestion: %s", n, question)
 }
 
-// defaultSubTopicCount is the breadth used when a caller names none.
+// defaultSubTopicCount is the ceiling used when a caller names none.
 const defaultSubTopicCount = 4
 
 // Plan implements the planning phase of the pipeline.
-func (a *impl) Plan(ctx context.Context, question string, subTopics int) (Outline, error) {
+func (a *impl) Plan(ctx context.Context, question string, b Breadth) (Outline, error) {
 	// The deadline is part of the answer to "how long will this sit here":
 	// planning is one call with nothing on screen behind it.
 	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s)", a.model, roundDuration(a.timeout)))
-	out, err := a.plan(ctx, planPrompt(question, subTopics))
+	out, err := a.plan(ctx, planPrompt(question, b))
 	if err != nil {
 		return Outline{}, err
 	}
@@ -1620,8 +1635,8 @@ func (a *impl) Plan(ctx context.Context, question string, subTopics int) (Outlin
 	// A requested count is a suggestion to a model, not a constraint. Running
 	// every extra branch it volunteers would spend a budget the caller sized
 	// for fewer of them.
-	if subTopics > 0 && len(topics) > subTopics {
-		topics = topics[:subTopics]
+	if b.Max > 0 && len(topics) > b.Max {
+		topics = topics[:b.Max]
 	}
 	proposed := parsePlanQuestion(out)
 	fixed := fixedQuestion(question, proposed)

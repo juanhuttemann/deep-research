@@ -36,11 +36,20 @@ once their evidence was in, which put two full analyses on the critical
 path of nine runs in ten; the call that only names the searches reasons a
 tenth as long. A follow-up call that fails or names nothing leaves the
 analysis to what the first round found, and with search refusing queries
-it is not made. The round never repeats.
+it is not made. The round never repeats. It is the plan's to skip
+(`Plan.NoFollowUps`, set from `follow_ups`/`--no-follow-ups` and toggled by
+the terminal brief's `f` and the serve page's review alike), so a plan
+written out, edited, checkpointed or replayed keeps it; skipped, no call is
+made.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
-each phase. The planner writes, for each sub-topic and in the question's
+each phase. The planner is given a breadth (`agent.Breadth`): by default a
+ceiling, the depth tier's sub-topic count, under which it plans as few
+sub-topics as the question needs, so a one-fact question is not split into
+four overlapping branches; `sub_topics`/`--topics` asks for an exact count
+instead. Code cuts a plan to the ceiling either way, and the run's source
+budget follows the sub-topics the plan has. The planner writes, for each sub-topic and in the question's
 language, a keyword search query and the terms a relevant page must mention.
 It also returns the question with its typos fixed (`agent.Outline.Question`);
 `agent` takes it only when it keeps every word (case, hyphens and

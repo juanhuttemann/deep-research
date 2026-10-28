@@ -823,6 +823,10 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, findings []agent.Find
 	if ctx.Err() != nil {
 		return findings, uncovered
 	}
+	if plan.NoFollowUps {
+		d.emit(Event{Type: Info, Phase: "Research", Detail: "follow-up round off: analysing what the plan found"})
+		return findings, uncovered
+	}
 	if d.isSearchDown() {
 		// Every query of the round would be refused too, so the call that
 		// chooses them would be spent for nothing.

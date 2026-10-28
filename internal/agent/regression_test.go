@@ -36,7 +36,7 @@ func TestMalformedOutputDoesNotInventResearch(t *testing.T) {
 			t.Errorf("%q invented findings: %+v", out, got)
 		}
 		a := &impl{plan: func(context.Context, string) (string, error) { return out, nil }}
-		out, err := a.Plan(context.Background(), "original question", 3)
+		out, err := a.Plan(context.Background(), "original question", Breadth{Max: 3})
 		got := out.SubTopics
 		if err != nil || len(got) != 1 || got[0].Name != "original question" || got[0].ID == "" {
 			t.Errorf("fallback must research original question: %+v, %v", got, err)
@@ -194,7 +194,7 @@ func TestPlanAgainstDeadEndpointFailsFast(t *testing.T) {
 	a.SetProgress(func(msg string) { logged = append(logged, msg) })
 
 	start := time.Now()
-	_, err = a.Plan(context.Background(), "question", 3)
+	_, err = a.Plan(context.Background(), "question", Breadth{Max: 3})
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected an error against a dead endpoint")
@@ -262,7 +262,7 @@ func TestRetriesAreNotMultipliedBySDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if _, err = a.Plan(context.Background(), "question", 3); err == nil {
+	if _, err = a.Plan(context.Background(), "question", Breadth{Max: 3}); err == nil {
 		t.Fatal("expected an error from a failing provider")
 	}
 	// ModelCallRetries: 1 means exactly two attempts, not two times the SDK's.
@@ -340,7 +340,7 @@ func TestStreamedPlanReportsProgressAndKeepsUsage(t *testing.T) {
 	var progress []string
 	a.SetProgress(func(msg string) { mu.Lock(); progress = append(progress, msg); mu.Unlock() })
 
-	out, err := a.Plan(context.Background(), "question", 3)
+	out, err := a.Plan(context.Background(), "question", Breadth{Max: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1003,7 +1003,7 @@ func TestAnalysisWithoutAnswerKeyHasNoAnswer(t *testing.T) {
 }
 
 // planMessages runs one Plan call and returns its messages by role.
-func planMessages(t *testing.T, instructions, question string, subTopics int) map[string]string {
+func planMessages(t *testing.T, instructions, question string, b Breadth) map[string]string {
 	t.Helper()
 	got := map[string]string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1026,7 +1026,7 @@ func planMessages(t *testing.T, instructions, question string, subTopics int) ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Plan(context.Background(), question, subTopics); err != nil {
+	if _, err := a.Plan(context.Background(), question, b); err != nil {
 		t.Fatal(err)
 	}
 	return got
@@ -1038,7 +1038,7 @@ func planMessages(t *testing.T, instructions, question string, subTopics int) ma
 // call, contradicting it ("as many as the request asks for" against
 // "exactly %d"). The user message carries only the breadth and the question.
 func TestPlannerInstructionsComeOnlyFromTheConfig(t *testing.T) {
-	msgs := planMessages(t, "CUSTOM_PLANNER_SYSTEM", "Is Valkey faster than Redis?", 3)
+	msgs := planMessages(t, "CUSTOM_PLANNER_SYSTEM", "Is Valkey faster than Redis?", Breadth{Max: 3})
 	if !strings.Contains(msgs["system"], "CUSTOM_PLANNER_SYSTEM") {
 		t.Errorf("system message = %s, want the configured instructions", msgs["system"])
 	}
@@ -1055,7 +1055,7 @@ func TestPlannerInstructionsComeOnlyFromTheConfig(t *testing.T) {
 // the built-in text with its "%d" unformatted.
 func TestPlannerFallbackInstructionsAreComplete(t *testing.T) {
 	for _, n := range []int{0, -1, 5} {
-		msgs := planMessages(t, "", "q", n)
+		msgs := planMessages(t, "", "q", Breadth{Max: n})
 		if strings.Contains(msgs["system"], "%d") || !strings.Contains(msgs["system"], "Respond ONLY with JSON") {
 			t.Errorf("subTopics %d: fallback system message = %s", n, msgs["system"])
 		}
@@ -1272,7 +1272,7 @@ func checkFix(t *testing.T, asked, proposed, want string) {
 	t.Helper()
 	out := `{"question":` + strconv.Quote(proposed) + `,"subtopics":[{"name":"Pricing"}]}`
 	a := &impl{plan: func(context.Context, string) (string, error) { return out, nil }}
-	got, err := a.Plan(context.Background(), asked, 3)
+	got, err := a.Plan(context.Background(), asked, Breadth{Max: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1297,5 +1297,21 @@ func TestRoundDuration(t *testing.T) {
 		if got := roundDuration(d); got != want {
 			t.Errorf("roundDuration(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// "Plan exactly 4 sub-topics" gave every question four branches, a one-fact
+// question included. Without Exact the count is a ceiling the planner is
+// told to stay under when the question needs fewer; with it, the old request.
+func TestPlanPromptAsksForAnExactCountOnlyWhenExact(t *testing.T) {
+	adaptive := planPrompt("q", Breadth{Max: 4})
+	if strings.Contains(adaptive, "exactly") || !strings.Contains(adaptive, "as few sub-topics as the question needs, at most 4") {
+		t.Errorf("adaptive breadth prompt = %q", adaptive)
+	}
+	if exact := planPrompt("q", Breadth{Max: 5, Exact: true}); !strings.HasPrefix(exact, "Plan exactly 5 sub-topics.") {
+		t.Errorf("exact breadth prompt = %q", exact)
+	}
+	if none := planPrompt("q", Breadth{}); !strings.Contains(none, fmt.Sprintf("at most %d", defaultSubTopicCount)) {
+		t.Errorf("unset breadth prompt = %q, want the default ceiling", none)
 	}
 }

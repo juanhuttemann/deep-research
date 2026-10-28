@@ -246,11 +246,11 @@ type deadlineRecorder struct {
 	budget time.Duration
 }
 
-func (d *deadlineRecorder) Plan(ctx context.Context, q string, subTopics int) (agent.Outline, error) {
+func (d *deadlineRecorder) Plan(ctx context.Context, q string, b agent.Breadth) (agent.Outline, error) {
 	if dl, ok := ctx.Deadline(); ok {
 		d.budget = time.Until(dl)
 	}
-	return d.Assistant.Plan(ctx, q, subTopics)
+	return d.Assistant.Plan(ctx, q, b)
 }
 
 // stub is an assistant that makes no network call, so a test can drive the
@@ -270,7 +270,7 @@ func (stub) Summarize(context.Context, string) (*agent.Summary, error) {
 	return &agent.Summary{Report: "stub report", Executive: "stub", Confidence: "low"}, nil
 }
 
-func (stub) Plan(_ context.Context, question string, _ int) (agent.Outline, error) {
+func (stub) Plan(_ context.Context, question string, _ agent.Breadth) (agent.Outline, error) {
 	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: question}}}, nil
 }
 
@@ -347,7 +347,7 @@ type blockingPlan struct {
 	started chan struct{}
 }
 
-func (b blockingPlan) Plan(ctx context.Context, _ string, _ int) (agent.Outline, error) {
+func (b blockingPlan) Plan(ctx context.Context, _ string, _ agent.Breadth) (agent.Outline, error) {
 	close(b.started)
 	<-ctx.Done()
 	return agent.Outline{}, ctx.Err()
@@ -394,7 +394,7 @@ type handedPlan struct {
 	queries *[]string
 }
 
-func (h handedPlan) Plan(context.Context, string, int) (agent.Outline, error) {
+func (h handedPlan) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
 	return agent.Outline{}, errors.New("planned again")
 }
 
@@ -554,7 +554,7 @@ type stopsAt struct {
 	cancel context.CancelFunc
 }
 
-func (s *stopsAt) Plan(context.Context, string, int) (agent.Outline, error) {
+func (s *stopsAt) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
 	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}, {ID: "2", Name: "Beta"}, {ID: "3", Name: "Gamma"}}}, nil
 }
 

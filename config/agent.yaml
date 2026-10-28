@@ -145,7 +145,9 @@ follow_up_instructions: |
   time-sensitive or consequential point resting on one secondary source
   calls for a search of the authoritative record or the strongest applicable
   evidence. Return at most three, and none when the findings already answer
-  every part of the question.
+  every part of the question. A search that would only add detail to a part
+  the findings already answer is not worth running: an empty list is the
+  right answer then, and returning three is never the goal.
 
   Write each query as keywords a person would type into a search engine,
   under 80 characters, in the question's language unless the source's own

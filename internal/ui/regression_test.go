@@ -7,6 +7,7 @@ package ui
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -595,11 +596,11 @@ type progressDuringPlan struct {
 
 func (p *progressDuringPlan) SetProgress(logf func(string)) { p.logf = logf }
 
-func (p *progressDuringPlan) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
+func (p *progressDuringPlan) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
 	if p.logf != nil {
 		p.logf(p.msg)
 	}
-	return p.fakeAssistant.Plan(ctx, question, subTopics)
+	return p.fakeAssistant.Plan(ctx, question, b)
 }
 
 // syncBuffer is a bytes.Buffer safe to read while a goroutine writes to it.
@@ -633,8 +634,8 @@ func TestDepthTierSetsPlanBreadth(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fa.asked != tier.SubTopics || tier.SubTopics == 0 {
-			t.Errorf("%s: planner asked for %d sub-topics, want the tier's %d", tier.Key, fa.asked, tier.SubTopics)
+		if fa.asked.Max != tier.SubTopics || fa.asked.Exact || tier.SubTopics == 0 {
+			t.Errorf("%s: planner asked for %+v, want up to the tier's %d", tier.Key, fa.asked, tier.SubTopics)
 		}
 		seen[tier.Key] = plan.MaxSources
 	}
@@ -663,15 +664,18 @@ func TestPlanBreadthIsCappedAtTheTier(t *testing.T) {
 // more than that to stand in for a model ignoring the request.
 type breadthRecorder struct {
 	*fakeAssistant
-	asked int
+	asked agent.Breadth
 	over  int
+	// give, when set, is how many sub-topics to return, standing in for a
+	// planner that chose fewer than its ceiling.
+	give int
 }
 
-func (b *breadthRecorder) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
-	b.asked = subTopics
-	n := subTopics
-	if b.over > 0 {
-		n = b.over
+func (r *breadthRecorder) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
+	r.asked = b
+	n := cmp.Or(r.give, b.Max)
+	if r.over > 0 {
+		n = r.over
 	}
 	out := make([]agent.SubTopic, n)
 	for i := range out {
@@ -3038,8 +3042,8 @@ type fixingPlanner struct {
 	fixed string
 }
 
-func (f *fixingPlanner) Plan(ctx context.Context, question string, subTopics int) (agent.Outline, error) {
-	out, err := f.fakeAssistant.Plan(ctx, question, subTopics)
+func (f *fixingPlanner) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
+	out, err := f.fakeAssistant.Plan(ctx, question, b)
 	out.Question = f.fixed
 	return out, err
 }
@@ -3334,5 +3338,114 @@ func TestCancelledBriefLeavesTheScreenWhereItWas(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, eraseToEnd) {
 		t.Errorf("cancelled brief not cleared:\n%q", out)
+	}
+}
+
+// Every plan had the tier's four sub-topics, so a one-fact question got four
+// overlapping branches. The planner is now asked for up to the tier's count
+// and a plan of fewer is run as planned, budgeted for the branches it has.
+func TestPlannerMayChooseFewerSubTopicsThanTheTier(t *testing.T) {
+	tier := depthMode("standard")
+	fa := &breadthRecorder{fakeAssistant: &fakeAssistant{}, give: 2}
+	plan, err := NewPlanner(fa, tier).Plan(context.Background(), "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.SubTopics) != 2 {
+		t.Fatalf("plan has %d sub-topics, want the planner's 2", len(plan.SubTopics))
+	}
+	if want := 2 * tier.MaxSources; plan.MaxSources != want || plan.PerTopic() != tier.MaxSources {
+		t.Errorf("budget %d (%d per sub-agent), want %d (%d each)", plan.MaxSources, plan.PerTopic(), want, tier.MaxSources)
+	}
+}
+
+// --topics asks for an exact count in any tier, bounded so a typo cannot
+// spread the run budget over dozens of branches.
+func TestTopicsAsksForAnExactCount(t *testing.T) {
+	for _, tc := range []struct{ asked, want int }{{5, 5}, {1, 1}, {40, MaxSubTopics}} {
+		fa := &breadthRecorder{fakeAssistant: &fakeAssistant{}}
+		pl := NewPlanner(fa, depthMode("quick"))
+		pl.SubTopics = tc.asked
+		plan, err := pl.Plan(context.Background(), "q")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !fa.asked.Exact || fa.asked.Max != tc.want || len(plan.SubTopics) != tc.want {
+			t.Errorf("--topics %d: asked %+v, planned %d, want exactly %d", tc.asked, fa.asked, len(plan.SubTopics), tc.want)
+		}
+	}
+}
+
+// The follow-up round ran on every run, whatever the findings, with no way
+// to turn it off. A plan with it off makes no follow-up call and still
+// analyses what the planned searches found.
+func TestFollowUpRoundOffMakesNoCall(t *testing.T) {
+	fa := &followUpAnalyzer{fakeAssistant: &fakeAssistant{}, followUp: queries("widgetdb limits")}
+	plan := newTestPlan("quick", nil)
+	plan.NoFollowUps = true
+	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fa.followCalls != 0 {
+		t.Errorf("follow-up call made %d times with the round off, want none", fa.followCalls)
+	}
+	if len(fa.prompts) != 1 || res.Analysis == nil {
+		t.Errorf("analyze ran %d times with the round off, want once", len(fa.prompts))
+	}
+}
+
+// Options.NoFollowUps reaches the plan the planner makes, and f in the brief
+// turns it back on before the run.
+func TestBriefFTogglesTheFollowUpRound(t *testing.T) {
+	for _, tc := range []struct {
+		keys string
+		off  bool
+	}{{"\r", true}, {"f\r", false}} {
+		res, err := Run(context.Background(), Options{
+			Question: "q", Assistant: &fakeAssistant{}, NoFollowUps: true, OutDir: t.TempDir(),
+			Stdout: io.Discard, Stderr: io.Discard, KeyScript: tc.keys,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Plan == nil || res.Plan.NoFollowUps != tc.off {
+			t.Errorf("keys %q: plan %+v, want follow-ups off=%v", tc.keys, res.Plan, tc.off)
+		}
+	}
+}
+
+// A plan written by --plan-only keeps the round's setting through an edit,
+// and one written before the setting existed runs the round.
+func TestReadPlanKeepsTheFollowUpSetting(t *testing.T) {
+	for in, off := range map[string]bool{
+		`{"question":"q","depth":{"key":"quick"},"sub_topics":[{"name":"A"}]}`:                      false,
+		`{"question":"q","depth":{"key":"quick"},"sub_topics":[{"name":"A"}],"no_follow_ups":true}`: true,
+	} {
+		p, err := ReadPlan(strings.NewReader(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.NoFollowUps != off {
+			t.Errorf("%s: follow-ups off=%v, want %v", in, p.NoFollowUps, off)
+		}
+	}
+}
+
+// The brief's key hints grew past 80 columns with [f], and a row clipped at
+// the width lost the last hint, the one that says how to cancel.
+func TestBriefHintsWrapOnANarrowTerminal(t *testing.T) {
+	r := &Renderer{T: Theme{}, width: 60}
+	rows := r.hintRows("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [f] follow-ups   [q] cancel")
+	if len(rows) < 2 {
+		t.Fatalf("hints on %d row(s) at width 60, want them wrapped", len(rows))
+	}
+	for _, row := range rows {
+		if dispWidth(row) > 60 {
+			t.Errorf("hint row %q is %d columns, wider than 60", row, dispWidth(row))
+		}
+	}
+	if !strings.Contains(rows[len(rows)-1], "[q] cancel") {
+		t.Errorf("last row %q lost the cancel hint", rows[len(rows)-1])
 	}
 }
