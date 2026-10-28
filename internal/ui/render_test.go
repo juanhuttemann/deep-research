@@ -829,3 +829,40 @@ func TestKeyHintsPaintKeysApartFromActions(t *testing.T) {
 		t.Errorf("without colour hints = %q, want the text unchanged", got)
 	}
 }
+
+// The tail named a row's sub-agent by its ID, "1" or "f3", which only
+// someone who knew the IDs could read. It names it as the tree does, in the
+// colour its tree row has; a phase heads the rows under it; what the run
+// reports of itself is gray under the research.
+func TestActivityNamesTheSubAgent(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 30, 100)
+	r.Emit(Event{Type: SubAgent, SubID: "1", SubName: "Specs", SubState: "running"})
+	r.Emit(Event{Type: SubAgent, SubID: "f1", SubName: "Replication status", SubState: "running"})
+	r.Emit(Event{Type: Search, SubID: "f1", Line: "Searching: lk-99 replication"})
+	r.Emit(Event{Type: Info, Detail: "searxng   10 results from search.example"})
+	r.Emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings"})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rows := r.activityLines(3)
+	hue := agentHues[1]
+	if !strings.Contains(rows[0], hue+"Replication status") || strings.Contains(rows[0], " f1 ") ||
+		!strings.Contains(rows[0], r.T.gray("search")+"  lk-99 replication") {
+		t.Errorf("search row = %q, want the sub-agent's name in its hue, not its ID", rows[0])
+	}
+	if !strings.Contains(strings.Join(r.agentLines(), "\n"), hue+"Replication status") {
+		t.Errorf("the tree does not show the sub-agent in the tail's hue")
+	}
+	if !strings.Contains(rows[1], r.T.gray("searxng   10 results from search.example")) {
+		t.Errorf("engine row = %q, want it gray", rows[1])
+	}
+	if want := "  " + r.T.dim("0:00 ") + "  " + r.T.cyan("▸") + " " + r.T.bold("Synthesizing findings"); rows[2] != want {
+		t.Errorf("phase row = %q, want %q", rows[2], want)
+	}
+	r.T.Enabled = false
+	for _, l := range r.activityLines(3) {
+		if strings.Contains(l, "\x1b") {
+			t.Errorf("without colour a row carries an escape: %q", l)
+		}
+	}
+}
