@@ -17,6 +17,7 @@ import (
 type Key byte
 
 const (
+	KeyA     Key = 'a' // show or hide the activity tail
 	KeyB     Key = 'b' // send to background
 	KeyQ     Key = 'q' // cancel the run
 	KeyD     Key = 'd' // change depth mode
@@ -116,6 +117,8 @@ func (b *byteReader) Raw() bool { return true }
 // keyFromByte maps a raw byte to a Key.
 func keyFromByte(b byte) Key {
 	switch Key(b) {
+	case KeyA:
+		return KeyA
 	case KeyB:
 		return KeyB
 	case KeyQ:

@@ -866,3 +866,30 @@ func TestActivityNamesTheSubAgent(t *testing.T) {
 		}
 	}
 }
+
+// TestActivityTailHiddenUntilToggled: the live frame starts without the
+// activity tail, a shows it and a again hides it, and the key hint says
+// which one a will do.
+func TestActivityTailHiddenUntilToggled(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 30, 100)
+	r.T.Enabled = false
+	r.Emit(Event{Type: SubAgent, SubID: "1", SubName: "Specs", SubState: "running"})
+	r.Emit(Event{Type: Info, Detail: "searxng   10 results from search.example"})
+	frame := func() string {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return strings.Join(r.treeLines(), "\n")
+	}
+	if f := frame(); strings.Contains(f, "10 results from search.example") || !strings.Contains(f, "[a] show activity") {
+		t.Fatalf("the frame starts with the tail shown or no hint to show it:\n%s", f)
+	}
+	r.ToggleActivity()
+	if f := frame(); !strings.Contains(f, "10 results from search.example") || !strings.Contains(f, "[a] hide activity") {
+		t.Fatalf("a did not show the tail:\n%s", f)
+	}
+	r.ToggleActivity()
+	if f := frame(); strings.Contains(f, "10 results from search.example") {
+		t.Fatalf("a second a did not hide the tail:\n%s", f)
+	}
+}

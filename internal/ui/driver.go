@@ -26,6 +26,9 @@ type Driver struct {
 	Parallelism int
 
 	now func() time.Time
+	// toggleActivity is what a does: the live frame shows or hides its
+	// activity tail. nil when there is no frame.
+	toggleActivity func()
 
 	detached bool
 	// keysDone is closed when the key reader ends; nil when none started.
@@ -180,6 +183,10 @@ func (d *Driver) startKeyReader() {
 			case KeyEsc, KeyCtrlC:
 				if d.cancel != nil {
 					d.cancel()
+				}
+			case KeyA:
+				if d.toggleActivity != nil {
+					d.toggleActivity()
 				}
 			case KeyCtrlZ, KeyB:
 				d.detach()

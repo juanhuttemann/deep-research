@@ -7,6 +7,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The live frame's activity tail is hidden at the start of a run; `a`
+  shows it and hides it again, and the key hints say which.
 - The start screen's key hints no longer list `[tab] use the example`;
   Tab still takes it.
 - The planning spinner says how long it may wait as `2m`, not `2m0s`, and
