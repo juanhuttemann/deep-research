@@ -38,10 +38,12 @@ as typed. Grammar is left as typed.
 ### A bare `drsh`
 
 On a terminal, `drsh` with no question opens a start screen, the
-terminal's side of what [`serve`](#serve)'s page offers, drawn as the
+terminal's side of what [`serve`](#serve)'s page offers, headed as the
 live frame is: the title with the model and search the runs will use, as
 the page's top bar names them, and the page's `research ▸` box for the
-question, with an example in it that Tab takes. Enter runs it as `-p` would, the brief and the
+question, with an example in it that Tab takes. It is drawn in place,
+under what the terminal already shows, as the `ask ▸` box and the
+`/resume` and `/model` lists are, so the three sit alike. Enter runs it as `-p` would, the brief and the
 live frame included, and then takes questions about its report in an
 `ask ▸` box drawn like the start screen's (see [`ask`](#ask)). An empty
 line or Esc there brings the screen back for the next question; Esc or

@@ -19,6 +19,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   where the terminal used to read the line: a question longer than a row
   still wraps, under its first column, and Esc goes back as an empty line
   does. A terminal that will not go raw reads the line as before.
+- The start screen and the `/resume` and `/model` lists are drawn in
+  place, under what the terminal shows, as the `ask ▸` box is. The lists
+  opened on the alternate screen and the start screen from the top of the
+  screen, and in Warp, which shows output at the foot of the window, the
+  input moved between the foot and the top. The lists are cleared when
+  they close, so the report above them shows as it was.
 - The live frame, the brief, the `ask ▸` box and the `/resume` and
   `/model` pickers end on a blank row under their key hints, as the start
   screen does.

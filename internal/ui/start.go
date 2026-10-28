@@ -26,15 +26,18 @@ var examples = []string{
 // AskQuestion is the start screen of a bare drsh, the terminal's side of
 // the browser page's: the model and search runs will use, and a box for the
 // question with an example in it that Tab takes. It is drawn and read as the brief
-// is, so the two look and answer keys alike. note, when set, says why the
-// last step ended: the screen's first paint erases what was printed before
-// it. It returns "" when the reader quit (Esc, Ctrl-C).
+// is, so the two look and answer keys alike, and drawn in place, under what
+// the terminal shows (see region). note, when set, says why the last step
+// ended, on the screen where it is read. It returns "" when the reader quit
+// (Esc, Ctrl-C).
 func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup, note string) string {
 	sig := catchSignals(true)
 	in := NewInput(stdin, nil)
 	r := NewRenderer(stdout, Theme{Enabled: !noColor})
 	defer guardTerminal(sig, in, r)()
-	return askQuestion(in, r, s, examples[rand.IntN(len(examples))], note)
+	keys := &keptInput{Input: in}
+	defer r.Inline(keys)()
+	return askQuestion(keys, r, s, examples[rand.IntN(len(examples))], note)
 }
 
 func askQuestion(in Input, r *Renderer, s agent.Setup, example, note string) string {
