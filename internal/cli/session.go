@@ -132,7 +132,13 @@ func (s *session) after(res ui.RunResult, err error) {
 		s.say("error: " + err.Error())
 		return
 	}
-	if res.Cancelled || res.Detached || res.JSONPath == "" {
+	if res.Cancelled {
+		// Said on the start screen when the run goes back there, where it is
+		// read; printed, it sat between the cleared brief and that screen.
+		s.say("research cancelled")
+		return
+	}
+	if res.Detached || res.JSONPath == "" {
 		return
 	}
 	if m, err := ui.LoadMeta(res.JSONPath); err != nil {
