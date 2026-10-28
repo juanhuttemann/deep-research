@@ -1086,6 +1086,19 @@ func clockTime(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", s/60, s%60)
 }
 
+// roundDuration renders a deadline as it is said: "2m", "1m30s", "1h", where
+// Duration.String spells a whole two minutes "2m0s".
+func roundDuration(d time.Duration) string {
+	s := d.Round(time.Second).String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
+}
+
 // tickProgress re-reports the last partial every interval until stop. A model
 // that sends nothing produces no stream updates at all, so without a ticker
 // the wait line froze and the stall notice could never fire. No call to
@@ -1595,7 +1608,7 @@ const defaultSubTopicCount = 4
 func (a *impl) Plan(ctx context.Context, question string, subTopics int) (Outline, error) {
 	// The deadline is part of the answer to "how long will this sit here":
 	// planning is one call with nothing on screen behind it.
-	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s, %s)", a.model, a.timeout, a.effortLabel(a.effort.Plan)))
+	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s)", a.model, roundDuration(a.timeout)))
 	out, err := a.plan(ctx, planPrompt(question, subTopics))
 	if err != nil {
 		return Outline{}, err

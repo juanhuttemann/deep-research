@@ -5,6 +5,22 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The start screen's key hints no longer list `[tab] use the example`;
+  Tab still takes it.
+- The planning spinner says how long it may wait as `2m`, not `2m0s`, and
+  no longer names the plan call's reasoning effort.
+- The brief no longer shows the question as typed (`typed as:`) under the
+  planner's corrected one.
+
+### Fixed
+
+- The brief is drawn in place, under what the terminal shows, as the start
+  screen is, and cancelling it clears it: the start screen comes back on
+  the rows it had, with the `cancelled` notice on it, where the old brief
+  stayed on the screen with the start screen drawn under it.
+
 ## [0.25.0] - 2026-10-27
 
 ### Added

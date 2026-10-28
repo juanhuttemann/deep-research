@@ -567,7 +567,7 @@ func (r *Renderer) paintInlineLocked() {
 	r.inline.paint(append([]string{""}, r.frameLines()...))
 }
 
-// Inline draws the start screen and the picker in place, at the cursor, in
+// Inline draws the start screen, the picker and the brief in place, at the cursor, in
 // rows that keys reads the terminal's answers from (see region), where they
 // were drawn from the top of the screen. It returns what clears them, which
 // leaves the cursor where they began. It does nothing for a renderer that
@@ -697,11 +697,9 @@ func (r *Renderer) briefHead() []string {
 		r.rule(),
 		"  " + r.T.bold(r.plan.Question),
 	}
-	// The fixed question titles the report and its files, so the reader sees
-	// what was changed while [q] can still stop the run.
-	if r.plan.Asked != "" {
-		head = append(head, "  "+r.T.dim("typed as: "+r.plan.Asked))
-	}
+	// The question as typed is not shown under the planner's fix: the fix
+	// is nearly always a capital and a question mark, and a row repeating
+	// the question to say so was noise.
 	return append(head,
 		"",
 		// The per-sub-agent figure is what the reader asked for with --sources

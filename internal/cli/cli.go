@@ -51,6 +51,9 @@ func New(load func() (Deps, error)) *cobra.Command {
 			return interactive(cmd, load)
 		}
 		res, err := research(cmd, load)
+		if res.Cancelled {
+			fmt.Fprintln(cmd.ErrOrStderr(), "cancelled")
+		}
 		if jsonl, _ := cmd.Flags().GetBool("jsonl"); jsonl {
 			ui.JSONL{W: cmd.OutOrStdout()}.Emit(doneEvent(res, err))
 		}
@@ -517,7 +520,6 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		return res, fmt.Errorf("research failed: %w", err)
 	}
 	if res.Cancelled {
-		fmt.Fprintln(cmd.ErrOrStderr(), "cancelled")
 		return res, nil
 	}
 	if planOnly {

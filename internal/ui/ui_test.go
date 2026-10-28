@@ -2252,7 +2252,7 @@ func TestStartScreenFrame(t *testing.T) {
 	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, "an example?", "research failed: no key")
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
-		"research ▸ █an example?", "[enter] research   [tab] use the example   [esc] quit",
+		"research ▸ █an example?", "[enter] research   [esc] quit",
 		// Why the last run ended is said on the screen, where it is read.
 		"research failed: no key"} {
 		if !strings.Contains(frame, want) {
@@ -2279,7 +2279,7 @@ func TestStartScreenCommandMenu(t *testing.T) {
 			t.Errorf("menu lacks %q:\n%s", want, frame)
 		}
 	}
-	if strings.Contains(frame, "/model") || strings.Contains(frame, "use the example") {
+	if strings.Contains(frame, "/model") || strings.Contains(frame, "[enter] research") {
 		t.Errorf("menu shows /model or the screen's keys for /r:\n%s", frame)
 	}
 	r.SetCommand("why /r", 0)

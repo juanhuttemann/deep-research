@@ -73,7 +73,7 @@ func (r *Renderer) startLines() []string {
 	chips := "model " + r.setup.Model + " · search " + searchChip(r.setup)
 	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule()}
 	out = append(out, r.commandBlock(r.promptText, r.commandAt,
-		"[enter] research   [tab] use the example   [esc] quit", "quit")...)
+		"[enter] research   [esc] quit", "quit")...)
 	if r.briefNote != "" {
 		for _, l := range wrapWords(r.briefNote, r.width-4) {
 			out = append(out, "  "+r.T.yellow(l))

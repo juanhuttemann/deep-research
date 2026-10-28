@@ -3046,7 +3046,9 @@ func (f *fixingPlanner) Plan(ctx context.Context, question string, subTopics int
 
 // The question as typed ("overalll", over two lines) titled the report and
 // named its files. The planner's fix is what the run reports under, and the
-// brief keeps what was typed so the change is seen before launch.
+// plan keeps what was typed for the page. The terminal's brief no longer
+// shows it: the fix is nearly always a capital and a question mark, and a
+// "typed as" row repeating the question read as noise.
 func TestFixedQuestionTitlesTheRun(t *testing.T) {
 	a := &fixingPlanner{fakeAssistant: &fakeAssistant{}, fixed: "Best cloud storage overall"}
 	var stdout, stderr bytes.Buffer
@@ -3065,8 +3067,8 @@ func TestFixedQuestionTitlesTheRun(t *testing.T) {
 	}
 	r := NewRenderer(discard{}, Theme{})
 	r.plan = res.Plan
-	if head := strings.Join(r.briefHead(), "\n"); !strings.Contains(head, "typed as: Best cloud storage overalll") {
-		t.Errorf("brief does not show what was typed:\n%s", head)
+	if head := strings.Join(r.briefHead(), "\n"); strings.Contains(head, "typed as") {
+		t.Errorf("brief repeats the question as typed:\n%s", head)
 	}
 }
 
@@ -3309,5 +3311,28 @@ func TestCheckQuotesCountsOnlyQuotesTheReaderGets(t *testing.T) {
 	}
 	if !slices.ContainsFunc(sink.TimelineSnapshot(), func(e Event) bool { return strings.HasPrefix(e.Detail, "1 quoted passage is") }) {
 		t.Errorf("want one quote counted: %v", sink.TimelineSnapshot())
+	}
+}
+
+// The brief was drawn from the top of the screen, under a start screen drawn
+// in place: cancelling it brought the start screen back at the top, not on
+// the rows it had been on.
+func TestCancelledBriefLeavesTheScreenWhereItWas(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{})
+	r.width, r.rows, r.plain = 100, 30, false
+	plan := &Plan{Question: "q?", SubTopics: []SubTopic{{Name: "one"}}}
+	if _, cancelled := (Options{}).confirmBrief(NewByteReader([]byte("q")), r, plan, true); !cancelled {
+		t.Fatal("q did not cancel the brief")
+	}
+	out := buf.String()
+	if !strings.Contains(out, "RESEARCH BRIEF") {
+		t.Fatalf("brief not drawn:\n%q", out)
+	}
+	if strings.Contains(out, eraseScreen) || strings.Contains(out, cursorHome) {
+		t.Errorf("brief drawn from the top of the screen:\n%q", out)
+	}
+	if !strings.HasSuffix(out, eraseToEnd) {
+		t.Errorf("cancelled brief not cleared:\n%q", out)
 	}
 }

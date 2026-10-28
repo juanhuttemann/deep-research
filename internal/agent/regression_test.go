@@ -1280,3 +1280,22 @@ func checkFix(t *testing.T, asked, proposed, want string) {
 		t.Errorf("%q fixed as %q: question = %q, want %q", asked, proposed, got.Question, want)
 	}
 }
+
+// The planning line read "(up to 2m0s, effort low)": Duration.String's
+// spelling, and an effort level the reader did not choose and cannot act on
+// while waiting.
+func TestRoundDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		2 * time.Minute:                  "2m",
+		90 * time.Second:                 "1m30s",
+		45 * time.Second:                 "45s",
+		time.Hour:                        "1h",
+		time.Hour + 5*time.Minute:        "1h5m",
+		time.Hour + 5*time.Second:        "1h0m5s",
+		2*time.Minute + time.Millisecond: "2m",
+	} {
+		if got := roundDuration(d); got != want {
+			t.Errorf("roundDuration(%v) = %q, want %q", d, got, want)
+		}
+	}
+}

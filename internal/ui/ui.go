@@ -265,7 +265,15 @@ func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive 
 		}
 		r.SetBriefNote(keys + " ignored — review the plan, then press Enter")
 	}
-	plan, action := waitBrief(input, r, plan, (*Plan).WithDepth)
+	// Drawn in place, as the start screen it follows is, and cleared after:
+	// drawn from the top of the screen, a cancelled brief brought the start
+	// screen back at the top, not where it had been. A launch clears it
+	// before the live frame takes the screen.
+	keys := &keptInput{Input: input}
+	if interactive {
+		defer r.Inline(keys)()
+	}
+	plan, action := waitBrief(keys, r, plan, (*Plan).WithDepth)
 	return plan, action == actionCancel
 }
 
