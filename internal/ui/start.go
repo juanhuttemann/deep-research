@@ -37,62 +37,11 @@ func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup,
 	return askQuestion(in, r, s, examples[rand.IntN(len(examples))], note)
 }
 
-// commands are the session's (cli/session.go), offered in a menu under the
-// box while a "/" is being typed.
-var commands = []Choice{{Title: "/resume", Note: "past runs"}, {Title: "/model", Note: "change the model"}}
-
-// completions is the commands text is the start of, while it can still be
-// one: a "/" and no space.
-func completions(text string) []Choice {
-	if !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \t") {
-		return nil
-	}
-	var out []Choice
-	for _, c := range commands {
-		if strings.HasPrefix(c.Title, strings.ToLower(text)) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 func askQuestion(in Input, r *Renderer, s agent.Setup, example, note string) string {
 	r.RenderStart(s, example, note)
-	text, at := "", 0
-	echo := func(t string) {
-		if t != text {
-			text, at = t, 0
-		}
-		r.SetCommand(text, at)
-	}
-	arrow := func(k byte) {
-		switch k {
-		case 'A':
-			at = max(at-1, 0)
-		case 'B':
-			at = max(min(at+1, len(completions(text))-1), 0)
-		}
-		r.SetCommand(text, at)
-	}
-	// Tab takes the highlighted command over the example, and Enter on
-	// the start of one runs it, rather than "unknown command /r".
-	pick := func(t string) string {
-		if m := completions(t); len(m) > 0 {
-			return m[min(at, len(m)-1)].Title
-		}
-		return t
-	}
-	tab := func(t string) string {
-		if t == "" {
-			return example
-		}
-		return pick(t)
-	}
-	q, ok := "", true
-	for ok && q == "" {
-		q, ok = readPromptRaw(in, nil, tab, echo, arrow)
-	}
-	return pick(q)
+	e := &commandEditor{example: example, paint: r.SetCommand}
+	q, _ := e.read(in, true)
+	return q
 }
 
 // SetCommand is SetPrompt for the start screen, with the command menu's
@@ -120,32 +69,13 @@ func (r *Renderer) RenderStart(s agent.Setup, example, note string) {
 func (r *Renderer) startLines() []string {
 	chips := "model " + r.setup.Model + " · search " + searchChip(r.setup)
 	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule()}
-	if m := completions(r.promptText); len(m) > 0 {
-		out = append(append(out, r.commandLines(m)...), "",
-			"  "+r.T.hints("[tab] complete   [enter] run   [↑↓] move   [esc] quit"), "")
-	} else {
-		out = append(out, "  "+r.T.hints("[enter] research   [tab] use the example   [esc] quit"), "")
-	}
+	out = append(out, r.commandBlock(r.promptText, r.commandAt,
+		"[enter] research   [tab] use the example   [esc] quit", "quit")...)
 	if r.briefNote != "" {
 		for _, l := range wrapWords(r.briefNote, r.width-4) {
 			out = append(out, "  "+r.T.yellow(l))
 		}
 		out = append(out, "")
-	}
-	return out
-}
-
-// commandLines is the command menu, the picker's rows: what is typed bold
-// in each, the highlighted one marked.
-func (r *Renderer) commandLines(m []Choice) []string {
-	n := len(r.promptText)
-	out := make([]string, 0, len(m))
-	for i, c := range m {
-		row := "    " + r.T.bold(c.Title[:n]) + r.T.gray(c.Title[n:])
-		if i == min(r.commandAt, len(m)-1) {
-			row = "  " + r.T.magenta("▸ ") + r.T.bold(c.Title[:n]) + c.Title[n:]
-		}
-		out = append(out, row+"  "+r.T.gray(c.Note))
 	}
 	return out
 }
@@ -163,19 +93,13 @@ func AskHeading(noColor bool) string {
 	return "\n  " + t.bold(t.cyan("Ask about this report"))
 }
 
-// AskBox draws the box a question about a report is typed in, as the start
-// screen draws its own: the label between rules, the keys under it, back
+// AskBox draws the ask ▸ box for a terminal that will not go raw, which
+// reads the line itself, as the start screen draws its own: the label between rules, the keys under it, back
 // saying what an empty line does, a blank row under them as the start
 // screen ends. The cursor is left after the label, where the terminal echoes
 // and edits the line; EndAsk erases what is under it once it is read.
 func AskBox(w io.Writer, noColor bool, back string) {
 	r := NewRenderer(w, Theme{Enabled: !noColor})
-	// The rules stop a column short of the edge. One that filled the row
-	// left the cursor waiting to wrap, a terminal that wrapped it took a
-	// row more, and the move back up landed on the lower rule: the label
-	// drawn twice, once over the rule. The frame clears that state with
-	// its erase-line; a line drawn once, scrolling, has no such row to own.
-	r.width--
 	label := AskPrompt(noColor)
 	_, _ = io.WriteString(w, "\n"+r.rule()+"\n"+label+"\n"+r.rule()+"\n  "+
 		r.T.hints("[enter] ask   [empty enter] "+back+"   [/resume] past runs")+"\n\x1b[3A\r"+label)

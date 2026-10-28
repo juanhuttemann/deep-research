@@ -131,9 +131,6 @@ func (t *ttyReader) NextWithin(d time.Duration) (byte, error) {
 	return t.read()
 }
 
-// errNoKeyPending reports that nothing arrived inside the escape window.
-var errNoKeyPending = errors.New("no key pending")
-
 // Next waits for a key, in keyPoll steps so that a Close ends the wait: a
 // blocking read(2) on stdin outlived the run it served.
 func (t *ttyReader) Next() (byte, error) {

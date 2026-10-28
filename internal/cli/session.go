@@ -77,8 +77,9 @@ func (s *session) loop() error {
 }
 
 // read is the next line at the research box or, with a report open, at its
-// ask prompt; ok is false when the reader is done. The ask prompt is read
-// as the terminal reads a line, which echoes, edits and wraps it.
+// ask prompt; ok is false when the reader is done. On a terminal the ask
+// prompt is read a key at a time, as the research box is, so its commands
+// complete; elsewhere it is read a line at a time.
 func (s *session) read() (string, bool) {
 	if s.run == "" {
 		if !s.home {
@@ -93,6 +94,9 @@ func (s *session) read() (string, bool) {
 		back = "new research"
 	}
 	errOut := s.cmd.ErrOrStderr()
+	if f, ok := s.cmd.InOrStdin().(*os.File); ok && ui.IsTTYFile(f) {
+		return ui.Ask(f, errOut, s.noColor(), back)
+	}
 	ui.AskBox(errOut, s.noColor(), back)
 	ok := s.in.Scan()
 	if !ok {

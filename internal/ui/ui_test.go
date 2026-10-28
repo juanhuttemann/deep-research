@@ -2431,10 +2431,8 @@ func TestSessions(t *testing.T) {
 func TestAskBox(t *testing.T) {
 	var b bytes.Buffer
 	AskBox(&b, true, "new research")
-	// Rules a column short of the 80-column edge: a full one wrapped in
-	// some terminals, and the label was drawn a second time over the lower
-	// rule. A blank row under the keys, as the start screen ends.
-	want := "\n  " + strings.Repeat("─", 77) + "\n  ask ▸ \n  " + strings.Repeat("─", 77) +
+	// A blank row under the keys, as the start screen ends.
+	want := "\n  " + strings.Repeat("─", 78) + "\n  ask ▸ \n  " + strings.Repeat("─", 78) +
 		"\n  [enter] ask   [empty enter] new research   [/resume] past runs" + "\n\x1b[3A\r  ask ▸ "
 	if b.String() != want {
 		t.Errorf("AskBox = %q, want %q", b.String(), want)
@@ -2442,5 +2440,102 @@ func TestAskBox(t *testing.T) {
 	th := Theme{Enabled: true}
 	if got := th.hints("[empty enter] back"); got != "[empty enter]"+th.gray(" back") {
 		t.Errorf("hints = %q", got)
+	}
+}
+
+// The ask ▸ box reads a key at a time, as the start screen does, so its
+// commands complete. Esc goes back as an empty line does; Ctrl-C and Ctrl-D
+// end the questions, as they did when the terminal read the line.
+func TestAskBoxRead(t *testing.T) {
+	cases := []struct {
+		name, keys, want string
+		ok               bool
+	}{
+		{"a question", "  why so fast \r", "why so fast", true},
+		{"tab completes a command", "/r\t\r", "/resume", true},
+		{"enter runs the start of one", "/m\r", "/model", true},
+		{"down moves the highlight", "/\x1b[B\r", "/model", true},
+		{"empty enter goes back", "\r", "", true},
+		{"esc goes back", "half\x1b", "", true},
+		{"ctrl-c ends", "half\x03", "", false},
+		{"ctrl-d ends", "\x04", "", false},
+		{"tab has no example here", "\tq\r", "q", true},
+	}
+	for _, c := range cases {
+		b := &askBox{r: NewRenderer(&bytes.Buffer{}, Theme{}), back: "new research", height: 1}
+		if got, ok := b.read(NewByteReader([]byte(c.keys))); got != c.want || ok != c.ok {
+			t.Errorf("%s: read = %q, %v; want %q, %v", c.name, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// The box is the start screen's: the menu under it while a command is
+// typed, keys without /resume otherwise, which the menu offers, and a blank
+// row under them. A question longer than the row wraps under its first
+// column, where the terminal's own line wrapped it.
+func TestAskBoxLines(t *testing.T) {
+	b := &askBox{r: NewRenderer(&bytes.Buffer{}, Theme{}), back: "new research"}
+	b.r.width = 40
+	plain := b.lines("", 0, true)
+	if got := plain[len(plain)-2]; got != "  [enter] ask   [empty enter] new research" || plain[len(plain)-1] != "" {
+		t.Errorf("keys = %q, want them without /resume and a blank row under them", plain[len(plain)-2:])
+	}
+	if frame := strings.Join(b.lines("/r", 0, true), "\n"); !strings.Contains(frame, "▸ /resume  past runs") || strings.Contains(frame, "/model") {
+		t.Errorf("menu for /r:\n%s", frame)
+	}
+	rows := b.prompt(strings.Repeat("x", 40), true)
+	if len(rows) != 2 || !strings.HasPrefix(rows[1], strings.Repeat(" ", 8)+"x") || !strings.HasSuffix(rows[1], "█") {
+		t.Errorf("long question rows = %q, want two, the second under the first's text", rows)
+	}
+	for _, r := range rows {
+		if w := dispWidth(r); w > 40 {
+			t.Errorf("row %q is %d columns wide", r, w)
+		}
+	}
+}
+
+// queuedInput is a terminal whose bytes are all waiting, which a scripted
+// byteReader does not report until its buffer is first filled.
+type queuedInput struct {
+	Input
+	b []byte
+}
+
+func (q *queuedInput) Next() (byte, error) { return q.NextWithin(0) }
+
+func (q *queuedInput) NextWithin(time.Duration) (byte, error) {
+	if len(q.b) == 0 {
+		return 0, io.EOF
+	}
+	c := q.b[0]
+	q.b = q.b[1:]
+	return c, nil
+}
+
+// The box asks the terminal where the cursor is, and the keys typed before
+// the answer are the reader's: they ate the "r" of "/r" typed quickly.
+func TestCursorRowKeepsKeys(t *testing.T) {
+	for _, c := range []struct {
+		name, in string
+		row      int
+		kept     string
+	}{
+		{"keys before the answer", "r\x1b[12;5Rx", 12, "rx"},
+		{"an arrow before the answer", "\x1b[A\x1b[3;1R", 3, "\x1b[A"},
+		{"no answer", "ab", 0, "ab"},
+	} {
+		k := &keptInput{Input: &queuedInput{Input: NewByteReader(nil), b: []byte(c.in)}}
+		row := cursorRow(k, func(string) {})
+		var rest []byte
+		for {
+			b, err := k.Next()
+			if err != nil {
+				break
+			}
+			rest = append(rest, b)
+		}
+		if row != c.row || string(rest) != c.kept {
+			t.Errorf("%s: row %d, keys %q; want %d, %q", c.name, row, rest, c.row, c.kept)
+		}
 	}
 }
