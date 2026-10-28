@@ -2224,6 +2224,15 @@ func TestAskQuestion(t *testing.T) {
 		// An arrow key is a sequence starting with Esc; it quit the screen,
 		// and the question typed so far with it.
 		{"arrow is not esc", "ab\x1b[Dc\r", "abc"},
+		// The command menu: Tab completes the highlighted command, the
+		// arrows move among those matching, and Enter on the start of one
+		// runs it rather than an unknown "/r".
+		{"tab completes a command", "/r\t\r", "/resume"},
+		{"enter runs the start of one", "/m\r", "/model"},
+		{"down moves the highlight", "/\x1b[B\t\r", "/model"},
+		{"typing resets the highlight", "/\x1b[Bm\x1b[A\t\r", "/model"},
+		{"no match is left as typed", "/x\t\r", "/x"},
+		{"a space ends the command", "/r x\t\r", "/r x"},
 	}
 	for _, c := range cases {
 		r := NewRenderer(&bytes.Buffer{}, Theme{})
@@ -2243,7 +2252,7 @@ func TestStartScreenFrame(t *testing.T) {
 	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, "an example?", "research failed: no key")
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
-		"research ▸ █an example?", "[enter] research   [tab] use the example   [/resume] past runs   [esc] quit",
+		"research ▸ █an example?", "[enter] research   [tab] use the example   [esc] quit",
 		// The screen's first paint erases what was printed before it, so
 		// why the last run ended is said on it.
 		"research failed: no key"} {
@@ -2254,6 +2263,29 @@ func TestStartScreenFrame(t *testing.T) {
 	r.SetPrompt("research", "typed")
 	if frame := strings.Join(r.frameLines(), "\n"); strings.Contains(frame, "an example?") {
 		t.Errorf("the example stays once something is typed:\n%s", frame)
+	}
+}
+
+// Typing a "/" opens the command menu under the box: the commands it can
+// still become, what is typed of each bold, the first highlighted, and the
+// menu's keys in place of the screen's.
+func TestStartScreenCommandMenu(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{Enabled: true})
+	r.width, r.rows, r.plain = 100, 30, false
+	r.RenderStart(agent.Setup{}, "an example?", "")
+	r.SetCommand("/r", 0)
+	frame := strings.Join(r.frameLines(), "\n")
+	for _, want := range []string{"▸ ", cBold + "/r" + cReset + "esume", "past runs", "complete"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("menu lacks %q:\n%s", want, frame)
+		}
+	}
+	if strings.Contains(frame, "/model") || strings.Contains(frame, "use the example") {
+		t.Errorf("menu shows /model or the screen's keys for /r:\n%s", frame)
+	}
+	r.SetCommand("why /r", 0)
+	if frame := strings.Join(r.frameLines(), "\n"); strings.Contains(frame, "complete") {
+		t.Errorf("menu shown for a question:\n%s", frame)
 	}
 }
 

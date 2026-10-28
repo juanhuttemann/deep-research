@@ -630,7 +630,7 @@ func TestThinkingIsWrappedUnderTheStatusRow(t *testing.T) {
 	for i := range words {
 		words[i] = "w" + strconv.Itoa(i)
 	}
-	for _, rows := range []int{40, 16} {
+	for _, rows := range []int{40, 17} {
 		var buf bytes.Buffer
 		r := liveRenderer(&buf, rows, 60)
 		r.Emit(Event{Type: SubAgent, SubID: "1", SubName: "Specs", SubState: "done"})

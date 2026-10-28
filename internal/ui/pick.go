@@ -51,7 +51,7 @@ func pick(in Input, r *Renderer, title, label string, rows []Choice) int {
 		paint()
 	}
 	for {
-		_, ok := readPromptRaw(in, []byte(text), "", echo, arrow)
+		_, ok := readPromptRaw(in, []byte(text), nil, echo, arrow)
 		if !ok {
 			return -1
 		}

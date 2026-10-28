@@ -347,7 +347,7 @@ func readPromptSeeded(in Input, seed string, echo func(string)) (string, bool) {
 		}
 		return line, line != ""
 	}
-	return readPromptRaw(in, nil, "", echo, nil)
+	return readPromptRaw(in, nil, nil, echo, nil)
 }
 
 // readPromptEdit opens the prompt with current already in the buffer, so a
@@ -358,13 +358,14 @@ func readPromptEdit(in Input, current string, echo func(string)) (string, bool) 
 	if !in.Raw() {
 		return readPromptSeeded(in, "", echo)
 	}
-	return readPromptRaw(in, []byte(current), "", echo, nil)
+	return readPromptRaw(in, []byte(current), nil, echo, nil)
 }
 
-// readPromptRaw runs the keystroke-at-a-time edit loop over buf. Tab in an
-// empty buffer takes example, as the page's question box does. arrow, when
-// set, is handed each arrow key's final byte.
-func readPromptRaw(in Input, buf []byte, example string, echo func(string), arrow func(byte)) (string, bool) {
+// readPromptRaw runs the keystroke-at-a-time edit loop over buf. tab, when
+// set, turns the line into what Tab makes of it: the start screen's takes
+// its example, as the page's question box does, or completes a command.
+// arrow, when set, is handed each arrow key's final byte.
+func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(string), arrow func(byte)) (string, bool) {
 	show := func() {
 		if echo != nil {
 			echo(string(buf))
@@ -393,8 +394,8 @@ func readPromptRaw(in Input, buf []byte, example string, echo func(string), arro
 		case byte(KeyCtrlC): // as Esc: raw mode makes it a key
 			return "", false
 		case '\t':
-			if len(buf) == 0 {
-				buf = []byte(example)
+			if tab != nil {
+				buf = []byte(tab(string(buf)))
 			}
 		case 0x7f, 0x08: // Backspace deletes a whole rune, not a byte
 			if _, n := utf8.DecodeLastRune(buf); n > 0 {
