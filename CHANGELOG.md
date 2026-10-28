@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-27
+
 ### Added
 
 - The `research ▸` and `ask ▸` boxes complete their commands: typing `/`
@@ -1302,7 +1304,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/juanhuttemann/deep-research/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/juanhuttemann/deep-research/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/juanhuttemann/deep-research/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/juanhuttemann/deep-research/compare/v0.21.1...v0.22.0
