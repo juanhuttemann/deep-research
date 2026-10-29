@@ -39,8 +39,11 @@ type Trace struct {
 	Plan    []agent.SubTopic `json:"plan"`
 	// NoFollowUps is the plan's: a resumed run that skipped the round would
 	// otherwise ask for one the run it continues never made.
-	NoFollowUps bool     `json:"no_follow_ups,omitempty"`
-	Searches    []Search `json:"searches"`
+	NoFollowUps bool `json:"no_follow_ups,omitempty"`
+	// Scope is the planner's reading of the question, which the brief shows
+	// beside the sub-topics; a resumed run's brief lost it.
+	Scope    string   `json:"scope,omitempty"`
+	Searches []Search `json:"searches"`
 	// Pages holds each distinct page text once, keyed by URL. Searches return
 	// the same page over and over (a vendor's pricing page came back from five
 	// searches in one run), and storing it with every result made the page
@@ -145,7 +148,7 @@ func (r *Recorder) Seed(t *Trace) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
-	r.trace.NoFollowUps = t.NoFollowUps
+	r.trace.NoFollowUps, r.trace.Scope = t.NoFollowUps, t.Scope
 	if r.finished == nil {
 		r.finished = map[string]bool{}
 	}
@@ -202,11 +205,11 @@ func (r *Recorder) phase(name, prompt string, out any, err error) {
 // Load refused. The flags are not it either: --plan carries its own tier and
 // budget, and a replay at the flags' tier cut the recorded results
 // differently from the run it reproduces.
-func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int, noFollowUps bool) {
+func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int, noFollowUps bool, scope string) {
 	r.mu.Lock()
 	r.trace.Plan = slices.Clone(subs)
 	r.trace.Mode, r.trace.Sources = mode, sources
-	r.trace.NoFollowUps = noFollowUps
+	r.trace.NoFollowUps, r.trace.Scope = noFollowUps, scope
 	r.mu.Unlock()
 	r.save()
 }

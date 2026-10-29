@@ -2635,6 +2635,16 @@ func TestAskBoxDrawsTheCursorWhereItIs(t *testing.T) {
 	if !strings.Contains(joined, "█n") || strings.Count(joined, "█") != 1 {
 		t.Errorf("cursor before n not drawn once:\n%s", joined)
 	}
+	// Without colour the block takes a column of its own; put in after the
+	// wrap it made a row one column too wide, and its last letter was cut.
+	for _, row := range rows {
+		if dispWidth(row) > r.width {
+			t.Errorf("row %q is %d columns, wider than %d", row, dispWidth(row), r.width)
+		}
+	}
+	if !strings.Contains(strings.ReplaceAll(strings.Join(rows, ""), " ", ""), "ask▸abcdefghijklm█nopqrstuvwxyz") {
+		t.Errorf("a letter was lost around the cursor:\n%s", joined)
+	}
 	if end := strings.Join(b.prompt("abc", 3), ""); !strings.HasSuffix(end, "abc█") {
 		t.Errorf("end cursor: %q", end)
 	}

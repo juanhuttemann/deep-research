@@ -67,3 +67,35 @@ func TestBriefOffersEveryReviewSetting(t *testing.T) {
 		}
 	}
 }
+
+// A config's sources_per_topic: 7 is a budget the CLI runs, but the page
+// offered "7" as the value and then refused it as "not one of its choices",
+// so every launch from the page failed, and the terminal row showed nothing.
+// A count setting takes any whole number in its range and lists the one it
+// holds.
+func TestCountSettingsTakeTheirConfiguredValue(t *testing.T) {
+	sources, _ := SettingFor(Settings(RunSettings{Sources: 7}), SettingSources)
+	if o, ok := sources.Option("7"); !ok || o.Label != "7" {
+		t.Fatalf("sources at 7 does not offer 7: %+v", sources.Opts)
+	}
+	var order []string
+	for _, o := range sources.Opts {
+		order = append(order, o.Value)
+	}
+	if got := strings.Join(order, " "); got != "0 2 3 4 5 6 7 8 10" {
+		t.Errorf("choices out of order: %s", got)
+	}
+	if name, val, err := sources.Flag("7"); err != nil || name != "sources" || val != "7" {
+		t.Errorf("Flag(7) = %s %s %v", name, val, err)
+	}
+	topics, _ := SettingFor(Settings(RunSettings{}), SettingTopics)
+	mode, _ := SettingFor(Settings(RunSettings{}), SettingMode)
+	for _, bad := range []struct {
+		s Setting
+		v string
+	}{{topics, "9"}, {topics, "-1"}, {sources, "x"}, {mode, "7"}} {
+		if _, _, err := bad.s.Flag(bad.v); err == nil {
+			t.Errorf("%s took %q", bad.s.Key, bad.v)
+		}
+	}
+}

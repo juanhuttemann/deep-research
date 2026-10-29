@@ -220,7 +220,7 @@ func TestCheckpointIsSavedAsTheRunGoes(t *testing.T) {
 	if _, err := os.Stat(path); err == nil {
 		t.Error("a checkpoint with no plan was saved; there is nothing to resume yet")
 	}
-	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "deep", 5, false)
+	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "deep", 5, false, "")
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, _ = rec.ResearchDetail(cancelled, "cut short", nil)
@@ -283,7 +283,7 @@ func TestResumedRecordingKeepsTheSavedSearches(t *testing.T) {
 	rec := Record(Resume(l, saved), "q", "standard", 0)
 	rec.Seed(saved)
 	rec.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
-	rec.SetPlan(saved.Plan, "deep", 0, false)
+	rec.SetPlan(saved.Plan, "deep", 0, false, "")
 	if _, err := rec.ResearchDetail(context.Background(), "done", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -359,19 +359,19 @@ func TestCheckpointKeepsTheFollowUpSetting(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "q.partial.json")
 	rec := Record(&live{}, "q", "standard", 0)
 	rec.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
-	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "quick", 0, true)
+	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, "quick", 0, true, "narrow")
 	tr, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !tr.NoFollowUps {
-		t.Fatal("checkpoint lost the follow-up round being off")
+	if !tr.NoFollowUps || tr.Scope != "narrow" {
+		t.Fatalf("checkpoint lost the follow-up setting or the scope: %v %q", tr.NoFollowUps, tr.Scope)
 	}
 	again := Record(&live{}, "q", "standard", 0)
 	again.Seed(tr)
 	again.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
 	again.save()
-	if tr, err = Load(path); err != nil || !tr.NoFollowUps {
+	if tr, err = Load(path); err != nil || !tr.NoFollowUps || tr.Scope != "narrow" {
 		t.Errorf("a resumed recording dropped the setting: %+v, %v", tr, err)
 	}
 }
