@@ -724,8 +724,17 @@ func (r *Renderer) briefHead() []string {
 		// request is visible in the brief instead of only in the run.
 		r.briefSettingsRow(),
 		"",
-		"  "+r.T.dim("planned sub-topics"),
+		"  "+r.T.dim("planned sub-topics")+r.scopeNote(),
 	)
+}
+
+// scopeNote says what the planner judged the question to be, which is why
+// the plan has as many sub-topics as it has.
+func (r *Renderer) scopeNote() string {
+	if r.plan.Scope == "" {
+		return ""
+	}
+	return r.T.dim(" · " + r.plan.Scope + " question")
 }
 
 // briefFoot carries the key hints, the only thing that says how to start the

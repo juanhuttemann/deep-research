@@ -129,11 +129,21 @@ type SubTopic struct {
 
 // Outline is the planner's answer: the sub-topics, and the question they
 // plan for with its typos fixed. Question is empty when the planner offered
-// no fix the caller should take.
+// no fix the caller should take. Scope is the planner's reading of how much
+// the question asks (ScopeNarrow, ScopeMultiPart, ScopeComparison), "" when
+// it gave none or one not among them; the caller decides what it allows.
 type Outline struct {
 	Question  string
 	SubTopics []SubTopic
+	Scope     string
 }
+
+// The scopes a planner may judge a question to have.
+const (
+	ScopeNarrow     = "narrow"
+	ScopeMultiPart  = "multi-part"
+	ScopeComparison = "comparison"
+)
 
 // Finding is one unit of research evidence.
 type Finding struct {
@@ -1611,9 +1621,18 @@ func planPrompt(question string, b Breadth) string {
 	if b.Exact {
 		return fmt.Sprintf("Plan exactly %d sub-topics.\n\nQuestion: %s", n, question)
 	}
-	return fmt.Sprintf("Plan as few sub-topics as the question needs, at most %d: one or two for a narrow "+
-		"factual question, more only for distinct subjects, alternatives, periods or positions that one "+
-		"search would not cover.\n\nQuestion: %s", n, question)
+	// Told only "as few as needed", the planner filled the ceiling for
+	// nearly every question. Judging the scope first, as a field of its own,
+	// gives it a decision to make before it writes topics, and the caller a
+	// label to hold the count to and show.
+	return fmt.Sprintf("First judge the question's scope and give it as \"scope\" beside \"subtopics\": "+
+		"\"%s\" when it asks one thing about one subject (plan one or two sub-topics), "+
+		"\"%s\" when it asks several distinct things (one sub-topic per part), "+
+		"\"%s\" when it weighs alternatives (one per alternative, and one for the criteria only if they "+
+		"need research of their own). Plan at most %d and never more than the scope calls for: a sub-topic "+
+		"that restates another, or adds background the answer does not need, is padding. List them most "+
+		"essential first.\n\nQuestion: %s",
+		ScopeNarrow, ScopeMultiPart, ScopeComparison, n, question)
 }
 
 // defaultSubTopicCount is the ceiling used when a caller names none.
@@ -1646,7 +1665,25 @@ func (a *impl) Plan(ctx context.Context, question string, b Breadth) (Outline, e
 	if fixed == "" && proposed != "" && proposed != strings.Join(strings.Fields(question), " ") {
 		a.log(fmt.Sprintf("kept the question as typed: the planner's %q changes a word, not only its spelling", proposed))
 	}
-	return Outline{Question: fixed, SubTopics: topics}, nil
+	return Outline{Question: fixed, SubTopics: topics, Scope: parsePlanScope(out)}, nil
+}
+
+// parsePlanScope is the scope the planner judged, or "" when it gave none
+// of the known ones.
+func parsePlanScope(out string) string {
+	for payload := range jsonPayloads(out) {
+		var obj struct {
+			Scope string `json:"scope"`
+		}
+		if json.Unmarshal([]byte(payload), &obj) != nil {
+			continue
+		}
+		switch sc := strings.ToLower(strings.TrimSpace(obj.Scope)); sc {
+		case ScopeNarrow, ScopeMultiPart, ScopeComparison:
+			return sc
+		}
+	}
+	return ""
 }
 
 // parsePlanQuestion is the corrected question the planner wrote beside its

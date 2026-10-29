@@ -1019,7 +1019,10 @@ async function refreshPlan(key, value) {
     if (brief !== was) return;
     brief.depth = p.depth; brief.pinned_per_topic = p.pinned_per_topic || 0; brief.no_follow_ups = !!p.no_follow_ups;
     const n = brief.sub_topics.length;
-    $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + " · up to " + p.per_topic + " sources each";
+    // The scope is the planner's reading of the question, the reason for
+    // the count, as the terminal brief shows it.
+    $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + (p.scope ? " · " + p.scope + " question" : "") +
+      " · up to " + p.per_topic + " sources each";
     $("review-settings").replaceChildren(...p.settings.map(st => settingControl(st, "b-", refreshPlan)));
   } catch {}
 }
@@ -1103,6 +1106,7 @@ function editedPlan() {
     asked: brief.asked || "",
     depth: { key: brief.depth.key },
     pinned_per_topic: brief.pinned_per_topic || 0,
+    scope: brief.scope || "",
     domains: brief.domains || [],
     // The round's setting is the plan's, as in the CLI brief's f key; left
     // out, an edited plan ran the round the reader turned off.

@@ -60,6 +60,10 @@ type Plan struct {
 	// each run of the plan checks them again, since a site that failed once
 	// may answer the next time.
 	Domains []string `json:"domains,omitempty"`
+	// Scope is the planner's reading of the question (agent.ScopeNarrow, ...)
+	// when it chose the breadth, "" otherwise: the brief and the page's
+	// review show it beside the count it led to.
+	Scope string `json:"scope,omitempty"`
 	// NoFollowUps skips the follow-up round. It is a negative so that a plan
 	// or trace written before the round could be turned off still runs it.
 	NoFollowUps bool `json:"no_follow_ups,omitempty"`
@@ -143,6 +147,7 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	// so a run of it still reports what the planner corrected.
 	plan.Asked = strings.TrimSpace(p.Asked)
 	plan.NoFollowUps = p.NoFollowUps
+	plan.Scope = p.Scope
 	return plan, nil
 }
 
@@ -192,17 +197,36 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	// is sized for this many sub-agents, so an assistant that returns more
 	// would spend more than the tier allows. Asked-for counts are honoured by
 	// models only approximately.
-	if b.Max > 0 && len(topics) > b.Max {
-		topics = topics[:b.Max]
+	scope := ""
+	if !b.Exact {
+		scope = out.Scope
+	}
+	if n := scopeCap(scope, b.Max); n > 0 && len(topics) > n {
+		topics = topics[:n]
 	}
 	trimSharedSubject(question, topics)
 	return &Plan{
 		Question:   question,
 		Asked:      asked,
+		Scope:      scope,
 		Depth:      pl.Depth,
 		MaxSources: pl.MaxSourcesFor(len(topics)),
 		SubTopics:  topics,
 	}, nil
+}
+
+// narrowCap is the most sub-topics a question the planner judged narrow
+// runs: one thing about one subject is a search or two, and the planner,
+// told so, still wrote four for it.
+const narrowCap = 2
+
+// scopeCap is the most sub-topics a plan of scope runs under the ceiling
+// max: a narrow question's few, else the ceiling.
+func scopeCap(scope string, max int) int {
+	if scope == agent.ScopeNarrow && (max <= 0 || max > narrowCap) {
+		return narrowCap
+	}
+	return max
 }
 
 // MaxSubTopics bounds an exact sub-topic request. The run's source budget is

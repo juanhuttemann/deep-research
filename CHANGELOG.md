@@ -27,7 +27,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   review edit comes to.
 - The planner chooses how many sub-topics a question needs, up to the
   mode's count (quick 3, standard 4, deep 6), instead of always that many,
-  and a plan of fewer reads fewer pages. The follow-up call is told an empty
+  and a plan of fewer reads fewer pages. It first judges the question's
+  scope: narrow (one or two sub-topics, held to two in code), multi-part
+  (one per part) or a comparison (one per alternative). The brief and the
+  serve page's review show the scope beside the sub-topics. The follow-up call is told an empty
   list is the right answer when the findings already cover the question.
 - The brief's key hints wrap onto a second row on a narrow terminal rather
   than losing the last hint.
