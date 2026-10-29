@@ -1,0 +1,69 @@
+package ui
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// The tiers' sub-topic counts were copied by hand into the serve page and
+// drifted from DepthModes; the list every surface draws is built from them.
+func TestModeChoicesComeFromTheTiers(t *testing.T) {
+	s, _ := SettingFor(Settings(RunSettings{}), SettingMode)
+	if len(s.Opts) != len(DepthModes) {
+		t.Fatalf("mode offers %d choices, want the %d tiers", len(s.Opts), len(DepthModes))
+	}
+	for i, m := range DepthModes {
+		if o := s.Opts[i]; o.Value != m.Key || o.Note != "≤"+strconv.Itoa(m.SubTopics) {
+			t.Errorf("choice %d = %+v, want tier %s with ≤%d", i, o, m.Key, m.SubTopics)
+		}
+	}
+	topics, _ := SettingFor(Settings(RunSettings{}), SettingTopics)
+	if last := topics.Opts[len(topics.Opts)-1].Value; last != strconv.Itoa(MaxSubTopics) {
+		t.Errorf("sub-topics go up to %s, want MaxSubTopics %d", last, MaxSubTopics)
+	}
+}
+
+// A review edit, from the brief's key or the page's control, goes through
+// ApplyToPlan: a depth chosen there re-budgets and drops a pinned --sources,
+// follow-ups flips the plan's round, and a start-only setting is refused.
+func TestApplyToPlan(t *testing.T) {
+	p := PlanFor("q", depthMode("quick"), []SubTopic{{Name: "a"}, {Name: "b"}}, 9)
+	deep, err := ApplyToPlan(p, SettingMode, "deep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deep.Depth.Key != "deep" || deep.PinnedPerTopic != 0 || deep.PerTopic() != depthMode("deep").MaxSources {
+		t.Errorf("deep plan %+v (%d per sub-agent)", deep, deep.PerTopic())
+	}
+	off, err := ApplyToPlan(p, SettingFollowUps, "off")
+	if err != nil || !off.NoFollowUps || p.NoFollowUps {
+		t.Errorf("follow-ups off: %+v, %v (and the original changed: %v)", off, err, p.NoFollowUps)
+	}
+	if PlanValue(off, SettingFollowUps) != "off" || PlanValue(deep, SettingMode) != "deep" {
+		t.Error("PlanValue does not read back what ApplyToPlan set")
+	}
+	for _, bad := range [][2]string{{SettingTopics, "2"}, {SettingMode, "huge"}, {"colour", "red"}} {
+		if _, err := ApplyToPlan(p, bad[0], bad[1]); err == nil {
+			t.Errorf("ApplyToPlan(%s, %s) was accepted", bad[0], bad[1])
+		}
+	}
+}
+
+// The brief's keys, hints and settings row come from the list: every review
+// setting with a key is offered, at the plan's value.
+func TestBriefOffersEveryReviewSetting(t *testing.T) {
+	r := &Renderer{T: Theme{}, width: 200}
+	r.plan = PlanFor("q", depthMode("deep"), []SubTopic{{Name: "a"}}, 0)
+	r.plan.NoFollowUps = true
+	row, foot := r.briefSettingsRow(), strings.Join(r.briefFoot(), "\n")
+	for _, s := range ReviewSettings(r.plan) {
+		o, _ := s.Option(s.Value)
+		if !strings.Contains(row, s.Label+"  "+o.Label) {
+			t.Errorf("brief row %q lacks %s %s", row, s.Label, o.Label)
+		}
+		if s.BriefKey != 0 && !strings.Contains(foot, "["+string(rune(s.BriefKey))+"] "+s.Label) {
+			t.Errorf("brief hints %q lack %s's key", foot, s.Label)
+		}
+	}
+}

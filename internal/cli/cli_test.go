@@ -373,7 +373,7 @@ func TestWebRunEndsOnDone(t *testing.T) {
 			var out bytes.Buffer
 			// A question that starts with a dash is still the question.
 			run := webRun(func() (Deps, error) { return deps, nil }, dir, io.Discard)
-			run(ctx, web.Request{Question: "-why is the sky blue", Mode: "quick"}, &out)
+			run(ctx, web.Request{Question: "-why is the sky blue", Settings: map[string]string{"mode": "quick"}}, &out)
 			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 			var done struct{ Type, Status, Detail string }
 			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &done); err != nil || done.Type != "done" {
@@ -520,7 +520,7 @@ func TestWebRunPlansThenRunsTheEditedPlan(t *testing.T) {
 	// The plan-only launch is the page's first half: it must not research.
 	// Run in full, it bills a whole run before the reader saw the plan.
 	var searches int
-	for _, ln := range launch(searchCounter{searches: &searches}, web.Request{Question: "q", Mode: "quick", PlanOnly: true}) {
+	for _, ln := range launch(searchCounter{searches: &searches}, web.Request{Question: "q", Settings: map[string]string{"mode": "quick"}, PlanOnly: true}) {
 		var e struct {
 			Type string
 			Plan *ui.Plan
@@ -803,7 +803,7 @@ func TestDomainsAndPlanAreExclusive(t *testing.T) {
 }
 
 func TestWebArgsPassDomains(t *testing.T) {
-	args, _ := webArgs(web.Request{Question: "q", Domains: []string{"go.dev", "pkg.go.dev"}}, "reports")
+	args, _, _ := webArgs(web.Request{Question: "q", Domains: []string{"go.dev", "pkg.go.dev"}}, "reports")
 	if !slices.Contains(args, "--domains=go.dev,pkg.go.dev") {
 		t.Errorf("args = %v, want --domains", args)
 	}

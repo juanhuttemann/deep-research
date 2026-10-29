@@ -122,6 +122,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 1ch; }
 .field { display: inline-flex; align-items: center; gap: 1ch; color: var(--dim); }
 .composer-bar .btn.primary { margin-left: auto; }
+/* A settings container lays its controls out as the bar's own items. */
+.settings { display: contents; }
 .form-msg { color: var(--red); margin: 8px 0 0; min-height: 1.6em; }
 .form-msg:empty { min-height: 0; }
 
@@ -417,22 +419,9 @@ mark { background: var(--yellow); color: var(--bg); }
         <textarea id="q" required></textarea>
       </div>
       <div class="composer-bar">
-        <span class="group"><span class="k">depth</span>
-        <span class="segmented" role="radiogroup" aria-label="Depth">
-          <input type="radio" name="mode" id="m-quick" value="quick"><label for="m-quick">quick<small>≤3</small></label>
-          <input type="radio" name="mode" id="m-standard" value="standard" checked><label for="m-standard">standard<small>≤4</small></label>
-          <input type="radio" name="mode" id="m-deep" value="deep"><label for="m-deep">deep<small>≤6</small></label>
-        </span></span>
-        <label class="field" title="How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.">sub-topics
-          <select id="topics-n">
-            <option value="0">auto</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
-          </select>
-        </label>
-        <label class="field" title="How many pages each sub-topic reads. Auto lets the depth decide.">pages per topic
-          <select id="sources">
-            <option value="0">auto</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>8</option><option>10</option>
-          </select>
-        </label>
+        <!-- Drawn from the settings /api/info serves (ui.Settings), the list
+             the terminal's start screen and brief are drawn from too. -->
+        <span id="start-settings" class="settings"></span>
         <button id="go" class="btn primary" type="submit">research <kbd>↵</kbd></button>
       </div>
       <div class="scope">
@@ -464,17 +453,7 @@ mark { background: var(--yellow); color: var(--bg); }
         <p id="brief-domains" class="muted" hidden></p>
       </div>
       <div class="brief-bar">
-        <span class="group"><span class="k">depth</span>
-        <span class="segmented" role="radiogroup" aria-label="Depth">
-          <input type="radio" name="bdepth" id="b-quick" value="quick"><label for="b-quick">quick</label>
-          <input type="radio" name="bdepth" id="b-standard" value="standard"><label for="b-standard">standard</label>
-          <input type="radio" name="bdepth" id="b-deep" value="deep"><label for="b-deep">deep</label>
-        </span></span>
-        <span class="group" title="After the planned searches, up to three more for what the findings leave open."><span class="k">follow-ups</span>
-        <span class="segmented" role="radiogroup" aria-label="Follow-up searches">
-          <input type="radio" name="bfollow" id="f-on" value="on"><label for="f-on">on</label>
-          <input type="radio" name="bfollow" id="f-off" value="off"><label for="f-off">off</label>
-        </span></span>
+        <span id="review-settings" class="settings"></span>
         <span id="brief-budget" class="muted"></span>
       </div>
       <div class="topics-label">planned sub-topics</div>
@@ -634,9 +613,16 @@ function show(view) {
 // once when serve started: their names in the bar, the whole of it on the
 // start screen. A failure hides both, nothing more.
 let setup = null;
+// startSettings are the form's choices by setting key, drawn from the list
+// /api/info serves at the values a run started now takes; the server turns
+// each into its flag, as the terminal's /commands do.
+const startSettings = {};
 async function loadSetup() {
   try {
     const s = await (await fetch("/api/info")).json();
+    const start = (s.settings || []).filter(st => st.start);
+    for (const st of start) startSettings[st.key] = st.value;
+    $("start-settings").replaceChildren(...start.map(st => settingControl(st, "m-", (k, v) => { startSettings[k] = v; })));
     if (!s.model) return;
     fillChip("setup-model", s.model, "Model " + s.model + " via " + s.provider);
     setup = s;
@@ -976,7 +962,6 @@ async function exports(name, hasMd) {
 
 // Sources per sub-topic for each tier, and the whole-run cap: ui.DepthModes
 // and maxRunSources. Shown only; the run derives the budget again.
-const TIER_SOURCES = { quick: 3, standard: 4, deep: 5 }, RUN_SOURCES = 50;
 let brief = null;
 
 function showBrief(plan) {
@@ -989,9 +974,7 @@ function showBrief(plan) {
   const sites = brief.domains || [];
   $("brief-domains").textContent = sites.length ? "Only on: " + sites.join(", ") : "";
   $("brief-domains").hidden = !sites.length;
-  const depth = $("b-" + brief.depth.key) || $("b-standard");
-  depth.checked = true;
-  $(brief.no_follow_ups ? "f-off" : "f-on").checked = true;
+  $("review-settings").replaceChildren();
   $("brief-msg").textContent = "";
   renderTopics();
   show("brief");
@@ -1022,9 +1005,58 @@ function showQuestion(h, question, asked) {
   flush();
   h.replaceChildren(...out.flatMap((n, k) => k ? [" ", n] : [n]));
 }
-function perTopic() {
-  const n = brief.sub_topics.length, per = brief.pinned_per_topic || TIER_SOURCES[brief.depth.key] || 4;
-  return Math.max(1, Math.floor(Math.min(per * n, RUN_SOURCES) / n));
+// refreshPlan has the server re-derive the plan under review, applying the
+// review setting key when given, as the terminal brief's keys apply it: the
+// budget and the settings' controls come back worked out where the run
+// works them out, so the page keeps no copy of the tiers or the budget.
+async function refreshPlan(key, value) {
+  const was = brief;
+  try {
+    const r = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: editedPlan(), key: key || "", value: value || "" }) });
+    if (!r.ok) { $("brief-msg").textContent = (await r.text()).trim(); return; }
+    const p = await r.json();
+    if (brief !== was) return;
+    brief.depth = p.depth; brief.pinned_per_topic = p.pinned_per_topic || 0; brief.no_follow_ups = !!p.no_follow_ups;
+    const n = brief.sub_topics.length;
+    $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + " · up to " + p.per_topic + " sources each";
+    $("review-settings").replaceChildren(...p.settings.map(st => settingControl(st, "b-", refreshPlan)));
+  } catch {}
+}
+// settingControl draws one setting from the list the server serves
+// (ui.Settings, the terminal's list too): a segmented choice for a few
+// values, a list for more. onchange is given its key and the value chosen.
+function settingControl(st, prefix, onchange) {
+  if (st.choices.length > 4) {
+    const sel = document.createElement("select");
+    for (const o of st.choices) {
+      const op = el("option", "", o.label);
+      op.value = o.value; op.selected = o.value === st.value;
+      sel.append(op);
+    }
+    sel.onchange = () => onchange(st.key, sel.value);
+    const f = el("label", "field", st.label);
+    f.title = st.help;
+    f.append(sel);
+    return f;
+  }
+  const seg = el("span", "segmented");
+  seg.setAttribute("role", "radiogroup");
+  seg.setAttribute("aria-label", st.label);
+  for (const o of st.choices) {
+    const inp = document.createElement("input");
+    inp.type = "radio"; inp.name = prefix + st.key; inp.id = prefix + st.key + "-" + o.value;
+    inp.value = o.value; inp.checked = o.value === st.value;
+    inp.onchange = () => onchange(st.key, o.value);
+    const lab = el("label", "", o.label);
+    lab.htmlFor = inp.id;
+    if (o.note) lab.append(el("small", "", o.note));
+    seg.append(inp, lab);
+  }
+  const g = el("span", "group");
+  g.title = st.help;
+  g.append(el("span", "k", st.label), seg);
+  return g;
 }
 function renamed(t) { return t.planned !== undefined && t.name.trim() !== t.planned; }
 function topicMeta(t, meta) {
@@ -1063,7 +1095,7 @@ function renderTopics() {
     li.append(el("span", "num", String(i + 1)), body, rm);
     return li;
   }));
-  $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + " · up to " + perTopic() + " sources each";
+  refreshPlan();
 }
 function editedPlan() {
   return {
@@ -1085,16 +1117,6 @@ function editedPlan() {
       return query ? { name, notes, query } : { name, notes };
     }),
   };
-}
-for (const r of document.querySelectorAll("input[name=bdepth]")) {
-  r.onchange = () => {
-    // Choosing a tier replaces a pinned --sources budget, as in the CLI brief.
-    brief.depth = { key: r.value }; brief.pinned_per_topic = 0;
-    renderTopics();
-  };
-}
-for (const r of document.querySelectorAll("input[name=bfollow]")) {
-  r.onchange = () => { brief.no_follow_ups = r.value === "off"; };
 }
 $("add-topic").onsubmit = ev => {
   ev.preventDefault();
@@ -1520,9 +1542,7 @@ $("launch").onsubmit = async ev => {
   $("msg").textContent = "";
   const body = {
     question: $("q").value.trim(),
-    mode: document.querySelector("input[name=mode]:checked").value,
-    sources: Number($("sources").value) || 0,
-    topics: Number($("topics-n").value) || 0,
+    settings: startSettings,
     domains: onlySites() ? $("domains").value.split(/[\s,]+/).filter(Boolean) : [],
     // The plan first, for review; Start research in the review runs it.
     plan_only: true,

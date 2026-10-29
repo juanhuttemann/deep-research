@@ -282,7 +282,7 @@ func TestInfoServesTheSetup(t *testing.T) {
 // The page calls the server by path; a typo in one is invisible until a
 // button does nothing.
 func TestPageCallsTheServedEndpoints(t *testing.T) {
-	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`, `"/api/ask"`, `"/api/info"`} {
+	for _, path := range []string{`"/api/events"`, `"/api/runs"`, `"/api/run"`, `"/api/cancel"`, `"/reports/"`, `"/api/report/"`, `"/api/ask"`, `"/api/info"`, `"/api/plan"`} {
 		if !strings.Contains(string(page), path) {
 			t.Errorf("index.html never calls %s", path)
 		}
@@ -419,6 +419,9 @@ func TestLaunchPassesThePlanThrough(t *testing.T) {
 	// in full before the reader saw the plan.
 	if r := post(`{"question":"q","plan_only":true}`); !r.PlanOnly {
 		t.Error("plan_only was not read from the request")
+	}
+	if r := post(`{"question":"q","settings":{"mode":"deep","follow-ups":"off"}}`); r.Settings["mode"] != "deep" || r.Settings["follow-ups"] != "off" {
+		t.Errorf("settings were not read from the request: %v", r.Settings)
 	}
 }
 
@@ -603,5 +606,39 @@ func TestAskRendersTheAnswer(t *testing.T) {
 	}
 	if strings.Contains(body, "<script>") {
 		t.Errorf("raw HTML came through:\n%s", body)
+	}
+}
+
+// The review's edits go to the server, which works out the budget and the
+// settings as the terminal brief does; the page keeps no copy of either.
+func TestPlanEditsGoToThePlanFunc(t *testing.T) {
+	s := New(context.Background(), fstest.MapFS{}, nil)
+	var got struct{ plan, key, value string }
+	s.Plan = func(plan json.RawMessage, key, value string) (any, error) {
+		got.plan, got.key, got.value = string(plan), key, value
+		return map[string]int{"per_topic": 5}, nil
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/api/plan", "application/json",
+		strings.NewReader(`{"plan":{"question":"q"},"key":"mode","value":"deep"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out map[string]int
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if got.plan != `{"question":"q"}` || got.key != "mode" || got.value != "deep" || out["per_topic"] != 5 {
+		t.Errorf("PlanFunc got %+v and answered %v", got, out)
+	}
+	bare := httptest.NewServer(New(context.Background(), fstest.MapFS{}, nil).Handler())
+	defer bare.Close()
+	resp2, err := http.Post(bare.URL+"/api/plan", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotImplemented {
+		t.Errorf("no PlanFunc: status %d, want 501", resp2.StatusCode)
 	}
 }

@@ -64,8 +64,10 @@ func (s *session) loop() error {
 			s.resume()
 		case line == "/model":
 			s.switchModel()
+		case s.isSetting(line):
+			s.chooseSetting(line)
 		case strings.HasPrefix(line, "/"):
-			s.say("unknown command " + line + "; the commands are /resume and /model")
+			s.say("unknown command " + line + "; the commands are " + strings.Join(ui.CommandNames(), ", "))
 		case s.run != "":
 			s.ask(line)
 		default:
@@ -85,7 +87,8 @@ func (s *session) read() (string, bool) {
 		if !s.home {
 			return "", false
 		}
-		q := ui.AskQuestion(s.cmd.InOrStdin(), s.cmd.OutOrStdout(), s.noColor(), s.d.Config.Describe(), s.note)
+		q := ui.AskQuestion(s.cmd.InOrStdin(), s.cmd.OutOrStdout(), s.noColor(), s.d.Config.Describe(),
+			ui.Settings(runSettings(s.cmd, s.d)), s.note)
 		s.note = ""
 		return q, q != ""
 	}
@@ -177,6 +180,52 @@ func (s *session) ask(q string) {
 	}
 }
 
+// isSetting reports whether line is a start setting's /command, with or
+// without its value ("/mode" or "/mode deep").
+func (s *session) isSetting(line string) bool {
+	name, _, _ := strings.Cut(strings.TrimPrefix(line, "/"), " ")
+	set, ok := ui.SettingFor(ui.Settings(ui.RunSettings{}), name)
+	return strings.HasPrefix(line, "/") && ok && set.Start
+}
+
+// chooseSetting is a setting's /command: the value typed after it, or one
+// picked from its choices, set as its flag for every run the session starts
+// after, as the serve page's controls set it for the run they launch.
+func (s *session) chooseSetting(line string) {
+	name, value, typed := strings.Cut(strings.TrimPrefix(line, "/"), " ")
+	set, _ := ui.SettingFor(ui.Settings(runSettings(s.cmd, s.d)), name)
+	if value = strings.TrimSpace(value); !typed || value == "" {
+		rows := make([]ui.Choice, len(set.Opts))
+		for i, o := range set.Opts {
+			rows[i] = ui.Choice{Title: o.Label, Note: o.Note}
+			if o.Value == set.Value {
+				rows[i].Note = strings.TrimSpace(o.Note + " · now")
+			}
+		}
+		i := ui.Pick(s.cmd.InOrStdin(), s.cmd.OutOrStdout(), s.noColor(), strings.ToUpper(set.Label), set.Label, rows)
+		if i < 0 {
+			return
+		}
+		value = set.Opts[i].Value
+	} else if o, ok := optionByLabel(set, value); ok {
+		value = o.Value
+	}
+	if err := setSetting(s.cmd, name, value); err != nil {
+		s.say("error: " + err.Error())
+	}
+}
+
+// optionByLabel is the option a typed value names, by its label ("auto")
+// or its value ("0").
+func optionByLabel(set ui.Setting, typed string) (ui.Option, bool) {
+	for _, o := range set.Opts {
+		if strings.EqualFold(o.Label, typed) || o.Value == typed {
+			return o, true
+		}
+	}
+	return ui.Option{}, false
+}
+
 // resume is /resume: the runs in the reports directory, filtered by what is
 // typed. A finished one is reopened with its conversation; an interrupted
 // one is run from its checkpoint, as --resume does.
@@ -209,10 +258,15 @@ func (s *session) resume() {
 // run must not inherit them, so the flags are put back as they were.
 func (s *session) resumeRun(path string) {
 	var undo []func()
-	for _, name := range []string{"resume", "mode", "sources"} {
+	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups"} {
 		f := s.cmd.Flags().Lookup(name)
 		v, changed := f.Value.String(), f.Changed
 		undo = append(undo, func() { _ = f.Value.Set(v); f.Changed = changed })
+		// A setting chosen on the start screen is for new runs: the
+		// checkpoint carries the tier and budget it was made with.
+		if name != "resume" {
+			f.Changed = false
+		}
 	}
 	defer func() {
 		for _, u := range undo {

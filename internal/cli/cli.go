@@ -269,7 +269,8 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 			if noOpen, _ := cmd.Flags().GetBool("no-open"); !noOpen {
 				ready = func(url string) { openPage(url, cmd.ErrOrStderr()) }
 			}
-			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), webInfo(load), cmd.ErrOrStderr(), ready)
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), webInfo(load), webPlan,
+				cmd.ErrOrStderr(), ready)
 		},
 	}
 	cmd.Flags().String("addr", "127.0.0.1:7777", "address to listen on")
@@ -297,8 +298,33 @@ func webInfo(load func() (Deps, error)) web.InfoFunc {
 		if err != nil {
 			return nil, err
 		}
-		return d.Config.Describe(), nil
+		// The settings go with the setup: the page draws its controls from
+		// them, at the values a run started now would take.
+		return struct {
+			agent.Setup
+			Settings []ui.Setting `json:"settings"`
+		}{d.Config.Describe(), ui.Settings(defaultSettings(d.Config))}, nil
 	}
+}
+
+// webPlan is the page review's edit: the plan read as --plan reads it, the
+// setting applied as the terminal brief's key applies it, and the budget
+// per sub-agent the brief shows.
+func webPlan(raw json.RawMessage, key, value string) (any, error) {
+	p, err := ui.ReadPlan(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	if key != "" {
+		if p, err = ui.ApplyToPlan(p, key, value); err != nil {
+			return nil, err
+		}
+	}
+	return struct {
+		*ui.Plan
+		PerTopic int          `json:"per_topic"`
+		Settings []ui.Setting `json:"settings"`
+	}{p, p.PerTopic(), ui.ReviewSettings(p)}, nil
 }
 
 // webRun is a launch from the page: the same command as
@@ -307,7 +333,11 @@ func webInfo(load func() (Deps, error)) web.InfoFunc {
 // the history record and the done line on every outcome.
 func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.RunFunc {
 	return func(ctx context.Context, r web.Request, w io.Writer) {
-		args, in := webArgs(r, reports)
+		args, in, err := webArgs(r, reports)
+		if err != nil {
+			ui.JSONL{W: w}.Emit(doneEvent(ui.RunResult{}, err))
+			return
+		}
 		out := &wroteTo{Writer: w}
 		cmd := New(load)
 		cmd.SetArgs(args)
@@ -327,24 +357,34 @@ func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.Run
 
 // webArgs is the command line for a page's request. An edited plan goes in
 // on stdin (--plan=-): it carries its own question, depth and budget.
-func webArgs(r web.Request, reports string) ([]string, io.Reader) {
+func webArgs(r web.Request, reports string) ([]string, io.Reader, error) {
 	if r.Resume != "" {
 		// web accepts only a checkpoint's bare name in the reports directory.
-		return []string{"--jsonl", "--resume=" + filepath.Join(reports, r.Resume), "--reports=" + reports}, strings.NewReader("")
+		return []string{"--jsonl", "--resume=" + filepath.Join(reports, r.Resume), "--reports=" + reports}, strings.NewReader(""), nil
 	}
 	if len(r.Plan) > 0 {
-		return []string{"--jsonl", "--plan=-", "--reports=" + reports}, bytes.NewReader(r.Plan)
+		return []string{"--jsonl", "--plan=-", "--reports=" + reports}, bytes.NewReader(r.Plan), nil
 	}
 	// --flag=value: a question that starts with "-" is still the value.
 	args := []string{"--jsonl", "--prompt=" + r.Question, "--reports=" + reports}
-	if r.Mode != "" {
-		args = append(args, "--mode="+r.Mode)
+	// Each setting becomes its flag through the one mapping the terminal's
+	// /commands use, so the page cannot offer a choice the CLI reads
+	// differently.
+	for _, s := range ui.Settings(ui.RunSettings{}) {
+		v, ok := r.Settings[s.Key]
+		if !ok {
+			continue
+		}
+		name, val, err := s.Flag(v)
+		if err != nil {
+			return nil, nil, err
+		}
+		args = append(args, "--"+name+"="+val)
 	}
-	if r.Sources > 0 {
-		args = append(args, "--sources="+strconv.Itoa(r.Sources))
-	}
-	if r.Topics > 0 {
-		args = append(args, "--topics="+strconv.Itoa(r.Topics))
+	for k := range r.Settings {
+		if _, ok := ui.SettingFor(ui.Settings(ui.RunSettings{}), k); !ok {
+			return nil, nil, fmt.Errorf("unknown setting %q", k)
+		}
 	}
 	if len(r.Domains) > 0 {
 		args = append(args, "--domains="+strings.Join(r.Domains, ","))
@@ -352,7 +392,7 @@ func webArgs(r web.Request, reports string) ([]string, io.Reader) {
 	if r.PlanOnly {
 		args = append(args, "--plan-only")
 	}
-	return args, strings.NewReader("")
+	return args, strings.NewReader(""), nil
 }
 
 // wroteTo records whether anything was written through it.
@@ -416,10 +456,42 @@ func subTopics(cmd *cobra.Command, d Deps) int {
 	return d.Config.SubTopics
 }
 
-// noFollowUps reports whether the follow-up round is off for this run.
+// noFollowUps reports whether the follow-up round is off for this run: the
+// flag when given, either way, else the config's.
 func noFollowUps(cmd *cobra.Command, d Deps) bool {
-	off, _ := cmd.Flags().GetBool("no-follow-ups")
-	return off || d.Config.NoFollowUps
+	if cmd.Flags().Changed("no-follow-ups") {
+		off, _ := cmd.Flags().GetBool("no-follow-ups")
+		return off
+	}
+	return d.Config.NoFollowUps
+}
+
+// runSettings are the run's settings: the config's, with the flags over
+// them. The terminal's start screen shows them and ui.Options takes them.
+func runSettings(cmd *cobra.Command, d Deps) ui.RunSettings {
+	mode, _ := cmd.Flags().GetString("mode")
+	return ui.RunSettings{Mode: mode, SubTopics: subTopics(cmd, d), Sources: sourceBudget(cmd, d), NoFollowUps: noFollowUps(cmd, d)}
+}
+
+// defaultSettings are the settings a run started now with no flags takes,
+// the ones the serve page opens on.
+func defaultSettings(c config.Config) ui.RunSettings {
+	return ui.RunSettings{Mode: "standard", SubTopics: c.SubTopics, Sources: c.SourcesPerTopic, NoFollowUps: c.NoFollowUps}
+}
+
+// setSetting sets a setting chosen on the start screen as its flag, so every
+// run the session starts after takes it, as a flag given on the command
+// line would.
+func setSetting(cmd *cobra.Command, key, value string) error {
+	s, ok := ui.SettingFor(ui.Settings(ui.RunSettings{}), key)
+	if !ok {
+		return fmt.Errorf("unknown setting %q", key)
+	}
+	name, val, err := s.Flag(value)
+	if err != nil {
+		return err
+	}
+	return cmd.Flags().Set(name, val)
 }
 
 // runDeadline is the whole-run budget, defaulted when unconfigured.
@@ -525,13 +597,14 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	ctx, cancel := context.WithTimeout(cmd.Context(), runDeadline(d))
 	defer cancel()
 
+	rs := runSettings(cmd, d)
 	res, err := ui.Run(ctx, ui.Options{
 		Question:        question,
 		Assistant:       assistant,
-		DepthMode:       mode,
-		SourcesPerTopic: sourceBudget(cmd, d),
-		SubTopics:       subTopics(cmd, d),
-		NoFollowUps:     noFollowUps(cmd, d),
+		DepthMode:       rs.Mode,
+		SourcesPerTopic: rs.Sources,
+		SubTopics:       rs.SubTopics,
+		NoFollowUps:     rs.NoFollowUps,
 		Parallelism:     d.Config.Parallelism,
 		JSONL:           jsonl,
 		Quiet:           silent,

@@ -189,7 +189,7 @@ func TestCtrlCCancels(t *testing.T) {
 		t.Errorf("Ctrl-C read as %v, want KeyCtrlC", k.Key)
 	}
 	plan, action := waitBrief(NewByteReader([]byte{0x03}), NewRenderer(discard{}, Theme{}),
-		newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}}), (*Plan).WithDepth)
+		newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}}))
 	if action != actionCancel {
 		t.Errorf("Ctrl-C in the brief did not cancel (plan %v)", plan.Depth.Key)
 	}
@@ -201,7 +201,7 @@ func TestCtrlCCancels(t *testing.T) {
 func TestLineModeKeepsTheRestOfTheLine(t *testing.T) {
 	in := &lineModeReader{lines: []string{"e Performance Benchmarks", ""}}
 	plan := newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}})
-	plan, action := waitBrief(in, NewRenderer(discard{}, Theme{}), plan, (*Plan).WithDepth)
+	plan, action := waitBrief(in, NewRenderer(discard{}, Theme{}), plan)
 	if action != actionLaunch {
 		t.Fatalf("expected launch, got cancel")
 	}

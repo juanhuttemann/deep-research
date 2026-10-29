@@ -279,7 +279,7 @@ func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive 
 	if interactive {
 		defer r.Inline(keys)()
 	}
-	plan, action := waitBrief(keys, r, plan, (*Plan).WithDepth)
+	plan, action := waitBrief(keys, r, plan)
 	return plan, action == actionCancel
 }
 
@@ -406,9 +406,8 @@ func (o Options) withDefaults() Options {
 }
 
 // waitBrief drives the brief confirmation loop. It returns the final plan and
-// the action: actionLaunch or actionCancel. rebudget re-derives a plan at a
-// new depth tier.
-func waitBrief(in Input, r *Renderer, plan *Plan, rebudget func(*Plan, DepthMode) *Plan) (*Plan, int) {
+// the action: actionLaunch or actionCancel.
+func waitBrief(in Input, r *Renderer, plan *Plan) (*Plan, int) {
 	// Draw the brief before blocking on a key. Without this the loop waits on
 	// an empty screen, with nothing to say a plan exists or that Enter runs it.
 	r.RenderBrief(plan)
@@ -422,9 +421,6 @@ func waitBrief(in Input, r *Renderer, plan *Plan, rebudget func(*Plan, DepthMode
 			return plan, actionLaunch
 		case KeyQ, KeyEsc, KeyCtrlC:
 			return plan, actionCancel
-		case KeyD:
-			plan = rebudget(plan, cycleDepth(plan.Depth))
-			r.RenderBrief(plan)
 		case KeyE:
 			// In line mode the topic was typed on the same line as the key, so
 			// it is already in hand and there is no second line to wait for.
@@ -437,22 +433,37 @@ func waitBrief(in Input, r *Renderer, plan *Plan, rebudget func(*Plan, DepthMode
 					Name:  truncate(name, 60),
 					Notes: "added by you",
 				})
-				plan = renumbered(plan, rebudget)
+				plan = renumbered(plan)
 			}
-			r.RenderBrief(plan)
-		case KeyF:
-			plan.NoFollowUps = !plan.NoFollowUps
 			r.RenderBrief(plan)
 		case KeyR:
 			renameTopic(in, r, plan, k.Rest)
 			r.RenderBrief(plan)
 		case KeyX:
-			plan = deleteTopic(in, r, plan, k.Rest, rebudget)
+			plan = deleteTopic(in, r, plan, k.Rest)
 			r.RenderBrief(plan)
 		default:
-			// ignore unknown keys
+			// A review setting's key moves it to its next choice, through the
+			// same ApplyToPlan the serve page's review uses; other keys do
+			// nothing.
+			if s, ok := briefSetting(k.Key); ok {
+				if np, err := ApplyToPlan(plan, s.Key, s.Next(PlanValue(plan, s.Key))); err == nil {
+					plan = np
+				}
+				r.RenderBrief(plan)
+			}
 		}
 	}
+}
+
+// briefSetting is the review setting key cycles in the brief.
+func briefSetting(k Key) (Setting, bool) {
+	for _, s := range Settings(RunSettings{}) {
+		if s.Review && s.BriefKey != 0 && s.BriefKey == k {
+			return s, true
+		}
+	}
+	return Setting{}, false
 }
 
 // renameTopic edits one sub-topic's name in place. The prompt opens seeded
@@ -475,13 +486,13 @@ func renameTopic(in Input, r *Renderer, plan *Plan, seed string) {
 
 // deleteTopic drops one sub-topic. The last one is not deletable: a plan with
 // no branches has nothing to research.
-func deleteTopic(in Input, r *Renderer, plan *Plan, seed string, rebudget func(*Plan, DepthMode) *Plan) *Plan {
+func deleteTopic(in Input, r *Renderer, plan *Plan, seed string) *Plan {
 	i, ok := pickTopic(in, r, plan, "delete which sub-topic", seed)
 	if !ok || len(plan.SubTopics) < 2 {
 		return plan
 	}
 	plan.SubTopics = slices.Delete(plan.SubTopics, i, i+1)
-	return renumbered(plan, rebudget)
+	return renumbered(plan)
 }
 
 // pickTopic asks which sub-topic a key applies to and returns its index. An
@@ -506,7 +517,7 @@ func pickTopic(in Input, r *Renderer, plan *Plan, label, seed string) (int, bool
 // An explicit --sources request is re-applied rather than re-derived from the
 // depth tier: the reader asked for a number of sources per sub-agent, and
 // adding or deleting a branch does not withdraw that request.
-func renumbered(plan *Plan, rebudget func(*Plan, DepthMode) *Plan) *Plan {
+func renumbered(plan *Plan) *Plan {
 	for i := range plan.SubTopics {
 		plan.SubTopics[i].ID = strconv.Itoa(i + 1)
 	}
@@ -514,7 +525,7 @@ func renumbered(plan *Plan, rebudget func(*Plan, DepthMode) *Plan) *Plan {
 	if pin := plan.PinnedPerTopic; pin > 0 {
 		np, _ = plan.WithSourcesPerTopic(pin)
 	} else {
-		np = rebudget(plan, plan.Depth)
+		np = plan.WithDepth(plan.Depth)
 	}
 	np.SubTopics = plan.SubTopics
 	return np
@@ -544,16 +555,6 @@ func ParseDepthMode(s string) (DepthMode, error) {
 		}
 		return DepthModes[1], fmt.Errorf("unknown mode %q (want %s)", s, strings.Join(names, " | "))
 	}
-}
-
-// cycleDepth returns the next depth tier after d.
-func cycleDepth(d DepthMode) DepthMode {
-	for i, m := range DepthModes {
-		if m.Key == d.Key {
-			return DepthModes[(i+1)%len(DepthModes)]
-		}
-	}
-	return DepthModes[1]
 }
 
 // notify emits an OS notification when possible and always rings the bell.

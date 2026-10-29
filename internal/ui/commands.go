@@ -3,8 +3,26 @@ package ui
 import "strings"
 
 // commands are the session's (cli/session.go), offered in a menu under the
-// research ▸ and ask ▸ boxes while a "/" is being typed.
-var commands = []Choice{{Title: "/resume", Note: "past runs"}, {Title: "/model", Note: "change the model"}}
+// research ▸ and ask ▸ boxes while a "/" is being typed: its own, then one
+// per start setting, from the list the serve page draws its controls from.
+func commands() []Choice {
+	out := []Choice{{Title: "/resume", Note: "past runs"}, {Title: "/model", Note: "change the model"}}
+	for _, s := range Settings(RunSettings{}) {
+		if s.Start {
+			out = append(out, Choice{Title: "/" + s.Key, Note: "set the " + s.Label})
+		}
+	}
+	return out
+}
+
+// CommandNames are the commands' names, for saying which there are.
+func CommandNames() []string {
+	var out []string
+	for _, c := range commands() {
+		out = append(out, c.Title)
+	}
+	return out
+}
 
 // completions is the commands text is the start of, while it can still be
 // one: a "/" and no space.
@@ -13,7 +31,7 @@ func completions(text string) []Choice {
 		return nil
 	}
 	var out []Choice
-	for _, c := range commands {
+	for _, c := range commands() {
 		if strings.HasPrefix(c.Title, strings.ToLower(text)) {
 			out = append(out, c)
 		}

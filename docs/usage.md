@@ -55,13 +55,20 @@ line or Esc there brings the screen back for the next question; Esc or
 Ctrl-C on the screen ends it, and Ctrl-C or Ctrl-D at `ask ▸` ends `drsh`
 at once. A run that
 fails, or that the brief cancels, returns to the screen, which says why.
-Flags given with it (`--mode`, `--sources`, `--domains`, `--reports`, `-o`,
-`--trace`) apply to every run it starts. With `--silent`, `--jsonl` or a
+Under the box is the next run's settings row: `depth`, `sub-topics`,
+`pages per topic` and `follow-ups`. It is the same list the serve page's form
+draws, at the values the config and the flags give. Each setting has a
+command that changes it for every run the screen starts after: `/mode`,
+`/topics`, `/sources` and `/follow-ups`, alone for a list of its choices or
+with the value (`/mode deep`, `/topics 2`, `/follow-ups off`). Flags given
+with it (`--mode`, `--topics`, `--sources`, `--no-follow-ups`, `--domains`,
+`--reports`, `-o`, `--trace`) apply to every run it starts. A run resumed
+from `/resume` keeps its checkpoint's tier and budget whatever the row says. With `--silent`, `--jsonl` or a
 pipe on either side it prints the help, as it always did.
 
 Each run is a session. Its questions and answers are kept beside its
 `.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box
-takes two commands. In either box, a `/` opens a menu of the commands
+takes the setting commands above and two more. In either box, a `/` opens a menu of the commands
 what is typed can still become, that part of each bold: Tab completes the
 highlighted one, the arrows move, and Enter on the start of one (`/r`)
 runs it.
@@ -370,8 +377,10 @@ in the default browser once it is listening (`$BROWSER` if set; `wslview` or
 Windows' browser under WSL; nothing on a Linux session with no display, such
 as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
-question, `--mode`, `--topics` (as "Sub-topics", auto by default) and
-`--sources` (as "Pages per topic"), and Search: the
+question and the same settings the terminal's start screen shows: `--mode`,
+`--topics` (as "Sub-topics", auto by default), `--sources` (as "Pages per
+topic") and `--no-follow-ups` (as "Follow-ups"), drawn from the list
+`/api/info` serves and launched as those flags. Then Search: the
 web, or "Only these sites", which opens a box for the list (`--domains`)
 and keeps the last one typed. The empty question box shows an example, and
 Tab takes it as the question: a hot question from Stack Exchange's space,
@@ -382,8 +391,10 @@ sites, each marked usable, from snippets only, or dropped with the reason,
 and the plan review shows them. Research makes the plan first (the same
 as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
 add and remove sub-topics, change the search each one runs, change the
-depth, or turn the follow-up round off or on (the brief's `f`; the plan
-carries it as `no_follow_ups`). Under each name is the planner's description of the sub-topic, which
+depth, or turn the follow-up round off or on: the review settings the
+terminal brief's keys change (`d`, `f`), drawn from the same list. Each
+change is worked out by the server (`/api/plan`) as the brief works it out,
+budget per sub-agent included. Under each name is the planner's description of the sub-topic, which
 is for reading: research never sends it. Below that is the query the
 sub-agent searches, editable in place; a sub-topic added here can be given
 one too. A renamed sub-topic drops the query the planner wrote for its old

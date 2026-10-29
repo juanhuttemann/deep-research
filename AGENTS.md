@@ -81,6 +81,11 @@ invariants:
   every `config.yaml` key is overridable as `DEEP_RESEARCH_<KEY>`. New config
   keys must work through all three channels, and be documented in
   [docs/configuration.md](docs/configuration.md).
+- A run setting is one entry in `ui.Settings` (internal/ui/settings.go),
+  which the CLI flags, the terminal start screen and brief, and the serve
+  page all draw from. Don't add a control to one surface or copy tiers,
+  counts or budget rules into `web/index.html`; add the setting there and
+  every surface gets it.
 - The terminal UI is unix-only. Platform-split files use `//go:build unix` /
   `//go:build !unix` pairs (`term_unix.go`/`term_other.go`,
   `input_unix.go`/`input_other.go`), and the termios ioctl request numbers

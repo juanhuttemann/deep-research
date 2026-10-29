@@ -151,7 +151,7 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 // request when there is one, else from the tier.
 func PlanFor(question string, depth DepthMode, topics []SubTopic, pin int) *Plan {
 	p := &Plan{Question: question, Depth: depth, SubTopics: topics, PinnedPerTopic: max(pin, 0)}
-	return renumbered(p, (*Plan).WithDepth)
+	return renumbered(p)
 }
 
 // Planner produces a research plan from a question using the assistant's Plan
