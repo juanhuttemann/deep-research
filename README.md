@@ -17,7 +17,7 @@ it writes a cited report as Markdown, PDF and JSON.
 
 </div>
 
-![deep-research planning, researching, fact-checking and reporting on a question about mixture-of-experts LLMs](demo.gif)
+![drsh's start screen set to quick depth, then the brief sizing a question about mixture-of-experts LLMs to two sub-topics, the research with its follow-up searches, the fact-check and the report](demo.gif)
 
 By default it costs nothing: OpenRouter's free models and public SearXNG
 search, so a free key is all it needs. Every source says how it was obtained,
@@ -123,22 +123,22 @@ dark theme. Type the question and pick the same settings the terminal offers,
 then edit the plan before anything is searched: rename, add or remove
 sub-topics, change the search each one runs, the depth and the follow-ups:
 
-![The serve page's plan review for "How close are we to a room-temperature superconductor after LK-99?": four sub-topics, each with the search it will run](docs/images/web-plan.jpg)
+![The serve page's plan review for "How close are we to a room-temperature superconductor after LK-99?": the depth and follow-up settings, and four sub-topics for what the planner read as a multi-part question, each with the search it will run](docs/images/web-plan.jpg)
 
 The live frame shows each sub-agent with its sources, the follow-up searches,
 and the model's reasoning as it streams:
 
-![The live frame mid-analysis: Plan and Research done, seven sub-agents complete including three follow-ups, and the model's reasoning streaming above them](docs/images/web-live.jpg)
+![The live frame mid-analysis: Plan and Research done, seven sub-agents complete including three follow-ups, and the model thinking through the analysis](docs/images/web-live.jpg)
 
 When the run ends, the report opens below it, with the `.md`, `.pdf` and
 `.json` downloads in the header (here in the light theme):
 
-![A finished run in the light theme for "Have the Voyager probes really left the solar system?": every phase done, md, pdf and json downloads in the header, and the answer opening on the two readings of "left the solar system"](docs/images/web-report.jpg)
+![The same run finished, in the light theme: every phase done, md, pdf and json downloads in the header, and the answer opening on LK-99 failing verification](docs/images/web-report.jpg)
 
 The audit shows what the fact-check decided: the statements that passed or
 were blocked, every claim's verdict, and the quote and page each rests on:
 
-![The audit view: statements passed and blocked, and the inspector showing a claim about LK-99's Cu2S impurity rated partial, with the checker's reason and the quote it located](docs/images/web-audit.jpg)
+![The audit view: statements passed and blocked, the question as the analysis read it, and the inspector showing a supported claim about the July 2023 LK-99 preprints, with its fetched sources and the checker's assessment](docs/images/web-audit.jpg)
 
 ## Search
 
