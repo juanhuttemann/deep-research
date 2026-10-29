@@ -666,6 +666,8 @@ type breadthRecorder struct {
 	*fakeAssistant
 	asked agent.Breadth
 	over  int
+	// scope is the scope the planner answers with.
+	scope string
 	// give, when set, is how many sub-topics to return, standing in for a
 	// planner that chose fewer than its ceiling.
 	give int
@@ -681,7 +683,7 @@ func (r *breadthRecorder) Plan(ctx context.Context, question string, b agent.Bre
 	for i := range out {
 		out[i] = agent.SubTopic{ID: fmt.Sprint(i + 1), Name: fmt.Sprintf("Topic %d", i+1)}
 	}
-	return agent.Outline{SubTopics: out}, nil
+	return agent.Outline{SubTopics: out, Scope: r.scope}, nil
 }
 
 // Analyze, fact-check and summarize each re-embed every finding's content, so
@@ -3447,5 +3449,48 @@ func TestBriefHintsWrapOnANarrowTerminal(t *testing.T) {
 	}
 	if !strings.Contains(rows[len(rows)-1], "[q] cancel") {
 		t.Errorf("last row %q lost the cancel hint", rows[len(rows)-1])
+	}
+}
+
+// Told "as few as needed", the planner still wrote four sub-topics for a
+// one-fact question. It now judges the scope first; a narrow question runs
+// two at most, whatever it wrote, and the plan says why. An exact --topics
+// request is the reader's count and the scope does not cut it.
+func TestNarrowScopeCapsThePlan(t *testing.T) {
+	tier := depthMode("standard")
+	fa := &breadthRecorder{fakeAssistant: &fakeAssistant{}, scope: agent.ScopeNarrow}
+	plan, err := NewPlanner(fa, tier).Plan(context.Background(), "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.SubTopics) != narrowCap || plan.Scope != agent.ScopeNarrow || plan.MaxSources != narrowCap*tier.MaxSources {
+		t.Errorf("narrow plan: %d sub-topics, scope %q, %d sources; want %d, narrow, %d",
+			len(plan.SubTopics), plan.Scope, plan.MaxSources, narrowCap, narrowCap*tier.MaxSources)
+	}
+	fa = &breadthRecorder{fakeAssistant: &fakeAssistant{}, scope: agent.ScopeComparison}
+	if plan, _ = NewPlanner(fa, tier).Plan(context.Background(), "q"); len(plan.SubTopics) != tier.SubTopics {
+		t.Errorf("comparison plan cut to %d, want the tier's %d", len(plan.SubTopics), tier.SubTopics)
+	}
+	fa = &breadthRecorder{fakeAssistant: &fakeAssistant{}, scope: agent.ScopeNarrow}
+	pl := NewPlanner(fa, tier)
+	pl.SubTopics = 4
+	if plan, _ = pl.Plan(context.Background(), "q"); len(plan.SubTopics) != 4 || plan.Scope != "" {
+		t.Errorf("--topics 4 on a narrow question: %d sub-topics, scope %q; want 4 and none", len(plan.SubTopics), plan.Scope)
+	}
+}
+
+// The scope reaches the brief and survives an edited plan, as the page's
+// review hands it back.
+func TestScopeIsShownAndKept(t *testing.T) {
+	p, err := ReadPlan(strings.NewReader(`{"question":"q","depth":{"key":"quick"},"scope":"narrow","sub_topics":[{"name":"A"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Scope != agent.ScopeNarrow {
+		t.Fatalf("ReadPlan dropped the scope: %q", p.Scope)
+	}
+	r := &Renderer{T: Theme{}, width: 120, plan: p}
+	if !strings.Contains(strings.Join(r.briefHead(), "\n"), "planned sub-topics · narrow question") {
+		t.Errorf("brief head lacks the scope:\n%s", strings.Join(r.briefHead(), "\n"))
 	}
 }

@@ -1305,7 +1305,7 @@ func TestRoundDuration(t *testing.T) {
 // told to stay under when the question needs fewer; with it, the old request.
 func TestPlanPromptAsksForAnExactCountOnlyWhenExact(t *testing.T) {
 	adaptive := planPrompt("q", Breadth{Max: 4})
-	if strings.Contains(adaptive, "exactly") || !strings.Contains(adaptive, "as few sub-topics as the question needs, at most 4") {
+	if strings.Contains(adaptive, "exactly") || !strings.Contains(adaptive, "Plan at most 4") || !strings.Contains(adaptive, `"scope"`) {
 		t.Errorf("adaptive breadth prompt = %q", adaptive)
 	}
 	if exact := planPrompt("q", Breadth{Max: 5, Exact: true}); !strings.HasPrefix(exact, "Plan exactly 5 sub-topics.") {
@@ -1313,5 +1313,22 @@ func TestPlanPromptAsksForAnExactCountOnlyWhenExact(t *testing.T) {
 	}
 	if none := planPrompt("q", Breadth{}); !strings.Contains(none, fmt.Sprintf("at most %d", defaultSubTopicCount)) {
 		t.Errorf("unset breadth prompt = %q, want the default ceiling", none)
+	}
+}
+
+// The planner's scope is read beside its sub-topics, and only the known
+// ones are taken: a label the caller holds a count to cannot be free text.
+func TestParsePlanScope(t *testing.T) {
+	for out, want := range map[string]string{
+		`{"scope":"narrow","subtopics":[{"name":"a"}]}`: ScopeNarrow,
+		`{"scope":" Comparison ","subtopics":[]}`:       ScopeComparison,
+		`{"scope":"multi-part"}`:                        ScopeMultiPart,
+		`{"scope":"huge","subtopics":[{"name":"a"}]}`:   "",
+		`{"subtopics":[{"name":"a"}]}`:                  "",
+		"```json\n{\"scope\":\"narrow\"}\n```":          ScopeNarrow,
+	} {
+		if got := parsePlanScope(out); got != want {
+			t.Errorf("parsePlanScope(%s) = %q, want %q", out, got, want)
+		}
 	}
 }

@@ -97,7 +97,7 @@ runs it.
 | `--output`, `-o FILE` | — | write the report to a file as well |
 | `--mode quick\|standard\|deep` | `standard` | research budget tier |
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
-| `--topics N` | `0` | plan exactly N sub-topics (1–8); `0` lets the planner choose as few as the question needs, up to the `--mode` tier's count (quick 3, standard 4, deep 6). `sub_topics` in `config.yaml` sets it for every run |
+| `--topics N` | `0` | plan exactly N sub-topics (1–8); `0` lets the planner choose: it judges the question narrow (one or two sub-topics), multi-part (one per part) or a comparison (one per alternative), up to the `--mode` tier's count (quick 3, standard 4, deep 6), and the brief shows the scope beside the sub-topics. `sub_topics` in `config.yaml` sets it for every run |
 | `--no-follow-ups` | off | skip the follow-up round: one model call and up to three searches fewer, and the analysis gets what the planned searches found. `follow_ups: false` in `config.yaml` makes it the default |
 | `--reports DIR` | `reports` | where the `.md` / `.pdf` / `.json` artifacts are written |
 | `--jsonl` | off | machine-readable event stream instead of the live UI |

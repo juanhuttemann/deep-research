@@ -45,10 +45,16 @@ made.
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
 each phase. The planner is given a breadth (`agent.Breadth`): by default a
-ceiling, the depth tier's sub-topic count, under which it plans as few
-sub-topics as the question needs, so a one-fact question is not split into
-four overlapping branches; `sub_topics`/`--topics` asks for an exact count
-instead. Code cuts a plan to the ceiling either way, and the run's source
+ceiling, the depth tier's sub-topic count. Under it the planner first
+judges the question's scope (`agent.Outline.Scope`): `narrow` (one thing
+about one subject, one or two sub-topics), `multi-part` (one per part) or
+`comparison` (one per alternative, and one for the criteria only if they
+need research). Told only "as few as needed" it filled the ceiling for
+nearly every question; a label it must choose first gives it a decision,
+and the Driver a rule: a narrow plan runs two sub-topics at most whatever
+it wrote (`ui.scopeCap`), and the plan carries the scope for the brief and
+the page's review to show. `sub_topics`/`--topics` asks for an exact count
+instead, and no scope applies. Code cuts a plan to the ceiling either way, and the run's source
 budget follows the sub-topics the plan has. The planner writes, for each sub-topic and in the question's
 language, a keyword search query and the terms a relevant page must mention.
 It also returns the question with its typos fixed (`agent.Outline.Question`);
