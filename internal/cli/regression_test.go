@@ -519,6 +519,10 @@ func TestWebArgsMapSettingsToFlags(t *testing.T) {
 			t.Errorf("args = %v, want %s", args, want)
 		}
 	}
+	// A configured budget the page shows as its value is launched as it is.
+	if args, _, err := webArgs(web.Request{Question: "q", Settings: map[string]string{"sources": "7"}}, "reports"); err != nil || !slices.Contains(args, "--sources=7") {
+		t.Errorf("sources 7: args %v, err %v", args, err)
+	}
 	for _, bad := range []map[string]string{{"topics": "40"}, {"colour": "red"}} {
 		if _, _, err := webArgs(web.Request{Question: "q", Settings: bad}, "reports"); err == nil {
 			t.Errorf("settings %v were accepted", bad)

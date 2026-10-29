@@ -25,6 +25,12 @@ type Setting struct {
 	Review bool `json:"review"`
 	// BriefKey cycles the setting in the terminal brief; 0 for none.
 	BriefKey Key `json:"-"`
+	// count settings take any whole number from 0 (auto) to max (0 for no
+	// bound), not only the choices offered: a config file's
+	// sources_per_topic: 7 is a budget the CLI runs, and the page that
+	// offered it as the value must be able to launch it.
+	count bool
+	max   int
 }
 
 // Option is one value a setting takes.
@@ -55,17 +61,49 @@ var sourceChoices = []int{2, 3, 4, 5, 6, 8, 10}
 
 // Settings describes every setting at the values rs holds.
 func Settings(rs RunSettings) []Setting {
-	return []Setting{
+	out := []Setting{
 		{Key: SettingMode, Label: "depth", Help: "How wide and deep the research goes: the most sub-topics, and the pages each reads.",
 			Value: cmp.Or(rs.Mode, "standard"), Opts: modeOptions(), Start: true, Review: true, BriefKey: KeyD},
 		{Key: SettingTopics, Label: "sub-topics", Help: "How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.",
-			Value: strconv.Itoa(rs.SubTopics), Opts: countOptions(MaxSubTopics, nil), Start: true},
+			Value: strconv.Itoa(rs.SubTopics), Opts: countOptions(MaxSubTopics, nil), Start: true, count: true, max: MaxSubTopics},
 		{Key: SettingSources, Label: "pages per topic", Help: "How many pages each sub-topic reads. Auto lets the depth decide.",
-			Value: strconv.Itoa(rs.Sources), Opts: countOptions(0, sourceChoices), Start: true},
+			Value: strconv.Itoa(rs.Sources), Opts: countOptions(0, sourceChoices), Start: true, count: true},
 		{Key: SettingFollowUps, Label: "follow-ups", Help: "After the planned searches, up to three more for what the findings leave open.",
 			Value: onOff(!rs.NoFollowUps), Opts: []Option{{Value: "on", Label: "on"}, {Value: "off", Label: "off"}},
 			Start: true, Review: true, BriefKey: KeyF},
 	}
+	for i := range out {
+		out[i].Opts = withValue(out[i], out[i].Value)
+	}
+	return out
+}
+
+// withValue is s's choices with v among them, in order, when v is a count s
+// accepts but does not offer: shown as the value, it has to be selectable,
+// or the page's list showed its first choice and the terminal row nothing.
+func withValue(s Setting, v string) []Option {
+	if _, ok := s.Option(v); ok || !s.accepts(v) {
+		return s.Opts
+	}
+	n, _ := strconv.Atoi(v)
+	i := slices.IndexFunc(s.Opts, func(o Option) bool {
+		m, err := strconv.Atoi(o.Value)
+		return err == nil && m > n
+	})
+	if i < 0 {
+		i = len(s.Opts)
+	}
+	return slices.Insert(slices.Clone(s.Opts), i, Option{Value: v, Label: v})
+}
+
+// accepts reports whether v is a value s takes: one of its choices, or for
+// a count any whole number in its range.
+func (s Setting) accepts(v string) bool {
+	if _, ok := s.Option(v); ok {
+		return true
+	}
+	n, err := strconv.Atoi(v)
+	return s.count && err == nil && n >= 0 && (s.max == 0 || n <= s.max)
 }
 
 func modeOptions() []Option {
@@ -107,7 +145,7 @@ func (s Setting) Next(v string) string {
 // value is passed, auto and on included, so a choice made on a screen wins
 // over the config file's.
 func (s Setting) Flag(v string) (name, value string, err error) {
-	if _, ok := s.Option(v); !ok {
+	if !s.accepts(v) {
 		return "", "", fmt.Errorf("%s: %q is not one of its choices", s.Label, v)
 	}
 	if s.Key == SettingFollowUps {

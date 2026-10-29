@@ -1009,8 +1009,18 @@ function showQuestion(h, question, asked) {
 // review setting key when given, as the terminal brief's keys apply it: the
 // budget and the settings' controls come back worked out where the run
 // works them out, so the page keeps no copy of the tiers or the budget.
-async function refreshPlan(key, value) {
+// Edits run one after another, each sent from what the last one returned:
+// sent at once, two quick choices (deep, then follow-ups off) were both made
+// on the plan before either, and the second undid the first. Start research
+// waits for them (planEdits).
+let planEdits = Promise.resolve();
+function refreshPlan(key, value) {
+  planEdits = planEdits.then(() => applyPlanEdit(key, value));
+  return planEdits;
+}
+async function applyPlanEdit(key, value) {
   const was = brief;
+  if (!was) return;
   try {
     const r = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plan: editedPlan(), key: key || "", value: value || "" }) });
@@ -1135,6 +1145,10 @@ $("discard").onclick = () => {
   brief = null; show("home");
 };
 $("start").onclick = async () => {
+  // A choice made just before is applied first, or the run took the plan
+  // from before it.
+  await planEdits;
+  if (!brief) return;
   const plan = editedPlan();
   if (!plan.sub_topics.length) { $("brief-msg").textContent = "Keep at least one named sub-topic."; return; }
   $("brief-msg").textContent = "";

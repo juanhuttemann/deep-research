@@ -129,7 +129,13 @@ func (b *askBox) prompt(text string, cursor int) []string {
 	label := "ask ▸ "
 	room := max(b.r.width-2-dispWidth(label), 8)
 	at, end := -1, cursor >= len(text) // the cursor's rune index; the end is a cell of its own
-	if cursor >= 0 {
+	switch {
+	case cursor >= 0 && !end && !b.r.T.Enabled:
+		// Without colour the block stands in front of the character, a
+		// column of its own: put in after the wrap, it made that row one
+		// column too wide and the region clipped its last character.
+		text = text[:cursor] + "█" + text[cursor:]
+	case cursor >= 0:
 		at = utf8.RuneCountInString(text[:min(cursor, len(text))])
 		if end {
 			text += " "

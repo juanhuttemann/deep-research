@@ -730,7 +730,7 @@ func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*
 			return nil, "", err
 		}
 		plan := ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d))
-		plan.NoFollowUps = tr.NoFollowUps
+		plan.NoFollowUps, plan.Scope = tr.NoFollowUps, tr.Scope
 		// A resumed run searches live for what it lacks, on the sites it was
 		// confined to; a replay searches nothing.
 		if replaying, _ := cmd.Flags().GetString("replay"); replaying == "" {
@@ -835,7 +835,7 @@ func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
 	}
 	return func(p *ui.Plan) {
 		rec.SetDomains(p.Domains)
-		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps)
+		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps, p.Scope)
 	}
 }
 
@@ -847,7 +847,7 @@ func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
 		return
 	}
 	if p := res.Plan; p != nil {
-		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps)
+		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps, p.Scope)
 	}
 	path := strings.TrimSuffix(res.MDPath, ".md") + ".trace.json"
 	if err := rec.Write(path); err != nil {
