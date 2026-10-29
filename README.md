@@ -131,11 +131,7 @@ and the model's reasoning as it streams:
 ![The live frame mid-analysis: Plan and Research done, seven sub-agents complete including three follow-ups, and the model thinking through the analysis](docs/images/web-live.jpg)
 
 When the run ends, the report opens below it, with the `.md`, `.pdf` and
-`.json` downloads in the header (here in the light theme):
-
-![The same run finished, in the light theme: every phase done, md, pdf and json downloads in the header, and the answer opening on LK-99 failing verification](docs/images/web-report.jpg)
-
-The audit shows what the fact-check decided: the statements that passed or
+`.json` downloads in the header. The audit shows what the fact-check decided: the statements that passed or
 were blocked, every claim's verdict, and the quote and page each rests on:
 
 ![The audit view: statements passed and blocked, the question as the analysis read it, and the inspector showing a supported claim about the July 2023 LK-99 preprints, with its fetched sources and the checker's assessment](docs/images/web-audit.jpg)
