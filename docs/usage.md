@@ -66,6 +66,14 @@ with it (`--mode`, `--topics`, `--sources`, `--no-follow-ups`, `--domains`,
 from `/resume` keeps its checkpoint's tier and budget whatever the row says. With `--silent`, `--jsonl` or a
 pipe on either side it prints the help, as it always did.
 
+Every box the terminal types in (the start screen's, `ask ▸`, the brief's
+add and rename prompts, the `/resume` and setting pickers) edits at a
+cursor: Left and Right move it, Ctrl-Left and Ctrl-Right (Option-Left and
+Option-Right on macOS) by a word, Home and End or Ctrl-A and Ctrl-E to the
+ends; typing inserts at it, Backspace and Delete remove the character
+before and under it, Ctrl-W the word before it, Ctrl-U everything before
+it and Ctrl-K everything after.
+
 Each run is a session. Its questions and answers are kept beside its
 `.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box
 takes the setting commands above and two more. In either box, a `/` opens a menu of the commands

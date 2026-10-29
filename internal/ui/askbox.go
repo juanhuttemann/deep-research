@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Ask reads a question about a report in the ask ▸ box, drawn under the
@@ -92,7 +93,7 @@ func (b *askBox) read(in Input) (string, bool) {
 	}
 	b.r.write(cursorHide)
 	b.r.hidden = true
-	e := &commandEditor{paint: func(text string, at int) { b.g.paint(b.lines(text, at, true)) }}
+	e := &commandEditor{paint: func(text string, at, cursor int) { b.g.paint(b.lines(text, at, cursor)) }}
 	q, ok := e.read(keys, false)
 	if !ok {
 		q = ""
@@ -105,15 +106,16 @@ func (b *askBox) read(in Input) (string, bool) {
 	// drawn again where it was when the command is done.
 	var keep []string
 	if q != "" && !strings.HasPrefix(q, "/") {
-		keep = b.lines(q, 0, false)[:2+len(b.prompt(q, false))]
+		keep = b.lines(q, 0, -1)[:2+len(b.prompt(q, -1))]
 	}
 	b.g.paint(keep)
 	return q, ok
 }
 
 // lines is the box: a blank row, the label and the text typed between
-// rules, wrapped, and what goes under them.
-func (b *askBox) lines(text string, at int, cursor bool) []string {
+// rules, wrapped, and what goes under them. cursor is the cursor's byte
+// offset in text, -1 for none.
+func (b *askBox) lines(text string, at, cursor int) []string {
 	out := append([]string{"", b.r.rule()}, b.prompt(text, cursor)...)
 	out = append(out, b.r.rule())
 	return append(out, b.r.commandBlock(text, at, "[enter] ask   [empty enter] "+b.back, b.back)...)
@@ -121,16 +123,25 @@ func (b *askBox) lines(text string, at int, cursor bool) []string {
 
 // prompt is the label and text, wrapped under the text's first column: a
 // question is often longer than a row, and the terminal's line wrapped it.
-func (b *askBox) prompt(text string, cursor bool) []string {
+// The cursor, at byte offset cursor (-1 for none), is drawn in its cell
+// after wrapping, so its colour codes are never cut by the wrap.
+func (b *askBox) prompt(text string, cursor int) []string {
 	label := "ask ▸ "
 	room := max(b.r.width-2-dispWidth(label), 8)
-	if cursor {
-		text += "█"
+	at, end := -1, cursor >= len(text) // the cursor's rune index; the end is a cell of its own
+	if cursor >= 0 {
+		at = utf8.RuneCountInString(text[:min(cursor, len(text))])
+		if end {
+			text += " "
+		}
 	}
 	rows := wrapCells(text, room)
-	if cursor {
-		last := rows[len(rows)-1]
-		rows[len(rows)-1] = strings.TrimSuffix(last, "█") + b.r.T.cyan("█")
+	for i, row := range rows {
+		n := utf8.RuneCountInString(row)
+		if at >= 0 && at < n {
+			rows[i] = b.r.cursorAt(row, at, end)
+		}
+		at -= n
 	}
 	for i := range rows {
 		lead := strings.Repeat(" ", 2+dispWidth(label))

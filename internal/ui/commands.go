@@ -45,8 +45,9 @@ func completions(text string) []Choice {
 type commandEditor struct {
 	text    string
 	at      int
+	cursor  int
 	example string
-	paint   func(text string, at int)
+	paint   func(text string, at, cursor int)
 }
 
 // read takes a line, its keys handled as the menu needs; an empty line is
@@ -62,11 +63,12 @@ func (e *commandEditor) read(in Input, wait bool) (string, bool) {
 	return e.pick(q), ok
 }
 
-func (e *commandEditor) echo(t string) {
+func (e *commandEditor) echo(t string, cursor int) {
 	if t != e.text {
 		e.text, e.at = t, 0
 	}
-	e.paint(e.text, e.at)
+	e.cursor = cursor
+	e.paint(e.text, e.at, e.cursor)
 }
 
 func (e *commandEditor) arrow(k byte) {
@@ -76,7 +78,7 @@ func (e *commandEditor) arrow(k byte) {
 	case 'B':
 		e.at = max(min(e.at+1, len(completions(e.text))-1), 0)
 	}
-	e.paint(e.text, e.at)
+	e.paint(e.text, e.at, e.cursor)
 }
 
 // pick is t, or the highlighted command when t is the start of one: Enter

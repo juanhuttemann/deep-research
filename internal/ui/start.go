@@ -50,11 +50,11 @@ func askQuestion(in Input, r *Renderer, s agent.Setup, settings []Setting, examp
 
 // SetCommand is SetPrompt for the start screen, with the command menu's
 // highlighted row.
-func (r *Renderer) SetCommand(text string, at int) {
+func (r *Renderer) SetCommand(text string, at, cursor int) {
 	r.mu.Lock()
 	r.commandAt = at
 	r.mu.Unlock()
-	r.SetPrompt("research", text)
+	r.SetPromptAt("research", text, cursor)
 }
 
 // RenderStart shows the start screen.

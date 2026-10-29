@@ -424,8 +424,8 @@ func waitBrief(in Input, r *Renderer, plan *Plan) (*Plan, int) {
 		case KeyE:
 			// In line mode the topic was typed on the same line as the key, so
 			// it is already in hand and there is no second line to wait for.
-			name, ok := readPromptSeeded(in, k.Rest, func(text string) {
-				r.SetPrompt("add sub-topic", text)
+			name, ok := readPromptSeeded(in, k.Rest, func(text string, cursor int) {
+				r.SetPromptAt("add sub-topic", text, cursor)
 			})
 			r.SetPrompt("", "")
 			if ok && name != "" {
@@ -473,8 +473,8 @@ func renameTopic(in Input, r *Renderer, plan *Plan, seed string) {
 	if !ok {
 		return
 	}
-	name, done := readPromptEdit(in, plan.SubTopics[i].Name, func(text string) {
-		r.SetPrompt("rename sub-topic", text)
+	name, done := readPromptEdit(in, plan.SubTopics[i].Name, func(text string, cursor int) {
+		r.SetPromptAt("rename sub-topic", text, cursor)
 	})
 	r.SetPrompt("", "")
 	if name = truncate(name, 60); done && name != "" && name != plan.SubTopics[i].Name {
@@ -499,8 +499,8 @@ func deleteTopic(in Input, r *Renderer, plan *Plan, seed string) *Plan {
 // answer that is not a listed number is treated as "never mind", so a typo
 // cannot delete the wrong branch.
 func pickTopic(in Input, r *Renderer, plan *Plan, label, seed string) (int, bool) {
-	answer, ok := readPromptSeeded(in, seed, func(text string) {
-		r.SetPrompt(fmt.Sprintf("%s (1-%d)", label, len(plan.SubTopics)), text)
+	answer, ok := readPromptSeeded(in, seed, func(text string, cursor int) {
+		r.SetPromptAt(fmt.Sprintf("%s (1-%d)", label, len(plan.SubTopics)), text, cursor)
 	})
 	r.SetPrompt("", "")
 	n, err := strconv.Atoi(strings.TrimSpace(answer))

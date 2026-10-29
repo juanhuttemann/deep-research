@@ -46,6 +46,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- The terminal's boxes have a cursor: Left and Right move it (by a word
+  with Ctrl or Option), Home and End or Ctrl-A and Ctrl-E go to the ends,
+  and typing, Backspace, Delete, Ctrl-W, Ctrl-U and Ctrl-K edit at it. A
+  typo early in a question used to mean deleting everything after it.
+
 - The brief is drawn in place, under what the terminal shows, as the start
   screen is, and cancelling it clears it: the start screen comes back on
   the rows it had, with the `cancelled` notice on it, where the old brief

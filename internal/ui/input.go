@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -151,7 +152,7 @@ func keyFromByte(b byte) Key {
 // ESC followed by something else (alt-<key>) is not a cancel, and not a
 // sequence we act on either.
 func readEscape(in Input) Key {
-	if lead, _ := escapeAfter(in); lead == 0 {
+	if lead, _, _ := escapeAfter(in); lead == 0 {
 		return KeyEsc
 	}
 	return KeyUnknown
@@ -159,32 +160,35 @@ func readEscape(in Input) Key {
 
 // escapeAfter reads what follows an Esc: lead is 0 for a bare Esc, '[' or
 // 'O' for a key sequence, whose remaining bytes it swallows and whose final
-// byte it returns ('A' up, 'B' down), or an alt-<key>'s key.
-func escapeAfter(in Input) (lead, final byte) {
+// byte it returns ('A' up, 'B' down) with its parameters ("1;5" for a
+// Ctrl-arrow, "3" for Delete's ESC [ 3 ~), or an alt-<key>'s key.
+func escapeAfter(in Input) (lead, final byte, params string) {
 	t, ok := in.(timedInput)
 	if !ok {
-		return 0, 0
+		return 0, 0, ""
 	}
 	b, err := t.NextWithin(escapeWindow)
 	if err != nil {
-		return 0, 0
+		return 0, 0, ""
 	}
 	if b != '[' && b != 'O' {
-		return b, 0
+		return b, 0, ""
 	}
 	// CSI parameter bytes run 0x30-0x3f and intermediates 0x20-0x2f; the
 	// sequence ends at the first final byte (0x40-0x7e). ESC O takes exactly
 	// one final byte.
+	var ps []byte
 	for i := 0; i < 16; i++ {
 		c, err := t.NextWithin(escapeWindow)
 		if err != nil {
 			break
 		}
 		if b == 'O' || (c >= 0x40 && c <= 0x7e) {
-			return b, c
+			return b, c, string(ps)
 		}
+		ps = append(ps, c)
 	}
-	return b, 0
+	return b, 0, string(ps)
 }
 
 // readKey reads one keystroke.
@@ -341,10 +345,10 @@ func guardTerminal(sig chan os.Signal, input Input, r *Renderer) (stop func()) {
 // seed is the text already in hand. In line mode the argument arrives on the
 // same line as the key that opened the prompt, so it is the answer and there
 // is nothing left to read.
-func readPromptSeeded(in Input, seed string, echo func(string)) (string, bool) {
+func readPromptSeeded(in Input, seed string, echo func(text string, cursor int)) (string, bool) {
 	if seed != "" {
 		if echo != nil {
-			echo(seed)
+			echo(seed, len(seed))
 		}
 		return strings.TrimSpace(seed), true
 	}
@@ -355,7 +359,7 @@ func readPromptSeeded(in Input, seed string, echo func(string)) (string, bool) {
 			return "", false
 		}
 		if echo != nil {
-			echo(line)
+			echo(line, len(line))
 		}
 		return line, line != ""
 	}
@@ -366,74 +370,217 @@ func readPromptSeeded(in Input, seed string, echo func(string)) (string, bool) {
 // rename starts from the old name rather than an empty field. Only raw mode
 // can edit that buffer; a line-mode terminal has no per-keystroke echo to edit
 // against, so there the reader types a whole fresh line.
-func readPromptEdit(in Input, current string, echo func(string)) (string, bool) {
+func readPromptEdit(in Input, current string, echo func(text string, cursor int)) (string, bool) {
 	if !in.Raw() {
 		return readPromptSeeded(in, "", echo)
 	}
 	return readPromptRaw(in, []byte(current), nil, echo, nil)
 }
 
-// readPromptRaw runs the keystroke-at-a-time edit loop over buf. tab, when
-// set, turns the line into what Tab makes of it: the start screen's takes
-// its example, as the page's question box does, or completes a command.
-// arrow, when set, is handed each arrow key's final byte.
-func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(string), arrow func(byte)) (string, bool) {
+// readPromptRaw runs the keystroke-at-a-time edit loop over buf, with a
+// cursor the arrows move: a typo early in a long question used to mean
+// deleting everything after it. tab, when set, turns the line into what Tab
+// makes of it: the start screen's takes its example, as the page's question
+// box does, or completes a command. arrow, when set, is handed the final
+// byte of each key sequence the line does not use (up and down, which move
+// a menu). echo is given the line and the cursor's byte offset in it.
+func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text string, cursor int), arrow func(byte)) (string, bool) {
+	l := &lineEdit{buf: buf, cur: len(buf)}
 	show := func() {
 		if echo != nil {
-			echo(string(buf))
+			echo(string(l.buf), l.cur)
 		}
 	}
 	show()
 	for {
 		c, err := in.Next()
 		if err != nil {
-			return strings.TrimSpace(string(buf)), len(buf) > 0
+			return strings.TrimSpace(string(l.buf)), len(l.buf) > 0
 		}
 		switch c {
 		case '\r', '\n':
-			return strings.TrimSpace(string(buf)), true
+			return strings.TrimSpace(string(l.buf)), true
 		case 0x1b:
-			// An arrow or function key arrives as a sequence that starts
-			// with Esc. The line has no cursor to move, so the key does
-			// nothing; taken as Esc, it threw the typed line away.
-			if lead, final := escapeAfter(in); lead == '[' || lead == 'O' {
+			// A key sequence starts with Esc, as an Alt-<key> does; taken
+			// as Esc, either threw the typed line away.
+			lead, final, params := escapeAfter(in)
+			used := lead != 0 && l.escape(lead, final, params)
+			switch {
+			case used:
+			case lead == '[' || lead == 'O':
 				if arrow != nil {
 					arrow(final)
 				}
-				continue
-			}
-			return "", false
-		case byte(KeyCtrlC): // as Esc: raw mode makes it a key
-			return "", false
-		case 0x04: // Ctrl-D on an empty line ends it, as at a shell
-			if len(buf) == 0 {
+			default:
+				// A bare Esc, or Esc and a key the line does not use (Esc
+				// then Enter typed fast reads as Alt-Enter): Esc, as it was.
 				return "", false
 			}
+		case byte(KeyCtrlC): // as Esc: raw mode makes it a key
+			return "", false
+		case 0x04: // Ctrl-D ends an empty line, as at a shell; else deletes forward
+			if len(l.buf) == 0 {
+				return "", false
+			}
+			l.deleteForward()
 		default:
-			buf = editLine(buf, c, tab)
+			l.edit(c, tab)
 		}
 		show()
 	}
 }
 
-// editLine is buf after a key that edits it rather than ends it.
-func editLine(buf []byte, c byte, tab func(string) string) []byte {
+// lineEdit is a line being typed and the cursor in it, a byte offset on a
+// rune boundary.
+type lineEdit struct {
+	buf []byte
+	cur int
+}
+
+// edit applies a key that edits the line rather than ends it.
+func (l *lineEdit) edit(c byte, tab func(string) string) {
 	switch c {
 	case '\t':
 		if tab != nil {
-			return []byte(tab(string(buf)))
+			l.buf = []byte(tab(string(l.buf)))
+			l.cur = len(l.buf)
 		}
-	case 0x7f, 0x08: // Backspace deletes a whole rune, not a byte
-		if _, n := utf8.DecodeLastRune(buf); n > 0 {
-			return buf[:len(buf)-n]
-		}
+	case 0x7f, 0x08: // Backspace deletes the whole rune before the cursor
+		_, n := utf8.DecodeLastRune(l.buf[:l.cur])
+		l.cut(l.cur-n, l.cur)
+	case 0x01: // Ctrl-A, Ctrl-E: start and end, as at a shell
+		l.cur = 0
+	case 0x05:
+		l.cur = len(l.buf)
+	case 0x02: // Ctrl-B, Ctrl-F: back and forward a character
+		l.left()
+	case 0x06:
+		l.right()
+	case 0x15: // Ctrl-U, Ctrl-K: delete to the start, to the end
+		l.cut(0, l.cur)
+	case 0x0b:
+		l.cut(l.cur, len(l.buf))
+	case 0x17: // Ctrl-W deletes the word before the cursor
+		l.cut(l.wordLeft(), l.cur)
 	default:
-		// Printable bytes only: control codes would corrupt the frame,
-		// and UTF-8 continuation bytes (>= 0x80) are appended as they
-		// arrive so multi-byte characters survive.
+		// Printable bytes only: control codes would corrupt the frame. A
+		// multi-byte character's bytes arrive one after another and are
+		// inserted in turn, so it lands whole at the cursor.
 		if c >= 0x20 {
-			return append(buf, c)
+			l.buf = slices.Insert(l.buf, l.cur, c)
+			l.cur++
 		}
 	}
-	return buf
+}
+
+// escape applies a key sequence, or an Alt-<key>, and reports whether the
+// line used it.
+func (l *lineEdit) escape(lead, final byte, params string) bool {
+	if lead != '[' && lead != 'O' {
+		return l.altKey(lead)
+	}
+	return l.sequence(final, params)
+}
+
+// altKey is Alt-B, Alt-F and Alt-Backspace: what macOS terminals send for
+// Option with the arrows and Backspace.
+func (l *lineEdit) altKey(k byte) bool {
+	switch k {
+	case 'b':
+		l.cur = l.wordLeft()
+	case 'f':
+		l.cur = l.wordRight()
+	case 0x7f:
+		l.cut(l.wordLeft(), l.cur)
+	default:
+		return false
+	}
+	return true
+}
+
+// sequence is an arrow, Home, End or Delete. A modified arrow carries its
+// modifier as the last parameter (ESC [ 1 ; 5 D is Ctrl-Left): any modifier
+// moves by word.
+func (l *lineEdit) sequence(final byte, params string) bool {
+	if final == '~' {
+		return l.tilde(params)
+	}
+	byWord := strings.Contains(params, ";")
+	switch {
+	case final == 'D' && byWord:
+		l.cur = l.wordLeft()
+	case final == 'C' && byWord:
+		l.cur = l.wordRight()
+	case final == 'D':
+		l.left()
+	case final == 'C':
+		l.right()
+	case final == 'H':
+		l.cur = 0
+	case final == 'F':
+		l.cur = len(l.buf)
+	default:
+		return false
+	}
+	return true
+}
+
+// tilde is the ESC [ n ~ keys: Home (1, 7), End (4, 8) and Delete (3).
+func (l *lineEdit) tilde(params string) bool {
+	switch params {
+	case "1", "7":
+		l.cur = 0
+	case "4", "8":
+		l.cur = len(l.buf)
+	case "3":
+		l.deleteForward()
+	default:
+		return false
+	}
+	return true
+}
+
+func (l *lineEdit) left() {
+	_, n := utf8.DecodeLastRune(l.buf[:l.cur])
+	l.cur -= n
+}
+
+func (l *lineEdit) right() {
+	_, n := utf8.DecodeRune(l.buf[l.cur:])
+	l.cur += n
+}
+
+func (l *lineEdit) deleteForward() {
+	_, n := utf8.DecodeRune(l.buf[l.cur:])
+	l.cut(l.cur, l.cur+n)
+}
+
+// cut deletes buf[from:to] and leaves the cursor where it was.
+func (l *lineEdit) cut(from, to int) {
+	l.buf = slices.Delete(l.buf, from, to)
+	l.cur = from
+}
+
+// wordLeft is the start of the word before the cursor, past any spaces.
+func (l *lineEdit) wordLeft() int {
+	i := l.cur
+	for i > 0 && l.buf[i-1] == ' ' {
+		i--
+	}
+	for i > 0 && l.buf[i-1] != ' ' {
+		i--
+	}
+	return i
+}
+
+// wordRight is the end of the word after the cursor, past any spaces.
+func (l *lineEdit) wordRight() int {
+	i := l.cur
+	for i < len(l.buf) && l.buf[i] == ' ' {
+		i++
+	}
+	for i < len(l.buf) && l.buf[i] != ' ' {
+		i++
+	}
+	return i
 }
