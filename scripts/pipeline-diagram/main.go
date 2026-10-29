@@ -43,7 +43,7 @@ type box struct {
 // more. docs/architecture.md has the rest.
 var (
 	question = box{user, "Question", "", []string{"drsh -p, or", "drsh serve"}}
-	plan     = box{model, "Plan", "1 call", []string{subTopicRange() + " sub-topics,", "query + terms each"}}
+	plan     = box{model, "Plan", "1 call", []string{subTopicRange() + " sub-topics,", "as many as needed"}}
 	group    = "Sub-agents, in parallel"
 	lanes    = []string{"sub-topic 1", "sub-topic 2", "sub-topic n"}
 	laneWork = "search · rank · read"
@@ -297,7 +297,7 @@ func header(height int) string {
 `, width, height, width, height, html.EscapeString(summary), style, width, height)
 }
 
-const summary = "A deep-research run: the question is planned into sub-topics, each researched by a parallel " +
+const summary = "A deep-research run: the question is planned into as many sub-topics as it needs, each researched by a parallel " +
 	"sub-agent that searches, ranks by its terms and reads pages; an optional follow-up round adds a few searches. " +
 	"The analysis states claims and the answer, the fact-check judges them against the pages, code keeps only " +
 	"what passed and blocked statements get one repair, then the summary is written from the checked result " +

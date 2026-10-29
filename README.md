@@ -1,6 +1,6 @@
 # deep-research
 
-![A run: the question is planned into sub-topics, researched by parallel sub-agents and an optional follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
+![A run: the question is planned into as many sub-topics as it needs, researched by parallel sub-agents and an optional follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
 
 An AI-powered deep research agent for the terminal and the browser. Its
 answer states only what passed a fact-check against the pages it read, and
@@ -87,12 +87,19 @@ cheap request each.
 
 In the terminal:
 
-1. **Research brief**: the planned sub-topics. Add, rename, delete or
-   re-budget them, then press Enter.
-2. **Live frame**: the pipeline stage, one row per parallel sub-agent, the
+1. **Start screen** (a bare `drsh`): type the question. The row under the box
+   is the run's settings: depth, sub-topics, pages per topic and follow-ups,
+   each changed with its command (`/mode deep`, `/topics 2`,
+   `/follow-ups off`).
+2. **Research brief**: the planned sub-topics. The planner sizes the plan to
+   the question and says how it read it: a narrow question gets one or two
+   sub-topics, a multi-part one a sub-topic per part, a comparison one per
+   alternative. Add, rename or delete them, change the depth (`d`) or turn
+   the follow-up searches off (`f`), then press Enter.
+3. **Live frame**: the pipeline stage, one row per parallel sub-agent, the
    sources as they are read, and a status line for the model call in flight,
    with a reasoning model's latest thinking under it.
-3. **Report**: rendered in the terminal and saved to `reports/` as `.md`,
+4. **Report**: rendered in the terminal and saved to `reports/` as `.md`,
    `.pdf` and `.json`.
 
 The report opens with the answer (for a choice: which option, under which
@@ -112,9 +119,9 @@ whose searches mostly came back empty says so up front, with confidence
 ### In the browser
 
 `drsh serve` runs the same pipeline from a page on localhost, in a light or a
-dark theme. Type the question, pick the depth, then edit the plan before
-anything is searched: rename, add or remove sub-topics, and change the search
-each one runs:
+dark theme. Type the question and pick the same settings the terminal offers,
+then edit the plan before anything is searched: rename, add or remove
+sub-topics, change the search each one runs, the depth and the follow-ups:
 
 ![The serve page's plan review for "How close are we to a room-temperature superconductor after LK-99?": four sub-topics, each with the search it will run](docs/images/web-plan.jpg)
 
@@ -172,6 +179,8 @@ minute and per day; a run with web search takes 4 to 13 model requests, and
 ```bash
 drsh                                     # ask on the start screen, one run after another
 drsh -p "question" --mode deep          # quick | standard | deep
+drsh -p "question" --topics 3           # exactly 3 sub-topics (default: the planner decides)
+drsh -p "question" --no-follow-ups      # skip the follow-up searches
 drsh -p "question" --output report.md   # also save to a file
 drsh -p "question" --silent             # just the report
 drsh -p "question" --jsonl              # machine-readable events
