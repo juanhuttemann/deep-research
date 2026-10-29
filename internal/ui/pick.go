@@ -27,12 +27,13 @@ func Pick(stdin io.Reader, stdout io.Writer, noColor bool, title, label string, 
 }
 
 func pick(in Input, r *Renderer, title, label string, rows []Choice) int {
-	text, shown, at := "", matching(rows, ""), 0
-	paint := func() { r.RenderPick(title, label, text, rows, shown, at) }
-	echo := func(t string) {
+	text, shown, at, cursor := "", matching(rows, ""), 0, 0
+	paint := func() { r.RenderPick(title, label, text, cursor, rows, shown, at) }
+	echo := func(t string, c int) {
 		if t != text {
 			text, shown, at = t, matching(rows, t), 0
 		}
+		cursor = c
 		paint()
 	}
 	arrow := func(k byte) {
@@ -73,11 +74,11 @@ func matching(rows []Choice, filter string) []int {
 }
 
 // RenderPick shows the picker: rows[shown[at]] is highlighted.
-func (r *Renderer) RenderPick(title, label, text string, rows []Choice, shown []int, at int) {
+func (r *Renderer) RenderPick(title, label, text string, cursor int, rows []Choice, shown []int, at int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.mode, r.pickTitle, r.pickRows, r.pickShown, r.pickAt = "pick", title, rows, shown, at
-	r.promptLabel, r.promptText, r.example = label, text, "type to filter"
+	r.promptLabel, r.promptText, r.promptCursor, r.example = label, text, cursor, "type to filter"
 	if !r.plain {
 		r.paintLocked(true)
 	}

@@ -459,7 +459,7 @@ func TestReadPromptEditing(t *testing.T) {
 	}
 	// Every keystroke is echoed so the reader sees what they are typing.
 	var seen []string
-	if _, _ = readPromptSeeded(NewByteReader([]byte("hi\r")), "", func(s string) {
+	if _, _ = readPromptSeeded(NewByteReader([]byte("hi\r")), "", func(s string, _ int) {
 		seen = append(seen, s)
 	}); strings.Join(seen, "|") != "|h|hi" {
 		t.Errorf("echo sequence = %q, want \"|h|hi\"", strings.Join(seen, "|"))
@@ -2209,8 +2209,8 @@ func TestAskQuestion(t *testing.T) {
 		{"esc quits", "half typed\x1b", ""},
 		{"ctrl-c quits", "half typed\x03", ""},
 		// An arrow key is a sequence starting with Esc; it quit the screen,
-		// and the question typed so far with it.
-		{"arrow is not esc", "ab\x1b[Dc\r", "abc"},
+		// and the question typed so far with it. Left now moves the cursor.
+		{"arrow is not esc", "ab\x1b[Dc\r", "acb"},
 		// The command menu: Tab completes the highlighted command, the
 		// arrows move among those matching, and Enter on the start of one
 		// runs it rather than an unknown "/r".
@@ -2259,7 +2259,7 @@ func TestStartScreenCommandMenu(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{Enabled: true})
 	r.width, r.rows, r.plain = 100, 30, false
 	r.RenderStart(agent.Setup{}, nil, "an example?", "")
-	r.SetCommand("/r", 0)
+	r.SetCommand("/r", 0, 2)
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"▸ ", cBold + "/r" + cReset + "esume", "past runs", "complete"} {
 		if !strings.Contains(frame, want) {
@@ -2269,7 +2269,7 @@ func TestStartScreenCommandMenu(t *testing.T) {
 	if strings.Contains(frame, "/model") || strings.Contains(frame, "[enter] research") {
 		t.Errorf("menu shows /model or the screen's keys for /r:\n%s", frame)
 	}
-	r.SetCommand("why /r", 0)
+	r.SetCommand("why /r", 0, 6)
 	if frame := strings.Join(r.frameLines(), "\n"); strings.Contains(frame, "complete") {
 		t.Errorf("menu shown for a question:\n%s", frame)
 	}
@@ -2307,7 +2307,7 @@ func TestPick(t *testing.T) {
 func TestPickFrame(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	r.width, r.rows, r.plain = 100, 30, false
-	r.RenderPick("RESUME", "resume", "", []Choice{{Title: "first run", Note: "2h ago"}, {Title: "second run"}}, []int{0, 1}, 1)
+	r.RenderPick("RESUME", "resume", "", 0, []Choice{{Title: "first run", Note: "2h ago"}, {Title: "second run"}}, []int{0, 1}, 1)
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"RESUME", "resume ▸ █", "    first run", "  ▸ second run", "2h ago",
 		"[enter] open   [↑↓] move   [esc] back"} {
@@ -2462,14 +2462,14 @@ func TestAskBoxRead(t *testing.T) {
 func TestAskBoxLines(t *testing.T) {
 	b := newAskBox(NewRenderer(&bytes.Buffer{}, Theme{}), "new research", nil)
 	b.r.width = 40
-	plain := b.lines("", 0, true)
+	plain := b.lines("", 0, 0)
 	if got := plain[len(plain)-2]; got != "  [enter] ask   [empty enter] new research" || plain[len(plain)-1] != "" {
 		t.Errorf("keys = %q, want them without /resume and a blank row under them", plain[len(plain)-2:])
 	}
-	if frame := strings.Join(b.lines("/r", 0, true), "\n"); !strings.Contains(frame, "▸ /resume  past runs") || strings.Contains(frame, "/model") {
+	if frame := strings.Join(b.lines("/r", 0, 2), "\n"); !strings.Contains(frame, "▸ /resume  past runs") || strings.Contains(frame, "/model") {
 		t.Errorf("menu for /r:\n%s", frame)
 	}
-	rows := b.prompt(strings.Repeat("x", 40), true)
+	rows := b.prompt(strings.Repeat("x", 40), 40)
 	if len(rows) != 2 || !strings.HasPrefix(rows[1], strings.Repeat(" ", 8)+"x") || !strings.HasSuffix(rows[1], "█") {
 		t.Errorf("long question rows = %q, want two, the second under the first's text", rows)
 	}
@@ -2572,5 +2572,73 @@ func TestRegionWithoutAnAnswer(t *testing.T) {
 		"\r\n" + "\r\x1b[3Aa" + eraseLine + "\r\x1b[1Bb" + eraseLine + "\r\x1b[1Bc" + eraseLine + "\r\x1b[1Bd" + eraseLine
 	if out.String() != want {
 		t.Errorf("relative paint = %q\nwant %q", out.String(), want)
+	}
+}
+
+// Fixing a typo early in a long question meant deleting everything after
+// it: the line had no cursor, and the arrows did nothing. Every box (the
+// start screen, ask ▸, the brief's prompts, the pickers) reads through the
+// same editor, which now moves and edits at a cursor.
+func TestLineEditorMovesAndEditsAtTheCursor(t *testing.T) {
+	cases := []struct{ name, keys, want string }{
+		{"left then insert", "helo\x1b[Dl\r", "hello"},
+		{"right after left", "ab\x1b[D\x1b[Cc\r", "abc"},
+		{"home and end", "bc\x1b[Ha\x1b[Fd\r", "abcd"},
+		{"ctrl-a and ctrl-e", "bc\x01a\x05d\r", "abcd"},
+		{"backspace mid-line", "abxc\x1b[D\x7f\r", "abc"},
+		{"delete key", "abxc\x1b[D\x1b[D\x1b[3~\r", "abc"},
+		{"ctrl-left by word", "one three\x1b[1;5Dtwo \r", "one two three"},
+		{"alt-b by word (macOS option-left)", "one three\x1bbtwo \r", "one two three"},
+		{"ctrl-right by word", "one two\x01\x1b[1;5C!\r", "one! two"},
+		{"ctrl-w deletes the word before", "one two\x17three\r", "one three"},
+		{"ctrl-u deletes to the start", "abc\x1b[D\x15x\r", "xc"},
+		{"ctrl-k deletes to the end", "abc\x1b[D\x1b[D\x0b\r", "a"},
+		{"multi-byte rune moved over whole", "a名c\x1b[D\x1b[D\x1b[Db\r", "ba名c"},
+		{"left stops at the start", "a\x1b[D\x1b[D\x1b[Db\r", "ba"},
+		{"tab puts the cursor at the end", "\x1b[D\tx\r", "examplex"},
+	}
+	for _, c := range cases {
+		got, ok := readPromptRaw(NewByteReader([]byte(c.keys)), nil, func(s string) string {
+			if s == "" {
+				return "example"
+			}
+			return s
+		}, nil, nil)
+		if !ok || got != c.want {
+			t.Errorf("%s: got %q (ok=%v), want %q", c.name, got, ok, c.want)
+		}
+	}
+	// The cursor reaches the screen: the character under it is inverted in
+	// colour, the block stands before it without, and sits after the text at
+	// its end.
+	r := NewRenderer(&bytes.Buffer{}, Theme{Enabled: true})
+	if got := r.withCursor("abc", 1); got != "a"+cInverse+"b"+cReset+"c" {
+		t.Errorf("colour cursor = %q", got)
+	}
+	plain := NewRenderer(&bytes.Buffer{}, Theme{})
+	if got := plain.withCursor("abc", 1); got != "a█bc" {
+		t.Errorf("plain cursor = %q", got)
+	}
+	if got := plain.withCursor("abc", 3); got != "abc█" {
+		t.Errorf("end cursor = %q", got)
+	}
+}
+
+// The ask box wraps a long question; the cursor is drawn in its cell after
+// the wrap, on whichever row it falls.
+func TestAskBoxDrawsTheCursorWhereItIs(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width = 20
+	b := newAskBox(r, "finish", nil)
+	rows := b.prompt("abcdefghijklmnopqrstuvwxyz", 13)
+	joined := strings.Join(rows, "\n")
+	if !strings.Contains(joined, "█n") || strings.Count(joined, "█") != 1 {
+		t.Errorf("cursor before n not drawn once:\n%s", joined)
+	}
+	if end := strings.Join(b.prompt("abc", 3), ""); !strings.HasSuffix(end, "abc█") {
+		t.Errorf("end cursor: %q", end)
+	}
+	if none := strings.Join(b.prompt("abc", -1), ""); strings.Contains(none, "█") {
+		t.Errorf("a kept question drew a cursor: %q", none)
 	}
 }

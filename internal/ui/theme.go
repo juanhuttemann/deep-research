@@ -15,6 +15,8 @@ const (
 	cReset = "\x1b[0m"
 	cBold  = "\x1b[1m"
 	cDim   = "\x1b[2m"
+	// cInverse swaps foreground and background: the cursor over a character.
+	cInverse = "\x1b[7m"
 
 	cRed     = "\x1b[31m"
 	cGreen   = "\x1b[32m"

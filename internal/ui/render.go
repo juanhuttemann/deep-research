@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 )
@@ -113,6 +114,8 @@ type Renderer struct {
 	// has to draw it.
 	promptLabel string
 	promptText  string
+	// promptCursor is the cursor's byte offset in promptText.
+	promptCursor int
 	// briefNote is a one-line notice shown above the brief's key hints.
 	briefNote string
 	// setup and example are the start screen's: what runs will use, and
@@ -266,10 +269,13 @@ func (r *Renderer) ToggleActivity() {
 }
 
 // SetPrompt draws the line the reader is typing. label empty closes it.
-func (r *Renderer) SetPrompt(label, text string) {
+func (r *Renderer) SetPrompt(label, text string) { r.SetPromptAt(label, text, len(text)) }
+
+// SetPromptAt is SetPrompt with the cursor at byte offset cursor of text.
+func (r *Renderer) SetPromptAt(label, text string, cursor int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.promptLabel, r.promptText = label, text
+	r.promptLabel, r.promptText, r.promptCursor = label, text, cursor
 	if r.plain {
 		return
 	}
@@ -279,11 +285,40 @@ func (r *Renderer) SetPrompt(label, text string) {
 // promptRow renders the in-progress line with a block cursor, and the
 // example after it while nothing is typed.
 func (r *Renderer) promptRow() string {
-	row := "  " + r.T.magenta(r.promptLabel+" ▸ ") + r.promptText + r.T.cyan("█")
+	row := "  " + r.T.magenta(r.promptLabel+" ▸ ") + r.withCursor(r.promptText, r.promptCursor)
 	if r.promptText == "" {
 		row += r.T.dim(r.example)
 	}
 	return row
+}
+
+// cursorAt draws row with the cursor on its rune i, which is the blank
+// added after the text when end is set.
+func (r *Renderer) cursorAt(row string, i int, end bool) string {
+	off := 0
+	for k := 0; k < i; k++ {
+		_, n := utf8.DecodeRuneInString(row[off:])
+		off += n
+	}
+	if end {
+		return row[:off] + r.T.cyan("█")
+	}
+	return r.withCursor(row, off)
+}
+
+// withCursor draws text with the cursor at byte offset cursor: the block
+// after the text at its end, as it always was, and the character under it
+// shown inverted inside it. Without colour there is no inverting, so the
+// block stands in front of that character instead.
+func (r *Renderer) withCursor(text string, cursor int) string {
+	if cursor < 0 || cursor >= len(text) {
+		return text + r.T.cyan("█")
+	}
+	_, n := utf8.DecodeRuneInString(text[cursor:])
+	if !r.T.Enabled {
+		return text[:cursor] + "█" + text[cursor:]
+	}
+	return text[:cursor] + r.T.paint(cInverse, text[cursor:cursor+n]) + text[cursor+n:]
 }
 
 // apply folds one event into the live state. It must be called with mu held.
