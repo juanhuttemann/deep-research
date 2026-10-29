@@ -2384,7 +2384,9 @@ func extractExecutive(report string) string {
 	var out []string
 	for _, ln := range strings.Split(report, "\n") {
 		t := strings.TrimSpace(ln)
-		if t == "" || strings.HasPrefix(t, "#") || IsEmphasizedHeading(t) {
+		// A table is no summary: a report that opened with one gave a
+		// summary of its first twelve rows.
+		if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "|") || IsEmphasizedHeading(t) {
 			if len(out) > 0 {
 				return strings.Join(out, "\n")
 			}

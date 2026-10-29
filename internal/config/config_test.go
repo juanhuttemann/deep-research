@@ -453,3 +453,28 @@ func TestBreadthAndFollowUpKeys(t *testing.T) {
 		t.Errorf("env: sub_topics %d, follow-ups off=%v; want 2 and on", cfg.SubTopics, cfg.NoFollowUps)
 	}
 }
+
+// The report keys take the three channels too, are stored normalized (the
+// standard report is the zero spec whichever channel named it), and a
+// misspelt format fails the load rather than a run.
+func TestReportKeys(t *testing.T) {
+	if got := loadIn(t, "model_call_retries: 2\n").Report; got != (agent.ReportSpec{}) {
+		t.Errorf("defaults: report %+v, want the zero (standard) spec", got)
+	}
+	want := agent.ReportSpec{Format: "brief", Words: 400, Tables: "none"}
+	if got := loadIn(t, "report_format: Brief\nreport_words: 400\nreport_tables: none\n").Report; got != want {
+		t.Errorf("config.yaml: report %+v, want %+v", got, want)
+	}
+	t.Setenv("DEEP_RESEARCH_REPORT_FORMAT", "table")
+	t.Setenv("DEEP_RESEARCH_REPORT_TABLES", "auto")
+	if got := loadIn(t, "report_format: brief\nreport_tables: none\n").Report; got != (agent.ReportSpec{Format: "table"}) {
+		t.Errorf("env: report %+v, want table with the format's tables", got)
+	}
+	t.Setenv("DEEP_RESEARCH_REPORT_FORMAT", "breif")
+	cfgDir := t.TempDir()
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "model_call_retries: 2\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "breif") {
+		t.Errorf("a misspelt format loaded: %v", err)
+	}
+}

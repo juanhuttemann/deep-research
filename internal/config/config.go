@@ -35,6 +35,10 @@ type Config struct {
 	// (follow_ups: false). A negative, so that a Config built without Load
 	// runs the round as the default does.
 	NoFollowUps bool
+	// Report is the shape reports are written in (report_format,
+	// report_words, report_tables), normalized: the standard report is the
+	// zero value.
+	Report agent.ReportSpec
 	// Parallelism is how many sub-agents search at once. Every other budget
 	// in the tool is configurable; this one used to be a literal 3 in the UI,
 	// so a deep run with six sub-topics could not be widened or, on a rate-
@@ -498,23 +502,17 @@ func Load() (Config, error) {
 	v.SetDefault("parallelism", defaultParallelism)
 	v.SetDefault("sub_topics", 0)
 	v.SetDefault("follow_ups", true)
+	v.SetDefault("report_format", "standard")
+	v.SetDefault("report_words", 0)
+	v.SetDefault("report_tables", "auto")
 	// The setting was originally spelled max_depth back when it capped a run's
 	// total sources. Config files on disk still use that name, so it keeps
 	// resolving to the same value.
 	v.RegisterAlias("max_depth", "sources_per_topic")
 
-	cfg := Config{
-		DataFile:        v.GetString("data_file"),
-		RunTimeout:      v.GetDuration("run_timeout"),
-		SourcesPerTopic: v.GetInt("sources_per_topic"),
-		SubTopics:       max(v.GetInt("sub_topics"), 0),
-		NoFollowUps:     !v.GetBool("follow_ups"),
-		Parallelism:     v.GetInt("parallelism"),
-	}
-	// A file or env var setting this to 0 or a negative number would
-	// otherwise mean "no sub-agent runs at all".
-	if cfg.Parallelism <= 0 {
-		cfg.Parallelism = defaultParallelism
+	cfg, err := runKeys(v)
+	if err != nil {
+		return Config{}, err
 	}
 	if err := loadModelCalls(&cfg, v); err != nil {
 		return Config{}, err
@@ -566,6 +564,32 @@ func expandHome(path string) (string, error) {
 
 // loadModelCalls reads what every model call is given: its deadline, its
 // retries and each phase's reasoning effort.
+// runKeys are the keys that shape a run: where it is saved, its deadline,
+// its breadth and budget, and its report.
+func runKeys(v *viper.Viper) (Config, error) {
+	cfg := Config{
+		DataFile:        v.GetString("data_file"),
+		RunTimeout:      v.GetDuration("run_timeout"),
+		SourcesPerTopic: v.GetInt("sources_per_topic"),
+		SubTopics:       max(v.GetInt("sub_topics"), 0),
+		NoFollowUps:     !v.GetBool("follow_ups"),
+		Parallelism:     v.GetInt("parallelism"),
+	}
+	// A file or env var setting this to 0 or a negative number would
+	// otherwise mean "no sub-agent runs at all".
+	if cfg.Parallelism <= 0 {
+		cfg.Parallelism = defaultParallelism
+	}
+	// A misspelt format is an error here, where the key that holds it can be
+	// named, rather than in the middle of a run that already planned.
+	var err error
+	if cfg.Report, err = (agent.ReportSpec{Format: v.GetString("report_format"), Words: v.GetInt("report_words"),
+		Tables: v.GetString("report_tables")}).Normalized(); err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
+	return cfg, nil
+}
+
 func loadModelCalls(cfg *Config, v *viper.Viper) (err error) {
 	cfg.ModelCallTimeout = v.GetDuration("model_call_timeout")
 	cfg.ModelCallRetries = v.GetInt("model_call_retries")

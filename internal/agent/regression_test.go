@@ -1332,3 +1332,34 @@ func TestParsePlanScope(t *testing.T) {
 		}
 	}
 }
+
+// A report written tables first gave the executive summary its first twelve
+// table rows: the summary skips a table as it skips a heading.
+func TestExecutiveSummarySkipsATable(t *testing.T) {
+	report := "## Comparison\n\n| Option | Cost |\n|---|---|\n| A | 1 |\n\nA costs least where it applies.\n"
+	if got := extractExecutive(report); got != "A costs least where it applies." {
+		t.Errorf("executive = %q, want the first paragraph of prose", got)
+	}
+}
+
+// The default report's shape had one spelling per channel ("standard" from
+// config, "" from an old plan), and a default run would have sent the
+// summarizer a shape for it; a misspelt format must not run as standard.
+func TestReportSpecNormalized(t *testing.T) {
+	for _, tc := range []struct {
+		in   ReportSpec
+		want ReportSpec
+	}{
+		{ReportSpec{Format: "standard", Tables: "auto"}, ReportSpec{}},
+		{ReportSpec{Format: " Brief ", Words: 200, Tables: "NONE"}, ReportSpec{Format: "brief", Words: 200, Tables: "none"}},
+	} {
+		if got, err := tc.in.Normalized(); err != nil || got != tc.want {
+			t.Errorf("%+v: %+v, %v; want %+v", tc.in, got, err, tc.want)
+		}
+	}
+	for _, bad := range []ReportSpec{{Format: "breif"}, {Tables: "lots"}, {Words: -1}, {Words: MaxReportWords + 1}} {
+		if _, err := bad.Normalized(); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
+	}
+}

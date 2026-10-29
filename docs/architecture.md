@@ -42,6 +42,15 @@ the terminal brief's `f` and the serve page's review alike), so a plan
 written out, edited, checkpointed or replayed keeps it; skipped, no call is
 made.
 
+The report's shape is the plan's too (`Plan.Report`, an `agent.ReportSpec`
+so the replay trace can carry it without importing `ui`). The Driver
+appends a "Report shape" block, rendered from the format preset and its
+overrides (`ui/report.go`), to the summarizer's input; for the standard
+report the block is empty and the input is what it was. The shape changes
+only the summarizer's prose: the program-written answer, the quote check
+and the export's Fact-Check and citation sections are the same in every
+format.
+
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
 each phase. The planner is given a breadth (`agent.Breadth`): by default a

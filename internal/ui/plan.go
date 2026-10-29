@@ -67,6 +67,10 @@ type Plan struct {
 	// NoFollowUps skips the follow-up round. It is a negative so that a plan
 	// or trace written before the round could be turned off still runs it.
 	NoFollowUps bool `json:"no_follow_ups,omitempty"`
+	// Report is the shape the report is written in, the zero value for the
+	// standard one: a plan written before reports had a shape still runs as
+	// it did.
+	Report ReportSpec `json:"report,omitzero"`
 }
 
 // PerTopic is the source budget for a single sub-agent: the whole-
@@ -148,6 +152,9 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	plan.Asked = strings.TrimSpace(p.Asked)
 	plan.NoFollowUps = p.NoFollowUps
 	plan.Scope = p.Scope
+	if plan.Report, err = p.Report.Normalized(); err != nil {
+		return nil, fmt.Errorf("read plan: %w", err)
+	}
 	return plan, nil
 }
 

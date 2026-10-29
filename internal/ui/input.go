@@ -25,6 +25,7 @@ const (
 	KeyE     Key = 'e' // add a sub-topic
 	KeyF     Key = 'f' // turn the follow-up round on or off
 	KeyR     Key = 'r' // rename a sub-topic
+	KeyT     Key = 't' // change the report format
 	KeyX     Key = 'x' // delete a sub-topic
 	KeyEsc   Key = 27  // escape: cancel the run
 	KeyCtrlZ Key = 26  // ctrl-z: detach
@@ -133,6 +134,8 @@ func keyFromByte(b byte) Key {
 		return KeyF
 	case KeyR:
 		return KeyR
+	case KeyT:
+		return KeyT
 	case KeyX:
 		return KeyX
 	case KeyEsc:

@@ -76,6 +76,9 @@ func New(load func() (Deps, error)) *cobra.Command {
 	root.Flags().String("mode", "standard", "research depth: quick | standard | deep")
 	root.Flags().Int("topics", 0, "plan exactly this many sub-topics, 1-8 (0 = the planner chooses, up to the --mode tier's)")
 	root.Flags().Bool("no-follow-ups", false, "skip the follow-up round: analyse what the planned searches found")
+	root.Flags().String("format", "standard", "report format: standard | brief | detailed | table")
+	root.Flags().Int("words", 0, "the report's explanation in about this many words (0 = the --format's)")
+	root.Flags().String("tables", "auto", "how much of the report is in tables: auto (the --format's) | none | some | many")
 	root.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts")
 	root.Flags().Bool("jsonl", false, "emit machine-readable JSONL events instead of the live UI")
 	root.Flags().Bool("no-color", false, "disable ANSI colour")
@@ -97,10 +100,13 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A plan carries its own question, depth and budget. Taking them from
 	// flags as well would leave two answers to each, and a replay carries
 	// its recorded plan.
-	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only", "topics", "no-follow-ups"} {
+	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only", "topics", "no-follow-ups",
+		"format", "words", "tables"} {
 		root.MarkFlagsMutuallyExclusive("plan", other)
 	}
 	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
+	// The report flags are not among them: a replay writes the report again,
+	// live, and the recorded evidence can be written up in another shape.
 	for _, other := range []string{"topics", "no-follow-ups"} {
 		root.MarkFlagsMutuallyExclusive("replay", other)
 	}
@@ -114,7 +120,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A checkpoint carries the question, the confirmed plan, its tier and
 	// budget, and the searches already made.
 	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth", "domains",
-		"topics", "no-follow-ups"} {
+		"topics", "no-follow-ups", "format", "words", "tables"} {
 		root.MarkFlagsMutuallyExclusive("resume", other)
 	}
 
@@ -466,17 +472,41 @@ func noFollowUps(cmd *cobra.Command, d Deps) bool {
 	return d.Config.NoFollowUps
 }
 
+// reportSpec is the run's report shape: base (the config's, or a trace's)
+// with each report flag given over its own field, so a replay asked for
+// --words keeps the format it recorded.
+func reportSpec(cmd *cobra.Command, base ui.ReportSpec) (ui.ReportSpec, error) {
+	if cmd.Flags().Changed("format") {
+		base.Format, _ = cmd.Flags().GetString("format")
+	}
+	if cmd.Flags().Changed("words") {
+		base.Words, _ = cmd.Flags().GetInt("words")
+	}
+	if cmd.Flags().Changed("tables") {
+		base.Tables, _ = cmd.Flags().GetString("tables")
+	}
+	return base.Normalized()
+}
+
 // runSettings are the run's settings: the config's, with the flags over
-// them. The terminal's start screen shows them and ui.Options takes them.
+// them. The terminal's start screen shows them and ui.Options takes them. A
+// report flag that does not parse is runResearch's to report; here it
+// leaves the config's shape.
 func runSettings(cmd *cobra.Command, d Deps) ui.RunSettings {
 	mode, _ := cmd.Flags().GetString("mode")
-	return ui.RunSettings{Mode: mode, SubTopics: subTopics(cmd, d), Sources: sourceBudget(cmd, d), NoFollowUps: noFollowUps(cmd, d)}
+	report, err := reportSpec(cmd, d.Config.Report)
+	if err != nil {
+		report = d.Config.Report
+	}
+	return ui.RunSettings{Mode: mode, SubTopics: subTopics(cmd, d), Sources: sourceBudget(cmd, d), NoFollowUps: noFollowUps(cmd, d),
+		Report: report}
 }
 
 // defaultSettings are the settings a run started now with no flags takes,
 // the ones the serve page opens on.
 func defaultSettings(c config.Config) ui.RunSettings {
-	return ui.RunSettings{Mode: "standard", SubTopics: c.SubTopics, Sources: c.SourcesPerTopic, NoFollowUps: c.NoFollowUps}
+	return ui.RunSettings{Mode: "standard", SubTopics: c.SubTopics, Sources: c.SourcesPerTopic, NoFollowUps: c.NoFollowUps,
+		Report: c.Report}
 }
 
 // setSetting sets a setting chosen on the start screen as its flag, so every
@@ -533,6 +563,21 @@ func doneEvent(res ui.RunResult, err error) ui.Event {
 	return e
 }
 
+// checkSettings refuses a setting the run cannot take. A misspelt tier used
+// to fall through to standard without a word, so "--mode deeep" ran a study
+// the reader never asked for.
+func checkSettings(cmd *cobra.Command, d Deps) error {
+	mode, _ := cmd.Flags().GetString("mode")
+	if _, err := ui.ParseDepthMode(mode); err != nil {
+		return err
+	}
+	if n := subTopics(cmd, d); n > ui.MaxSubTopics {
+		return fmt.Errorf("%d sub-topics asked for: at most %d", n, ui.MaxSubTopics)
+	}
+	_, err := reportSpec(cmd, d.Config.Report)
+	return err
+}
+
 func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, error) {
 	st, err := runStart(cmd, d, question)
 	if err != nil {
@@ -552,16 +597,12 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if strings.TrimSpace(question) == "" {
 		return ui.RunResult{}, errors.New("the question is empty")
 	}
-	// A misspelt tier used to fall through to standard without a word, so
-	// "--mode deeep" ran a study the reader never asked for. Checked before
-	// the assistant, so a typo is reported before a missing key.
-	mode, _ := cmd.Flags().GetString("mode")
-	if _, err := ui.ParseDepthMode(mode); err != nil {
+	// Checked before the assistant, so a typo is reported before a missing
+	// key.
+	if err := checkSettings(cmd, d); err != nil {
 		return ui.RunResult{}, err
 	}
-	if n := subTopics(cmd, d); n > ui.MaxSubTopics {
-		return ui.RunResult{}, fmt.Errorf("%d sub-topics asked for: at most %d", n, ui.MaxSubTopics)
-	}
+	mode, _ := cmd.Flags().GetString("mode")
 	rawDomains, _ := cmd.Flags().GetStringSlice("domains")
 	domains, err := agent.ParseDomains(rawDomains)
 	if err != nil {
@@ -605,6 +646,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		SourcesPerTopic: rs.Sources,
 		SubTopics:       rs.SubTopics,
 		NoFollowUps:     rs.NoFollowUps,
+		Report:          rs.Report,
 		Parallelism:     d.Config.Parallelism,
 		JSONL:           jsonl,
 		Quiet:           silent,
@@ -731,6 +773,11 @@ func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*
 		}
 		plan := ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d))
 		plan.NoFollowUps, plan.Scope = tr.NoFollowUps, tr.Scope
+		// Normalized here as a plan file is in ReadPlan: a hand-edited
+		// trace's format is input too.
+		if plan.Report, err = reportSpec(cmd, tr.Report); err != nil {
+			return nil, "", err
+		}
 		// A resumed run searches live for what it lacks, on the sites it was
 		// confined to; a replay searches nothing.
 		if replaying, _ := cmd.Flags().GetString("replay"); replaying == "" {
@@ -835,8 +882,13 @@ func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
 	}
 	return func(p *ui.Plan) {
 		rec.SetDomains(p.Domains)
-		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps, p.Scope)
+		rec.SetPlan(p.SubTopics, tracedSettings(p))
 	}
+}
+
+// tracedSettings are what the trace records of plan beside its sub-topics.
+func tracedSettings(p *ui.Plan) replay.PlanSettings {
+	return replay.PlanSettings{Mode: p.Depth.Key, Sources: p.PinnedPerTopic, NoFollowUps: p.NoFollowUps, Scope: p.Scope, Report: p.Report}
 }
 
 // writeTrace saves a recorded run next to its report, named after it.
@@ -847,7 +899,7 @@ func writeTrace(cmd *cobra.Command, rec *replay.Recorder, res *ui.RunResult) {
 		return
 	}
 	if p := res.Plan; p != nil {
-		rec.SetPlan(p.SubTopics, p.Depth.Key, p.PinnedPerTopic, p.NoFollowUps, p.Scope)
+		rec.SetPlan(p.SubTopics, tracedSettings(p))
 	}
 	path := strings.TrimSuffix(res.MDPath, ".md") + ".trace.json"
 	if err := rec.Write(path); err != nil {

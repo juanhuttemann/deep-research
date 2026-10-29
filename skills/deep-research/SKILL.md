@@ -127,6 +127,11 @@ cmd /c "drsh -p ""QUESTION"" --jsonl --reports ""$dir"" > ""$dir\events.jsonl"""
   the facets to cover.
 - `--no-follow-ups` skips the follow-up searches after the planned ones:
   one model request fewer, for a question the plan already covers.
+- `--format brief|detailed|table` shapes the report (default `standard`):
+  `brief` for a quick answer (about 300 words), `table` when the user wants
+  a comparison laid out, `detailed` when they ask for depth. `--words N`
+  and `--tables none|some|many` adjust it. The answer, fact-check and
+  citations are in every format.
 - `--domains go.dev,pkg.go.dev` confines the search to those sites. Each
   site is checked first; one that fails is dropped with a reason (a
   `source` event). `drsh doctor --domains LIST` checks a list
@@ -141,9 +146,10 @@ drsh -p "QUESTION" --plan-only > plan.json   # one model request
 drsh --plan plan.json --jsonl --reports "$dir" > "$dir/events.jsonl"
 ```
 
-`--plan` carries its own question, tier and follow-up setting
-(`no_follow_ups`), so it takes no `-p`, `--mode`, `--sources`, `--topics` or
-`--no-follow-ups`.
+`--plan` carries its own question, tier, follow-up setting
+(`no_follow_ups`) and report shape (`report`), so it takes no `-p`,
+`--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`, `--words`
+or `--tables`.
 
 ## 3. Wait for the `done` line
 

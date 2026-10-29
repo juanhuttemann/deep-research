@@ -47,6 +47,17 @@ sub_topics: 0
 # false skips it (one model call and up to three searches fewer); --no-follow-ups
 # skips it for one run, and f in the research brief turns it on or off.
 follow_ups: true
+# The report's shape. report_format is a preset: standard (the explanation
+# organized as the question needs), brief (about 300 words, at most one table),
+# detailed (about 1500 words) or table (tables first, little prose).
+# report_words sets the explanation's length in words (0 = the format's),
+# report_tables how much goes in tables: auto (the format's), none, some or
+# many. --format, --words and --tables set them for one run, and t in the
+# research brief cycles the format. The program-written answer, the
+# fact-check and the citations are in every format.
+report_format: standard
+report_words: 0
+report_tables: auto
 # Sub-agents searching at the same time. A deep plan has more sub-topics than
 # this, and they queue: raise it to finish a wide plan sooner, lower it when the
 # search backend or a rate-limited model provider cannot take the concurrency.

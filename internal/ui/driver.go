@@ -390,7 +390,9 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	d.repair(ctx, plan.Question, analysis, fc)
 
 	d.emit(Event{Type: Phase, Phase: "Summarize", Detail: "Writing the report"})
-	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved)
+	// The shape goes after either input, checked or prose, and is nothing
+	// for the standard report, whose input stays as it was.
+	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved) + reportShape(plan.Report)
 	summary, err := d.Agent.Summarize(ctx, prompt)
 	if err != nil {
 		return d.partial(ctx, plan, findings, analysis, fc, checkErr, "report writing failed", err)

@@ -3494,3 +3494,98 @@ func TestScopeIsShownAndKept(t *testing.T) {
 		t.Errorf("brief head lacks the scope:\n%s", strings.Join(r.briefHead(), "\n"))
 	}
 }
+
+// Every report had the same sections at about the same length, whatever the
+// reader needed. The plan's shape reaches the summarizer as a block after its
+// input, and the standard report's input is what it always was.
+func TestReportShapeReachesTheSummarizer(t *testing.T) {
+	summarized := func(spec ReportSpec) string {
+		plan := newTestPlan("quick", nil)
+		plan.Report = spec
+		// The fake summarizer writes its input back as the report.
+		res, err := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1).Run(context.Background(), plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Summary.Report
+	}
+	if got := summarized(ReportSpec{}); strings.Contains(got, "Report shape") {
+		t.Errorf("the standard report was sent a shape:\n%s", got)
+	}
+	if reportShape(ReportSpec{}) != "" {
+		t.Error("the zero spec renders a shape")
+	}
+	for _, tc := range []struct {
+		spec      ReportSpec
+		want, not []string
+	}{
+		{ReportSpec{Format: "brief"}, []string{"Keep it short", "About 300 words", "At most one or two tables"}, nil},
+		{ReportSpec{Format: "brief", Words: 800}, []string{"About 800 words"}, []string{"About 300"}},
+		{ReportSpec{Format: "table", Tables: "none"}, []string{"No tables"}, []string{"Lead with tables", "A table for each"}},
+		{ReportSpec{Words: 500}, []string{"About 500 words", "open with a ## heading"}, []string{"Keep it short"}},
+	} {
+		got := summarized(tc.spec)
+		for _, w := range append(tc.want, "Report shape") {
+			if !strings.Contains(got, w) {
+				t.Errorf("%+v: no %q in the summarizer's input:\n%s", tc.spec, w, got)
+			}
+		}
+		for _, n := range tc.not {
+			if strings.Contains(got, n) {
+				t.Errorf("%+v: %q in the summarizer's input", tc.spec, n)
+			}
+		}
+	}
+}
+
+// t in the brief cycles the format, through ApplyToPlan as the page's review
+// does, and the shape the run used is in the .json sidecar.
+func TestBriefTCyclesTheReportFormat(t *testing.T) {
+	for _, tc := range []struct {
+		keys string
+		want string
+	}{{"\r", "detailed"}, {"t\r", "table"}, {"tt\r", ""}} {
+		res, err := Run(context.Background(), Options{
+			Question: "q", Assistant: &fakeAssistant{}, Report: ReportSpec{Format: "detailed", Words: 900}, OutDir: t.TempDir(),
+			Stdout: io.Discard, Stderr: io.Discard, KeyScript: tc.keys,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Plan == nil || res.Plan.Report != (ReportSpec{Format: tc.want, Words: 900}) {
+			t.Errorf("keys %q: plan %+v, want format %q with the words kept", tc.keys, res.Plan, tc.want)
+		}
+		b, err := os.ReadFile(res.JSONPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m Meta
+		if err := json.Unmarshal(b, &m); err != nil || m.ReportSpec != res.Plan.Report || m.Report == "" {
+			t.Errorf("keys %q: sidecar report_spec %+v (report %d bytes), %v; want the plan's", tc.keys, m.ReportSpec, len(m.Report), err)
+		}
+	}
+}
+
+// A plan written by --plan-only keeps its report shape through an edit; one
+// written before reports had a shape is the standard report, and a format
+// typed wrong into it is refused rather than run as standard.
+func TestReadPlanKeepsTheReportShape(t *testing.T) {
+	const head = `{"question":"q","depth":{"key":"quick"},"sub_topics":[{"name":"A"}]`
+	for in, want := range map[string]ReportSpec{
+		head + `}`: {},
+		head + `,"report":{"format":"standard","tables":"auto"}}`: {},
+		head + `,"report":{"format":"brief","words":250}}`:        {Format: "brief", Words: 250},
+	} {
+		p, err := ReadPlan(strings.NewReader(in))
+		if err != nil || p.Report != want {
+			t.Errorf("%s: %+v, %v; want %+v", in, p, err, want)
+		}
+	}
+	if _, err := ReadPlan(strings.NewReader(head + `,"report":{"format":"breif"}}`)); err == nil {
+		t.Error("a misspelt format was read")
+	}
+	b, _ := json.Marshal(PlanFor("q", depthMode("quick"), []SubTopic{{Name: "A"}}, 0))
+	if strings.Contains(string(b), "report") {
+		t.Errorf("a standard plan writes a report shape: %s", b)
+	}
+}
