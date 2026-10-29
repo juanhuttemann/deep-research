@@ -17,6 +17,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The run settings (depth, sub-topics, pages per topic, follow-ups) are
+  described once (`ui.Settings`) and every surface draws them from it: the
+  terminal start screen shows them under its box and changes them with
+  `/mode`, `/topics`, `/sources` and `/follow-ups`; the brief's settings
+  row, keys and hints come from it; and the serve page draws its form and
+  plan-review controls from it (served with `/api/info`) instead of its own
+  copies of the tiers, and asks the server (`/api/plan`) for the budget a
+  review edit comes to.
 - The planner chooses how many sub-topics a question needs, up to the
   mode's count (quick 3, standard 4, deep 6), instead of always that many,
   and a plan of fewer reads fewer pages. The follow-up call is told an empty

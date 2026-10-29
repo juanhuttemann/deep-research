@@ -264,13 +264,27 @@ internal/
   web       `serve`: one embedded page, the run's JSONL over SSE with
             Last-Event-ID replay, launch / cancel, the reports directory
             read-only, a run's report rendered without its citations,
-            questions about a run; the run and the answer are functions cli
-            injects
+            questions about a run, a reviewed plan re-derived; the run, the
+            answer, the setup and the plan edit are functions cli injects
 config/     embedded default config.yaml and agent.yaml
 ```
 
 The frame is clamped to the terminal and repainted in place; on a pipe it
 degrades to one log line per event.
+
+The settings a run takes are described once, in `ui.Settings`: each one's
+key (the flag it becomes, through `Setting.Flag`), label, choices (the
+depth tiers built from `DepthModes`, the sub-topic counts from
+`MaxSubTopics`), and whether it is chosen before the plan (`Start`) or can
+still change on review (`Review`, with its brief key). Every surface draws
+from that list: the terminal start screen's settings row and its `/mode`,
+`/topics`, `/sources`, `/follow-ups` commands, the brief's settings row,
+keys and hints, and the serve page, which gets the list from `/api/info`
+and launches with a `settings` map that `cli.webArgs` turns into the same
+flags. A review change goes through `ui.ApplyToPlan`, from the brief's key
+or the page's `/api/plan`, which also returns the budget, so the page keeps
+no copy of the tiers or the budget rules. A new setting is one entry there,
+its flag, and its effect on the run.
 
 ## Layering
 

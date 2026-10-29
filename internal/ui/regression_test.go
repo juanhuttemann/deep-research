@@ -987,13 +987,13 @@ func TestEditingSubTopicsKeepsTheSourcesPin(t *testing.T) {
 
 	added := *pinned
 	added.SubTopics = append(slices.Clone(pinned.SubTopics), SubTopic{Name: "Three"})
-	if got := renumbered(&added, (*Plan).WithDepth).PerTopic(); got != 9 {
+	if got := renumbered(&added).PerTopic(); got != 9 {
 		t.Errorf("after adding a sub-topic: %d sources per sub-agent, want the pinned 9", got)
 	}
 
 	deleted := *pinned
 	deleted.SubTopics = slices.Clone(pinned.SubTopics)[:1]
-	if got := renumbered(&deleted, (*Plan).WithDepth).PerTopic(); got != 9 {
+	if got := renumbered(&deleted).PerTopic(); got != 9 {
 		t.Errorf("after deleting a sub-topic: %d sources per sub-agent, want the pinned 9", got)
 	}
 }

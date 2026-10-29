@@ -76,6 +76,8 @@ type activity struct {
 type Renderer struct {
 	W io.Writer
 	T Theme
+	// settings are the start screen's, shown under its box.
+	settings []Setting
 
 	// mu guards every field below. Events arrive from the driver's parallel
 	// sub-agents (serialised by MultiSink) and the animation ticker paints
@@ -720,11 +722,7 @@ func (r *Renderer) briefHead() []string {
 		// The per-sub-agent figure is what the reader asked for with --sources
 		// and what each branch actually gets, so a run budget that reduced the
 		// request is visible in the brief instead of only in the run.
-		fmt.Sprintf("  %s  %s   %s  %d   %s  %d   %s  %s",
-			r.T.dim("depth"), r.plan.Depth.Label,
-			r.T.dim("max sources"), r.plan.MaxSources,
-			r.T.dim("per sub-agent"), r.plan.PerTopic(),
-			r.T.dim("follow-ups"), onOff(!r.plan.NoFollowUps)),
+		r.briefSettingsRow(),
 		"",
 		"  "+r.T.dim("planned sub-topics"),
 	)
@@ -745,8 +743,27 @@ func (r *Renderer) briefFoot() []string {
 	if r.briefNote != "" {
 		out = append(out, "  "+r.T.yellow(r.briefNote))
 	}
-	out = append(out, r.hintRows("[enter] launch   [e] add   [r] rename   [x] delete   [d] depth   [f] follow-ups   [q] cancel")...)
+	hints := "[enter] launch   [e] add   [r] rename   [x] delete"
+	for _, s := range Settings(RunSettings{}) {
+		if s.Review && s.BriefKey != 0 {
+			hints += fmt.Sprintf("   [%c] %s", s.BriefKey, s.Label)
+		}
+	}
+	out = append(out, r.hintRows(hints+"   [q] cancel")...)
 	return append(out, "")
+}
+
+// briefSettingsRow is the plan's review settings, from the same list the
+// serve page's review draws, then the budget they come to.
+func (r *Renderer) briefSettingsRow() string {
+	row := ""
+	for _, s := range ReviewSettings(r.plan) {
+		o, _ := s.Option(s.Value)
+		row += fmt.Sprintf("  %s  %s ", r.T.dim(s.Label), o.Label)
+	}
+	return row + fmt.Sprintf("  %s  %d   %s  %d",
+		r.T.dim("max sources"), r.plan.MaxSources,
+		r.T.dim("per sub-agent"), r.plan.PerTopic())
 }
 
 func onOff(on bool) string {

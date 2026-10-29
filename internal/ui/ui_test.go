@@ -322,7 +322,7 @@ func TestConfirmBriefLaunchesOnEnter(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewRenderer(&buf, Theme{Enabled: false})
 	plan := newTestPlan("standard", []agent.SubTopic{{ID: "1", Name: "S", Notes: "n"}})
-	_, action := waitBrief(NewByteReader([]byte("\r")), r, plan, rebudgetForTest)
+	_, action := waitBrief(NewByteReader([]byte("\r")), r, plan)
 	if action != actionLaunch {
 		t.Errorf("expected launch action, got %d", action)
 	}
@@ -333,14 +333,12 @@ func TestConfirmBriefCancels(t *testing.T) {
 		var buf bytes.Buffer
 		r := NewRenderer(&buf, Theme{Enabled: false})
 		plan := newTestPlan("standard", []agent.SubTopic{{ID: "1", Name: "S", Notes: "n"}})
-		_, action := waitBrief(NewByteReader([]byte(key)), r, plan, rebudgetForTest)
+		_, action := waitBrief(NewByteReader([]byte(key)), r, plan)
 		if action != actionCancel {
 			t.Errorf("%s: expected cancel action, got %d", name, action)
 		}
 	}
 }
-
-func rebudgetForTest(p *Plan, d DepthMode) *Plan { return p.WithDepth(d) }
 
 func TestConfirmBriefCyclesDepth(t *testing.T) {
 	var buf bytes.Buffer
@@ -348,7 +346,7 @@ func TestConfirmBriefCyclesDepth(t *testing.T) {
 	base := newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "S", Notes: "n"}})
 
 	// Two presses: quick -> standard -> deep, then launch.
-	got, action := waitBrief(NewByteReader([]byte("dd\r")), r, base, rebudgetForTest)
+	got, action := waitBrief(NewByteReader([]byte("dd\r")), r, base)
 	if action != actionLaunch {
 		t.Errorf("expected launch after cycling, got %d", action)
 	}
@@ -369,7 +367,7 @@ func TestConfirmBriefEditsSubtopic(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewRenderer(&buf, Theme{Enabled: false})
 	base := newTestPlan("standard", []agent.SubTopic{{ID: "1", Name: "S", Notes: "n"}})
-	got, action := waitBrief(NewByteReader([]byte("eNew added topic\n\r")), r, base, rebudgetForTest)
+	got, action := waitBrief(NewByteReader([]byte("eNew added topic\n\r")), r, base)
 	if action != actionLaunch {
 		t.Errorf("expected launch, got %d", action)
 	}
@@ -395,7 +393,7 @@ func TestConfirmBriefRenamesSubtopic(t *testing.T) {
 		{ID: "1", Name: "First", Notes: "n"}, {ID: "2", Name: "Second", Notes: "n"}})
 	// "r" then "2" picks the second topic; the prompt starts seeded with the
 	// current name, so six backspaces clear "Second" before the new one.
-	got, _ := waitBrief(NewByteReader([]byte("r2\n\x7f\x7f\x7f\x7f\x7f\x7fRenamed\n\r")), r, base, rebudgetForTest)
+	got, _ := waitBrief(NewByteReader([]byte("r2\n\x7f\x7f\x7f\x7f\x7f\x7fRenamed\n\r")), r, base)
 	if got.SubTopics[1].Name != "Renamed" || got.SubTopics[0].Name != "First" {
 		t.Errorf("rename hit the wrong topic: %#v", got.SubTopics)
 	}
@@ -410,7 +408,7 @@ func TestConfirmBriefRenameDropsThePlannersQuery(t *testing.T) {
 		{ID: "1", Name: "Memory", Query: "sync.Mutex memory overhead", Terms: []string{"Mutex", "memory"}},
 		{ID: "2", Name: "Same", Query: "kept query", Terms: []string{"kept", "terms"}}})
 	// "Memory" is six backspaces; the second rename confirms the seeded name.
-	got, _ := waitBrief(NewByteReader([]byte("r1\n\x7f\x7f\x7f\x7f\x7f\x7fFairness\nr2\n\n\r")), r, base, rebudgetForTest)
+	got, _ := waitBrief(NewByteReader([]byte("r1\n\x7f\x7f\x7f\x7f\x7f\x7fFairness\nr2\n\n\r")), r, base)
 	if s := got.SubTopics[0]; s.Name != "Fairness" || s.Query != "" || s.Terms != nil {
 		t.Errorf("renamed topic kept the planner's search: %#v", s)
 	}
@@ -424,7 +422,7 @@ func TestConfirmBriefDeletesSubtopic(t *testing.T) {
 	r := NewRenderer(&buf, Theme{Enabled: false})
 	base := newTestPlan("standard", []agent.SubTopic{
 		{ID: "1", Name: "First", Notes: "n"}, {ID: "2", Name: "Second", Notes: "n"}})
-	got, _ := waitBrief(NewByteReader([]byte("x1\n\r")), r, base, rebudgetForTest)
+	got, _ := waitBrief(NewByteReader([]byte("x1\n\r")), r, base)
 	if len(got.SubTopics) != 1 || got.SubTopics[0].Name != "Second" {
 		t.Errorf("delete removed the wrong topic: %#v", got.SubTopics)
 	}
@@ -437,7 +435,7 @@ func TestConfirmBriefKeepsTheLastSubtopicAndIgnoresBadPicks(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewRenderer(&buf, Theme{Enabled: false})
 	base := newTestPlan("standard", []agent.SubTopic{{ID: "1", Name: "Only", Notes: "n"}})
-	got, _ := waitBrief(NewByteReader([]byte("x1\nx9\nrzz\n\r")), r, base, rebudgetForTest)
+	got, _ := waitBrief(NewByteReader([]byte("x1\nx9\nrzz\n\r")), r, base)
 	if len(got.SubTopics) != 1 || got.SubTopics[0].Name != "Only" {
 		t.Errorf("plan must keep one sub-topic: %#v", got.SubTopics)
 	}
@@ -447,7 +445,7 @@ func TestConfirmBriefEscapeAbandonsAnEdit(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewRenderer(&buf, Theme{Enabled: false})
 	base := newTestPlan("standard", []agent.SubTopic{{ID: "1", Name: "S", Notes: "n"}})
-	got, _ := waitBrief(NewByteReader([]byte("ehalf typed\x1b\r")), r, base, rebudgetForTest)
+	got, _ := waitBrief(NewByteReader([]byte("ehalf typed\x1b\r")), r, base)
 	if len(got.SubTopics) != 1 {
 		t.Errorf("Esc must abandon the edit, got %#v", got.SubTopics)
 	}
@@ -604,15 +602,6 @@ func TestDepthModeSelection(t *testing.T) {
 		if got := depthMode(in); got.Key != want {
 			t.Errorf("depthMode(%q) = %q, want %q", in, got.Key, want)
 		}
-	}
-}
-
-func TestCycleDepth(t *testing.T) {
-	if got := cycleDepth(DepthModes[0]); got.Key != "standard" {
-		t.Errorf("cycle quick = %q, want standard", got.Key)
-	}
-	if got := cycleDepth(DepthModes[2]); got.Key != "quick" {
-		t.Errorf("cycle deep wraps to %q, want quick", got.Key)
 	}
 }
 
@@ -1057,7 +1046,7 @@ func TestWaitBriefDrawsBriefBeforeBlocking(t *testing.T) {
 	})
 
 	// An immediate Enter: the brief must already have been drawn.
-	got, action := waitBrief(NewByteReader([]byte("\r")), r, plan, rebudgetForTest)
+	got, action := waitBrief(NewByteReader([]byte("\r")), r, plan)
 	if action != actionLaunch {
 		t.Errorf("action = %d, want actionLaunch", action)
 	}
@@ -2052,24 +2041,22 @@ func TestReadPlanMakesAnEditedPlanSafeToRun(t *testing.T) {
 	}
 }
 
-// The browser's plan review shows the per-topic budget from copies of the
-// tiers and the run cap, and orders follow-up rows by their ID prefix. The
-// page cannot import them, so a change here must fail until the page follows.
+// The browser's plan review showed the per-topic budget from hand copies of
+// the tiers and the run cap, which drifted from DepthModes. It now has the
+// server work the budget out (/api/plan) and draws its settings from
+// ui.Settings, so no copy may come back. Follow-up rows are still ordered
+// by their ID prefix, which the page cannot import.
 func TestBrowserPageCopiesMatch(t *testing.T) {
 	page, err := os.ReadFile("../web/index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tiers := make([]string, len(DepthModes))
-	for i, m := range DepthModes {
-		tiers[i] = fmt.Sprintf("%s: %d", m.Key, m.MaxSources)
+	if want := `id.startsWith("` + followUpPrefix + `")`; !bytes.Contains(page, []byte(want)) {
+		t.Errorf("index.html does not have %s", want)
 	}
-	for _, want := range []string{
-		"const TIER_SOURCES = { " + strings.Join(tiers, ", ") + " }, RUN_SOURCES = " + strconv.Itoa(maxRunSources) + ";",
-		`id.startsWith("` + followUpPrefix + `")`,
-	} {
-		if !bytes.Contains(page, []byte(want)) {
-			t.Errorf("index.html does not have %s", want)
+	for _, copied := range []string{"TIER_SOURCES", "RUN_SOURCES", `value="quick"`, `value="deep"`} {
+		if bytes.Contains(page, []byte(copied)) {
+			t.Errorf("index.html has its own copy of the tiers again: %s", copied)
 		}
 	}
 }
@@ -2236,7 +2223,7 @@ func TestAskQuestion(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := NewRenderer(&bytes.Buffer{}, Theme{})
-		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, "what is inside a neutron star?", "")
+		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "what is inside a neutron star?", "")
 		if got != c.want {
 			t.Errorf("%s: askQuestion = %q, want %q", c.name, got, c.want)
 		}
@@ -2249,10 +2236,10 @@ func TestAskQuestion(t *testing.T) {
 func TestStartScreenFrame(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	r.width, r.rows, r.plain = 100, 30, false
-	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, "an example?", "research failed: no key")
+	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, nil, "an example?", "research failed: no key")
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
-		"research ▸ █an example?", "[enter] research   [esc] quit",
+		"research ▸ █an example?", "[enter] research   [/] settings   [esc] quit",
 		// Why the last run ended is said on the screen, where it is read.
 		"research failed: no key"} {
 		if !strings.Contains(frame, want) {
@@ -2271,7 +2258,7 @@ func TestStartScreenFrame(t *testing.T) {
 func TestStartScreenCommandMenu(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{Enabled: true})
 	r.width, r.rows, r.plain = 100, 30, false
-	r.RenderStart(agent.Setup{}, "an example?", "")
+	r.RenderStart(agent.Setup{}, nil, "an example?", "")
 	r.SetCommand("/r", 0)
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"▸ ", cBold + "/r" + cReset + "esume", "past runs", "complete"} {

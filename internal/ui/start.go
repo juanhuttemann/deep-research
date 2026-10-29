@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"strings"
@@ -30,18 +31,18 @@ var examples = []string{
 // the terminal shows (see region). note, when set, says why the last step
 // ended, on the screen where it is read. It returns "" when the reader quit
 // (Esc, Ctrl-C).
-func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup, note string) string {
+func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup, settings []Setting, note string) string {
 	sig := catchSignals(true)
 	in := NewInput(stdin, nil)
 	r := NewRenderer(stdout, Theme{Enabled: !noColor})
 	defer guardTerminal(sig, in, r)()
 	keys := &keptInput{Input: in}
 	defer r.Inline(keys)()
-	return askQuestion(keys, r, s, examples[rand.IntN(len(examples))], note)
+	return askQuestion(keys, r, s, settings, examples[rand.IntN(len(examples))], note)
 }
 
-func askQuestion(in Input, r *Renderer, s agent.Setup, example, note string) string {
-	r.RenderStart(s, example, note)
+func askQuestion(in Input, r *Renderer, s agent.Setup, settings []Setting, example, note string) string {
+	r.RenderStart(s, settings, example, note)
 	e := &commandEditor{example: example, paint: r.SetCommand}
 	q, _ := e.read(in, true)
 	return q
@@ -57,10 +58,11 @@ func (r *Renderer) SetCommand(text string, at int) {
 }
 
 // RenderStart shows the start screen.
-func (r *Renderer) RenderStart(s agent.Setup, example, note string) {
+func (r *Renderer) RenderStart(s agent.Setup, settings []Setting, example, note string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.mode, r.setup, r.example, r.briefNote, r.commandAt = "start", s, example, note, 0
+	r.settings = settings
 	r.promptLabel, r.promptText = "research", ""
 	if !r.plain {
 		r.paintLocked(true)
@@ -72,8 +74,11 @@ func (r *Renderer) RenderStart(s agent.Setup, example, note string) {
 func (r *Renderer) startLines() []string {
 	chips := "model " + r.setup.Model + " · search " + searchChip(r.setup)
 	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule()}
+	if row := r.startSettingsRow(); row != "" && len(completions(r.promptText)) == 0 {
+		out = append(out, row)
+	}
 	out = append(out, r.commandBlock(r.promptText, r.commandAt,
-		"[enter] research   [esc] quit", "quit")...)
+		"[enter] research   [/] settings   [esc] quit", "quit")...)
 	if r.briefNote != "" {
 		for _, l := range wrapWords(r.briefNote, r.width-4) {
 			out = append(out, "  "+r.T.yellow(l))
@@ -81,6 +86,20 @@ func (r *Renderer) startLines() []string {
 		out = append(out, "")
 	}
 	return out
+}
+
+// startSettingsRow is the next run's start settings, as the serve page's
+// form shows them; each one's /command changes it.
+func (r *Renderer) startSettingsRow() string {
+	row := ""
+	for _, s := range r.settings {
+		if !s.Start {
+			continue
+		}
+		o, _ := s.Option(s.Value)
+		row += fmt.Sprintf("  %s %s ", r.T.dim(s.Label), o.Label)
+	}
+	return row
 }
 
 // AskPrompt is the label a question about a report is typed after, the

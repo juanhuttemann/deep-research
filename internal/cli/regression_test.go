@@ -21,6 +21,7 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
 	"github.com/juanhuttemann/deep-research/internal/replay"
+	"github.com/juanhuttemann/deep-research/internal/ui"
 	"github.com/juanhuttemann/deep-research/internal/web"
 )
 
@@ -503,14 +504,112 @@ func TestTooManyTopicsIsRejected(t *testing.T) {
 	}
 }
 
-// The page's sub-topic count reaches its run as --topics, the flag a
-// terminal run takes, so the web and the CLI plan alike.
-func TestWebArgsPassTopics(t *testing.T) {
-	args, _ := webArgs(web.Request{Question: "q", Topics: 2, PlanOnly: true}, "reports")
-	if !slices.Contains(args, "--topics=2") {
-		t.Errorf("args = %v, want --topics=2", args)
+// Each page setting reaches its run as the flag the terminal's /command
+// sets, through one mapping: auto and on included, so a choice on the page
+// wins over the config file, and a value no setting offers is refused.
+func TestWebArgsMapSettingsToFlags(t *testing.T) {
+	args, _, err := webArgs(web.Request{Question: "q", PlanOnly: true, Settings: map[string]string{
+		"mode": "deep", "topics": "2", "sources": "0", "follow-ups": "on",
+	}}, "reports")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if args, _ = webArgs(web.Request{Question: "q"}, "reports"); slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--topics") }) {
-		t.Errorf("args = %v, want no --topics when the planner chooses", args)
+	for _, want := range []string{"--mode=deep", "--topics=2", "--sources=0", "--no-follow-ups=false"} {
+		if !slices.Contains(args, want) {
+			t.Errorf("args = %v, want %s", args, want)
+		}
+	}
+	for _, bad := range []map[string]string{{"topics": "40"}, {"colour": "red"}} {
+		if _, _, err := webArgs(web.Request{Question: "q", Settings: bad}, "reports"); err == nil {
+			t.Errorf("settings %v were accepted", bad)
+		}
+	}
+}
+
+// Every setting the start screen, the brief and the page offer becomes a
+// flag the command defines: a setting with no flag behind it would be a
+// control that does nothing.
+func TestEverySettingIsAFlag(t *testing.T) {
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	for _, s := range ui.Settings(ui.RunSettings{}) {
+		for _, o := range s.Opts {
+			name, val, err := s.Flag(o.Value)
+			if err != nil {
+				t.Fatalf("%s %s: %v", s.Key, o.Value, err)
+			}
+			if f := cmd.Flags().Lookup(name); f == nil {
+				t.Errorf("%s maps to --%s, which the command does not define", s.Key, name)
+			} else if err := f.Value.Set(val); err != nil {
+				t.Errorf("--%s=%s does not parse: %v", name, val, err)
+			}
+		}
+	}
+}
+
+// The page opens on the settings a run started now would take: the config
+// file's, not the built-in defaults.
+func TestWebInfoServesTheConfiguredSettings(t *testing.T) {
+	cfg := config.Config{SubTopics: 3, NoFollowUps: true}
+	got, err := webInfo(func() (Deps, error) { return Deps{Config: cfg}, nil })()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(got)
+	var info struct {
+		Settings []ui.Setting `json:"settings"`
+	}
+	_ = json.Unmarshal(b, &info)
+	for key, want := range map[string]string{"topics": "3", "follow-ups": "off", "mode": "standard"} {
+		if s, ok := ui.SettingFor(info.Settings, key); !ok || s.Value != want {
+			t.Errorf("%s = %+v, want %s", key, s, want)
+		}
+	}
+}
+
+// The page's review edit runs the same ApplyToPlan the brief's keys run,
+// on the plan as --plan reads it.
+func TestWebPlanAppliesTheReviewSetting(t *testing.T) {
+	raw := json.RawMessage(`{"question":"q","depth":{"key":"quick"},"pinned_per_topic":9,"sub_topics":[{"name":"a"},{"name":"b"}]}`)
+	got, err := webPlan(raw, "mode", "deep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(got)
+	var p struct {
+		Depth    struct{ Key string } `json:"depth"`
+		Pinned   int                  `json:"pinned_per_topic"`
+		PerTopic int                  `json:"per_topic"`
+		Settings []ui.Setting         `json:"settings"`
+	}
+	_ = json.Unmarshal(b, &p)
+	if p.Depth.Key != "deep" || p.Pinned != 0 || p.PerTopic != 5 {
+		t.Errorf("plan after deep = %+v, want deep, unpinned, 5 per sub-agent", p)
+	}
+	if s, ok := ui.SettingFor(p.Settings, "mode"); !ok || s.Value != "deep" {
+		t.Errorf("review settings = %+v, want mode at deep", p.Settings)
+	}
+	if _, err := webPlan(raw, "topics", "2"); err == nil {
+		t.Error("a start-only setting was applied to a plan on review")
+	}
+}
+
+// /mode deep on the start screen sets the flag every later run of the
+// session takes, through the mapping the page uses; /mode alone is the
+// picker, and a typed value can be the choice's label.
+func TestStartScreenSettingCommandSetsItsFlag(t *testing.T) {
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	s := &session{cmd: cmd}
+	for _, line := range []string{"/mode deep", "/topics 2", "/follow-ups off", "/sources auto"} {
+		if !s.isSetting(line) {
+			t.Fatalf("%q is not taken for a setting", line)
+		}
+		s.chooseSetting(line)
+	}
+	rs := runSettings(cmd, Deps{Config: config.Config{SubTopics: 5}})
+	if rs.Mode != "deep" || rs.SubTopics != 2 || !rs.NoFollowUps || rs.Sources != 0 {
+		t.Errorf("settings after the commands = %+v", rs)
+	}
+	if s.isSetting("/resume") || s.isSetting("deep") {
+		t.Error("a non-setting line was taken for a setting")
 	}
 }

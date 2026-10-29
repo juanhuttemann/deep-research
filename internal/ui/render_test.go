@@ -464,7 +464,7 @@ func TestDepthCyclesInLineMode(t *testing.T) {
 	base := newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "S"}})
 
 	in := lineInput{NewByteReader([]byte("d\nd\n\n"))}
-	got, action := waitBrief(in, r, base, (*Plan).WithDepth)
+	got, action := waitBrief(in, r, base)
 	if action != actionLaunch {
 		t.Errorf("expected launch, got %d", action)
 	}

@@ -32,17 +32,17 @@ import (
 //go:embed index.html
 var page []byte
 
-// Request is what the page launches: the question, --mode, --topics and --sources a
+// Request is what the page launches: the question and the settings a
 // --jsonl run takes, with --plan-only to make the plan the page then edits,
 // or the edited plan itself (--plan). The plan passes through as the page
 // wrote it; the run checks it.
 type Request struct {
-	Question string          `json:"question,omitempty"`
-	Mode     string          `json:"mode,omitempty"`
-	Sources  int             `json:"sources,omitempty"`
-	Topics   int             `json:"topics,omitempty"`
-	PlanOnly bool            `json:"plan_only,omitempty"`
-	Plan     json.RawMessage `json:"plan,omitempty"`
+	Question string `json:"question,omitempty"`
+	// Settings are the page's choices by setting key, drawn from the list
+	// /api/info serves; the cli turns each into its flag.
+	Settings map[string]string `json:"settings,omitempty"`
+	PlanOnly bool              `json:"plan_only,omitempty"`
+	Plan     json.RawMessage   `json:"plan,omitempty"`
 	// Resume names an interrupted run's checkpoint in the reports
 	// directory (--resume).
 	Resume string `json:"resume,omitempty"`
@@ -89,6 +89,12 @@ type AskFunc func(ctx context.Context, run string, turns []Turn, question string
 // empty object.
 type InfoFunc func() (any, error)
 
+// PlanFunc re-derives a plan the page's review edited, and applies the
+// review setting key to value when key is set: the budget and what a
+// setting changes are worked out where the terminal brief works them out,
+// not again in the page. Any JSON-encodable value.
+type PlanFunc func(plan json.RawMessage, key, value string) (any, error)
+
 // maxLines bounds the replay buffer by line count, not bytes. Events are
 // short (a status line, a URL); the longest is the plan event, a few KB, so
 // the count bounds the memory too.
@@ -105,6 +111,8 @@ type Server struct {
 	Ask AskFunc
 	// Info describes the configured setup; nil serves an empty object.
 	Info InfoFunc
+	// Plan re-derives an edited plan; nil refuses.
+	Plan PlanFunc
 	// remove deletes a file in the reports directory: a discarded
 	// checkpoint. Nil refuses every discard.
 	remove func(name string) error
@@ -150,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/cancel", s.stop)
 	mux.HandleFunc("GET /api/report/{name}", s.report)
 	mux.HandleFunc("POST /api/ask", s.ask)
+	mux.HandleFunc("POST /api/plan", s.plan)
 	mux.Handle("GET /reports/", http.StripPrefix("/reports/", http.FileServerFS(s.reports)))
 	// Cross-origin protection refuses another site's POST (a cancel is a
 	// simple request); the Host check refuses a page that rebound its own
@@ -161,7 +170,8 @@ func (s *Server) Handler() http.Handler {
 // returns only when the listener fails: ctx bounds the runs, not the server,
 // which stops with the process. ready, when set, is given the page's URL
 // once the listener is bound, so a browser opened on it finds the server.
-func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, info InfoFunc, log io.Writer, ready func(url string)) error {
+func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, info InfoFunc, plan PlanFunc,
+	log io.Writer, ready func(url string)) error {
 	if err := os.MkdirAll(reports, 0o755); err != nil {
 		return err
 	}
@@ -182,6 +192,7 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, 
 	s.remove = root.Remove
 	s.Ask = ask
 	s.Info = info
+	s.Plan = plan
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if ready != nil {
 		ready(url)
@@ -467,6 +478,34 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		Answer string `json:"answer"`
 		HTML   string `json:"html"`
 	}{answer, out.String()})
+}
+
+// plan answers the review's edits with the plan as the run would take it.
+func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		http.Error(w, "plan takes application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	var req struct {
+		Plan  json.RawMessage `json:"plan"`
+		Key   string          `json:"key"`
+		Value string          `json:"value"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAskBody)).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if s.Plan == nil {
+		http.Error(w, "plan editing is not available", http.StatusNotImplemented)
+		return
+	}
+	got, err := s.Plan(req.Plan, req.Key, req.Value)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(got)
 }
 
 func (s *Server) stop(w http.ResponseWriter, _ *http.Request) {
