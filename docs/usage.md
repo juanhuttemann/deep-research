@@ -747,7 +747,10 @@ mode is unavailable, so the brief is skipped, the keys below do nothing, and
 the run degrades to headless output: one log line per event, then the report.
 Everything else — search, the pipeline, the exports and `list` — is unchanged.
 
-In the brief:
+In the brief, the row under the question is the plan's settings and what
+they come to: `depth`, `follow-ups`, `max sources` and `per sub-agent`. The
+sub-topics' heading names how the planner read the question
+(`planned sub-topics · narrow question`) when it chose their number.
 
 | Key | Action |
 | --- | ------ |

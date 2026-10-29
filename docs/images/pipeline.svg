@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 404" width="960" height="404" role="img" aria-label="A deep-research run: the question is planned into sub-topics, each researched by a parallel sub-agent that searches, ranks by its terms and reads pages; an optional follow-up round adds a few searches. The analysis states claims and the answer, the fact-check judges them against the pages, code keeps only what passed and blocked statements get one repair, then the summary is written from the checked result and saved as Markdown, PDF and JSON.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 404" width="960" height="404" role="img" aria-label="A deep-research run: the question is planned into as many sub-topics as it needs, each researched by a parallel sub-agent that searches, ranks by its terms and reads pages; an optional follow-up round adds a few searches. The analysis states claims and the answer, the fact-check judges them against the pages, code keeps only what passed and blocked statements get one repair, then the summary is written from the checked result and saved as Markdown, PDF and JSON.">
 <title>How a deep-research run works</title>
 <style>
 .bg{fill:#f6f8fa}
@@ -40,31 +40,31 @@ text{fill:#e6edf3}
 <text class="title" x="52" y="82">Question</text>
 <text class="detail" x="52" y="101">drsh -p, or</text>
 <text class="detail" x="52" y="116">drsh serve</text>
-<rect class="llm" x="213" y="59" width="132" height="64" rx="8"/>
-<text class="title" x="225" y="82">Plan</text>
-<text class="count" x="333" y="82" text-anchor="end">1 call</text>
-<text class="detail" x="225" y="101">1–6 sub-topics,</text>
-<text class="detail" x="225" y="116">query + terms each</text>
+<rect class="llm" x="215" y="59" width="126" height="64" rx="8"/>
+<text class="title" x="227" y="82">Plan</text>
+<text class="count" x="329" y="82" text-anchor="end">1 call</text>
+<text class="detail" x="227" y="101">1–6 sub-topics,</text>
+<text class="detail" x="227" y="116">as many as needed</text>
 <rect class="llm" x="768" y="59" width="168" height="64" rx="8"/>
 <text class="title" x="780" y="82">Follow-ups</text>
 <text class="count" x="924" y="82" text-anchor="end">0–1 call</text>
 <text class="detail" x="780" y="101">up to 3 more searches</text>
 <text class="detail" x="780" y="116">for what is still open</text>
-<line class="a" x1="130" y1="91" x2="211" y2="91" marker-end="url(#ah)"/>
-<rect class="group" x="428" y="24" width="257" height="134" rx="10"/>
-<text class="title" x="442" y="46">Sub-agents, in parallel</text>
-<rect class="web" x="442" y="58" width="229" height="24" rx="6"/>
-<text class="lane" x="454" y="74"><tspan font-weight="600">sub-topic 1</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
-<line class="a" x1="345" y1="91" x2="440" y2="70" marker-end="url(#ah)"/>
-<line class="a" x1="671" y1="70" x2="766" y2="91" marker-end="url(#ah)"/>
-<rect class="web" x="442" y="90" width="229" height="24" rx="6"/>
-<text class="lane" x="454" y="106"><tspan font-weight="600">sub-topic 2</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
-<line class="a" x1="345" y1="91" x2="440" y2="102" marker-end="url(#ah)"/>
-<line class="a" x1="671" y1="102" x2="766" y2="91" marker-end="url(#ah)"/>
-<rect class="web" x="442" y="122" width="229" height="24" rx="6"/>
-<text class="lane" x="454" y="138"><tspan font-weight="600">sub-topic n</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
-<line class="a" x1="345" y1="91" x2="440" y2="134" marker-end="url(#ah)"/>
-<line class="a" x1="671" y1="134" x2="766" y2="91" marker-end="url(#ah)"/>
+<line class="a" x1="130" y1="91" x2="213" y2="91" marker-end="url(#ah)"/>
+<rect class="group" x="426" y="24" width="257" height="134" rx="10"/>
+<text class="title" x="440" y="46">Sub-agents, in parallel</text>
+<rect class="web" x="440" y="58" width="229" height="24" rx="6"/>
+<text class="lane" x="452" y="74"><tspan font-weight="600">sub-topic 1</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
+<line class="a" x1="341" y1="91" x2="438" y2="70" marker-end="url(#ah)"/>
+<line class="a" x1="669" y1="70" x2="766" y2="91" marker-end="url(#ah)"/>
+<rect class="web" x="440" y="90" width="229" height="24" rx="6"/>
+<text class="lane" x="452" y="106"><tspan font-weight="600">sub-topic 2</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
+<line class="a" x1="341" y1="91" x2="438" y2="102" marker-end="url(#ah)"/>
+<line class="a" x1="669" y1="102" x2="766" y2="91" marker-end="url(#ah)"/>
+<rect class="web" x="440" y="122" width="229" height="24" rx="6"/>
+<text class="lane" x="452" y="138"><tspan font-weight="600">sub-topic n</tspan><tspan class="detail" dx="8">search · rank · read</tspan></text>
+<line class="a" x1="341" y1="91" x2="438" y2="134" marker-end="url(#ah)"/>
+<line class="a" x1="669" y1="134" x2="766" y2="91" marker-end="url(#ah)"/>
 <path class="a" d="M936,91 H936 Q948,91 948,103 V182 Q948,194 936,194 H26 Q14,194 14,206 V254 Q14,266 26,266 H38" marker-end="url(#ah)"/>
 <text class="edge" x="488" y="186" text-anchor="middle">every page found, each one source</text>
 <rect class="llm" x="40" y="234" width="162" height="64" rx="8"/>
