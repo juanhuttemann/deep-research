@@ -262,6 +262,9 @@ API: they reject adaptive thinking.
 | `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works |
 | `sub_topics` | `0` | sub-topics per plan; `0` lets the planner choose as few as the question needs, up to the `--mode` tier's count (quick 3, standard 4, deep 6); 1–8 asks for exactly that many in every mode. `--topics` overrides it |
 | `follow_ups` | `true` | run the follow-up round between the planned searches and the analysis; `false` skips it (`--no-follow-ups` for one run, `f` in the brief) |
+| `report_format` | `standard` | the report's shape: `standard`, `brief` (about 300 words), `detailed` (about 1500 words) or `table` (tables first). `--format` for one run, `t` in the brief. A value that is not one of these fails the load |
+| `report_words` | `0` | about this many words for the explanation, the program-written answer not counted; `0` leaves it to the format. At most 6000. `--words` for one run |
+| `report_tables` | `auto` | how much of the report is in tables: `auto` (the format's), `none`, `some` or `many`. `--tables` for one run |
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |
 | `reasoning_effort.<phase>` | see below | how hard each phase's model reasons: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
 

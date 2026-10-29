@@ -241,6 +241,9 @@ summarizer_instructions: |
   4. Limits: only those that change the answer's scope, certainty or
      application, and what evidence or clarification would settle them.
 
+  When the input ends with a report shape, follow it over this organization:
+  the answer section, the limits and the rules below still apply.
+
   Write in the language of the question. Title the answer section with the
   heading the input names, "## Answer" when it names none. Quotes stay in their source's language; a translation beside one is
   labelled as such. State each fact once. Link every factual claim to its

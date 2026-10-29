@@ -258,7 +258,7 @@ func (s *session) resume() {
 // run must not inherit them, so the flags are put back as they were.
 func (s *session) resumeRun(path string) {
 	var undo []func()
-	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups"} {
+	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups", "format", "words", "tables"} {
 		f := s.cmd.Flags().Lookup(name)
 		v, changed := f.Value.String(), f.Changed
 		undo = append(undo, func() { _ = f.Value.Set(v); f.Changed = changed })

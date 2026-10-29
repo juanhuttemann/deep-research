@@ -5,6 +5,28 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Report formats. `--format standard|brief|detailed|table` (key
+  `report_format`) picks the report's shape: `brief` is about 300 words
+  with at most a table or two, `detailed` about 1500 words, and `table`
+  puts the comparison in tables with little prose. `--words N` and
+  `--tables none|some|many` (keys `report_words`, `report_tables`) override
+  the format's length and amount of tables. Every format keeps the
+  program-written answer, the quote check, the Fact-Check section and the
+  citations. The start screen sets them with `/format`, `/words` and
+  `/tables`, and the serve page's form has a control for each. On review,
+  the format alone can change: `t` in the terminal brief, or a "format"
+  control on the page. Plans, checkpoints and traces carry the shape as
+  `report`, and the `.json` sidecar as `report_spec`. A replay rewrites
+  its report live, so it takes the report flags, each over its own part of
+  the shape it recorded.
+
+### Changed
+
+- A report that opens with a table no longer has that table's first rows
+  as its executive summary.
+
 ## [0.26.0] - 2026-10-28
 
 ### Added

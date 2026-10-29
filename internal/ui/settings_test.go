@@ -43,7 +43,15 @@ func TestApplyToPlan(t *testing.T) {
 	if PlanValue(off, SettingFollowUps) != "off" || PlanValue(deep, SettingMode) != "deep" {
 		t.Error("PlanValue does not read back what ApplyToPlan set")
 	}
-	for _, bad := range [][2]string{{SettingTopics, "2"}, {SettingMode, "huge"}, {"colour", "red"}} {
+	// The format is stored normalized, "standard" as the zero spec, and the
+	// words chosen with the question stay.
+	p.Report = ReportSpec{Format: "brief", Words: 400}
+	std, err := ApplyToPlan(p, SettingFormat, "standard")
+	if err != nil || std.Report != (ReportSpec{Words: 400}) || PlanValue(std, SettingFormat) != "standard" {
+		t.Errorf("format standard: %+v, %v", std, err)
+	}
+	for _, bad := range [][2]string{{SettingTopics, "2"}, {SettingMode, "huge"}, {"colour", "red"},
+		{SettingWords, "300"}, {SettingFormat, "essay"}} {
 		if _, err := ApplyToPlan(p, bad[0], bad[1]); err == nil {
 			t.Errorf("ApplyToPlan(%s, %s) was accepted", bad[0], bad[1])
 		}

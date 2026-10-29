@@ -1028,6 +1028,7 @@ async function applyPlanEdit(key, value) {
     const p = await r.json();
     if (brief !== was) return;
     brief.depth = p.depth; brief.pinned_per_topic = p.pinned_per_topic || 0; brief.no_follow_ups = !!p.no_follow_ups;
+    brief.report = p.report || {};
     const n = brief.sub_topics.length;
     // The scope is the planner's reading of the question, the reason for
     // the count, as the terminal brief shows it.
@@ -1121,6 +1122,8 @@ function editedPlan() {
     // The round's setting is the plan's, as in the CLI brief's f key; left
     // out, an edited plan ran the round the reader turned off.
     no_follow_ups: !!brief.no_follow_ups,
+    // The report's shape is the plan's too, the brief's t key on the page.
+    report: brief.report || {},
     sub_topics: brief.sub_topics.filter(t => t.name.trim()).map(t => {
       const name = t.name.trim(), query = (t.query || "").trim(), notes = t.notes || "";
       // The planner's terms judge results for the planner's query, so they

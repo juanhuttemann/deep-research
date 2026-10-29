@@ -56,14 +56,17 @@ Ctrl-C on the screen ends it, and Ctrl-C or Ctrl-D at `ask ▸` ends `drsh`
 at once. A run that
 fails, or that the brief cancels, returns to the screen, which says why.
 Under the box is the next run's settings row: `depth`, `sub-topics`,
-`pages per topic` and `follow-ups`. It is the same list the serve page's form
+`pages per topic`, `follow-ups`, `format`, `words` and `tables`. It is the same list the serve page's form
 draws, at the values the config and the flags give. Each setting has a
 command that changes it for every run the screen starts after: `/mode`,
-`/topics`, `/sources` and `/follow-ups`, alone for a list of its choices or
-with the value (`/mode deep`, `/topics 2`, `/follow-ups off`). Flags given
-with it (`--mode`, `--topics`, `--sources`, `--no-follow-ups`, `--domains`,
+`/topics`, `/sources`, `/follow-ups`, `/format`, `/words` and `/tables`,
+alone for a list of its choices or with the value (`/mode deep`,
+`/topics 2`, `/follow-ups off`, `/format brief`). Flags given
+with it (`--mode`, `--topics`, `--sources`, `--no-follow-ups`, `--format`,
+`--words`, `--tables`, `--domains`,
 `--reports`, `-o`, `--trace`) apply to every run it starts. A run resumed
-from `/resume` keeps its checkpoint's tier and budget whatever the row says. With `--silent`, `--jsonl` or a
+from `/resume` keeps its checkpoint's tier, budget and report shape whatever
+the row says. With `--silent`, `--jsonl` or a
 pipe on either side it prints the help, as it always did.
 
 Every box the terminal types in (the start screen's, `ask ▸`, the brief's
@@ -107,6 +110,9 @@ runs it.
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
 | `--topics N` | `0` | plan exactly N sub-topics (1–8); `0` lets the planner choose: it judges the question narrow (one or two sub-topics), multi-part (one per part) or a comparison (one per alternative), up to the `--mode` tier's count (quick 3, standard 4, deep 6), and the brief shows the scope beside the sub-topics. `sub_topics` in `config.yaml` sets it for every run |
 | `--no-follow-ups` | off | skip the follow-up round: one model call and up to three searches fewer, and the analysis gets what the planned searches found. `follow_ups: false` in `config.yaml` makes it the default |
+| `--format standard\|brief\|detailed\|table` | `standard` | the report's shape: `standard` organizes the explanation as the question needs; `brief` is about 300 words with at most a table or two and the limits in a sentence or two; `detailed` is about 1500 words, discussing each claim it may state; `table` puts the comparison in tables, with prose only to connect them. Every format keeps the program-written answer, the Fact-Check section and the citations. `report_format` sets the default |
+| `--words N` | `0` | about N words for the explanation (the answer section the program writes is not counted); `0` leaves it to `--format`. At most 6000. `report_words` sets the default. The length is a target the model aims at, not a guarantee |
+| `--tables auto\|none\|some\|many` | `auto` | how much of the report is in tables, over the format's own amount; `report_tables` sets the default |
 | `--reports DIR` | `reports` | where the `.md` / `.pdf` / `.json` artifacts are written |
 | `--jsonl` | off | machine-readable event stream instead of the live UI |
 | `--silent`, `-s` | off | no live UI; print only the report |
@@ -136,8 +142,12 @@ drsh --plan plan.json
 
 A plan carries its question, depth tier (`depth.key`), any pinned
 `pinned_per_topic` budget and whether the follow-up round is off
-(`no_follow_ups`, absent for on), so `--plan` cannot be combined with `-p`,
-`--mode`, `--sources`, `--topics` or `--no-follow-ups`. It is checked before it runs: the tier must exist,
+(`no_follow_ups`, absent for on) and the report's shape (`report`, absent
+for the standard report: `{"format": "brief", "words": 300, "tables":
+"none"}`, each part optional), so `--plan` cannot be combined with `-p`,
+`--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`, `--words`
+or `--tables`. A format or table amount that is not one of the choices is
+refused. It is checked before it runs: the tier must exist,
 at least one sub-topic must have a name, sub-topics are renumbered in
 order, and the source budget is worked out again from the tier rather than
 read from the file. When you rename a sub-topic, clear its `query` and
@@ -243,8 +253,8 @@ keeps saving to the same checkpoint, so it can be stopped and resumed again.
 Its sub-agents may take saved results in another order than the first run
 did, so its evidence is close to, not always identical with, what that run
 would have reached. `--resume` cannot be combined with `-p`, `--plan`,
-`--replay`, `--mode`, `--sources`, `--topics` or `--no-follow-ups`: the
-checkpoint carries all of them.
+`--replay`, `--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`,
+`--words` or `--tables`: the checkpoint carries all of them.
 
 A run killed before its plan was confirmed has nothing saved beyond the
 question; run it again.
@@ -276,6 +286,11 @@ searches return, which changes the pages each counts and whether it runs its
 fallback query. Two replays of one trace therefore see the same evidence,
 but a replay can differ from the live run it was recorded from by a page or
 so; compare replays with replays. `--replay` cannot be combined with `-p`.
+It writes the report in the shape the trace recorded, and takes `--format`,
+`--words` and `--tables` to write it in another: each replaces its own
+part of the recorded shape (`--words 600` keeps the recorded format). The
+analysis and the fact-check run again too, so a reshaped replay is not
+only the same decision written differently.
 
 An empty question is rejected, and so is a run with no API key; neither
 writes anything.
@@ -387,7 +402,8 @@ as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question and the same settings the terminal's start screen shows: `--mode`,
 `--topics` (as "Sub-topics", auto by default), `--sources` (as "Pages per
-topic") and `--no-follow-ups` (as "Follow-ups"), drawn from the list
+topic"), `--no-follow-ups` (as "Follow-ups"), `--format`, `--words` and
+`--tables`, drawn from the list
 `/api/info` serves and launched as those flags. Then Search: the
 web, or "Only these sites", which opens a box for the list (`--domains`)
 and keeps the last one typed. The empty question box shows an example, and
@@ -399,8 +415,9 @@ sites, each marked usable, from snippets only, or dropped with the reason,
 and the plan review shows them. Research makes the plan first (the same
 as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
 add and remove sub-topics, change the search each one runs, change the
-depth, or turn the follow-up round off or on: the review settings the
-terminal brief's keys change (`d`, `f`), drawn from the same list. Each
+depth, turn the follow-up round off or on, or change the report's format:
+the review settings the terminal brief's keys change (`d`, `f`, `t`), drawn
+from the same list. Each
 change is worked out by the server (`/api/plan`) as the brief works it out,
 budget per sub-agent included. Under each name is the planner's description of the sub-topic, which
 is for reading: research never sends it. Below that is the query the
@@ -760,6 +777,7 @@ sub-topics' heading names how the planner read the question
 | `x` | delete a sub-topic (pick its number; one must stay) |
 | `d` | cycle depth: quick → standard → deep |
 | `f` | turn the follow-up round on or off (the brief's `follow-ups` field says which) |
+| `t` | cycle the report's format: standard → brief → detailed → table (the words and tables chosen with the question stay) |
 | `q` / `Esc` / `Ctrl-C` | cancel |
 
 Keys pressed while the plan is still being made are discarded — a plan

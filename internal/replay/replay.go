@@ -42,8 +42,11 @@ type Trace struct {
 	NoFollowUps bool `json:"no_follow_ups,omitempty"`
 	// Scope is the planner's reading of the question, which the brief shows
 	// beside the sub-topics; a resumed run's brief lost it.
-	Scope    string   `json:"scope,omitempty"`
-	Searches []Search `json:"searches"`
+	Scope string `json:"scope,omitempty"`
+	// Report is the shape the run's report was asked for. A replay re-writes
+	// the report live, in this shape unless its flags give another.
+	Report   agent.ReportSpec `json:"report,omitzero"`
+	Searches []Search         `json:"searches"`
 	// Pages holds each distinct page text once, keyed by URL. Searches return
 	// the same page over and over (a vendor's pricing page came back from five
 	// searches in one run), and storing it with every result made the page
@@ -148,7 +151,7 @@ func (r *Recorder) Seed(t *Trace) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
-	r.trace.NoFollowUps, r.trace.Scope = t.NoFollowUps, t.Scope
+	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = t.NoFollowUps, t.Scope, t.Report
 	if r.finished == nil {
 		r.finished = map[string]bool{}
 	}
@@ -198,6 +201,16 @@ func (r *Recorder) phase(name, prompt string, out any, err error) {
 	r.mu.Unlock()
 }
 
+// PlanSettings are what a trace records beside the plan's sub-topics: the
+// tier, the pinned per-sub-agent budget, and the plan's other settings.
+type PlanSettings struct {
+	Mode        string
+	Sources     int
+	NoFollowUps bool
+	Scope       string
+	Report      agent.ReportSpec
+}
+
 // SetPlan records the plan the run actually used, with its tier and pinned
 // per-sub-agent budget. The planner's answer is not it: the brief can rename,
 // add and delete sub-topics and change the tier, and a plan handed in with
@@ -205,11 +218,11 @@ func (r *Recorder) phase(name, prompt string, out any, err error) {
 // Load refused. The flags are not it either: --plan carries its own tier and
 // budget, and a replay at the flags' tier cut the recorded results
 // differently from the run it reproduces.
-func (r *Recorder) SetPlan(subs []agent.SubTopic, mode string, sources int, noFollowUps bool, scope string) {
+func (r *Recorder) SetPlan(subs []agent.SubTopic, s PlanSettings) {
 	r.mu.Lock()
 	r.trace.Plan = slices.Clone(subs)
-	r.trace.Mode, r.trace.Sources = mode, sources
-	r.trace.NoFollowUps, r.trace.Scope = noFollowUps, scope
+	r.trace.Mode, r.trace.Sources = s.Mode, s.Sources
+	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = s.NoFollowUps, s.Scope, s.Report
 	r.mu.Unlock()
 	r.save()
 }

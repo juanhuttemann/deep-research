@@ -26,17 +26,18 @@ const (
 type Options struct {
 	Question        string
 	Assistant       agent.Assistant
-	DepthMode       string    // "quick" | "standard" | "deep" | "" (standard)
-	SourcesPerTopic int       // sources per sub-agent; 0 => derived from depth
-	SubTopics       int       // exact sub-topic count; 0 => the planner chooses up to the tier's
-	NoFollowUps     bool      // skip the follow-up round
-	Parallelism     int       // sub-agents searching concurrently; 0 => 3
-	JSONL           bool      // emit structured JSONL events
-	Quiet           bool      // minimal, non-interactive output
-	NoColor         bool      // disable ANSI colour
-	Detach          bool      // start in detached / background state
-	OutDir          string    // report output dir (default "reports")
-	Input           io.Reader // interactive stdin; nil => non-interactive
+	DepthMode       string     // "quick" | "standard" | "deep" | "" (standard)
+	SourcesPerTopic int        // sources per sub-agent; 0 => derived from depth
+	SubTopics       int        // exact sub-topic count; 0 => the planner chooses up to the tier's
+	NoFollowUps     bool       // skip the follow-up round
+	Report          ReportSpec // the report's shape; the zero value for standard
+	Parallelism     int        // sub-agents searching concurrently; 0 => 3
+	JSONL           bool       // emit structured JSONL events
+	Quiet           bool       // minimal, non-interactive output
+	NoColor         bool       // disable ANSI colour
+	Detach          bool       // start in detached / background state
+	OutDir          string     // report output dir (default "reports")
+	Input           io.Reader  // interactive stdin; nil => non-interactive
 	Stdout          io.Writer
 	Stderr          io.Writer
 	Bell            func(string)     // OS/notification hook
@@ -232,7 +233,7 @@ func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
-	plan.NoFollowUps = o.NoFollowUps
+	plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
 	if o.SourcesPerTopic <= 0 {
 		return plan, nil
 	}
@@ -357,8 +358,9 @@ func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, d
 	// driver returning and this write emits a Detach event, which appends to
 	// the same timeline BuildMeta ranges over. Snapshot it under the sink's
 	// lock so the export never reads a slice mid-append.
-	meta = keep(WriteMetadata(
-		BuildMeta(result, sink.TimelineSnapshot(), plan.Depth.Key, driver.tokens, driver.sources), o.OutDir))
+	m := BuildMeta(result, sink.TimelineSnapshot(), plan.Depth.Key, driver.tokens, driver.sources)
+	m.ReportSpec = plan.Report
+	meta = keep(WriteMetadata(m, o.OutDir))
 	return md, pdf, meta
 }
 

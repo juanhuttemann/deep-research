@@ -88,14 +88,15 @@ cheap request each.
 In the terminal:
 
 1. **Start screen** (a bare `drsh`): type the question. The row under the box
-   is the run's settings: depth, sub-topics, pages per topic and follow-ups,
-   each changed with its command (`/mode deep`, `/topics 2`,
-   `/follow-ups off`).
+   is the run's settings: depth, sub-topics, pages per topic, follow-ups and
+   the report's format, words and tables, each changed with its command
+   (`/mode deep`, `/topics 2`, `/follow-ups off`, `/format brief`).
 2. **Research brief**: the planned sub-topics. The planner sizes the plan to
    the question and says how it read it: a narrow question gets one or two
    sub-topics, a multi-part one a sub-topic per part, a comparison one per
-   alternative. Add, rename or delete them, change the depth (`d`) or turn
-   the follow-up searches off (`f`), then press Enter.
+   alternative. Add, rename or delete them, change the depth (`d`), turn
+   the follow-up searches off (`f`) or pick the report's format (`t`), then
+   press Enter.
 3. **Live frame**: the pipeline stage, one row per parallel sub-agent, the
    sources as they are read, and a status line for the model call in flight,
    with a reasoning model's latest thinking under it.
@@ -177,6 +178,7 @@ drsh                                     # ask on the start screen, one run afte
 drsh -p "question" --mode deep          # quick | standard | deep
 drsh -p "question" --topics 3           # exactly 3 sub-topics (default: the planner decides)
 drsh -p "question" --no-follow-ups      # skip the follow-up searches
+drsh -p "question" --format brief       # standard | brief | detailed | table
 drsh -p "question" --output report.md   # also save to a file
 drsh -p "question" --silent             # just the report
 drsh -p "question" --jsonl              # machine-readable events

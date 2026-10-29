@@ -35,6 +35,9 @@ type Meta struct {
 	Sources          int      `json:"sources"`
 	ExecutiveSummary string   `json:"executive_summary"`
 	Report           string   `json:"report"`
+	// ReportSpec is the shape the report was asked for, absent for the
+	// standard one.
+	ReportSpec ReportSpec `json:"report_spec,omitzero"`
 	// Error is set when a late phase failed and the report is incomplete.
 	Error string `json:"error,omitempty"`
 	// Topics is the analyzer's per-topic evidence with its own confidence.

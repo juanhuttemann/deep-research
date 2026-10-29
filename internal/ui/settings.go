@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+
+	"github.com/juanhuttemann/deep-research/internal/agent"
 )
 
 // Setting is one choice a run takes, described once for every surface that
@@ -46,6 +48,7 @@ type RunSettings struct {
 	SubTopics   int
 	Sources     int
 	NoFollowUps bool
+	Report      ReportSpec
 }
 
 // Setting keys, the flags they become.
@@ -54,10 +57,16 @@ const (
 	SettingTopics    = "topics"
 	SettingSources   = "sources"
 	SettingFollowUps = "follow-ups"
+	SettingFormat    = "format"
+	SettingWords     = "words"
+	SettingTables    = "tables"
 )
 
 // sourceChoices are the per-sub-agent budgets offered besides auto.
 var sourceChoices = []int{2, 3, 4, 5, 6, 8, 10}
+
+// wordChoices are the report lengths offered besides the format's own.
+var wordChoices = []int{300, 600, 1000, 1500, 2500}
 
 // Settings describes every setting at the values rs holds.
 func Settings(rs RunSettings) []Setting {
@@ -71,6 +80,14 @@ func Settings(rs RunSettings) []Setting {
 		{Key: SettingFollowUps, Label: "follow-ups", Help: "After the planned searches, up to three more for what the findings leave open.",
 			Value: onOff(!rs.NoFollowUps), Opts: []Option{{Value: "on", Label: "on"}, {Value: "off", Label: "off"}},
 			Start: true, Review: true, BriefKey: KeyF},
+		{Key: SettingFormat, Label: "format", Help: "The report's shape. The answer, the fact-check and the citations are in every format.",
+			Value: cmp.Or(rs.Report.Format, agent.ReportFormats[0]), Opts: formatOptions(), Start: true, Review: true, BriefKey: KeyT},
+		// Words and tables are chosen with the question: on review, the
+		// format alone keeps the brief's row to what its keys change.
+		{Key: SettingWords, Label: "words", Help: "How long the explanation is, in words. Auto lets the format decide.",
+			Value: strconv.Itoa(rs.Report.Words), Opts: countOptions(0, wordChoices), Start: true, count: true, max: agent.MaxReportWords},
+		{Key: SettingTables, Label: "tables", Help: "How much of the report is in tables. Auto lets the format decide.",
+			Value: cmp.Or(rs.Report.Tables, agent.ReportTables[0]), Opts: plainOptions(agent.ReportTables), Start: true},
 	}
 	for i := range out {
 		out[i].Opts = withValue(out[i], out[i].Value)
@@ -110,6 +127,23 @@ func modeOptions() []Option {
 	out := make([]Option, len(DepthModes))
 	for i, m := range DepthModes {
 		out[i] = Option{Value: m.Key, Label: m.Key, Note: fmt.Sprintf("≤%d", m.SubTopics)}
+	}
+	return out
+}
+
+func formatOptions() []Option {
+	out := plainOptions(agent.ReportFormats)
+	for i := range out {
+		out[i].Note = reportPresets[out[i].Value].note
+	}
+	return out
+}
+
+// plainOptions are values offered as they are named.
+func plainOptions(values []string) []Option {
+	out := make([]Option, len(values))
+	for i, v := range values {
+		out[i] = Option{Value: v, Label: v}
 	}
 	return out
 }
@@ -183,6 +217,8 @@ func PlanValue(p *Plan, key string) string {
 		return p.Depth.Key
 	case SettingFollowUps:
 		return onOff(!p.NoFollowUps)
+	case SettingFormat:
+		return cmp.Or(p.Report.Format, agent.ReportFormats[0])
 	}
 	return ""
 }
@@ -205,6 +241,14 @@ func ApplyToPlan(p *Plan, key, value string) (*Plan, error) {
 			return nil, err
 		}
 		return p.WithDepth(d), nil
+	case SettingFormat:
+		r, err := ReportSpec{Format: value, Words: p.Report.Words, Tables: p.Report.Tables}.Normalized()
+		if err != nil {
+			return nil, err
+		}
+		np := *p
+		np.Report = r
+		return &np, nil
 	default: // SettingFollowUps
 		np := *p
 		np.NoFollowUps = value == "off"

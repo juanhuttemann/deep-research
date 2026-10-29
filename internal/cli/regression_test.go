@@ -617,3 +617,39 @@ func TestStartScreenSettingCommandSetsItsFlag(t *testing.T) {
 		t.Error("a non-setting line was taken for a setting")
 	}
 }
+
+// A replay writes its report again, live, so it takes the report flags: each
+// one replaces only its own field of the recorded shape, and a trace's
+// misspelt format is refused as a plan file's is. A plan or a checkpoint
+// carries its shape, so the flags are refused beside them.
+func TestReplayTakesTheReportFlagsOverTheTrace(t *testing.T) {
+	tr := &replay.Trace{Question: "q", Plan: []agent.SubTopic{{Name: "a"}}, Report: agent.ReportSpec{Format: "brief", Tables: "none"}}
+	for _, tc := range []struct {
+		flags []string
+		want  agent.ReportSpec
+	}{
+		{nil, agent.ReportSpec{Format: "brief", Tables: "none"}},
+		{[]string{"--words=700"}, agent.ReportSpec{Format: "brief", Words: 700, Tables: "none"}},
+		{[]string{"--format=standard", "--tables=auto"}, agent.ReportSpec{}},
+	} {
+		cmd := New(func() (Deps, error) { return Deps{}, nil })
+		if err := cmd.ParseFlags(append([]string{"--replay=x"}, tc.flags...)); err != nil {
+			t.Fatal(err)
+		}
+		plan, _, err := givenPlan(cmd, Deps{}, tr, "")
+		if err != nil || plan.Report != tc.want {
+			t.Errorf("%v: report %+v, %v; want %+v", tc.flags, plan, err, tc.want)
+		}
+	}
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	bad := *tr
+	bad.Report.Format = "breif"
+	if _, _, err := givenPlan(cmd, Deps{}, &bad, ""); err == nil {
+		t.Error("a trace's misspelt format was run")
+	}
+	for _, args := range [][]string{{"--plan", "x.json", "--format", "brief"}, {"--resume", "x.json", "--words", "300"}} {
+		if _, err := runCLI(t, t.TempDir(), stub{}, args...); err == nil || !strings.Contains(err.Error(), "none of the others") {
+			t.Errorf("%v: %v, want the flags refused together", args, err)
+		}
+	}
+}
