@@ -41,7 +41,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 
 	// A question is a flag on the root, not a subcommand: `drsh -p "..."`.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
-		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only", "resume"}, cmd.Flags().Changed) {
+		if !slices.ContainsFunc([]string{"prompt", "replay", "plan", "plan-only", "clarify-only", "resume"}, cmd.Flags().Changed) {
 			// A script piping a bare drsh still gets the help it always did.
 			silent, _ := cmd.Flags().GetBool("silent")
 			jsonl, _ := cmd.Flags().GetBool("jsonl")
@@ -79,6 +79,9 @@ func New(load func() (Deps, error)) *cobra.Command {
 	root.Flags().String("format", "standard", "report format: standard | brief | detailed | table")
 	root.Flags().Int("words", 0, "the report's explanation in about this many words (0 = the --format's)")
 	root.Flags().String("tables", "auto", "how much of the report is in tables: auto (the --format's) | none | some | many")
+	root.Flags().String("clarify", "auto", "before planning, ask what the question leaves open: auto (only when it does) | off")
+	root.Flags().Bool("clarify-only", false, "ask the clarifying questions, print them (as the clarify event under --jsonl) and stop before planning")
+	root.Flags().String("answers", "", "plan for these answers instead of asking: the JSON --clarify-only printed, with \"answers\" filled in")
 	root.Flags().String("reports", "reports", "directory for the .md / .pdf / .json artifacts")
 	root.Flags().Bool("jsonl", false, "emit machine-readable JSONL events instead of the live UI")
 	root.Flags().Bool("no-color", false, "disable ANSI colour")
@@ -101,13 +104,18 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// flags as well would leave two answers to each, and a replay carries
 	// its recorded plan.
 	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only", "topics", "no-follow-ups",
-		"format", "words", "tables"} {
+		"format", "words", "tables", "clarify", "clarify-only", "answers"} {
 		root.MarkFlagsMutuallyExclusive("plan", other)
 	}
 	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
+	// The questions come before the plan, so a run that stops at them makes
+	// none; with answers in hand there is nothing left to ask.
+	for _, other := range []string{"plan-only", "replay", "answers"} {
+		root.MarkFlagsMutuallyExclusive("clarify-only", other)
+	}
 	// The report flags are not among them: a replay writes the report again,
 	// live, and the recorded evidence can be written up in another shape.
-	for _, other := range []string{"topics", "no-follow-ups"} {
+	for _, other := range []string{"topics", "no-follow-ups", "clarify", "answers"} {
 		root.MarkFlagsMutuallyExclusive("replay", other)
 	}
 	root.Flags().StringSlice("domains", nil, "research only these sites (comma-separated); each is checked before planning")
@@ -120,7 +128,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A checkpoint carries the question, the confirmed plan, its tier and
 	// budget, and the searches already made.
 	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth", "domains",
-		"topics", "no-follow-ups", "format", "words", "tables"} {
+		"topics", "no-follow-ups", "format", "words", "tables", "clarify", "clarify-only", "answers"} {
 		root.MarkFlagsMutuallyExclusive("resume", other)
 	}
 
@@ -398,6 +406,12 @@ func webArgs(r web.Request, reports string) ([]string, io.Reader, error) {
 	if r.PlanOnly {
 		args = append(args, "--plan-only")
 	}
+	if r.ClarifyOnly {
+		args = append(args, "--clarify-only")
+	}
+	if len(r.Answers) > 0 {
+		args = append(args, "--answers="+string(r.Answers))
+	}
 	return args, strings.NewReader(""), nil
 }
 
@@ -499,14 +513,37 @@ func runSettings(cmd *cobra.Command, d Deps) ui.RunSettings {
 		report = d.Config.Report
 	}
 	return ui.RunSettings{Mode: mode, SubTopics: subTopics(cmd, d), Sources: sourceBudget(cmd, d), NoFollowUps: noFollowUps(cmd, d),
-		Report: report}
+		Report: report, NoClarify: noClarify(cmd, d)}
+}
+
+// noClarify is whether the run asks no clarifying questions: the flag's
+// choice, else the config's.
+func noClarify(cmd *cobra.Command, d Deps) bool {
+	if cmd.Flags().Changed("clarify") {
+		v, _ := cmd.Flags().GetString("clarify")
+		return strings.EqualFold(strings.TrimSpace(v), "off")
+	}
+	return d.Config.NoClarify
+}
+
+// answers are the --answers handed in, nil when none were.
+func answers(cmd *cobra.Command) (*ui.Clarified, error) {
+	if !cmd.Flags().Changed("answers") {
+		return nil, nil
+	}
+	raw, _ := cmd.Flags().GetString("answers")
+	c, err := ui.ParseAnswers(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 // defaultSettings are the settings a run started now with no flags takes,
 // the ones the serve page opens on.
 func defaultSettings(c config.Config) ui.RunSettings {
 	return ui.RunSettings{Mode: "standard", SubTopics: c.SubTopics, Sources: c.SourcesPerTopic, NoFollowUps: c.NoFollowUps,
-		Report: c.Report}
+		Report: c.Report, NoClarify: c.NoClarify}
 }
 
 // setSetting sets a setting chosen on the start screen as its flag, so every
@@ -563,16 +600,27 @@ func doneEvent(res ui.RunResult, err error) ui.Event {
 	return e
 }
 
-// checkSettings refuses a setting the run cannot take. A misspelt tier used
-// to fall through to standard without a word, so "--mode deeep" ran a study
-// the reader never asked for.
-func checkSettings(cmd *cobra.Command, d Deps) error {
+// checkRun refuses a question or a setting the run cannot take. A misspelt
+// tier used to fall through to standard without a word, so "--mode deeep"
+// ran a study the reader never asked for.
+func checkRun(cmd *cobra.Command, d Deps, question string) error {
+	// An empty question plans nothing, and the run would still spend its
+	// model calls writing a report about nothing.
+	if strings.TrimSpace(question) == "" {
+		return errors.New("the question is empty")
+	}
 	mode, _ := cmd.Flags().GetString("mode")
 	if _, err := ui.ParseDepthMode(mode); err != nil {
 		return err
 	}
 	if n := subTopics(cmd, d); n > ui.MaxSubTopics {
 		return fmt.Errorf("%d sub-topics asked for: at most %d", n, ui.MaxSubTopics)
+	}
+	if v, _ := cmd.Flags().GetString("clarify"); !slices.Contains([]string{"auto", "off"}, strings.ToLower(strings.TrimSpace(v))) {
+		return fmt.Errorf("--clarify %q: want auto or off", v)
+	}
+	if _, err := answers(cmd); err != nil {
+		return err
 	}
 	_, err := reportSpec(cmd, d.Config.Report)
 	return err
@@ -592,14 +640,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if st.replay {
 		d.Config.Parallelism = 1
 	}
-	// An empty question plans nothing, and the run would still spend its
-	// model calls writing a report about nothing.
-	if strings.TrimSpace(question) == "" {
-		return ui.RunResult{}, errors.New("the question is empty")
-	}
 	// Checked before the assistant, so a typo is reported before a missing
 	// key.
-	if err := checkSettings(cmd, d); err != nil {
+	if err := checkRun(cmd, d, question); err != nil {
 		return ui.RunResult{}, err
 	}
 	mode, _ := cmd.Flags().GetString("mode")
@@ -613,7 +656,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		return ui.RunResult{}, err
 	}
 	planOnly, _ := cmd.Flags().GetBool("plan-only")
-	assistant, rec := instrument(cmd, assistant, st, planOnly, mode, sourceBudget(cmd, d))
+	clarifyOnly, _ := cmd.Flags().GetBool("clarify-only")
+	given, _ := answers(cmd) // checkRun refused what does not parse
+	assistant, rec := instrument(cmd, assistant, st, planOnly || clarifyOnly, mode, sourceBudget(cmd, d))
 
 	silent, _ := cmd.Flags().GetBool("silent")
 	jsonl, _ := cmd.Flags().GetBool("jsonl")
@@ -660,6 +705,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		PlanOnly:        planOnly,
 		OnPlan:          recordPlan(rec),
 		Domains:         domains,
+		Clarify:         !rs.NoClarify,
+		ClarifyOnly:     clarifyOnly,
+		Answers:         given,
 	})
 	if err != nil {
 		return res, fmt.Errorf("research failed: %w", err)
@@ -667,8 +715,8 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	if res.Cancelled {
 		return res, nil
 	}
-	if planOnly {
-		return res, printPlan(cmd, res.Plan, jsonl)
+	if clarifyOnly || planOnly {
+		return res, printStage(cmd, res, jsonl)
 	}
 	writeTrace(cmd, rec, &res)
 	return res, finish(cmd, d, rec, res, !st.replay, silent, jsonl)
@@ -773,6 +821,7 @@ func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*
 		}
 		plan := ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d))
 		plan.NoFollowUps, plan.Scope = tr.NoFollowUps, tr.Scope
+		plan.Questions, plan.Clarifications = tr.Questions, tr.Clarifications
 		// Normalized here as a plan file is in ReadPlan: a hand-edited
 		// trace's format is input too.
 		if plan.Report, err = reportSpec(cmd, tr.Report); err != nil {
@@ -809,14 +858,23 @@ func readPlanFile(cmd *cobra.Command, path string) (*ui.Plan, error) {
 	return ui.ReadPlan(f)
 }
 
-// printPlan writes a plan-only run's plan as JSON, the input --plan reads
-// back: to -o when given, as it does a report, else to stdout. Under --jsonl
-// the plan event already carried it to stdout.
-func printPlan(cmd *cobra.Command, plan *ui.Plan, jsonl bool) error {
-	if plan == nil {
+// printStage writes what a --clarify-only or --plan-only run stopped at.
+func printStage(cmd *cobra.Command, res ui.RunResult, jsonl bool) error {
+	if res.Clarified != nil {
+		return printJSON(cmd, res.Clarified, jsonl)
+	}
+	return printJSON(cmd, res.Plan, jsonl)
+}
+
+// printJSON writes what a stage stopped at as JSON: a plan-only run's plan,
+// the input --plan reads back, or a clarify-only run's questions, the input
+// --answers does. To -o when given, as it does a report, else to stdout;
+// under --jsonl its event already carried it there.
+func printJSON[T any](cmd *cobra.Command, v *T, jsonl bool) error {
+	if v == nil {
 		return nil
 	}
-	b, err := json.MarshalIndent(plan, "", "  ")
+	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -888,7 +946,8 @@ func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
 
 // tracedSettings are what the trace records of plan beside its sub-topics.
 func tracedSettings(p *ui.Plan) replay.PlanSettings {
-	return replay.PlanSettings{Mode: p.Depth.Key, Sources: p.PinnedPerTopic, NoFollowUps: p.NoFollowUps, Scope: p.Scope, Report: p.Report}
+	return replay.PlanSettings{Mode: p.Depth.Key, Sources: p.PinnedPerTopic, NoFollowUps: p.NoFollowUps, Scope: p.Scope, Report: p.Report,
+		Questions: p.Questions, Answers: p.Clarifications}
 }
 
 // writeTrace saves a recorded run next to its report, named after it.
@@ -957,7 +1016,8 @@ func printResult(cmd *cobra.Command, result *agent.ResearchResult, printed bool)
 		return nil
 	}
 	noColor, _ := cmd.Flags().GetBool("no-color")
-	fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", ui.FormatMarkdown(cmd.OutOrStdout(), result.Summary.Report, noColor))
+	body := ui.WithReading(result.Summary.Report, result.Clarifications)
+	fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", ui.FormatMarkdown(cmd.OutOrStdout(), body, noColor))
 	return nil
 }
 

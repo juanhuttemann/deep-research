@@ -52,6 +52,9 @@ const (
 	// confirmed in the brief, or handed in with --plan. A caller can keep it,
 	// edit it and hand it back.
 	PlanReady EventType = "plan"
+	// ClarifyReady carries the questions a --clarify-only run asked, none
+	// for a clear question; the caller answers them with --answers.
+	ClarifyReady EventType = "clarify"
 	// SourceCheck is the preflight's finding for one domain of a --domains
 	// list, sent before planning. Check carries it whole.
 	SourceCheck EventType = "source"
@@ -113,6 +116,9 @@ type Event struct {
 	Artifacts []string `json:"artifacts,omitempty"`
 	// Plan is the plan about to run (PlanReady only).
 	Plan *Plan `json:"plan,omitempty"`
+	// Questions are a clarify event's; a clear question sends an empty
+	// list, so that a caller can tell it from a run that never asked.
+	Questions *[]Question `json:"questions,omitempty"`
 	// Check is one domain's preflight result (SourceCheck only).
 	Check *agent.DomainCheck `json:"check,omitempty"`
 }

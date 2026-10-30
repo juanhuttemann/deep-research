@@ -365,7 +365,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
-	analysis, err := d.analyze(ctx, analyzePrompt(plan.Question, findings, uncovered))
+	analysis, err := d.analyze(ctx, analyzePrompt(statedQuestion(plan), findings, uncovered))
 	if err != nil {
 		return d.partial(ctx, plan, findings, nil, nil, nil, "analysis failed", err)
 	}
@@ -387,12 +387,12 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// report's: each keeps the normalised forms it was compared in.
 	pages := fetchedPages(findings)
 	d.applyVerdicts(analysis, fc, checkErr, findings, pages)
-	d.repair(ctx, plan.Question, analysis, fc)
+	d.repair(ctx, statedQuestion(plan), analysis, fc)
 
 	d.emit(Event{Type: Phase, Phase: "Summarize", Detail: "Writing the report"})
 	// The shape goes after either input, checked or prose, and is nothing
 	// for the standard report, whose input stays as it was.
-	prompt := summarizePrompt(plan.Question, analysis, fc, findings, retrieved) + reportShape(plan.Report)
+	prompt := summarizePrompt(statedQuestion(plan), analysis, fc, findings, retrieved) + reportShape(plan.Report)
 	summary, err := d.Agent.Summarize(ctx, prompt)
 	if err != nil {
 		return d.partial(ctx, plan, findings, analysis, fc, checkErr, "report writing failed", err)
@@ -407,6 +407,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	}
 	return d.finish(&agent.ResearchResult{
 		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
+		Clarifications: plan.Clarifications,
 	}), nil
 }
 
@@ -723,6 +724,7 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 	return d.finish(&agent.ResearchResult{
 		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc,
 		Summary: &agent.Summary{Report: report, Confidence: confidence}, Error: reason,
+		Clarifications: plan.Clarifications,
 	}), nil
 }
 
@@ -837,7 +839,7 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, findings []agent.Find
 		return findings, uncovered
 	}
 	d.emit(Event{Type: Phase, Phase: "Research", Detail: "Finding what the evidence leaves open"})
-	qs, err := d.Agent.FollowUps(ctx, analyzePrompt(plan.Question, findings, uncovered))
+	qs, err := d.Agent.FollowUps(ctx, analyzePrompt(statedQuestion(plan), findings, uncovered))
 	if err != nil {
 		d.emit(Event{Type: Error, Phase: "Research", Detail: "follow-up searches not chosen, analysing what was found: " + err.Error()})
 		return findings, uncovered

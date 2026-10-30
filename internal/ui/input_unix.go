@@ -88,6 +88,10 @@ func newTTYInput(f *os.File) (Input, error) {
 		_ = setTermios(fd, tcSetFlush, old)
 		return nil, errors.New("raw mode not applied")
 	}
+	// Raw mode reads a pasted line break as Enter, so a paste is marked
+	// (see readPaste). A write that fails, stdin opened read-only, leaves
+	// pastes typed as they were.
+	_, _ = io.WriteString(f, pasteOn)
 	t := &ttyReader{f: f, old: old}
 	// Drain what was typed before now, counting it. Flushing it in the
 	// ioctl, as this used to, lost an Enter pressed during planning without
@@ -179,6 +183,8 @@ func (t *ttyReader) Close() {
 		t.mu.Lock()
 		t.done = true
 		t.mu.Unlock()
+		// The shell's line editor would take the markers for keys.
+		_, _ = io.WriteString(t.f, pasteOff)
 		if t.old != nil {
 			// Flushed: keys pressed during the run are not the shell's.
 			_ = setTermios(int(t.f.Fd()), tcSetFlush, t.old)

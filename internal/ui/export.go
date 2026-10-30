@@ -38,6 +38,9 @@ type Meta struct {
 	// ReportSpec is the shape the report was asked for, absent for the
 	// standard one.
 	ReportSpec ReportSpec `json:"report_spec,omitzero"`
+	// Clarifications are the reading the reader gave before the plan: what
+	// the research and the report answered.
+	Clarifications []Clarification `json:"clarifications,omitempty"`
 	// Error is set when a late phase failed and the report is incomplete.
 	Error string `json:"error,omitempty"`
 	// Topics is the analyzer's per-topic evidence with its own confidence.
@@ -145,6 +148,7 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	if len(res.Domains) > 0 {
 		fmt.Fprintf(&sb, "**Sources limited to:** %s\n\n", strings.Join(res.Domains, ", "))
 	}
+	sb.WriteString(ReadingMarkdown(res.Clarifications))
 	if body := summaryBody(res.Question, sum); body != "" {
 		sb.WriteString(body)
 		sb.WriteString("\n\n")
@@ -345,6 +349,35 @@ func WritePDF(res *agent.ResearchResult, dir string) (string, error) {
 		return path, err
 	}
 	return path, nil
+}
+
+// ReadingMarkdown is the reader's answers to the clarifying questions, each
+// under the question it answered, "" when none were given. A report written
+// for one reading of its question read as the answer to the question.
+func ReadingMarkdown(cs []Clarification) string {
+	if len(cs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("**Read as:**\n\n")
+	for _, c := range cs {
+		fmt.Fprintf(&sb, "- %s **%s**\n", c.Question, c.Answer)
+	}
+	return sb.String() + "\n"
+}
+
+// WithReading is body with the reading under its title, a leading "# "
+// line, or ahead of it when it has none: the terminal prints the report's
+// body, which the Markdown artifact's header does not head.
+func WithReading(body string, cs []Clarification) string {
+	reading := ReadingMarkdown(cs)
+	if reading == "" {
+		return body
+	}
+	if first, rest, ok := strings.Cut(body, "\n"); ok && strings.HasPrefix(first, "# ") {
+		return first + "\n\n" + reading + strings.TrimLeft(rest, "\n")
+	}
+	return reading + body
 }
 
 // summaryBody retains an executive section already present in the report.

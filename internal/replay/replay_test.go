@@ -16,7 +16,9 @@ import (
 // phase with a fixed value.
 type live struct{ searches int }
 
-func (l *live) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
+func (l *live) Clarify(context.Context, string) ([]agent.Question, error) { return nil, nil }
+
+func (l *live) Plan(context.Context, string, agent.Breadth, []agent.Clarification) (agent.Outline, error) {
 	return agent.Outline{SubTopics: []agent.SubTopic{{ID: "1", Name: "Alpha", Query: "alpha query"}}}, nil
 }
 func (l *live) ResearchDetail(_ context.Context, q string, _ []string) (*agent.ResearchDetail, error) {
@@ -46,7 +48,7 @@ func (l *live) TokensUsed() int               { return 0 }
 func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	ctx := context.Background()
 	rec := Record(&live{}, "q", "deep", 4)
-	_, _ = rec.Plan(ctx, "q", agent.Breadth{Max: 4})
+	_, _ = rec.Plan(ctx, "q", agent.Breadth{Max: 4}, nil)
 	_, _ = rec.ResearchDetail(ctx, "alpha query", []string{"alpha"})
 	_, _ = rec.ResearchDetail(ctx, "broken", nil)
 	_, _ = rec.Analyze(ctx, "analyze prompt")
@@ -64,7 +66,7 @@ func TestReplayServesTheRecordedEvidenceAndCallsTheModelLive(t *testing.T) {
 	}
 	fresh := &live{}
 	p := Play(fresh, tr)
-	if plan, _ := p.Plan(ctx, "ignored", agent.Breadth{Max: 9}); len(plan.SubTopics) != 1 || plan.SubTopics[0].Query != "alpha query" {
+	if plan, _ := p.Plan(ctx, "ignored", agent.Breadth{Max: 9}, nil); len(plan.SubTopics) != 1 || plan.SubTopics[0].Query != "alpha query" {
 		t.Errorf("plan = %+v, want the recorded one", plan)
 	}
 	det, err := p.ResearchDetail(ctx, "alpha query", nil)
@@ -346,7 +348,7 @@ func TestWrappersForwardScopingButAPlayerHasNone(t *testing.T) {
 // two lines made every one of them a query the replay had never seen.
 func TestTraceKeepsThePlannedQuestion(t *testing.T) {
 	rec := Record(&live{}, "cloud\nstorage", "quick", 0)
-	_, _ = rec.Plan(context.Background(), "cloud storage", agent.Breadth{Max: 3})
+	_, _ = rec.Plan(context.Background(), "cloud storage", agent.Breadth{Max: 3}, nil)
 	if rec.trace.Question != "cloud storage" {
 		t.Errorf("trace question = %q, want the planned %q", rec.trace.Question, "cloud storage")
 	}
@@ -374,5 +376,28 @@ func TestCheckpointKeepsTheFollowUpSetting(t *testing.T) {
 	again.save()
 	if tr, err = Load(path); err != nil || !tr.NoFollowUps || tr.Scope != "narrow" || tr.Report != brief {
 		t.Errorf("a resumed recording dropped the setting: %+v, %v", tr, err)
+	}
+}
+
+// The reading a run was planned for is part of its plan: a resumed run, or a
+// replay, that lost it would analyse the evidence for a question read
+// another way.
+func TestCheckpointKeepsTheClarifications(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.partial.json")
+	rec := Record(&live{}, "q", "standard", 0)
+	rec.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
+	qs := []agent.Question{{ID: "q1", Text: "Which market?", Options: []string{"US", "EU"}}}
+	answers := []agent.Clarification{{Question: "Which market?", Answer: "EU"}}
+	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "Alpha"}}, PlanSettings{Mode: "quick", Questions: qs, Answers: answers})
+	again := Record(&live{}, "q", "standard", 0)
+	tr, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again.Seed(tr)
+	again.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
+	again.save()
+	if tr, err = Load(path); err != nil || len(tr.Questions) != 1 || len(tr.Clarifications) != 1 || tr.Clarifications[0] != answers[0] {
+		t.Errorf("a resumed recording dropped the reading: %+v, %v", tr, err)
 	}
 }

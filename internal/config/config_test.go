@@ -382,7 +382,7 @@ func TestUseLocalSearXNG(t *testing.T) {
 // provider's default.
 func TestReasoningEffortDefaults(t *testing.T) {
 	got := loadIn(t, "").Effort
-	want := agent.Effort{Plan: "low", Chat: "medium"}
+	want := agent.Effort{Plan: "low", Clarify: "low", Chat: "medium"}
 	if got != want {
 		t.Errorf("effort = %+v, want %+v", got, want)
 	}
@@ -403,7 +403,7 @@ func TestReasoningEffortComesFromFileAndEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := agent.Effort{Analyze: "medium", FactCheck: "low", Summarize: "low", Chat: "medium"}
+	want := agent.Effort{Clarify: "low", Analyze: "medium", FactCheck: "low", Summarize: "low", Chat: "medium"}
 	if cfg.Effort != want {
 		t.Errorf("effort = %+v, want %+v", cfg.Effort, want)
 	}

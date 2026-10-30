@@ -45,9 +45,20 @@ type fakeAssistant struct {
 	// standing in for what a provider reports.
 	tokensPerCall int
 	tokens        atomic.Int64
+	// questions are what Clarify asks; clarifies counts its calls, and
+	// readings are the reading each Plan call was given.
+	questions []agent.Question
+	clarifies int
+	readings  [][]agent.Clarification
 }
 
-func (f *fakeAssistant) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
+func (f *fakeAssistant) Clarify(context.Context, string) ([]agent.Question, error) {
+	f.clarifies++
+	return f.questions, nil
+}
+
+func (f *fakeAssistant) Plan(ctx context.Context, question string, b agent.Breadth, reading []agent.Clarification) (agent.Outline, error) {
+	f.readings = append(f.readings, reading)
 	if f.planTopics != nil {
 		return agent.Outline{SubTopics: f.planTopics}, nil
 	}
@@ -2252,6 +2263,30 @@ func TestStartScreenFrame(t *testing.T) {
 	}
 }
 
+// The settings row names the depth and what is set away from its default,
+// and counts the rest: all eight at auto, on and standard overran the
+// screen's width saying nothing was chosen.
+func TestStartSettingsRowShowsChanges(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 30, false
+	r.RenderStart(agent.Setup{}, Settings(RunSettings{}), "an example?", "")
+	if got, want := strings.TrimSpace(r.startSettingsRow()), "depth standard   +7 more"; got != want {
+		t.Errorf("default row = %q, want %q", got, want)
+	}
+	r.RenderStart(agent.Setup{}, Settings(RunSettings{Mode: "deep", Report: ReportSpec{Words: 1000}}), "an example?", "")
+	row := r.startSettingsRow()
+	for _, want := range []string{"depth deep", "words 1000", "+6 more"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("row lacks %q: %q", want, row)
+		}
+	}
+	for _, hidden := range []string{"sub-topics", "follow-ups", "clarify"} {
+		if strings.Contains(row, hidden) {
+			t.Errorf("row shows default %q: %q", hidden, row)
+		}
+	}
+}
+
 // Typing a "/" opens the command menu under the box: the commands it can
 // still become, what is typed of each bold, the first highlighted, and the
 // menu's keys in place of the screen's.
@@ -2307,7 +2342,8 @@ func TestPick(t *testing.T) {
 func TestPickFrame(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	r.width, r.rows, r.plain = 100, 30, false
-	r.RenderPick("RESUME", "resume", "", 0, []Choice{{Title: "first run", Note: "2h ago"}, {Title: "second run"}}, []int{0, 1}, 1)
+	sp := pickSpec{title: "RESUME", label: "resume", rows: []Choice{{Title: "first run", Note: "2h ago"}, {Title: "second run"}}}
+	r.RenderPick(sp, "", 0, []int{0, 1}, 1)
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"RESUME", "resume ▸ █", "    first run", "  ▸ second run", "2h ago",
 		"[enter] open   [↑↓] move   [esc] back"} {
@@ -2603,7 +2639,7 @@ func TestLineEditorMovesAndEditsAtTheCursor(t *testing.T) {
 				return "example"
 			}
 			return s
-		}, nil, nil)
+		}, nil, nil, nil)
 		if !ok || got != c.want {
 			t.Errorf("%s: got %q (ok=%v), want %q", c.name, got, ok, c.want)
 		}

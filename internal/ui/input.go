@@ -20,6 +20,7 @@ type Key byte
 const (
 	KeyA     Key = 'a' // show or hide the activity tail
 	KeyB     Key = 'b' // send to background
+	KeyC     Key = 'c' // answer the clarifying questions again
 	KeyQ     Key = 'q' // cancel the run
 	KeyD     Key = 'd' // change depth mode
 	KeyE     Key = 'e' // add a sub-topic
@@ -124,6 +125,8 @@ func keyFromByte(b byte) Key {
 		return KeyA
 	case KeyB:
 		return KeyB
+	case KeyC:
+		return KeyC
 	case KeyQ:
 		return KeyQ
 	case KeyD:
@@ -155,10 +158,89 @@ func keyFromByte(b byte) Key {
 // ESC followed by something else (alt-<key>) is not a cancel, and not a
 // sequence we act on either.
 func readEscape(in Input) Key {
-	if lead, _, _ := escapeAfter(in); lead == 0 {
+	lead, final, params := escapeAfter(in)
+	if lead == 0 {
 		return KeyEsc
 	}
+	if isPasteStart(lead, final, params) {
+		// Text pasted where keys are read is not keys: its x, q and Enter
+		// deleted a sub-topic, cancelled or started the run.
+		readPaste(in)
+	}
 	return KeyUnknown
+}
+
+// Bracketed paste (enabled with raw mode, see pasteOn) wraps what is pasted
+// in ESC [ 200 ~ and ESC [ 201 ~, which is how a paste is told from typing.
+const (
+	pasteOn    = "\x1b[?2004h"
+	pasteOff   = "\x1b[?2004l"
+	pasteStart = "\x1b[200~"
+	pasteEnd   = "\x1b[201~"
+)
+
+// pasteWait is how long a paste's next byte may take before the paste is
+// taken as ended: a terminal sends it at once, and one that lost the end
+// marker must not leave the box swallowing every key after it.
+const pasteWait = 500 * time.Millisecond
+
+// maxPaste bounds what one paste puts in a box.
+const maxPaste = 64 << 10
+
+func isPasteStart(lead, final byte, params string) bool {
+	return lead == '[' && final == '~' && params == "200"
+}
+
+// readPaste reads a bracketed paste's text, after its start marker, up to
+// and without its end marker, keeping at most maxPaste bytes of it. Past
+// the bound it still reads to the marker: stopping there left the rest of
+// the paste to be read as keys, a q in it cancelling the run.
+func readPaste(in Input) string {
+	t, ok := in.(timedInput)
+	if !ok {
+		return ""
+	}
+	var buf []byte
+	// tail is the last bytes read, where the end marker is looked for once
+	// buf has stopped growing.
+	var tail []byte
+	for {
+		c, err := t.NextWithin(pasteWait)
+		if err != nil {
+			break
+		}
+		if len(buf) < maxPaste+len(pasteEnd) {
+			buf = append(buf, c)
+		}
+		tail = append(tail, c)
+		if len(tail) > len(pasteEnd) {
+			tail = tail[1:]
+		}
+		if string(tail) == pasteEnd {
+			if bytes.HasSuffix(buf, []byte(pasteEnd)) {
+				buf = buf[:len(buf)-len(pasteEnd)]
+			}
+			break
+		}
+	}
+	return string(buf[:min(len(buf), maxPaste)])
+}
+
+// pastedText is a paste as one line of a box: its line breaks and tabs
+// are spaces, as a question is one line, and copied text ending in a line
+// break no longer submitted it before it could be read; other control
+// codes, which would corrupt the frame, are dropped.
+func pastedText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case r < 0x20 || r == 0x7f:
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, ""))
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // escapeAfter reads what follows an Esc: lead is 0 for a bare Esc, '[' or
@@ -366,7 +448,7 @@ func readPromptSeeded(in Input, seed string, echo func(text string, cursor int))
 		}
 		return line, line != ""
 	}
-	return readPromptRaw(in, nil, nil, echo, nil)
+	return readPromptRaw(in, nil, nil, echo, nil, nil)
 }
 
 // readPromptEdit opens the prompt with current already in the buffer, so a
@@ -377,7 +459,7 @@ func readPromptEdit(in Input, current string, echo func(text string, cursor int)
 	if !in.Raw() {
 		return readPromptSeeded(in, "", echo)
 	}
-	return readPromptRaw(in, []byte(current), nil, echo, nil)
+	return readPromptRaw(in, []byte(current), nil, echo, nil, nil)
 }
 
 // readPromptRaw runs the keystroke-at-a-time edit loop over buf, with a
@@ -387,7 +469,9 @@ func readPromptEdit(in Input, current string, echo func(text string, cursor int)
 // box does, or completes a command. arrow, when set, is handed the final
 // byte of each key sequence the line does not use (up and down, which move
 // a menu). echo is given the line and the cursor's byte offset in it.
-func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text string, cursor int), arrow func(byte)) (string, bool) {
+// quit, when set, makes Ctrl-C clear the line and leave only when pressed
+// on an empty one twice; without it Ctrl-C leaves at once, as Esc does.
+func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text string, cursor int), arrow func(byte), quit *twice) (string, bool) {
 	l := &lineEdit{buf: buf, cur: len(buf)}
 	show := func() {
 		if echo != nil {
@@ -400,27 +484,20 @@ func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text
 		if err != nil {
 			return strings.TrimSpace(string(l.buf)), len(l.buf) > 0
 		}
+		if c != byte(KeyCtrlC) {
+			quit.disarm()
+		}
 		switch c {
 		case '\r', '\n':
 			return strings.TrimSpace(string(l.buf)), true
 		case 0x1b:
-			// A key sequence starts with Esc, as an Alt-<key> does; taken
-			// as Esc, either threw the typed line away.
-			lead, final, params := escapeAfter(in)
-			used := lead != 0 && l.escape(lead, final, params)
-			switch {
-			case used:
-			case lead == '[' || lead == 'O':
-				if arrow != nil {
-					arrow(final)
-				}
-			default:
-				// A bare Esc, or Esc and a key the line does not use (Esc
-				// then Enter typed fast reads as Alt-Enter): Esc, as it was.
+			if !l.afterEsc(in, arrow) {
 				return "", false
 			}
 		case byte(KeyCtrlC): // as Esc: raw mode makes it a key
-			return "", false
+			if quit.press(l) {
+				return "", false
+			}
 		case 0x04: // Ctrl-D ends an empty line, as at a shell; else deletes forward
 			if len(l.buf) == 0 {
 				return "", false
@@ -430,6 +507,58 @@ func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text
 			l.edit(c, tab)
 		}
 		show()
+	}
+}
+
+// afterEsc applies what follows an Esc, and reports false for an Esc that
+// leaves the line. A key sequence starts with Esc, as an Alt-<key> and a
+// paste do; taken as Esc, each threw the typed line away.
+func (l *lineEdit) afterEsc(in Input, arrow func(byte)) bool {
+	lead, final, params := escapeAfter(in)
+	switch {
+	case lead != 0 && l.escape(lead, final, params):
+	case isPasteStart(lead, final, params):
+		l.insert(pastedText(readPaste(in)))
+	case lead == '[' || lead == 'O':
+		if arrow != nil {
+			arrow(final)
+		}
+	default:
+		// A bare Esc, or Esc and a key the line does not use (Esc then
+		// Enter typed fast reads as Alt-Enter): Esc, as it was.
+		return false
+	}
+	return true
+}
+
+// twice is Ctrl-C in a box that leaves on it only twice over an empty line:
+// once was all it took, and a Ctrl-C meant to clear a line, as at a shell,
+// threw the session away. armed is told when the next press will leave and
+// when a key other than Ctrl-C makes it not.
+type twice struct {
+	armed bool
+	show  func(armed bool)
+}
+
+// press handles a Ctrl-C on l and reports whether it leaves the box. A nil
+// twice always leaves.
+func (t *twice) press(l *lineEdit) bool {
+	switch {
+	case t == nil || t.armed:
+		return true
+	case len(l.buf) > 0:
+		l.cut(0, len(l.buf))
+	default:
+		t.armed = true
+		t.show(true)
+	}
+	return false
+}
+
+func (t *twice) disarm() {
+	if t != nil && t.armed {
+		t.armed = false
+		t.show(false)
 	}
 }
 
@@ -541,6 +670,12 @@ func (l *lineEdit) tilde(params string) bool {
 		return false
 	}
 	return true
+}
+
+// insert puts text in at the cursor and leaves the cursor after it.
+func (l *lineEdit) insert(text string) {
+	l.buf = slices.Insert(l.buf, l.cur, []byte(text)...)
+	l.cur += len(text)
 }
 
 func (l *lineEdit) left() {

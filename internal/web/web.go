@@ -42,7 +42,13 @@ type Request struct {
 	// /api/info serves; the cli turns each into its flag.
 	Settings map[string]string `json:"settings,omitempty"`
 	PlanOnly bool              `json:"plan_only,omitempty"`
-	Plan     json.RawMessage   `json:"plan,omitempty"`
+	// ClarifyOnly asks the clarifying questions and stops (--clarify-only);
+	// Answers are the page's answers to them (--answers), passed through as
+	// written, so that answers to nothing still say the questions were
+	// asked.
+	ClarifyOnly bool            `json:"clarify_only,omitempty"`
+	Answers     json.RawMessage `json:"answers,omitempty"`
+	Plan        json.RawMessage `json:"plan,omitempty"`
 	// Resume names an interrupted run's checkpoint in the reports
 	// directory (--resume).
 	Resume string `json:"resume,omitempty"`

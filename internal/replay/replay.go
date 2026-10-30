@@ -45,8 +45,13 @@ type Trace struct {
 	Scope string `json:"scope,omitempty"`
 	// Report is the shape the run's report was asked for. A replay re-writes
 	// the report live, in this shape unless its flags give another.
-	Report   agent.ReportSpec `json:"report,omitzero"`
-	Searches []Search         `json:"searches"`
+	Report agent.ReportSpec `json:"report,omitzero"`
+	// Questions and Clarifications are what the reader was asked before the
+	// plan and answered: the reading the evidence was gathered for, which a
+	// replay's analysis and report are given again.
+	Questions      []agent.Question      `json:"questions,omitempty"`
+	Clarifications []agent.Clarification `json:"clarifications,omitempty"`
+	Searches       []Search              `json:"searches"`
 	// Pages holds each distinct page text once, keyed by URL. Searches return
 	// the same page over and over (a vendor's pricing page came back from five
 	// searches in one run), and storing it with every result made the page
@@ -104,8 +109,8 @@ func Record(a agent.Assistant, question, mode string, sources int) *Recorder {
 	return &Recorder{Assistant: a, trace: Trace{Version: 1, Question: question, Mode: mode, Sources: sources}}
 }
 
-func (r *Recorder) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
-	out, err := r.Assistant.Plan(ctx, question, b)
+func (r *Recorder) Plan(ctx context.Context, question string, b agent.Breadth, reading []agent.Clarification) (agent.Outline, error) {
+	out, err := r.Assistant.Plan(ctx, question, b, reading)
 	r.mu.Lock()
 	r.trace.Plan = out.SubTopics
 	// A replay or resume runs the trace's question, so it is the one this
@@ -152,6 +157,7 @@ func (r *Recorder) Seed(t *Trace) {
 	defer r.mu.Unlock()
 	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
 	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = t.NoFollowUps, t.Scope, t.Report
+	r.trace.Questions, r.trace.Clarifications = slices.Clone(t.Questions), slices.Clone(t.Clarifications)
 	if r.finished == nil {
 		r.finished = map[string]bool{}
 	}
@@ -161,6 +167,14 @@ func (r *Recorder) Seed(t *Trace) {
 			r.finished[s.Query] = true
 		}
 	}
+}
+
+// Clarify is recorded as a phase: what was asked is in the trace's plan
+// beside the answers, and the phase keeps what the clarifier said.
+func (r *Recorder) Clarify(ctx context.Context, question string) ([]agent.Question, error) {
+	out, err := r.Assistant.Clarify(ctx, question)
+	r.phase("clarify", question, out, err)
+	return out, err
 }
 
 func (r *Recorder) FollowUps(ctx context.Context, prompt string) ([]agent.FollowUpQuery, error) {
@@ -209,6 +223,8 @@ type PlanSettings struct {
 	NoFollowUps bool
 	Scope       string
 	Report      agent.ReportSpec
+	Questions   []agent.Question
+	Answers     []agent.Clarification
 }
 
 // SetPlan records the plan the run actually used, with its tier and pinned
@@ -223,6 +239,7 @@ func (r *Recorder) SetPlan(subs []agent.SubTopic, s PlanSettings) {
 	r.trace.Plan = slices.Clone(subs)
 	r.trace.Mode, r.trace.Sources = s.Mode, s.Sources
 	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = s.NoFollowUps, s.Scope, s.Report
+	r.trace.Questions, r.trace.Clarifications = slices.Clone(s.Questions), slices.Clone(s.Answers)
 	r.mu.Unlock()
 	r.save()
 }
@@ -406,9 +423,13 @@ func Play(live agent.Assistant, t *Trace) *Player {
 	return p
 }
 
-func (p *Player) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
+func (p *Player) Plan(context.Context, string, agent.Breadth, []agent.Clarification) (agent.Outline, error) {
 	return agent.Outline{SubTopics: p.trace.Plan}, nil
 }
+
+// Clarify asks nothing: the recorded plan carries the reading it was made
+// for.
+func (p *Player) Clarify(context.Context, string) ([]agent.Question, error) { return nil, nil }
 
 // FollowUps are the recorded run's, and no model is asked: a live call words
 // its own searches, which the recorded run never made, and the follow-up

@@ -265,6 +265,7 @@ API: they reject adaptive thinking.
 | `report_format` | `standard` | the report's shape: `standard`, `brief` (about 300 words), `detailed` (about 1500 words) or `table` (tables first). `--format` for one run, `t` in the brief. A value that is not one of these fails the load |
 | `report_words` | `0` | about this many words for the explanation, the program-written answer not counted; `0` leaves it to the format. At most 6000. `--words` for one run |
 | `report_tables` | `auto` | how much of the report is in tables: `auto` (the format's), `none`, `some` or `many`. `--tables` for one run |
+| `clarify` | `auto` | before planning, ask up to three questions about what the question leaves open, none for a clear one (`auto`), or never (`off`). Only runs someone can answer ask: the terminal and the serve page. `--clarify` for one run, `/clarify` on the start screen. Another value fails the load |
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |
 | `reasoning_effort.<phase>` | see below | how hard each phase's model reasons: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
 
@@ -283,6 +284,7 @@ defaults:
 ```yaml
 reasoning_effort:
   plan: low          # writes the search queries
+  clarify: low       # asks what the question leaves open, before the plan
   search: default    # only runs with no search engine, and then it writes the findings
   analyze: default   # the claims and conclusions the answer rests on
   fact_check: default
@@ -295,7 +297,7 @@ differently: DeepSeek V4.1 Flash on OpenRouter reasons as much as at `high`,
 Claude Opus 5.5 defaults to `medium`. That is why analyze and fact-check are
 not set to one level for every provider. Each phase is its own key, so a
 `config.yaml` that names one phase keeps the others' defaults, and
-`DEEP_RESEARCH_REASONING_EFFORT_<PHASE>` (`PLAN`, `SEARCH`, `ANALYZE`,
+`DEEP_RESEARCH_REASONING_EFFORT_<PHASE>` (`PLAN`, `CLARIFY`, `SEARCH`, `ANALYZE`,
 `FACT_CHECK`, `SUMMARIZE`, `CHAT`) overrides one from the environment. An
 empty variable changes nothing; write `default`. The repair pass uses the
 analyze and fact-check levels.
@@ -324,7 +326,8 @@ blocks you change, copied from this release's
 [`config/agent.yaml`](../config/agent.yaml): a block left out falls back to
 the built-in prompt, so the others keep following releases.
 `chat_instructions` is not a phase: it steers `ask` and the page's follow-up
-questions. `init` does not write `agent.yaml`; earlier releases did, and an
+questions. `clarifier_instructions` steers the clarifying questions asked
+before the plan; a file from before it existed keeps the built-in one. `init` does not write `agent.yaml`; earlier releases did, and an
 unedited copy from them keeps later releases' prompts from reaching you:
 delete it.
 

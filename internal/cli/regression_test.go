@@ -653,3 +653,78 @@ func TestReplayTakesTheReportFlagsOverTheTrace(t *testing.T) {
 		}
 	}
 }
+
+// asking is a stub whose clarifier asks one question.
+type asking struct{ stub }
+
+func (asking) Clarify(context.Context, string) ([]agent.Question, error) {
+	return []agent.Question{{ID: "q1", Text: "Which market?", Options: []string{"US", "EU"}}}, nil
+}
+
+// The page's clarify step and its answers reach the run as the flags a
+// script would pass, the answers as written: none answered is still an
+// answer, and asks nothing again.
+func TestWebArgsMapTheClarifyStep(t *testing.T) {
+	args, _, err := webArgs(web.Request{Question: "q", ClarifyOnly: true, Settings: map[string]string{"clarify": "off"}}, "reports")
+	if err != nil || !slices.Contains(args, "--clarify-only") || !slices.Contains(args, "--clarify=off") {
+		t.Errorf("clarify step: args %v, err %v", args, err)
+	}
+	raw := `{"questions":[],"answers":[]}`
+	args, _, err = webArgs(web.Request{Question: "q", PlanOnly: true, Answers: json.RawMessage(raw)}, "reports")
+	if err != nil || !slices.Contains(args, "--answers="+raw) {
+		t.Errorf("answers: args %v, err %v", args, err)
+	}
+}
+
+// --clarify-only stops at the questions: printed as --answers reads them,
+// the clarify event under --jsonl, and no plan, report or history.
+func TestClarifyOnlyPrintsTheQuestions(t *testing.T) {
+	dir := t.TempDir()
+	out, err := runCLI(t, dir, asking{}, "-p", "q", "--clarify-only", "--reports", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := ui.ParseAnswers(out)
+	if err != nil || len(c.Questions) != 1 {
+		t.Fatalf("printed %q: %+v, %v", out, c, err)
+	}
+	out, err = runCLI(t, dir, asking{}, "-p", "q", "--clarify-only", "--jsonl", "--reports", dir)
+	if err != nil || !strings.Contains(out, `"type":"clarify"`) || !strings.Contains(out, `"status":"complete"`) || strings.Contains(out, `"type":"plan"`) {
+		t.Errorf("jsonl: %v\n%s", err, out)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("a clarify-only run wrote %d files", len(entries))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "r.jsonl")); err == nil {
+		t.Error("a clarify-only run was saved to the history")
+	}
+}
+
+// Answers handed in are planned for and kept on the plan, which --plan then
+// carries.
+func TestAnswersReachThePlan(t *testing.T) {
+	dir := t.TempDir()
+	answers := `{"questions":[{"id":"q1","text":"Which market?","options":["US","EU"]}],"answers":[{"question":"Which market?","answer":"EU"}]}`
+	out, err := runCLI(t, dir, asking{}, "-p", "q", "--plan-only", "--answers", answers, "--reports", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := ui.ReadPlan(strings.NewReader(out))
+	if err != nil || len(plan.Clarifications) != 1 || plan.Clarifications[0].Answer != "EU" || len(plan.Questions) != 1 {
+		t.Errorf("plan = %+v, %v", plan, err)
+	}
+}
+
+func TestClarifyFlagsRefuseWhatTheyCannotMean(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"-p", "q", "--clarify-only", "--plan-only"},
+		{"-p", "q", "--clarify-only", "--answers", `{"answers":[]}`},
+		{"-p", "q", "--clarify", "sometimes"},
+		{"-p", "q", "--answers", `{"answer":[]}`},
+	} {
+		if _, err := runCLI(t, dir, asking{}, append(args, "--reports", dir)...); err == nil {
+			t.Errorf("%v was accepted", args)
+		}
+	}
+}

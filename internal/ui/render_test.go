@@ -622,47 +622,21 @@ func TestProgressBarSpellsOutSources(t *testing.T) {
 	}
 }
 
-// The reasoning was quoted on the status row, clipped to a fragment too short
-// to read. It is wrapped under the row instead, latest last, in rows the
-// activity tail gives up — the frame still fits the terminal.
-func TestThinkingIsWrappedUnderTheStatusRow(t *testing.T) {
-	words := make([]string, 150)
-	for i := range words {
-		words[i] = "w" + strconv.Itoa(i)
-	}
-	for _, rows := range []int{40, 17} {
-		var buf bytes.Buffer
-		r := liveRenderer(&buf, rows, 60)
-		r.Emit(Event{Type: SubAgent, SubID: "1", SubName: "Specs", SubState: "done"})
-		r.Emit(Event{Type: Phase, Phase: "Fact-Check", Detail: "Verifying claims against sources"})
-		r.Emit(Event{Type: Info, Transient: true, Detail: "fact-checking — thinking · 1:38\n" + strings.Join(words, " ")})
-		r.mu.Lock()
-		frame := r.frameLines()
-		r.mu.Unlock()
-		r.Close()
-
-		at := slices.IndexFunc(frame, func(l string) bool { return strings.Contains(l, "fact-checking — thinking · 1:38") })
-		if at < 0 || strings.Contains(frame[at], "w0") {
-			t.Fatalf("%d rows: no status row holding the status line alone:\n%s", rows, strings.Join(frame, "\n"))
-		}
-		var shown []string
-		for _, l := range frame[at+1:] {
-			if !strings.HasPrefix(l, "    ") {
-				break
-			}
-			shown = append(shown, l)
-		}
-		if len(shown) < 2 || len(shown) > maxThinkingRows || !strings.HasSuffix(shown[len(shown)-1], "w149"+cReset) {
-			t.Errorf("%d rows: reasoning rows %q, want up to %d ending on the latest words", rows, shown, maxThinkingRows)
-		}
-		if len(frame) > rows-1 {
-			t.Errorf("%d rows: frame is %d rows tall", rows, len(frame))
-		}
-		for _, l := range frame {
-			if w := dispWidth(l); w > 60 {
-				t.Errorf("%d rows: row is %d columns wide: %q", rows, w, l)
-			}
-		}
+// The reasoning was wrapped in rows under the status row, its latest words
+// replaced as they streamed: too hard to read and follow. The frame shows the
+// status line alone; the page has the reasoning whole.
+func TestFrameShowsTheStatusWithoutTheReasoning(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 40, 60)
+	r.Emit(Event{Type: SubAgent, SubID: "1", SubName: "Specs", SubState: "done"})
+	r.Emit(Event{Type: Phase, Phase: "Fact-Check", Detail: "Verifying claims against sources"})
+	r.Emit(Event{Type: Info, Transient: true, Detail: "fact-checking — thinking · 1:38\nmaybe claim c4 holds"})
+	r.mu.Lock()
+	frame := strings.Join(r.frameLines(), "\n")
+	r.mu.Unlock()
+	r.Close()
+	if !strings.Contains(frame, "fact-checking — thinking · 1:38") || strings.Contains(frame, "claim c4") {
+		t.Errorf("want the status row and no reasoning:\n%s", frame)
 	}
 }
 

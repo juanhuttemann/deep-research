@@ -107,3 +107,17 @@ func TestCountSettingsTakeTheirConfiguredValue(t *testing.T) {
 		}
 	}
 }
+
+// Each setting says its default, the value with nothing set, which the
+// start screen and the page compare against to show only what was chosen.
+func TestSettingsCarryTheirDefaults(t *testing.T) {
+	for _, s := range Settings(RunSettings{Mode: "deep", Report: ReportSpec{Words: 1000}}) {
+		want := map[string]string{SettingMode: "standard", SettingWords: "0", SettingFollowUps: "on"}[s.Key]
+		if want != "" && s.Default != want {
+			t.Errorf("%s default = %q, want %q", s.Key, s.Default, want)
+		}
+		if changed := s.Value != s.Default; changed != (s.Key == SettingMode || s.Key == SettingWords) {
+			t.Errorf("%s: value %q, default %q", s.Key, s.Value, s.Default)
+		}
+	}
+}

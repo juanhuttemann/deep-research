@@ -116,7 +116,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .composer:focus-within { border-color: var(--cyan); }
 .prompt { display: flex; gap: 1ch; padding: 12px 1.5ch 4px; }
 .prompt-label { color: var(--magenta); white-space: nowrap; line-height: 1.6; }
-.composer textarea { flex: 1; display: block; width: 100%; min-height: 4.8em; max-height: 40vh; resize: none; field-sizing: content;
+.composer textarea { flex: 1; display: block; width: 100%; min-height: 3.2em; max-height: 40vh; resize: none; field-sizing: content;
   border: 0; outline: 0; padding: 0; background: transparent; color: var(--fg); line-height: 1.6; caret-color: var(--cyan); }
 .composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 3ch; padding: 8px 1.5ch 10px; }
 .group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 1ch; }
@@ -124,6 +124,16 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .composer-bar .btn.primary { margin-left: auto; }
 /* A settings container lays its controls out as the bar's own items. */
 .settings { display: contents; }
+/* The settings past the depth: a label column and a control column, under
+   the bar, shown on asking. */
+.more-panel { border-top: 1px solid var(--rule); }
+.more-settings { display: grid; grid-template-columns: max-content 1fr; align-items: center; gap: 10px 3ch; padding: 12px 1.5ch; }
+.more-settings > .group, .more-settings > .field { display: contents; }
+.more-settings .k, .more-settings > .field { color: var(--dim); }
+.more-settings select { justify-self: start; }
+.more-panel .scope { border-top: 1px dashed var(--rule); }
+.changed { color: var(--dim); }
+.changed b { color: var(--fg); font-weight: 400; }
 .form-msg { color: var(--red); margin: 8px 0 0; min-height: 1.6em; }
 .form-msg:empty { min-height: 0; }
 
@@ -173,6 +183,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .add-topic #new-query { flex: 1.4; }
 @media (max-width: 640px) { .add-topic { flex-wrap: wrap; } .add-topic input { flex-basis: calc(100% - 4ch); } }
 .brief-foot { display: flex; align-items: center; gap: 1ch; padding: 10px 2ch; border-top: 1px solid var(--rule); }
+/* Clarifying questions: one block per question, its readings as a list. */
+.question { display: grid; gap: 4px; padding: 10px 2ch 12px; border-top: 1px solid var(--rule); }
+.question .q-text { font-weight: 700; margin-bottom: 2px; }
+.question label { display: flex; align-items: baseline; gap: 1ch; cursor: pointer; }
+.question input[type=text] { flex: 1; min-width: 0; }
+#brief-reading .btn { margin-left: 1ch; }
 .brief-foot .btn.primary { margin-left: auto; }
 
 /* ---- run view ---- */
@@ -420,10 +436,16 @@ mark { background: var(--yellow); color: var(--bg); }
       </div>
       <div class="composer-bar">
         <!-- Drawn from the settings /api/info serves (ui.Settings), the list
-             the terminal's start screen and brief are drawn from too. -->
+             the terminal's start screen and brief are drawn from too: the
+             depth here, the rest under "settings", as the terminal's row
+             names only the depth and what was changed. -->
         <span id="start-settings" class="settings"></span>
+        <button id="more" class="btn sm ghost" type="button" aria-expanded="false" aria-controls="more-panel">settings ▾</button>
+        <span id="changed" class="changed"></span>
         <button id="go" class="btn primary" type="submit">research <kbd>↵</kbd></button>
       </div>
+      <div id="more-panel" class="more-panel" hidden>
+        <div id="more-settings" class="more-settings"></div>
       <div class="scope">
         <span class="group"><span class="k">search</span>
         <span class="segmented" role="radiogroup" aria-label="Where to search">
@@ -432,6 +454,7 @@ mark { background: var(--yellow); color: var(--bg); }
         </span></span>
         <textarea id="domains" rows="1" placeholder="wikipedia.org, britannica.com" aria-label="Sites to search" autocomplete="off" spellcheck="false" hidden></textarea>
         <p id="domains-note" class="note" hidden>Separate sites with commas. Each is checked before research starts; one that can't be searched or read is skipped.</p>
+      </div>
       </div>
     </form>
     <p id="msg" class="form-msg" role="alert"></p>
@@ -451,6 +474,7 @@ mark { background: var(--yellow); color: var(--bg); }
         <h1 id="brief-question"></h1>
         <p>Each sub-topic is researched by its own agent. Rename, add or remove them, or change what they search, before research starts.</p>
         <p id="brief-domains" class="muted" hidden></p>
+        <p id="brief-reading" class="muted" hidden></p>
       </div>
       <div class="brief-bar">
         <span id="review-settings" class="settings"></span>
@@ -471,12 +495,31 @@ mark { background: var(--yellow); color: var(--bg); }
     <p id="brief-msg" class="form-msg" role="alert"></p>
   </section>
 
+  <!-- clarifying questions: what the question leaves open, asked before the
+       plan is made (the clarify step, --clarify-only) -->
+  <section id="clarify" class="brief" hidden>
+    <form id="clarify-form" class="card">
+      <div class="brief-head">
+        <h2 class="heading">A few questions first</h2>
+        <h1 id="clarify-question"></h1>
+        <p id="clarify-lede"></p>
+      </div>
+      <div id="questions"></div>
+      <div class="brief-foot">
+        <button id="clarify-back" class="btn ghost" type="button">discard</button>
+        <button id="clarify-go" class="btn primary" type="submit">make the plan</button>
+      </div>
+    </form>
+    <p id="clarify-msg" class="form-msg" role="alert"></p>
+  </section>
+
   <!-- run: live frame, outcome, audit -->
   <section id="run" hidden>
     <div class="card">
       <div class="run-head">
         <div class="heading-row"><span id="run-title" class="heading">Researching</span><span id="elapsed" class="dim"></span></div>
         <h1 id="question"></h1>
+        <p id="run-reading" class="muted" hidden></p>
         <div class="run-meta">
           <span><b id="n-sources">0</b> sources</span>
           <span><b id="n-tokens">0</b> tokens</span>
@@ -604,6 +647,7 @@ function provenanceTag(s) { return tag(provenanceInfo(s)); }
 function show(view) {
   $("home").hidden = view !== "home";
   $("brief").hidden = view !== "brief";
+  $("clarify").hidden = view !== "clarify";
   $("run").hidden = view !== "run";
   $("new").hidden = view !== "run" || running;
   if (view === "home") { loadRuns(); $("q").focus(); }
@@ -617,12 +661,17 @@ let setup = null;
 // /api/info serves at the values a run started now takes; the server turns
 // each into its flag, as the terminal's /commands do.
 const startSettings = {};
+// startList is the start settings as served, for their defaults and labels.
+let startList = [];
 async function loadSetup() {
   try {
     const s = await (await fetch("/api/info")).json();
-    const start = (s.settings || []).filter(st => st.start);
+    const start = startList = (s.settings || []).filter(st => st.start);
     for (const st of start) startSettings[st.key] = st.value;
-    $("start-settings").replaceChildren(...start.map(st => settingControl(st, "m-", (k, v) => { startSettings[k] = v; })));
+    const control = st => settingControl(st, "m-", (k, v) => { startSettings[k] = v; showChanged(); });
+    $("start-settings").replaceChildren(...start.filter(st => st.key === "mode").map(control));
+    $("more-settings").replaceChildren(...start.filter(st => st.key !== "mode").map(control));
+    showChanged();
     if (!s.model) return;
     fillChip("setup-model", s.model, "Model " + s.model + " via " + s.provider);
     setup = s;
@@ -630,6 +679,23 @@ async function loadSetup() {
     $("setup").hidden = false;
   } catch {}
 }
+// showChanged names, beside the settings button, the settings in the panel
+// set away from their defaults and the sites search, so a closed panel
+// still says what the run will take.
+function showChanged() {
+  const parts = startList.filter(st => st.key !== "mode" && startSettings[st.key] !== st.default).map(st => {
+    const o = st.choices.find(c => c.value === startSettings[st.key]);
+    return [st.label + " ", el("b", "", o ? o.label : startSettings[st.key])];
+  });
+  if (onlySites()) parts.push(["", el("b", "", "only these sites")]);
+  $("changed").replaceChildren(...parts.flatMap((p, i) => [...(i ? [" · "] : []), ...p]));
+}
+function showMore(open) {
+  $("more-panel").hidden = !open;
+  $("more").setAttribute("aria-expanded", String(open));
+  $("more").textContent = open ? "settings ▴" : "settings ▾";
+}
+$("more").onclick = () => showMore($("more-panel").hidden);
 // searchChip names the engine and what reads the pages, without their hosts:
 // "searxng (localhost:8888)" alone left out Firecrawl, which reads every
 // page a claim is checked against. The hosts are in the tooltip. The
@@ -708,6 +774,15 @@ let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, a
 // A plan-only run (the first half of Research) ends in the plan review, not
 // in an outcome; its plan arrives as the plan event before its done line.
 let planning = false, madePlan = null, planStamp = "";
+// The clarify step (the first launch) ends in its questions, or with none in
+// the plan's launch; they arrive as the clarify event before its done line.
+// runAsked is the request the run's start event echoes: what the next step
+// launches with.
+let clarifying = false, asked = null, runAsked = null;
+// ownStep is set by the tab that launched the clarify step, and only that
+// tab carries on to the plan when there is nothing to ask: every tab watching
+// sees the step end, and each launching the plan would pay for one apiece.
+let ownStep = false;
 // The plan this tab discarded, by its run's start time, so a reload does not
 // bring it back. Per tab and best effort: storage can be unavailable.
 function discardedPlan() { try { return sessionStorage.getItem("discarded-plan") || ""; } catch { return ""; } }
@@ -854,11 +929,14 @@ function handle(e) {
   case "start":
     reset(); setRunning(true);
     planning = !!e.plan_only; madePlan = null; planStamp = e.time;
+    clarifying = !!e.clarify_only; asked = null; runAsked = e;
     if (planning) $("run-title").textContent = "Planning";
+    if (clarifying) { $("run-title").textContent = "Checking the question"; status("Checking what the question leaves open…"); }
     startedAt = Date.parse(e.time) || Date.now();
     // A run launched from an edited plan names its question in the plan
     // event, which follows.
     $("question").textContent = e.question || (e.resume ? runTitle(e.resume) : "");
+    showRunReading([]);
     $("mode-label").textContent = (e.mode || "standard") + " mode";
     phase = "Plan"; stepper();
     // The model's own status replaces this once the plan call streams.
@@ -867,9 +945,11 @@ function handle(e) {
     if (e.domains && e.domains.length) status("Checking " + e.domains.length + (e.domains.length === 1 ? " site…" : " sites…"));
     break;
   case "source": source(e); break;
+  case "clarify": if (clarifying) asked = e.questions || []; break;
   case "plan":
     if (planning) madePlan = e.plan;
     $("question").textContent = e.plan.question;
+    showRunReading(e.plan.clarifications);
     $("mode-label").textContent = e.plan.depth.key + " mode";
     break;
   case "phase":
@@ -912,7 +992,16 @@ function done(e) {
   // opens the review again, unless this tab discarded it.
   if (planning && e.status === "complete" && madePlan) {
     if (planStamp === discardedPlan()) { show("home"); return; }
+    planAsked = runAsked;
     showBrief(madePlan); return;
+  }
+  if (clarifying && e.status === "complete" && asked) {
+    if (planStamp === discardedPlan()) { show("home"); return; }
+    if (asked.length) { showQuestions(runAsked, asked, null, false); return; }
+    // Nothing to ask: the plan is made straight away, by the tab that asked
+    // for the check, and neither by another tab nor by a reload.
+    if (ownStep) { ownStep = false; launchPlan(runAsked, { questions: [], answers: [] }, null, true); return; }
+    show("home"); return;
   }
   // A run that ended before this page opened is history: it is in Recent
   // runs, and the page opens on the start screen rather than on it.
@@ -974,6 +1063,7 @@ function showBrief(plan) {
   const sites = brief.domains || [];
   $("brief-domains").textContent = sites.length ? "Only on: " + sites.join(", ") : "";
   $("brief-domains").hidden = !sites.length;
+  showReading();
   $("review-settings").replaceChildren();
   $("brief-msg").textContent = "";
   renderTopics();
@@ -1034,6 +1124,7 @@ async function applyPlanEdit(key, value) {
     // the count, as the terminal brief shows it.
     $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + (p.scope ? " · " + p.scope + " question" : "") +
       " · up to " + p.per_topic + " sources each";
+    reviewValues = Object.fromEntries(p.settings.map(st => [st.key, st.value]));
     $("review-settings").replaceChildren(...p.settings.map(st => settingControl(st, "b-", refreshPlan)));
   } catch {}
 }
@@ -1124,6 +1215,9 @@ function editedPlan() {
     no_follow_ups: !!brief.no_follow_ups,
     // The report's shape is the plan's too, the brief's t key on the page.
     report: brief.report || {},
+    // The reading the plan was made for, and what was asked to get it.
+    questions: brief.questions || [],
+    clarifications: brief.clarifications || [],
     sub_topics: brief.sub_topics.filter(t => t.name.trim()).map(t => {
       const name = t.name.trim(), query = (t.query || "").trim(), notes = t.notes || "";
       // The planner's terms judge results for the planner's query, so they
@@ -1158,6 +1252,137 @@ $("start").onclick = async () => {
   const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
   if (!r.ok) $("brief-msg").textContent = (await r.text()).trim();
 };
+
+// ---- clarifying questions ------------------------------------------------
+
+// planAsked is the request the plan under review was made from, and
+// reviewValues the review settings' values as /api/plan last worked them
+// out: a plan made again for new answers keeps what the review chose.
+let planAsked = null, reviewValues = {};
+// clarifyFor is the request the questions on screen will plan, and whether
+// they were opened from the review.
+let clarifyFor = null;
+
+function showQuestions(req, qs, prior, review) {
+  clarifyFor = { req, qs, review };
+  $("clarify-question").textContent = req.question;
+  $("clarify-lede").textContent = review
+    ? "A new reading is a new plan: the sub-topics are planned again, and edits to them are replaced."
+    : "The answers decide what is researched. Skip one to leave it to the research.";
+  $("clarify-back").textContent = review ? "back to the plan" : "discard";
+  $("questions").replaceChildren(...qs.map((q, i) => questionField(q, i, prior)));
+  $("clarify-msg").textContent = "";
+  show("clarify");
+}
+// questionField is one question's readings, then a reading of one's own and
+// skip. It opens on the answer given before, else on the likeliest reading,
+// as the terminal's picker does.
+function questionField(q, i, prior) {
+  const box = el("div", "question"), text = el("div", "q-text", q.text), name = "q-" + i;
+  text.id = name + "-text";
+  box.setAttribute("role", "radiogroup");
+  box.setAttribute("aria-labelledby", text.id);
+  box.append(text);
+  const before = prior ? prior.find(c => c.question === q.text) : undefined;
+  const at = !prior ? 0 : before ? q.options.indexOf(before.answer) : -1;
+  const choice = (value, checked, ...label) => {
+    const l = el("label"), r = el("input");
+    r.type = "radio"; r.name = name; r.value = value; r.checked = checked;
+    l.append(r, ...label);
+    box.append(l);
+    return r;
+  };
+  q.options.forEach((o, j) => choice(String(j), j === at, o));
+  const own = el("input");
+  own.type = "text"; own.maxLength = 300; own.placeholder = "another reading…";
+  own.setAttribute("aria-label", "Another reading");
+  const ownRadio = choice("own", !!before && at < 0, own);
+  if (before && at < 0) own.value = before.answer;
+  own.oninput = () => { ownRadio.checked = true; };
+  choice("skip", !!prior && !before, el("span", "muted", "skip: leave it to the research"));
+  return box;
+}
+// answersFor is the answers the form holds: a skipped question, or one of
+// one's own left empty, has none.
+function answersFor(qs) {
+  const out = [];
+  qs.forEach((q, i) => {
+    const r = $("questions").querySelector(`input[name="q-${i}"]:checked`);
+    if (!r || r.value === "skip") return;
+    const answer = r.value === "own" ? r.closest("label").querySelector("input[type=text]").value.trim() : q.options[+r.value];
+    if (answer) out.push({ question: q.text, answer });
+  });
+  return out;
+}
+$("clarify-form").onsubmit = ev => {
+  ev.preventDefault();
+  const c = clarifyFor;
+  if (!c) return;
+  launchPlan(c.req, { questions: c.qs, answers: answersFor(c.qs) }, $("clarify-msg"));
+};
+$("clarify-back").onclick = () => {
+  const review = clarifyFor && clarifyFor.review;
+  clarifyFor = null;
+  if (review && brief) { show("brief"); return; }
+  try { sessionStorage.setItem("discarded-plan", planStamp); } catch {}
+  show("home");
+};
+// launchPlan makes the plan for req's question and settings and the reading
+// answers gives. handoff is the launch made the moment the clarify step
+// ends, which may find its slot still held (launchAfter).
+async function launchPlan(req, answers, msg, handoff) {
+  const body = { question: req.question, settings: req.settings || {}, domains: req.domains || [], plan_only: true, answers };
+  const r = handoff ? await launchAfter(body)
+    : await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.ok) return;
+  const text = (await r.text()).trim();
+  if (msg) { msg.textContent = text; return; }
+  show("home"); $("msg").textContent = text;
+}
+// launchAfter launches the step that follows a run: the run's done line
+// reaches the page a moment before the server lets go of its slot, so a
+// launch made on it can be refused as one too many for a while.
+async function launchAfter(body) {
+  for (let i = 0; ; i++) {
+    const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (r.status !== 409 || i >= 20) return r;
+    await new Promise(res => setTimeout(res, 100));
+  }
+}
+// showReading shows, under the question, the reading the plan was made for,
+// and a way to answer again.
+function showReading() {
+  const qs = brief.questions || [], cs = brief.clarifications || [];
+  const p = $("brief-reading");
+  p.hidden = !qs.length;
+  if (!qs.length) { p.replaceChildren(); return; }
+  const change = el("button", "btn sm ghost", "change answers");
+  change.type = "button";
+  // A setting chosen just before is worked out first, or the new plan took
+  // the one from before it, as Start research waits for it.
+  change.onclick = async () => { await planEdits; if (brief) showQuestions(reviewAsked(), qs, cs, true); };
+  p.replaceChildren(el("span", "k", "read as "), ...(cs.length ? readingNodes(cs) : ["the research's guess: no question answered"]), change);
+}
+// readingNodes are the answers, each after the question it answers: the
+// answers alone said "US · 2020s" without saying to what.
+function readingNodes(cs) {
+  return cs.flatMap((c, i) => [...(i ? [" · "] : []), el("span", "k", c.question + " "), el("b", "", c.answer)]);
+}
+// showRunReading puts the reading under the run's question, as the
+// terminal's live frame and the report carry it past the brief.
+function showRunReading(cs) {
+  const p = $("run-reading");
+  p.hidden = !(cs && cs.length);
+  p.replaceChildren(...(p.hidden ? [] : [el("span", "k", "read as "), ...readingNodes(cs)]));
+}
+// reviewAsked is the plan's request with what the review chose over it: its
+// settings, its sites, and its pinned budget, which a depth chosen in the
+// review clears (ui.ApplyToPlan).
+function reviewAsked() {
+  const req = planAsked || { question: brief.asked || brief.question, settings: {} };
+  const settings = { ...(req.settings || {}), ...reviewValues, sources: String(brief.pinned_per_topic || 0) };
+  return { question: req.question, settings, domains: brief.domains || [] };
+}
 
 // ---- recent runs ----------------------------------------------------------
 
@@ -1565,14 +1790,16 @@ $("launch").onsubmit = async ev => {
     question: $("q").value.trim(),
     settings: startSettings,
     domains: onlySites() ? $("domains").value.split(/[\s,]+/).filter(Boolean) : [],
-    // The plan first, for review; Start research in the review runs it.
-    plan_only: true,
+    // The questions first, then the plan for review; Start research in the
+    // review runs it. With clarify off the step asks nothing and moves on.
+    clarify_only: true,
   };
   if (!body.question) return;
-  if (onlySites() && !body.domains.length) { $("msg").textContent = "Add at least one site, or search the web."; $("domains").focus(); return; }
+  if (onlySites() && !body.domains.length) { $("msg").textContent = "Add at least one site, or search the web."; showMore(true); $("domains").focus(); return; }
   try { localStorage.setItem("sites", $("domains").value); } catch {}
+  ownStep = true;
   const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) $("msg").textContent = (await r.text()).trim();
+  if (!r.ok) { ownStep = false; $("msg").textContent = (await r.text()).trim(); }
 };
 // Where to search: the sites box shows only when it is used, so an empty one
 // is never a question to answer. The last list typed is kept for next time.
@@ -1581,7 +1808,7 @@ function showScope() {
   $("domains").hidden = $("domains-note").hidden = !onlySites();
 }
 for (const r of document.querySelectorAll("input[name=scope]")) {
-  r.onchange = () => { showScope(); if (onlySites()) $("domains").focus(); };
+  r.onchange = () => { showScope(); showChanged(); if (onlySites()) $("domains").focus(); };
 }
 try { $("domains").value = localStorage.getItem("sites") || ""; } catch {}
 // Enter launches, as it did when the list was a one-line field.
@@ -1637,6 +1864,7 @@ if (permalink) {
   loadAudit(permalink).then(() => {
     if (!meta) return;
     $("question").textContent = meta.question;
+    showRunReading(meta.clarifications);
     $("n-sources").textContent = meta.sources || (meta.citations || []).length;
     $("n-tokens").textContent = fmtNum(meta.tokens);
     $("mode-label").textContent = (meta.depth || "standard") + " mode";

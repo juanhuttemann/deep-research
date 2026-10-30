@@ -147,9 +147,22 @@ drsh --plan plan.json --jsonl --reports "$dir" > "$dir/events.jsonl"
 ```
 
 `--plan` carries its own question, tier, follow-up setting
-(`no_follow_ups`) and report shape (`report`), so it takes no `-p`,
-`--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`, `--words`
-or `--tables`.
+(`no_follow_ups`), report shape (`report`) and clarifications, so it takes
+no `-p`, `--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`,
+`--words`, `--tables`, `--clarify`, `--clarify-only` or `--answers`.
+
+A `--jsonl` run asks no clarifying questions. When the question is
+ambiguous (which market, product, period or audience) and the user can
+answer, ask first, one model request:
+
+```bash
+drsh -p "QUESTION" --clarify-only > questions.json
+```
+
+Put its `questions` to the user, then pass their answers back in the same
+JSON with `"answers": [{"question": "...", "answer": "..."}]` filled in:
+`drsh -p "QUESTION" --answers "$(cat questions.json)" --jsonl ...`. An empty
+`questions` list means the question is clear: run it as it is.
 
 ## 3. Wait for the `done` line
 

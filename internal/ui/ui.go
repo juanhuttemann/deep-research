@@ -20,6 +20,9 @@ import (
 const (
 	actionLaunch = iota
 	actionCancel
+	// actionClarify asks the plan's questions again; ui.Run, not the brief,
+	// makes the new plan.
+	actionClarify
 )
 
 // Options configures a UI-driven research run.
@@ -55,16 +58,27 @@ type Options struct {
 	// Domains confines the search to these sites, each checked before the
 	// run plans. A Plan handed in brings its own.
 	Domains []string
+	// Clarify asks what the question leaves open before planning, when
+	// there is someone to ask: the terminal, or --clarify-only's caller.
+	Clarify bool
+	// ClarifyOnly stops once the questions are asked, before planning,
+	// with the questions in the result and on the clarify event.
+	ClarifyOnly bool
+	// Answers, when set, are what the reader already clarified (--answers):
+	// the run asks nothing and plans for them.
+	Answers *Clarified
 }
 
 // RunResult carries the artifacts produced by a run.
 type RunResult struct {
 	// Plan is the plan the run used, set once planning succeeds.
-	Plan     *Plan
-	Report   *agent.ResearchResult
-	MDPath   string
-	PDFPath  string
-	JSONPath string
+	Plan *Plan
+	// Clarified is a --clarify-only run's questions.
+	Clarified *Clarified
+	Report    *agent.ResearchResult
+	MDPath    string
+	PDFPath   string
+	JSONPath  string
 	// TracePath is the --trace file, written by the CLI after the run.
 	TracePath string
 	Cancelled bool
@@ -105,21 +119,20 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 		wireProgress(o.Assistant, func(e Event) { e.Phase = "Plan"; sink.Emit(e) })
 	}
 
-	plan, usable, err := o.scopedPlan(ctx, sink)
+	script := o.scriptInput()
+	plan, usable, err := o.scopedPlan(ctx, sink, o.asker(renderer, interactive, script))
 	if err != nil {
-		// A cancel can arrive while the plan call is still out (the browser's
-		// cancel button can press it there); it is the same stop as Esc later.
-		return ended(ctx, RunResult{}, err)
+		return endedBeforePlan(ctx, err)
 	}
 
 	sig := catchSignals(interactive)
-	input := o.openInput(interactive)
+	input := o.openInput(interactive, script)
 	defer input.Close()
 	defer guardTerminal(sig, input, renderer)()
 
 	// Phase 1: brief confirmation.
 	var cancelled bool
-	if plan, cancelled = o.confirmBrief(input, renderer, plan, interactive); cancelled {
+	if plan, cancelled = o.confirmBrief(ctx, input, renderer, plan, interactive); cancelled {
 		return RunResult{Cancelled: true}, nil
 	}
 	if o.OnPlan != nil {
@@ -164,6 +177,22 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	return res, nil
 }
 
+// endedBeforePlan reports a run that stopped before it had a plan: at the
+// questions, by the reader's Ctrl-C or with a --clarify-only run's
+// questions, or on err.
+func endedBeforePlan(ctx context.Context, err error) (RunResult, error) {
+	var stopped errStopped
+	switch {
+	case errors.As(err, &stopped) && stopped.c != nil:
+		return RunResult{Clarified: stopped.c}, nil
+	case errors.As(err, &stopped):
+		return RunResult{Cancelled: true}, nil
+	}
+	// A cancel can arrive while the plan call is still out (the browser's
+	// cancel button can press it there); it is the same stop as Esc later.
+	return ended(ctx, RunResult{}, err)
+}
+
 // ended reports a run that stopped on err. Esc or the cancel button is a
 // deliberate stop, so it reports as a cancellation rather than a failure; a
 // timeout still fails, because a deadline that expired is not something the
@@ -176,10 +205,22 @@ func ended(ctx context.Context, res RunResult, err error) (RunResult, error) {
 	return RunResult{}, err
 }
 
-// scopedPlan checks the run's domain list, then plans: a list with nothing
-// usable on it ends the run before the planner's model call. usable is what
-// the search was confined to; the plan keeps the list as asked.
-func (o Options) scopedPlan(ctx context.Context, sink *MultiSink) (plan *Plan, usable []string, err error) {
+// errStopped ends a run before its plan: the reader pressed Ctrl-C at a
+// question, or c holds the questions a --clarify-only run asked.
+type errStopped struct{ c *Clarified }
+
+func (errStopped) Error() string { return "stopped before planning" }
+
+// scopedPlan checks the run's domain list, asks what the question leaves
+// open, then plans: a list with nothing usable on it ends the run before any
+// model call. usable is what the search was confined to; the plan keeps the
+// list as asked.
+func (o Options) scopedPlan(ctx context.Context, sink *MultiSink, ask askFunc) (plan *Plan, usable []string, err error) {
+	if o.ClarifyOnly {
+		// The sites are the plan's to check: the stage after this one runs
+		// the same check, and fetched twice each would take twice as long.
+		return nil, nil, o.clarifyOnly(ctx, sink)
+	}
 	domains := o.Domains
 	if o.Plan != nil && len(domains) == 0 {
 		domains = o.Plan.Domains
@@ -193,23 +234,60 @@ func (o Options) scopedPlan(ctx context.Context, sink *MultiSink) (plan *Plan, u
 	if usable, err = o.checkSources(ctx, sink, domains); err != nil {
 		return nil, nil, err
 	}
-	if plan, err = o.plan(ctx); err != nil {
+	c, stop, err := o.clarified(ctx, ask)
+	switch {
+	case err != nil:
+		return nil, nil, err
+	case stop:
+		return nil, nil, errStopped{}
+	}
+	if plan, err = o.plan(ctx, c); err != nil {
 		return nil, nil, err
 	}
 	plan.Domains = domains
 	return plan, usable, nil
 }
 
-// plan is the plan to run: the one handed in, or the planner's.
-func (o Options) plan(ctx context.Context) (*Plan, error) {
+// clarifyOnly asks the clarifier and sends what it asked, none when it
+// asked nothing or clarify is off: the caller moves on to the plan the same
+// way either way.
+func (o Options) clarifyOnly(ctx context.Context, sink *MultiSink) error {
+	c, _, err := o.clarified(ctx, nil)
+	if err != nil {
+		return err
+	}
+	qs := c.Questions
+	if qs == nil {
+		qs = []Question{}
+	}
+	sink.Emit(Event{Type: ClarifyReady, Questions: &qs})
+	return errStopped{c: &Clarified{Questions: qs, Answers: []Clarification{}}}
+}
+
+// plan is the plan to run: the one handed in, or the planner's for the
+// reading c.
+func (o Options) plan(ctx context.Context, c Clarified) (*Plan, error) {
 	if o.Plan != nil {
 		return o.Plan, nil
 	}
-	return o.buildPlan(ctx)
+	return o.buildPlan(ctx, c)
 }
 
-// buildPlan runs the planning phase and applies the configured source budget.
-func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
+// asker is who answers the clarifier's questions: the terminal, the scripted
+// keys, or nobody. A detached run gave the terminal back before it began.
+func (o Options) asker(r *Renderer, interactive bool, script Input) askFunc {
+	switch {
+	case script != nil && !o.JSONL:
+		return askScripted(script, r)
+	case interactive && !o.Detach:
+		return o.askOnTerminal()
+	}
+	return nil
+}
+
+// buildPlan runs the planning phase for the reading c and applies the
+// configured source budget.
+func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 	// Planning is one model call with nothing on screen behind it, so it is
 	// the whole of the dead air between launching the CLI and the brief.
 	stopStatus := func() {}
@@ -227,13 +305,14 @@ func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
 		defer o.Assistant.SetProgress(func(msg string) { _, _ = fmt.Fprintf(o.Stderr, "%s\n", msg) })
 	}
 	planner := NewPlanner(o.Assistant, depthMode(o.DepthMode))
-	planner.SubTopics = o.SubTopics
+	planner.SubTopics, planner.Reading = o.SubTopics, c.Answers
 	plan, err := planner.Plan(ctx, o.Question)
 	stopStatus()
 	if err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
 	plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
+	plan.Questions, plan.Clarifications = c.Questions, c.Answers
 	if o.SourcesPerTopic <= 0 {
 		return plan, nil
 	}
@@ -255,7 +334,7 @@ func (o Options) buildPlan(ctx context.Context) (*Plan, error) {
 //
 // A plan handed in was confirmed where it was edited, and a plan-only run
 // stops before anyone could act on a confirmation.
-func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive bool) (*Plan, bool) {
+func (o Options) confirmBrief(ctx context.Context, input Input, r *Renderer, plan *Plan, interactive bool) (*Plan, bool) {
 	if o.Plan != nil || o.PlanOnly || (!interactive && (o.KeyScript == "" || o.JSONL)) {
 		return plan, false
 	}
@@ -280,8 +359,17 @@ func (o Options) confirmBrief(input Input, r *Renderer, plan *Plan, interactive 
 	if interactive {
 		defer r.Inline(keys)()
 	}
-	plan, action := waitBrief(keys, r, plan)
-	return plan, action == actionCancel
+	for {
+		var action int
+		plan, action = waitBrief(keys, r, plan)
+		if action != actionClarify {
+			return plan, action == actionCancel
+		}
+		var stop bool
+		if plan, stop = o.reclarify(ctx, keys, r, plan); stop {
+			return plan, true
+		}
+	}
 }
 
 // buildSink sends events to the machine stream, the live UI or, on a pipe,
@@ -321,14 +409,23 @@ func wireProgress(a agent.Assistant, emit func(Event)) {
 	}
 }
 
+// scriptInput is the scripted keys, read once for the questions and the
+// brief alike; nil without a script.
+func (o Options) scriptInput() Input {
+	if o.KeyScript == "" {
+		return nil
+	}
+	return NewByteReader([]byte(o.KeyScript))
+}
+
 // openInput returns the single Input used for both the brief and the run.
 // Acquiring it twice would put the terminal in raw mode, then capture that
 // already-raw state as the "original" to restore, leaving the shell without
 // echo after the run.
-func (o Options) openInput(interactive bool) Input {
+func (o Options) openInput(interactive bool, script Input) Input {
 	switch {
-	case o.KeyScript != "":
-		return NewByteReader([]byte(o.KeyScript))
+	case script != nil:
+		return script
 	case interactive:
 		return NewInput(o.Input, func(msg string) {
 			_, _ = fmt.Fprintf(o.Stderr, "warning: %s\n", msg)
@@ -360,6 +457,7 @@ func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, d
 	// lock so the export never reads a slice mid-append.
 	m := BuildMeta(result, sink.TimelineSnapshot(), plan.Depth.Key, driver.tokens, driver.sources)
 	m.ReportSpec = plan.Report
+	m.Clarifications = plan.Clarifications
 	meta = keep(WriteMetadata(m, o.OutDir))
 	return md, pdf, meta
 }
@@ -376,7 +474,7 @@ func (o Options) announce(result *agent.ResearchResult, res RunResult) {
 	case o.JSONL:
 		// The event stream owns the writer; nothing human-readable joins it.
 	case o.Quiet:
-		_, _ = fmt.Fprintf(o.Stdout, "%s\n", FormatMarkdown(o.Stdout, result.Summary.Report, o.NoColor))
+		_, _ = fmt.Fprintf(o.Stdout, "%s\n", FormatMarkdown(o.Stdout, WithReading(result.Summary.Report, result.Clarifications), o.NoColor))
 	default:
 		if o.Bell != nil {
 			o.Bell(fmt.Sprintf("Research complete: %s", result.Question))
@@ -423,6 +521,10 @@ func waitBrief(in Input, r *Renderer, plan *Plan) (*Plan, int) {
 			return plan, actionLaunch
 		case KeyQ, KeyEsc, KeyCtrlC:
 			return plan, actionCancel
+		case KeyC:
+			if len(plan.Questions) > 0 {
+				return plan, actionClarify
+			}
 		case KeyE:
 			// In line mode the topic was typed on the same line as the key, so
 			// it is already in hand and there is no second line to wait for.

@@ -45,6 +45,9 @@ type Config struct {
 	SummarizerInstructions  string
 	SearchInstructions      string
 	PlanningInstructions    string
+	// ClarifierInstructions steer the check for what a question leaves open
+	// (Clarify).
+	ClarifierInstructions string
 	// ChatInstructions steer the conversation about a finished run (NewChat).
 	ChatInstructions string
 	OpenAIAPIKey     string
@@ -327,7 +330,14 @@ type Assistant interface {
 	// tier that set only the former left the model deciding half of it. It
 	// returns an error only when the model call itself fails; a usable plan is
 	// always derived as a fallback.
-	Plan(ctx context.Context, question string, b Breadth) (Outline, error)
+	//
+	// reading is what the reader clarified about the question (Clarify), the
+	// reading to plan for; nil for none.
+	Plan(ctx context.Context, question string, b Breadth, reading []Clarification) (Outline, error)
+	// Clarify asks what the question leaves open that would change the
+	// research, before it is planned: up to MaxQuestions questions, none for
+	// a clear question.
+	Clarify(ctx context.Context, question string) ([]Question, error)
 	// SetSourceBudget caps how many sources a single query may gather. It is
 	// what gives the depth tier its effect: without it the search tool's own
 	// fixed per-query limit bounds every run identically, and picking a deeper
@@ -414,6 +424,10 @@ type ResearchResult struct {
 	Model    string   `json:"model,omitempty"`
 	Provider string   `json:"provider,omitempty"`
 	ServedBy []string `json:"served_by,omitempty"`
+	// Clarifications are the reading the reader gave before the plan,
+	// which the report answered: kept with it, or the choices that shaped
+	// the report were nowhere in it. Absent from older records.
+	Clarifications []Clarification `json:"clarifications,omitempty"`
 }
 
 type runFunc func(ctx context.Context, prompt string) (string, error)
@@ -468,6 +482,10 @@ func New(cfg Config) (Assistant, error) {
 		"choosing follow-up searches", entriesUnit("search", "searches", "query"))
 	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), cfg.Effort.FactCheck,
 		"fact-checking", entriesUnit("judged", "judged", "status", "follows"))
+	if cfg.ClarifierInstructions == "" {
+		cfg.ClarifierInstructions = defaultClarifierInstructions
+	}
+	impl.clarify = newRunJSON(newAgent("clarifier", cfg.ClarifierInstructions, nil), cfg.Effort.Clarify)
 	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), cfg.Effort.Summarize,
 		"writing the report", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
@@ -601,6 +619,7 @@ type impl struct {
 	factCheck   runFunc
 	summarizer  runFunc
 	plan        runFunc
+	clarify     runFunc
 	searchTools *tools.SearchTools // non-nil when real search+scrape is available
 	// served is every model the provider reported serving, which differs
 	// from model when model is a router alias.
@@ -1639,11 +1658,11 @@ func planPrompt(question string, b Breadth) string {
 const defaultSubTopicCount = 4
 
 // Plan implements the planning phase of the pipeline.
-func (a *impl) Plan(ctx context.Context, question string, b Breadth) (Outline, error) {
+func (a *impl) Plan(ctx context.Context, question string, b Breadth, reading []Clarification) (Outline, error) {
 	// The deadline is part of the answer to "how long will this sit here":
 	// planning is one call with nothing on screen behind it.
 	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s)", a.model, roundDuration(a.timeout)))
-	out, err := a.plan(ctx, planPrompt(question, b))
+	out, err := a.plan(ctx, planPrompt(question, b)+ClarifiedBlock(reading))
 	if err != nil {
 		return Outline{}, err
 	}
