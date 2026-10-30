@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -29,11 +30,11 @@ const (
 type Options struct {
 	Question        string
 	Assistant       agent.Assistant
-	DepthMode       string     // "quick" | "standard" | "deep" | "" (standard)
+	DepthMode       string     // "quick" | "standard" | "deep" | "instant" | "" (standard)
 	SourcesPerTopic int        // sources per sub-agent; 0 => derived from depth
 	SubTopics       int        // exact sub-topic count; 0 => the planner chooses up to the tier's
 	NoFollowUps     bool       // skip the follow-up round
-	Instant         bool       // answer in one call after the search, unchecked (instant mode)
+	SearchOff       bool       // no web search: an instant plan is refused
 	Report          ReportSpec // the report's shape; the zero value for standard
 	Parallelism     int        // sub-agents searching concurrently; 0 => 3
 	JSONL           bool       // emit structured JSONL events
@@ -135,10 +136,9 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	if plan, cancelled = o.confirmBrief(ctx, input, renderer, plan, interactive); cancelled {
 		return RunResult{Cancelled: true}, nil
 	}
-	if o.OnPlan != nil {
-		o.OnPlan(plan)
+	if plan, err = o.ready(plan, sink); err != nil {
+		return RunResult{}, err
 	}
-	sink.Emit(Event{Type: PlanReady, Plan: plan})
 	res := RunResult{Plan: plan}
 	if o.PlanOnly {
 		return res, nil
@@ -174,6 +174,27 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	o.announce(result, res)
 	res.KeysHeld = driver.stopKeys()
 	return res, nil
+}
+
+// ready checks the plan the run is about to search and announces it. The
+// brief can switch a run to instant after the CLI checked it: an instant
+// answer from findings the model wrote is what instant runs promise not to
+// be.
+//
+// An instant plan is launched at its least whatever was edited on the way
+// (a plan file, the page's review): instant is every option at its least.
+func (o Options) ready(plan *Plan, sink *MultiSink) (*Plan, error) {
+	if plan.Instant {
+		if o.SearchOff {
+			return nil, errors.New("an instant run answers from a web search, and search is off: set search_engine (drsh setup), or pick another depth")
+		}
+		plan = plan.Instantly()
+	}
+	if o.OnPlan != nil {
+		o.OnPlan(plan)
+	}
+	sink.Emit(Event{Type: PlanReady, Plan: plan})
+	return plan, nil
 }
 
 // endedBeforePlan reports a run that stopped before it had a plan: at the
@@ -305,7 +326,8 @@ func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 	}
 	// One sub-topic is the question itself: a planner call to rephrase it
 	// would take longer than the search it plans.
-	if o.Instant && o.SubTopics == 1 {
+	instant := depthMode(o.DepthMode).IsInstant()
+	if instant && o.SubTopics == 1 {
 		plan := InstantPlan(o.Question, depthMode(o.DepthMode), o.SourcesPerTopic)
 		plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
 		plan.Questions, plan.Clarifications = c.Questions, c.Answers
@@ -318,7 +340,7 @@ func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
-	plan.NoFollowUps, plan.Report, plan.Instant = o.NoFollowUps, o.Report, o.Instant
+	plan.NoFollowUps, plan.Report, plan.Instant = o.NoFollowUps, o.Report, instant
 	plan.Questions, plan.Clarifications = c.Questions, c.Answers
 	if o.SourcesPerTopic <= 0 {
 		return plan, nil
@@ -522,6 +544,9 @@ func waitBrief(in Input, r *Renderer, plan *Plan) (*Plan, int) {
 		if err != nil {
 			return plan, actionLaunch // EOF => launch
 		}
+		if heldKey(plan, k.Key) {
+			continue // every option at its least: only another depth changes it
+		}
 		switch k.Key {
 		case 0x0d, 0x0a, 0x00: // Enter / CR / NUL
 			return plan, actionLaunch
@@ -564,6 +589,13 @@ func waitBrief(in Input, r *Renderer, plan *Plan) (*Plan, int) {
 			}
 		}
 	}
+}
+
+// heldKey is a brief key an instant plan ignores: one that edits the plan
+// other than its depth (the sub-topic keys, and re-asking the questions,
+// which plans again). Instant is every option at its least.
+func heldKey(plan *Plan, k Key) bool {
+	return plan.Instant && (k == KeyE || k == KeyR || k == KeyX || k == KeyC)
 }
 
 // briefSetting is the review setting key cycles in the brief.
@@ -651,20 +683,15 @@ func depthMode(s string) DepthMode {
 // rather than a silent fall back to standard: "--mode deeep" used to run a
 // standard-depth study while the reader believed they had asked for a deep one.
 func ParseDepthMode(s string) (DepthMode, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "quick":
-		return DepthModes[0], nil
-	case "", "standard":
-		return DepthModes[1], nil
-	case "deep":
-		return DepthModes[2], nil
-	default:
-		names := make([]string, len(DepthModes))
-		for i, m := range DepthModes {
-			names[i] = m.Key
+	key := cmp.Or(strings.ToLower(strings.TrimSpace(s)), "standard")
+	names := make([]string, len(DepthModes))
+	for i, m := range DepthModes {
+		if m.Key == key {
+			return m, nil
 		}
-		return DepthModes[1], fmt.Errorf("unknown mode %q (want %s)", s, strings.Join(names, " | "))
+		names[i] = m.Key
 	}
+	return DepthModes[1], fmt.Errorf("unknown mode %q (want %s)", s, strings.Join(names, " | "))
 }
 
 // notify emits an OS notification when possible and always rings the bell.

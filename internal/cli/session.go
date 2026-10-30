@@ -210,7 +210,14 @@ func (s *session) isSetting(line string) bool {
 // after, as the serve page's controls set it for the run they launch.
 func (s *session) chooseSetting(line string) {
 	name, value, typed := strings.Cut(strings.TrimPrefix(line, "/"), " ")
-	set, _ := ui.SettingFor(ui.Settings(runSettings(s.cmd, s.d)), name)
+	all := ui.Settings(runSettings(s.cmd, s.d))
+	set, _ := ui.SettingFor(all, name)
+	// Instant is every option at its least: a setting it holds is changed by
+	// leaving it, not under it.
+	if _, held := ui.Implied(all)[name]; held {
+		s.say(fmt.Sprintf("instant runs every option at its least: pick another depth with /mode to change %s", set.Label))
+		return
+	}
 	if value = strings.TrimSpace(value); !typed || value == "" {
 		rows := make([]ui.Choice, len(set.Opts))
 		for i, o := range set.Opts {
@@ -235,12 +242,12 @@ func (s *session) chooseSetting(line string) {
 }
 
 // imply sets what the option chosen for set implies, as the serve page's
-// controls do, so the start screen shows the bundle /instant on stands for
-// and a /command after it changes one setting of it. Switching back puts
-// each implied flag as it was, unless it was changed since: that change
-// was chosen after, and stands.
+// controls do, so the start screen shows the bundle /mode instant stands
+// for and a /command after it changes one setting of it. Switching to
+// another depth puts each implied flag as it was, unless it was changed
+// since: that change was chosen after, and stands.
 //
-// Choosing the value it already has changes nothing: /instant on again
+// Choosing the value it already has changes nothing: /mode instant again
 // would put back the bundle over a setting changed since.
 func (s *session) imply(set ui.Setting, value string) {
 	if set.Value == value {
@@ -325,7 +332,7 @@ func (s *session) resume() {
 // run must not inherit them, so the flags are put back as they were.
 func (s *session) resumeRun(path string) {
 	var undo []func()
-	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups", "format", "words", "tables", "instant"} {
+	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups", "format", "words", "tables"} {
 		f := s.cmd.Flags().Lookup(name)
 		v, changed := f.Value.String(), f.Changed
 		undo = append(undo, func() { _ = f.Value.Set(v); f.Changed = changed })

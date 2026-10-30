@@ -51,8 +51,8 @@ only the summarizer's prose: the program-written answer, the quote check
 and the export's Fact-Check and citation sections are the same in every
 format.
 
-An instant run (`Plan.Instant`, from `--instant` or `instant: true`) ends
-differently:
+An instant run (`Plan.Instant`, from the `instant` depth, `--mode instant`)
+ends differently:
 
 ```
 research → [follow-ups → follow-up research] → answer
@@ -70,10 +70,21 @@ without the planner (`ui.InstantPlan`, the question searched as asked) and
 is never put on review: `ui.Run` skips the brief and the page launches it
 without its clarify and plan steps. The bit is the plan's, so a plan file, a
 checkpoint and a trace carry it, and a resume or replay of an instant run
-ends in the answer call. The settings it implies (`Option.Implies` on the
-instant setting's `on`) are applied by each surface from that one table:
-`RunSettings.WithImplied` for the flags and the config, the session's
-`/instant` and the page's control for the start screens. With search off
+ends in the answer call. Instant is a depth tier (`ui.ModeInstant`) and not quick made faster:
+quick is a checked run, and a run is instant only when it was started at
+the instant tier; a saved plan, checkpoint or trace says so in its own bit,
+never through its tier's name. The settings the tier implies
+(`Option.Implies` on the depth's instant option) are applied by each
+surface from that one table, over every other value: `RunSettings.WithImplied`
+for the flags and the config, `/mode instant` and the page's depth control for the start
+screens. On review (the brief's `d`, the page's review) `ApplyToPlan`
+turns the plan instant, every option at its least, keeping the plan it
+replaced in `Plan.Before`; another depth puts that plan back at that depth
+(`fromInstant`), checked. `Before` travels through the page's JSON round
+trip and is never run: an instant plan is launched through
+`Plan.Instantly`; `ui.Run`
+refuses an instant plan at launch with search off (`Options.SearchOff`),
+since the brief can choose it after the CLI's check. With search off
 the CLI refuses it, since the model would write the findings it answers
 from.
 

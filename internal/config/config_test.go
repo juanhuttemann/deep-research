@@ -479,30 +479,17 @@ func TestReportKeys(t *testing.T) {
 	}
 }
 
-// instant is a config key like the others: false by default, set in the
-// file, overridden from the environment; its answer call has its own
-// reasoning effort.
-func TestInstantComesFromFileAndEnv(t *testing.T) {
-	if loadIn(t, "").Instant {
-		t.Error("instant is on by default")
-	}
-	if !loadIn(t, "instant: true\n").Instant {
-		t.Error("instant: true in config.yaml was not read")
-	}
+// An instant run's answer call has its own reasoning effort, and the
+// answerer its own instructions.
+func TestAnswerEffortAndInstructions(t *testing.T) {
 	clearProviderEnv(t)
-	cfgDir := t.TempDir()
-	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", cfgDir)
-	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "instant: true\n")
-	t.Setenv("DEEP_RESEARCH_INSTANT", "false")
+	t.Setenv("DEEP_RESEARCH_CONFIG_DIR", t.TempDir())
 	t.Setenv("DEEP_RESEARCH_REASONING_EFFORT_ANSWER", "low")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Instant || cfg.Effort.Answer != "low" {
-		t.Errorf("env did not win: instant %v, answer effort %q", cfg.Instant, cfg.Effort.Answer)
-	}
-	if cfg.AnswererInstructions == "" {
-		t.Error("the answerer has no instructions")
+	if cfg.Effort.Answer != "low" || cfg.AnswererInstructions == "" {
+		t.Errorf("answer effort %q, answerer instructions %d bytes", cfg.Effort.Answer, len(cfg.AnswererInstructions))
 	}
 }

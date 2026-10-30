@@ -839,3 +839,15 @@ func TestActivityTailHiddenUntilToggled(t *testing.T) {
 		t.Fatalf("a second a did not hide the tail:\n%s", f)
 	}
 }
+
+// An instant plan's brief offers only what does anything on it, each hint
+// a key and its action: the other keys are held at their least.
+func TestInstantBriefHints(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows = 140, 30
+	r.RenderBrief(InstantPlan("q", depthMode(ModeInstant), 2))
+	foot := strings.Join(r.briefFoot(), "\n")
+	if strings.Contains(foot, "[e]") || !strings.Contains(foot, "[d] depth (instant holds every other option at its least)") || strings.Contains(foot, ")]") {
+		t.Errorf("instant brief hints:\n%s", foot)
+	}
+}

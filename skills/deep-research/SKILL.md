@@ -121,7 +121,10 @@ cmd /c "drsh -p ""QUESTION"" --jsonl --reports ""$dir"" > ""$dir\events.jsonl"""
   region, versions, budget). The planner works from it alone.
 - `--mode quick|standard|deep` sets the budget (default `standard`). Use
   `quick` for a narrow factual question, `deep` only when the user asks for
-  thoroughness; it spends more requests.
+  thoroughness; it spends more requests. All three are fact-checked.
+  `--mode instant` is one search and one answer call in seconds, cited but
+  not fact-checked: use it only when the user wants a fast lookup and says
+  so, and tell them the answer was not checked.
 - The planner chooses how many sub-topics the question needs, up to the
   tier's count. `--topics N` asks for exactly N (1-8) when the user names
   the facets to cover.

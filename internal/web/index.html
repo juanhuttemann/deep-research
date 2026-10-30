@@ -437,8 +437,8 @@ mark { background: var(--yellow); color: var(--bg); }
       <div class="composer-bar">
         <!-- Drawn from the settings /api/info serves (ui.Settings), the list
              the terminal's start screen and brief are drawn from too: the
-             depth and instant here, the rest under "settings", as the
-             terminal's row names only those and what was changed. -->
+             depth here, the rest under "settings", as the terminal's row
+             names only the depth and what was changed. -->
         <span id="start-settings" class="settings"></span>
         <button id="more" class="btn sm ghost" type="button" aria-expanded="false" aria-controls="more-panel">settings ▾</button>
         <span id="changed" class="changed"></span>
@@ -663,23 +663,27 @@ let setup = null;
 const startSettings = {};
 // startList is the start settings as served, for their defaults and labels.
 let startList = [];
-// mainSetting names the settings on the composer's row; the rest are under
-// "settings".
-function mainSetting(st) { return st.key === "mode" || st.key === "instant"; }
-// impliedBefore holds, while an option that implies others is chosen
-// (instant on), each implied setting's value before it, as the terminal's
-// start screen keeps them: switching back puts back those not changed since.
+// mainSetting names the setting on the composer's row, the depth; the rest
+// are under "settings".
+function mainSetting(st) { return st.key === "mode"; }
+// impliedBefore holds, while an option that implies others is chosen (the
+// instant depth), each implied setting's value before it, as the terminal's
+// start screen keeps them: another depth puts back those not changed since.
 let impliedBefore = null;
 function drawStart() {
-  const control = st => settingControl({ ...st, value: startSettings[st.key] }, "m-", setStart);
+  // The settings the chosen depth holds (instant's, at their least) cannot
+  // be changed under it: another depth changes them.
+  const held = {};
+  for (const st of startList) Object.assign(held, (st.choices.find(c => c.value === startSettings[st.key]) || {}).implies || {});
+  const control = st => settingControl({ ...st, value: startSettings[st.key] }, "m-", setStart, st.key in held);
   $("start-settings").replaceChildren(...startList.filter(mainSetting).map(control));
   $("more-settings").replaceChildren(...startList.filter(st => !mainSetting(st)).map(control));
 }
 // setStart takes a choice, and what its option implies for the others
 // (the served option's implies): the rule is the server's, not a copy here.
 function setStart(k, v) {
-  // The value it has already: instant on again would put the bundle back
-  // over a setting changed since.
+  // The value it has already: instant again would put the bundle back over
+  // a setting changed since.
   if (startSettings[k] === v) return;
   const st = startList.find(s => s.key === k), opt = st && st.choices.find(c => c.value === v);
   startSettings[k] = v;
@@ -720,7 +724,7 @@ function showChanged() {
   // not make it.
   const lede = $("lede");
   if (!lede.dataset.checked) lede.dataset.checked = lede.textContent;
-  lede.textContent = startSettings.instant === "on" ? lede.dataset.instant : lede.dataset.checked;
+  lede.textContent = startSettings.mode === "instant" ? lede.dataset.instant : lede.dataset.checked;
   const parts = startList.filter(st => !mainSetting(st) && startSettings[st.key] !== st.default).map(st => {
     const o = st.choices.find(c => c.value === startSettings[st.key]);
     return [st.label + " ", el("b", "", o ? o.label : startSettings[st.key])];
@@ -1161,23 +1165,41 @@ async function applyPlanEdit(key, value) {
     if (!r.ok) { $("brief-msg").textContent = (await r.text()).trim(); return; }
     const p = await r.json();
     if (brief !== was) return;
+    // Into or out of the instant depth the server returns the plan's new
+    // topics (the question alone) and settings: taken whole, or the run
+    // launched the old topics at the instant tier, checked.
+    const turned = !!p.instant !== !!brief.instant;
     brief.depth = p.depth; brief.pinned_per_topic = p.pinned_per_topic || 0; brief.no_follow_ups = !!p.no_follow_ups;
-    brief.report = p.report || {};
+    brief.report = p.report || {}; brief.instant = !!p.instant; brief.before = p.before || null;
+    if (turned) {
+      // The topics as edited here, with what the page knows of each edit
+      // (a typed search, the planner's name and search), are kept while
+      // instant is chosen and are the ones put back: rebuilt from the
+      // server's copy, a typed search was lost to the next rename.
+      const kept = !p.instant && brief.keptTopics;
+      if (p.instant) brief.keptTopics = brief.sub_topics;
+      brief.sub_topics = kept || p.sub_topics.map(t => ({ ...t, planned: t.name, plannedQuery: t.query || "", query: t.query || "" }));
+      if (!p.instant) brief.keptTopics = null;
+      renderTopics();
+      showReading();
+    }
     const n = brief.sub_topics.length;
     // The scope is the planner's reading of the question, the reason for
     // the count, as the terminal brief shows it.
     $("brief-budget").textContent = n + (n === 1 ? " sub-topic" : " sub-topics") + (p.scope ? " · " + p.scope + " question" : "") +
       " · up to " + p.per_topic + " sources each";
     reviewValues = Object.fromEntries(p.settings.map(st => [st.key, st.value]));
-    $("review-settings").replaceChildren(...p.settings.map(st => settingControl(st, "b-", refreshPlan)));
+    // An instant plan is every option at its least: only the depth changes.
+    $("review-settings").replaceChildren(...p.settings.map(st => settingControl(st, "b-", refreshPlan, brief.instant && st.key !== "mode")));
   } catch {}
 }
 // settingControl draws one setting from the list the server serves
 // (ui.Settings, the terminal's list too): a segmented choice for a few
 // values, a list for more. onchange is given its key and the value chosen.
-function settingControl(st, prefix, onchange) {
+function settingControl(st, prefix, onchange, disabled) {
   if (st.choices.length > 4) {
     const sel = document.createElement("select");
+    sel.disabled = !!disabled;
     for (const o of st.choices) {
       const op = el("option", "", o.label);
       op.value = o.value; op.selected = o.value === st.value;
@@ -1195,7 +1217,7 @@ function settingControl(st, prefix, onchange) {
   for (const o of st.choices) {
     const inp = document.createElement("input");
     inp.type = "radio"; inp.name = prefix + st.key; inp.id = prefix + st.key + "-" + o.value;
-    inp.value = o.value; inp.checked = o.value === st.value;
+    inp.value = o.value; inp.checked = o.value === st.value; inp.disabled = !!disabled;
     inp.onchange = () => onchange(st.key, o.value);
     const lab = el("label", "", o.label);
     lab.htmlFor = inp.id;
@@ -1215,14 +1237,16 @@ function topicMeta(t, meta) {
   meta.hidden = !meta.textContent;
 }
 function renderTopics() {
-  const n = brief.sub_topics.length;
+  const n = brief.sub_topics.length, held = !!brief.instant;
+  // An instant plan searches the question alone: its topic is not edited.
+  $("add-topic").hidden = held;
   $("topics").replaceChildren(...brief.sub_topics.map((t, i) => {
     const li = el("li", "topic"), body = el("div"), meta = el("div");
     const name = el("input", "topic-name");
-    name.value = t.name; name.maxLength = 200;
+    name.value = t.name; name.maxLength = 200; name.readOnly = held;
     name.setAttribute("aria-label", "Sub-topic " + (i + 1));
     const row = el("label", "topic-query"), query = el("input");
-    query.value = t.query || ""; query.maxLength = 200;
+    query.value = t.query || ""; query.maxLength = 200; query.readOnly = held;
     query.placeholder = "the question + this name";
     query.setAttribute("aria-label", "Search for sub-topic " + (i + 1));
     row.append(el("span", "k", "searches"), query);
@@ -1239,7 +1263,7 @@ function renderTopics() {
     const rm = el("button", "icon-btn", "✕");
     rm.type = "button"; rm.title = "Remove"; rm.setAttribute("aria-label", "Remove sub-topic " + (i + 1));
     // A plan with no sub-topics has nothing to research.
-    rm.disabled = n < 2;
+    rm.disabled = n < 2 || held;
     rm.onclick = () => { brief.sub_topics.splice(i, 1); renderTopics(); };
     li.append(el("span", "num", String(i + 1)), body, rm);
     return li;
@@ -1251,6 +1275,9 @@ function editedPlan() {
     question: brief.question,
     asked: brief.asked || "",
     depth: { key: brief.depth.key },
+    instant: !!brief.instant,
+    // The plan instant replaced, put back when another depth is chosen.
+    before: brief.instant ? brief.before : null,
     pinned_per_topic: brief.pinned_per_topic || 0,
     scope: brief.scope || "",
     domains: brief.domains || [],
@@ -1402,9 +1429,14 @@ function showReading() {
   if (!qs.length) { p.replaceChildren(); return; }
   const change = el("button", "btn sm ghost", "change answers");
   change.type = "button";
+  // New answers plan again, which an instant plan does not do (the brief's
+  // c key is held too): another depth first, and the plan instant replaced
+  // is kept to put back.
+  change.disabled = !!brief.instant;
+  change.title = brief.instant ? "Instant holds every option at its least: pick another depth to change the answers" : "";
   // A setting chosen just before is worked out first, or the new plan took
   // the one from before it, as Start research waits for it.
-  change.onclick = async () => { await planEdits; if (brief) showQuestions(reviewAsked(), qs, cs, true); };
+  change.onclick = async () => { await planEdits; if (brief && !brief.instant) showQuestions(reviewAsked(), qs, cs, true); };
   p.replaceChildren(el("span", "k", "read as "), ...(cs.length ? readingNodes(cs) : ["the research's guess: no question answered"]), change);
 }
 // readingNodes are the answers, each after the question it answers: the
@@ -1837,7 +1869,7 @@ $("launch").onsubmit = async ev => {
     // The questions first, then the plan for review; Start research in the
     // review runs it. With clarify off the step asks nothing and moves on.
     // An instant run has neither: it is launched as it is.
-    clarify_only: startSettings.instant !== "on",
+    clarify_only: startSettings.mode !== "instant",
   };
   if (!body.question) return;
   if (onlySites() && !body.domains.length) { $("msg").textContent = "Add at least one site, or search the web."; showMore(true); $("domains").focus(); return; }

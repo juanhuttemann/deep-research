@@ -803,6 +803,11 @@ func (r *Renderer) briefFoot() []string {
 	if r.briefNote != "" {
 		out = append(out, "  "+r.T.yellow(r.briefNote))
 	}
+	if r.plan.Instant {
+		// Every option is at its least: the other keys would do nothing.
+		hints := "[enter] launch   [d] depth (instant holds every other option at its least)"
+		return append(append(out, r.hintRows(hints+"   [q] cancel")...), "")
+	}
 	hints := "[enter] launch   [e] add   [r] rename   [x] delete"
 	for _, s := range Settings(RunSettings{}) {
 		if s.Review && s.BriefKey != 0 {
@@ -823,7 +828,13 @@ func (r *Renderer) briefSettingsRow() string {
 	row := ""
 	for _, s := range ReviewSettings(r.plan) {
 		o, _ := s.Option(s.Value)
-		row += fmt.Sprintf("  %s  %s ", r.T.dim(s.Label), o.Label)
+		label := o.Label
+		// The instant tier's note is the one a reader must see: its answer is
+		// not fact-checked.
+		if len(o.Implies) > 0 && o.Note != "" {
+			label += " (" + o.Note + ")"
+		}
+		row += fmt.Sprintf("  %s  %s ", r.T.dim(s.Label), label)
 	}
 	return row + fmt.Sprintf("  %s  %d   %s  %d",
 		r.T.dim("max sources"), r.plan.MaxSources,
