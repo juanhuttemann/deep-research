@@ -422,34 +422,6 @@ func (b *blockingAssistant) ResearchDetail(ctx context.Context, _ string, _ []st
 	return nil, ctx.Err()
 }
 
-func TestDetachReleasesTheTerminal(t *testing.T) {
-	var buf bytes.Buffer
-	r := liveRenderer(&buf, 24, 80)
-	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "running"})
-	buf.Reset()
-
-	r.Emit(Event{Type: Detach, Detail: "running detached"})
-	out := buf.String()
-	if !strings.Contains(out, "detached") {
-		t.Errorf("detaching says nothing:\n%s", out)
-	}
-	if !strings.HasSuffix(out, cursorShow) {
-		t.Error("detaching must give the cursor back")
-	}
-
-	// Nothing more may be drawn: the reader has their terminal back.
-	buf.Reset()
-	for range 5 {
-		r.Emit(Event{Type: Read, SubID: "1", Line: "read example.com"})
-		r.mu.Lock()
-		r.paintLocked(true)
-		r.mu.Unlock()
-	}
-	if buf.Len() != 0 {
-		t.Errorf("kept drawing after detaching: %q", buf.String())
-	}
-}
-
 // lineInput is a terminal that refused raw mode: keys arrive only with their
 // trailing Enter.
 type lineInput struct{ Input }
@@ -604,7 +576,7 @@ func TestRendererIgnoresOutputAfterClose(t *testing.T) {
 	buf.Reset()
 
 	// Everything the key reader can still reach after Close.
-	r.Emit(Event{Type: Detach, Detail: "late detach"})
+	r.Emit(Event{Type: Info, Detail: "late event"})
 	r.SetPrompt("prompt", "late")
 
 	if buf.Len() > 0 {
@@ -795,8 +767,8 @@ func TestLinkedRowsMeasureAndClipAsText(t *testing.T) {
 // colour, the action gray.
 func TestKeyHintsPaintKeysApartFromActions(t *testing.T) {
 	th := Theme{Enabled: true}
-	want := "[enter]" + th.gray(" launch") + "   [b]" + th.gray(" release display")
-	if got := th.hints("[enter] launch   [b] release display"); got != want {
+	want := "[enter]" + th.gray(" launch") + "   [a]" + th.gray(" show activity")
+	if got := th.hints("[enter] launch   [a] show activity"); got != want {
 		t.Errorf("hints = %q, want %q", got, want)
 	}
 	if got := (Theme{}).hints("[enter] launch   [q] cancel"); got != "[enter] launch   [q] cancel" {

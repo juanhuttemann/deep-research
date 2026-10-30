@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"os"
 	"strings"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
@@ -78,7 +79,7 @@ func (r *Renderer) startLines() []string {
 		out = append(out, row)
 	}
 	out = append(out, r.commandBlock(r.promptText, r.commandAt,
-		"[enter] research   [/] settings   [esc] quit", "quit")...)
+		"[enter] research   [/] settings", "quit")...)
 	if r.briefNote != "" {
 		for _, l := range wrapWords(r.briefNote, r.width-4) {
 			out = append(out, "  "+r.T.yellow(l))
@@ -88,17 +89,18 @@ func (r *Renderer) startLines() []string {
 	return out
 }
 
-// startSettingsRow is the next run's start settings: the depth, which
-// every run is chosen by, and those set away from their defaults. Listing
-// all of them at auto, on and standard filled the screen's width with
-// nothing chosen; the rest are counted, and "/" lists them.
+// startSettingsRow is the next run's start settings set away from their
+// defaults. Listing all of them at auto, on and standard filled the screen's
+// width with nothing chosen; the rest are counted, and "/" lists them. The
+// depth is no exception: the brief shows it and d changes it there, and
+// shown here from the start it read as fixed until the plan was ready.
 func (r *Renderer) startSettingsRow() string {
 	row, more := "", 0
 	for _, s := range r.settings {
 		if !s.Start {
 			continue
 		}
-		if s.Key != SettingMode && s.Value == s.Default {
+		if s.Value == s.Default {
 			more++
 			continue
 		}
@@ -134,6 +136,16 @@ func AskBox(w io.Writer, noColor bool, back string) {
 	label := AskPrompt(noColor)
 	_, _ = io.WriteString(w, "\n"+r.rule()+"\n"+label+"\n"+r.rule()+"\n  "+
 		r.T.hints("[enter] ask   [empty enter] "+back+"   [/resume] past runs")+"\n\x1b[3A\r"+label)
+}
+
+// ClearScreen empties a terminal's screen, for the start screen drawn after
+// leaving a report: drawn in place, it sat under the report and the
+// questions just left, which still filled the screen. Anything but a
+// terminal is left as it is.
+func ClearScreen(w io.Writer) {
+	if f, ok := w.(*os.File); ok && IsTTYFile(f) {
+		_, _ = io.WriteString(w, cursorHome+eraseToEnd)
+	}
 }
 
 // EndAsk erases the box's lower rule and keys, under the line just read.

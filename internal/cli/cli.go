@@ -64,7 +64,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 		d, _ := load()
 		silent, _ := cmd.Flags().GetBool("silent")
 		jsonl, _ := cmd.Flags().GetBool("jsonl")
-		return askAfter(cmd, d, res.JSONPath, drawsUI(cmd, silent, jsonl) && !res.Detached)
+		return askAfter(cmd, d, res.JSONPath, drawsUI(cmd, silent, jsonl) && !res.KeysHeld)
 	}
 	root.Flags().StringP("prompt", "p", "", "the question to research")
 	root.Flags().StringP("output", "o", "", "write report to file")
@@ -86,9 +86,11 @@ func New(load func() (Deps, error)) *cobra.Command {
 	root.Flags().Bool("jsonl", false, "emit machine-readable JSONL events instead of the live UI")
 	root.Flags().Bool("no-color", false, "disable ANSI colour")
 	root.Flags().BoolP("silent", "s", false, "suppress the live UI; print only the report")
-	// Same as pressing "b" during a run: the display is released at the first
-	// event, the run keeps the terminal until it writes its report.
-	root.Flags().Bool("detach", false, "release the live display as soon as the run starts")
+	// --detach released the live display while the run kept the terminal,
+	// which read as backgrounding a run that was not. The display is no
+	// longer released; scripts that pass the flag keep working.
+	root.Flags().Bool("detach", false, "deprecated: does nothing")
+	_ = root.Flags().MarkDeprecated("detach", "the live display is no longer released")
 	// Both write to stdout. Together they interleaved a rendered Markdown
 	// report with the event stream, leaving the machine-readable output
 	// unparseable, so the combination is rejected instead of guessed at.
@@ -663,7 +665,6 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	silent, _ := cmd.Flags().GetBool("silent")
 	jsonl, _ := cmd.Flags().GetBool("jsonl")
 	noColor, _ := cmd.Flags().GetBool("no-color")
-	detach, _ := cmd.Flags().GetBool("detach")
 	outDir, _ := cmd.Flags().GetString("reports")
 
 	// The agent's own progress lines are the fallback log for a plain pipe.
@@ -696,7 +697,6 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		JSONL:           jsonl,
 		Quiet:           silent,
 		NoColor:         noColor || os.Getenv("NO_COLOR") != "",
-		Detach:          detach,
 		OutDir:          outDir,
 		Input:           cmd.InOrStdin(),
 		Stdout:          cmd.OutOrStdout(),

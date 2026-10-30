@@ -38,7 +38,6 @@ type Options struct {
 	JSONL           bool       // emit structured JSONL events
 	Quiet           bool       // minimal, non-interactive output
 	NoColor         bool       // disable ANSI colour
-	Detach          bool       // start in detached / background state
 	OutDir          string     // report output dir (default "reports")
 	Input           io.Reader  // interactive stdin; nil => non-interactive
 	Stdout          io.Writer
@@ -82,10 +81,10 @@ type RunResult struct {
 	// TracePath is the --trace file, written by the CLI after the run.
 	TracePath string
 	Cancelled bool
-	// Detached is set when the run gave the terminal back (--detach, or b
-	// pressed at any point until it returned), or could not stop reading
-	// keys from it: either way what is typed at it next is not the run's.
-	Detached bool
+	// KeysHeld is set when the run could not stop reading keys from the
+	// terminal: what is typed at it next goes to that reader, not to a
+	// prompt opened after the run.
+	KeysHeld bool
 }
 
 // Paths lists the artifacts that were actually written; a failed write left
@@ -147,7 +146,6 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	// Phase 2: live research via the driver.
 	driver := NewDriver(o.Assistant, sink, input, o.Parallelism)
 	driver.now = o.Now
-	driver.detached = o.Detach
 	driver.domains = usable
 	driver.toggleActivity = renderer.ToggleActivity
 	if interactive || o.JSONL {
@@ -173,7 +171,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	}
 	res.MDPath, res.PDFPath, res.JSONPath = o.writeArtifacts(result, sink, driver, plan)
 	o.announce(result, res)
-	res.Detached = driver.stopKeys()
+	res.KeysHeld = driver.stopKeys()
 	return res, nil
 }
 
@@ -274,12 +272,12 @@ func (o Options) plan(ctx context.Context, c Clarified) (*Plan, error) {
 }
 
 // asker is who answers the clarifier's questions: the terminal, the scripted
-// keys, or nobody. A detached run gave the terminal back before it began.
+// keys, or nobody.
 func (o Options) asker(r *Renderer, interactive bool, script Input) askFunc {
 	switch {
 	case script != nil && !o.JSONL:
 		return askScripted(script, r)
-	case interactive && !o.Detach:
+	case interactive:
 		return o.askOnTerminal()
 	}
 	return nil
@@ -451,10 +449,8 @@ func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, d
 	if pdf != "" && pdfDropsText(MarkdownReport(result)) {
 		_, _ = fmt.Fprintln(o.Stderr, "warning: PDF export replaced unsupported characters with ?; use the Markdown or JSON artifact for the full Unicode text")
 	}
-	// The key reader can still be alive here: a `b` pressed between the
-	// driver returning and this write emits a Detach event, which appends to
-	// the same timeline BuildMeta ranges over. Snapshot it under the sink's
-	// lock so the export never reads a slice mid-append.
+	// Snapshot the timeline under the sink's lock so the export never reads
+	// a slice mid-append.
 	m := BuildMeta(result, sink.TimelineSnapshot(), plan.Depth.Key, driver.tokens, driver.sources)
 	m.ReportSpec = plan.Report
 	m.Clarifications = plan.Clarifications

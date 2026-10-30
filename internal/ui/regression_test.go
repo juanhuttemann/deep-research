@@ -731,110 +731,6 @@ func TestShortFindingsAreNotTruncated(t *testing.T) {
 	}
 }
 
-// terminalSpy is an Input that records whether the terminal was handed back
-// and keeps serving keys, so a key reader that did not stop is visible.
-type terminalSpy struct {
-	keys   chan byte
-	closed chan struct{}
-	once   sync.Once
-	reads  atomic.Int64
-}
-
-func newTerminalSpy() *terminalSpy {
-	return &terminalSpy{keys: make(chan byte, 8), closed: make(chan struct{})}
-}
-
-func (s *terminalSpy) Next() (byte, error) {
-	s.reads.Add(1)
-	b, ok := <-s.keys
-	if !ok {
-		return 0, io.EOF
-	}
-	return b, nil
-}
-
-func (s *terminalSpy) NextLine() (string, error) { return "", io.EOF }
-func (s *terminalSpy) Raw() bool                 { return true }
-func (s *terminalSpy) Close()                    { s.once.Do(func() { close(s.closed) }) }
-
-func (s *terminalSpy) wasClosed(d time.Duration) bool {
-	select {
-	case <-s.closed:
-		return true
-	case <-time.After(d):
-		return false
-	}
-}
-
-// Pressing "b" only stopped the renderer from painting. The terminal stayed in
-// raw mode and the key reader kept eating every keystroke, so typed input was
-// invisible and swallowed — and Esc could still kill a run the reader believed
-// they had put in the background.
-func TestDetachHandsTheTerminalBackAndStopsReadingKeys(t *testing.T) {
-	spy := newTerminalSpy()
-	d := NewDriver(&fakeAssistant{}, &MultiSink{}, spy, 1)
-	cancelled := make(chan struct{})
-	d.cancel = func() { close(cancelled) }
-	d.startKeyReader()
-
-	spy.keys <- byte(KeyB)
-	if !spy.wasClosed(2 * time.Second) {
-		t.Fatal("detaching left the terminal in raw mode")
-	}
-
-	// Anything typed after detaching belongs to the reader, not to the run.
-	// Esc is the sharpest case: a reader who stepped away must not come back
-	// to a run their own typing cancelled.
-	spy.keys <- byte(KeyEsc)
-	select {
-	case <-cancelled:
-		t.Error("the key reader kept consuming keys after the terminal was released")
-	case <-time.After(200 * time.Millisecond):
-	}
-	if n := spy.reads.Load(); n != 1 {
-		t.Errorf("read %d keys after detaching, want 1 (the detach key itself)", n)
-	}
-}
-
-// Detaching twice must restore the terminal once and announce itself once:
-// Ctrl-Z and "b" are the same directive, and the deferred Close in ui.Run
-// still runs over the same Input afterwards.
-func TestDetachIsIdempotent(t *testing.T) {
-	spy := newTerminalSpy()
-	sink := &MultiSink{}
-	d := NewDriver(&fakeAssistant{}, sink, spy, 1)
-	d.detach()
-	d.detach()
-	spy.Close() // as ui.Run's deferred close does
-	detaches := 0
-	for _, e := range sink.Timeline {
-		if e.Type == Detach {
-			detaches++
-		}
-	}
-	if detaches != 1 {
-		t.Errorf("emitted %d detach events, want 1", detaches)
-	}
-}
-
-// --detach starts a run with no display to release later and no directive to
-// accept, so holding the terminal in raw mode with a reader on it swallows the
-// reader's input for nothing.
-func TestARunStartedDetachedNeverTakesTheTerminal(t *testing.T) {
-	spy := newTerminalSpy()
-	d := NewDriver(&fakeAssistant{}, &MultiSink{}, spy, 1)
-	d.detached = true
-	if _, err := d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "S"}})); err != nil {
-		t.Fatal(err)
-	}
-	if !spy.wasClosed(time.Second) {
-		t.Error("a run started detached kept the terminal in raw mode")
-	}
-	if n := spy.reads.Load(); n != 0 {
-		t.Errorf("read %d keys with no display to drive, want 0", n)
-	}
-}
-
 // Sub-agent parallelism was a literal 3 in ui.Run, so the budget a caller
 // asked for was dropped on the floor: a deep plan always searched
 // three-at-a-time, however many sub-topics it had. It is a configured budget
@@ -954,14 +850,14 @@ func TestPhaselessEventsCarryTheRunningPhase(t *testing.T) {
 // ---- timeline export ------------------------------------------------------
 
 // writeArtifacts ranged over the live timeline while the key reader could
-// still emit a late detach into it.
+// still emit into it.
 func TestTimelineSnapshotIsSafeWhileEmitting(t *testing.T) {
 	sink := &MultiSink{}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			sink.Emit(Event{Type: Detach, Detail: "b"})
+			sink.Emit(Event{Type: Info, Detail: "late"})
 		}
 	}()
 	for i := 0; i < 200; i++ {
@@ -1141,28 +1037,6 @@ func TestProgressLinesRenderWithoutTheErrorGlyph(t *testing.T) {
 	}
 }
 
-// ---- Options.Detach -------------------------------------------------------
-
-// Detach was set only by tests: the CLI had no way to reach it. It is now
-// --detach, and it must release the display at the start of the run.
-func TestDetachOptionReleasesTheDisplay(t *testing.T) {
-	sink := &MultiSink{}
-	d := NewDriver(&fakeAssistant{}, sink, NewByteReader(nil), 1)
-	d.detached = true
-	if _, err := d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "Alpha"}})); err != nil {
-		t.Fatal(err)
-	}
-	var detached bool
-	for _, e := range sink.TimelineSnapshot() {
-		if e.Type == Detach {
-			detached = true
-		}
-	}
-	if !detached {
-		t.Error("a run started detached never reported the display released")
-	}
-}
-
 // ---- review pass: fact-check verdicts, mixed retrieval, query shape --------
 
 // The fact-checker may put a claim in the "verified" array with
@@ -1247,7 +1121,7 @@ func TestLongQuestionKeepsBranchesDistinct(t *testing.T) {
 	}
 }
 
-// ---- review pass: partial runs, detach ticker, export completeness --------
+// ---- review pass: partial runs, export completeness ----------------------
 
 // failingPhase answers every phase normally except the one named.
 type failingPhase struct {
@@ -1318,24 +1192,6 @@ type cancellingAnalyzer struct {
 func (c cancellingAnalyzer) Analyze(ctx context.Context, p string) (*agent.Analysis, error) {
 	c.cancel()
 	return nil, ctx.Err()
-}
-
-// Detaching stopped the animation ticker, and the very next event started a
-// new one that woke 8×/s for the rest of the run to paint nothing.
-func TestDetachedRendererDoesNotRestartTheTicker(t *testing.T) {
-	var buf bytes.Buffer
-	r := NewRenderer(&buf, Theme{})
-	r.plain = false
-	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
-	r.Emit(Event{Type: Detach, Detail: "released"})
-	r.Emit(Event{Type: Info, Detail: "still working"})
-	r.mu.Lock()
-	running := r.stop != nil
-	r.mu.Unlock()
-	r.Close()
-	if running {
-		t.Error("an event after detach restarted the animation ticker")
-	}
 }
 
 // A tab counted zero columns, so a row holding one was not really clipped:
@@ -2194,33 +2050,19 @@ func allocated(f func()) uint64 {
 	return after.TotalAlloc - before.TotalAlloc
 }
 
-// A run that gave the terminal back, with --detach or by pressing b, must say
-// so: the CLI offers questions about the report on the terminal that watched
-// it, and reading that terminal after a detach sent the lines typed at it
-// since, meant for the shell, to the model as questions.
-func TestRunReportsThatItDetached(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		detach bool
-		keys   string
-		want   bool
-	}{
-		{"watched", false, "\r", false},
-		{"--detach", true, "\r", true},
-		{"pressed b", false, "\rb", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			res, err := Run(context.Background(), Options{
-				Question: "q", Assistant: &fakeAssistant{summary: "s"}, OutDir: t.TempDir(),
-				Stdout: io.Discard, Stderr: io.Discard, KeyScript: tc.keys, Detach: tc.detach,
-			})
-			if err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if res.Detached != tc.want {
-				t.Errorf("Detached = %v, want %v", res.Detached, tc.want)
-			}
-		})
+// A run must say whether it still holds the terminal's keys: the CLI offers
+// questions about the report on the terminal that watched it, and a watched
+// run that claimed to hold them lost that prompt for no reason.
+func TestAWatchedRunGivesItsKeysBack(t *testing.T) {
+	res, err := Run(context.Background(), Options{
+		Question: "q", Assistant: &fakeAssistant{summary: "s"}, OutDir: t.TempDir(),
+		Stdout: io.Discard, Stderr: io.Discard, KeyScript: "\r",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.KeysHeld {
+		t.Error("KeysHeld after a watched run, want false")
 	}
 }
 
@@ -3746,3 +3588,21 @@ func (w *wholeInput) NextWithin(time.Duration) (byte, error) { return w.Next() }
 func (w *wholeInput) NextLine() (string, error)              { return "", io.EOF }
 func (w *wholeInput) Close()                                 {}
 func (w *wholeInput) Raw() bool                              { return true }
+
+// /mode is the start of /model, which the menu lists first, so Enter on
+// "/mode" typed whole ran /model and opened the model picker. A command
+// typed whole is the one taken; a prefix still takes the first match.
+func TestACommandTypedWholeIsTheOneRun(t *testing.T) {
+	for keys, want := range map[string]string{
+		"/mode\r":   "/mode",
+		"/mode\t\r": "/mode",
+		"/MODE\r":   "/mode",
+		"/model\r":  "/model",
+		"/m\r":      "/model",
+	} {
+		e := &commandEditor{paint: func(string, int, int) {}}
+		if got, _ := e.read(NewByteReader([]byte(keys)), false); got != want {
+			t.Errorf("%q ran %q, want %q", keys, got, want)
+		}
+	}
+}

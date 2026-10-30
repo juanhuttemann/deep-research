@@ -33,8 +33,6 @@ const (
 	SubAgent EventType = "subagent"
 	// Report marks completion of the final report.
 	Report EventType = "report"
-	// Detach reports that the run was sent to the background.
-	Detach EventType = "detach"
 	// Info is a non-fatal progress line — which model is being asked, that a
 	// call is being retried, how many results a search returned. It is its own
 	// type because routing these through Error rendered ordinary progress with
@@ -160,7 +158,7 @@ func (m *MultiSink) Emit(e Event) {
 }
 
 // TimelineSnapshot returns a copy of the recorded timeline taken under the
-// lock. Exports run while the key reader can still emit (a late detach), and
+// lock. Exports run while another goroutine can still emit, and
 // ranging over the live slice from another goroutine is a data race.
 func (m *MultiSink) TimelineSnapshot() []Event {
 	m.mu.Lock()

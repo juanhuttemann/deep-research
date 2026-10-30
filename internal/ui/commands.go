@@ -25,14 +25,20 @@ func CommandNames() []string {
 }
 
 // completions is the commands text is the start of, while it can still be
-// one: a "/" and no space.
+// one: a "/" and no space. A command typed whole comes first, so it is the
+// one highlighted and the one Enter runs: /mode is the start of /model,
+// which is listed before it, and Enter on "/mode" opened the model picker.
 func completions(text string) []Choice {
 	if !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \t") {
 		return nil
 	}
+	typed := strings.ToLower(text)
 	var out []Choice
 	for _, c := range commands() {
-		if strings.HasPrefix(c.Title, strings.ToLower(text)) {
+		switch {
+		case c.Title == typed:
+			out = append([]Choice{c}, out...)
+		case strings.HasPrefix(c.Title, typed):
 			out = append(out, c)
 		}
 	}

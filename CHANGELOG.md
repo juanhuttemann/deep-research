@@ -5,7 +5,30 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Removed
+
+- The `b` key (and Ctrl-Z) that released the live display, and `--detach`,
+  its flag. It stopped drawing the run but kept the terminal until the
+  report was written, which read as backgrounding a run that was not.
+  `--detach` is still accepted, with a deprecation warning, and does
+  nothing; the JSONL stream has no `detach` event.
+
+### Changed
+
+- The start screen's keys no longer list `[esc] quit`; Esc still quits.
+- The start screen's settings row no longer shows the depth at its
+  default. It read as fixed until the plan was ready, and the brief shows it
+  again, where `d` changes it; set away from the default (`/mode`,
+  `--mode`), it is listed with the other changed settings.
+
 ### Fixed
+
+- Enter on `/mode`, typed whole, ran `/model`: the menu listed `/model`
+  first and took the highlighted row. A command typed whole is now the one
+  highlighted and run.
+- Leaving a report's `ask ▸` box for the start screen (an empty line or
+  Esc, after a run or a `/resume`) left the report filling the screen above
+  it. The screen is now cleared first.
 
 - The Windows installer (`install.ps1`) failed to parse in PowerShell:
   `"removed $old: ..."` reads `$old:` as a drive-qualified variable, so

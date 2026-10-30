@@ -2250,7 +2250,7 @@ func TestStartScreenFrame(t *testing.T) {
 	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, nil, "an example?", "research failed: no key")
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
-		"research ▸ █an example?", "[enter] research   [/] settings   [esc] quit",
+		"research ▸ █an example?", "[enter] research   [/] settings",
 		// Why the last run ended is said on the screen, where it is read.
 		"research failed: no key"} {
 		if !strings.Contains(frame, want) {
@@ -2263,15 +2263,16 @@ func TestStartScreenFrame(t *testing.T) {
 	}
 }
 
-// The settings row names the depth and what is set away from its default,
-// and counts the rest: all eight at auto, on and standard overran the
-// screen's width saying nothing was chosen.
+// The settings row names what is set away from its default and counts the
+// rest: all eight at auto, on and standard overran the screen's width saying
+// nothing was chosen. The depth at its default was shown too, and read as
+// fixed until the brief, which shows it again and changes it.
 func TestStartSettingsRowShowsChanges(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	r.width, r.rows, r.plain = 100, 30, false
 	r.RenderStart(agent.Setup{}, Settings(RunSettings{}), "an example?", "")
-	if got, want := strings.TrimSpace(r.startSettingsRow()), "depth standard   +7 more"; got != want {
-		t.Errorf("default row = %q, want %q", got, want)
+	if got := r.startSettingsRow(); got != "" {
+		t.Errorf("default row = %q, want none", got)
 	}
 	r.RenderStart(agent.Setup{}, Settings(RunSettings{Mode: "deep", Report: ReportSpec{Words: 1000}}), "an example?", "")
 	row := r.startSettingsRow()

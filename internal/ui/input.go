@@ -18,18 +18,16 @@ import (
 type Key byte
 
 const (
-	KeyA     Key = 'a' // show or hide the activity tail
-	KeyB     Key = 'b' // send to background
-	KeyC     Key = 'c' // answer the clarifying questions again
-	KeyQ     Key = 'q' // cancel the run
-	KeyD     Key = 'd' // change depth mode
-	KeyE     Key = 'e' // add a sub-topic
-	KeyF     Key = 'f' // turn the follow-up round on or off
-	KeyR     Key = 'r' // rename a sub-topic
-	KeyT     Key = 't' // change the report format
-	KeyX     Key = 'x' // delete a sub-topic
-	KeyEsc   Key = 27  // escape: cancel the run
-	KeyCtrlZ Key = 26  // ctrl-z: detach
+	KeyA   Key = 'a' // show or hide the activity tail
+	KeyC   Key = 'c' // answer the clarifying questions again
+	KeyQ   Key = 'q' // cancel the run
+	KeyD   Key = 'd' // change depth mode
+	KeyE   Key = 'e' // add a sub-topic
+	KeyF   Key = 'f' // turn the follow-up round on or off
+	KeyR   Key = 'r' // rename a sub-topic
+	KeyT   Key = 't' // change the report format
+	KeyX   Key = 'x' // delete a sub-topic
+	KeyEsc Key = 27  // escape: cancel the run
 	// KeyCtrlC cancels. Raw mode clears ISIG, so the terminal never turns
 	// ^C into SIGINT and it has to be handled here or it does nothing —
 	// which is not what anyone who has used a shell expects it to do.
@@ -123,8 +121,6 @@ func keyFromByte(b byte) Key {
 	switch Key(b) {
 	case KeyA:
 		return KeyA
-	case KeyB:
-		return KeyB
 	case KeyC:
 		return KeyC
 	case KeyQ:
@@ -143,8 +139,6 @@ func keyFromByte(b byte) Key {
 		return KeyX
 	case KeyEsc:
 		return KeyEsc
-	case KeyCtrlZ:
-		return KeyCtrlZ
 	case KeyCtrlC:
 		return KeyCtrlC
 	default:

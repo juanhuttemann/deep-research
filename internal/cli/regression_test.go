@@ -186,25 +186,6 @@ func TestSilentAndJSONLAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// --detach used to be reachable only from a test: Options.Detach was set by
-// nothing the CLI could pass.
-func TestDetachFlagIsAccepted(t *testing.T) {
-	dir := t.TempDir()
-	deps := Deps{
-		Assistant: always(stub{}),
-		Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
-			Config: agent.Config{ModelCallTimeout: time.Second}},
-	}
-	cmd := New(func() (Deps, error) { return deps, nil })
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"-p", "q", "--detach", "--reports", dir})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("--detach: %v", err)
-	}
-}
-
 // `-p ""` planned nothing and still spent three model calls, wrote three
 // artifacts and a history record about nothing.
 func TestEmptyQuestionIsRejected(t *testing.T) {

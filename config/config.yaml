@@ -53,7 +53,7 @@ follow_ups: true
 # the period, which product) and asks up to three questions, none for a clear
 # question. auto asks in the terminal and on the serve page; off never asks.
 # --clarify off skips it for one run. Runs with no one to answer (--jsonl,
-# --silent, a pipe, --detach) never ask; --clarify-only prints the questions
+# --silent, a pipe) never ask; --clarify-only prints the questions
 # and --answers hands them back.
 clarify: auto
 # The report's shape. report_format is a preset: standard (the explanation

@@ -101,74 +101,6 @@ func TestKilledRunGivesTheTerminalBack(t *testing.T) {
 	}
 }
 
-// The key reader runs until the input closes, through the report and the
-// exports, so a b pressed there detaches the run too. The run sampled its
-// detach before them and said it had not, and the CLI then opened the
-// question prompt on a terminal it had just given back, where what is typed
-// next is meant for the shell.
-func TestDetachWhileTheReportIsWrittenIsReported(t *testing.T) {
-	// A watched run must still come back undetached once its reader stops,
-	// or every run would lose the prompt the reader never asked to skip.
-	for name, key := range map[string]string{"pressed b": "b", "watched": ""} {
-		t.Run(name, func(t *testing.T) {
-			if got := runPressingAfterReport(t, key); got != (key == "b") {
-				t.Errorf("Detached = %v after pressing %q while the report was written", got, key)
-			}
-		})
-	}
-}
-
-// runPressingAfterReport runs in a pseudo-terminal, launches at the brief,
-// types key once the report is rendered and its files written, and returns
-// whether the run reported it detached.
-func runPressingAfterReport(t *testing.T, key string) bool {
-	t.Helper()
-	master, slave := openPTY(t)
-	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 100}); err != nil {
-		t.Skipf("TIOCSWINSZ: %v", err)
-	}
-	var mu sync.Mutex
-	var screen bytes.Buffer
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := master.Read(buf)
-			mu.Lock()
-			screen.Write(buf[:n])
-			mu.Unlock()
-			if err != nil {
-				return
-			}
-		}
-	}()
-	// Keys typed before the brief are discarded, so Enter waits for it.
-	go func() {
-		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			mu.Lock()
-			shown := bytes.Contains(screen.Bytes(), []byte("[enter]"))
-			mu.Unlock()
-			if shown {
-				_, _ = master.Write([]byte("\r"))
-				return
-			}
-		}
-	}()
-	res, err := Run(context.Background(), Options{
-		Question: "q", Assistant: &fakeAssistant{summary: "s"}, OutDir: t.TempDir(),
-		Input: slave, Stdout: slave, Stderr: slave,
-		// The bell rings once the report is rendered and its files written:
-		// the key is typed there, and given time to be read.
-		Bell: func(string) {
-			_, _ = master.Write([]byte(key))
-			time.Sleep(3 * keyPoll)
-		},
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	return res.Detached
-}
-
 // The questions were drawn on the run's own renderer, and the guard that
 // gives the terminal back after them closed it: the brief that followed was
 // never drawn, and the run sat waiting on a key for a screen nobody saw.
@@ -226,5 +158,27 @@ func TestBriefIsDrawnAfterTheQuestions(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		_, _ = master.Write([]byte("q"))
 		t.Fatal("no brief after the questions")
+	}
+}
+
+// Leaving a report's ask ▸ box drew the start screen in place, under the
+// report, which still filled the screen. A terminal is cleared first; a
+// pipe or a file gets no escape sequence.
+func TestClearScreenClearsOnlyATerminal(t *testing.T) {
+	master, slave := openPTY(t)
+	// A pseudo-terminal with no size is not taken for a terminal.
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
+		t.Skipf("TIOCSWINSZ: %v", err)
+	}
+	ClearScreen(slave)
+	buf := make([]byte, 64)
+	n, err := master.Read(buf)
+	if err != nil || string(buf[:n]) != cursorHome+eraseToEnd {
+		t.Errorf("terminal got %q (%v), want the screen cleared", buf[:n], err)
+	}
+	var out bytes.Buffer
+	ClearScreen(&out)
+	if out.Len() > 0 {
+		t.Errorf("a non-terminal got %q", out.String())
 	}
 }

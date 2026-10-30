@@ -30,7 +30,6 @@ type Driver struct {
 	// activity tail. nil when there is no frame.
 	toggleActivity func()
 
-	detached bool
 	// keysDone is closed when the key reader ends; nil when none started.
 	keysDone  chan struct{}
 	cancel    context.CancelFunc
@@ -101,7 +100,7 @@ func NewDriver(a agent.Assistant, sink *MultiSink, input Input, parallelism int)
 // emit stamps an event with the phase the pipeline is in and fans it out.
 //
 // The phase is tracked rather than hardcoded: the assistant's progress logger
-// and the detach key emit phase-less events, and defaulting them all to
+// emits phase-less events, and defaulting them all to
 // "Research" filed every retry line from Analyze, Fact-Check and Summarize
 // under a phase that had already finished.
 func (d *Driver) emit(e Event) {
@@ -188,14 +187,6 @@ func (d *Driver) startKeyReader() {
 				if d.toggleActivity != nil {
 					d.toggleActivity()
 				}
-			case KeyCtrlZ, KeyB:
-				d.detach()
-				// Detaching gave the terminal back, so there are no more
-				// keys to read here. Staying in the loop would keep eating
-				// every keystroke the reader types at their shell prompt,
-				// and would leave Esc able to kill a run they already sent
-				// to the background.
-				return
 			}
 		}
 	}()
@@ -271,38 +262,12 @@ func (d *Driver) withFoundAgain(findings []agent.Finding) []agent.Finding {
 	return findings
 }
 
-// detach stops the live display and hands the terminal back.
-//
-// There is no second process to hand the work to, so the run keeps the
-// foreground until it prints its report. What detaching can honestly give
-// back is the terminal itself: closing the Input restores the mode it was
-// found in, so typing is echoed again and the keys are no longer swallowed.
-func (d *Driver) detach() {
-	d.mu.Lock()
-	already := d.detached
-	d.detached = true
-	d.mu.Unlock()
-	if already {
-		return
-	}
-	d.releaseTerminal()
-	d.emit(Event{Type: Detach, Detail: detachDetail})
-}
-
-// isDetached reports whether the run has given the terminal back.
-func (d *Driver) isDetached() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.detached
-}
-
 // stopKeys closes the input, which ends the key reader, and reports whether
-// the run gave the terminal back. The reader runs through the report and the
-// exports, so a b pressed there counts, and only once it has stopped is the
-// answer final. One that does not stop (a line reader parked on stdin) still
-// holds the terminal, which is no more free for what is typed next than a
-// detached one.
-func (d *Driver) stopKeys() (detached bool) {
+// it still holds the terminal. The reader runs through the report and the
+// exports, and only once it has stopped is the terminal free for what is
+// typed next. One that does not stop (a line reader parked on stdin) still
+// holds it.
+func (d *Driver) stopKeys() (held bool) {
 	d.releaseTerminal()
 	if d.keysDone != nil {
 		select {
@@ -311,12 +276,8 @@ func (d *Driver) stopKeys() (detached bool) {
 			return true
 		}
 	}
-	return d.isDetached()
+	return false
 }
-
-// detachDetail is what the run says about itself once the display is released.
-// It does not claim the process was backgrounded, because it was not.
-const detachDetail = "display released; the run keeps this terminal until the report is written"
 
 // releaseTerminal restores the terminal mode the Input was opened over. It is
 // safe to call more than once, and ui.Run closes the same Input again when the
@@ -335,13 +296,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	ctx, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
 	defer cancel()
-	// A run that starts detached never reads a key: it has no display to
-	// release later and no directive to accept, so leaving the terminal in
-	// raw mode with a reader on it would swallow input for nothing.
-	if d.detached {
-		d.releaseTerminal()
-		d.emit(Event{Type: Detach, Detail: detachDetail})
-	} else if d.Input != nil {
+	if d.Input != nil {
 		d.startKeyReader()
 	}
 	d.emit(Event{Type: Phase, Phase: "Plan", Detail: "Planning research scope"})
