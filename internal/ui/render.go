@@ -142,14 +142,12 @@ type Renderer struct {
 	pickFree  bool
 
 	startTime time.Time
-	detached  bool
 	done      bool
 	frame     int
 	result    *agent.ResearchResult
 
 	painted   int  // rows written by the previous frame
 	cleared   bool // viewport has been cleared for the live frame
-	released  bool // detached: the frame has handed the terminal back
 	hidden    bool // cursor is currently hidden
 	closed    bool // Close has released the terminal; writes are ignored
 	lastPaint time.Time
@@ -184,7 +182,6 @@ func (r *Renderer) RenderBrief(plan *Plan) {
 	r.plan = plan
 	r.question = plan.Question
 	r.result = nil
-	r.detached = false
 	r.mode = "brief"
 	r.phase = ""
 	r.frame = 0
@@ -256,12 +253,10 @@ func (r *Renderer) Emit(e Event) {
 		r.logEvent(e)
 		return
 	}
-	// A detached frame paints nothing, so a ticker restarted here would wake
-	// 8×/s for the rest of the run to do nothing.
-	if r.mode == "tree" && !r.detached {
+	if r.mode == "tree" {
 		r.startTickerLocked()
 	}
-	r.paintLocked(e.Type == Detach)
+	r.paintLocked(false)
 }
 
 // ToggleActivity shows the activity tail if it is hidden and hides it if not.
@@ -269,7 +264,7 @@ func (r *Renderer) ToggleActivity() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.showActivity = !r.showActivity
-	if r.plain || r.mode != "tree" || r.detached {
+	if r.plain || r.mode != "tree" {
 		return
 	}
 	r.paintLocked(true)
@@ -344,8 +339,6 @@ func (r *Renderer) apply(e Event) {
 		r.sources = max(r.sources, e.Sources)
 	case SubAgent:
 		r.applySubAgent(e)
-	case Detach:
-		r.detached = true
 	case Info:
 		// Periodic progress is status, not history: pushed into the tail it
 		// evicted every read/verify line within a few minutes.
@@ -544,23 +537,6 @@ func (r *Renderer) paintLocked(force bool) {
 	}
 	r.lastPaint = now
 	r.frame++
-
-	// Detached: hand the terminal back and stop drawing. The run itself keeps
-	// going and still prints its report. There is no second process to hand
-	// the work to, so what is released is the display and the terminal mode —
-	// the process keeps the foreground until the report is written, and the
-	// notice says so rather than implying a shell prompt is coming back.
-	if r.detached {
-		if !r.released {
-			r.stopTickerLocked()
-			r.write(cursorHome + eraseToEnd)
-			r.writeBlock([]string{r.T.yellow(
-				"  ● detached — display released; the run still holds this terminal")})
-			r.showCursorLocked()
-			r.painted, r.cleared, r.released = 0, false, true
-		}
-		return
-	}
 
 	if r.inline != nil {
 		r.paintInlineLocked()
@@ -1246,7 +1222,7 @@ func (r *Renderer) footerLines() []string {
 		if r.showActivity {
 			activity = "[a] hide activity"
 		}
-		out = append(out, "  "+r.T.hints(activity+"   [b] release display   [esc] cancel"))
+		out = append(out, "  "+r.T.hints(activity+"   [esc] cancel"))
 	}
 	return out
 }

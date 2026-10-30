@@ -59,7 +59,13 @@ func (s *session) loop() error {
 		case !ok:
 			return nil
 		case line == "":
+			// Only the ask prompt returns an empty line. With a start
+			// screen to go back to, it starts on a clear one; a -p run's
+			// report stays where it was printed.
 			s.run, s.chat = "", nil
+			if s.home {
+				ui.ClearScreen(s.cmd.OutOrStdout())
+			}
 		case line == "/resume":
 			s.resume()
 		case line == "/model":
@@ -141,7 +147,7 @@ func (s *session) after(res ui.RunResult, err error) {
 		s.say("research cancelled")
 		return
 	}
-	if res.Detached || res.JSONPath == "" {
+	if res.KeysHeld || res.JSONPath == "" {
 		return
 	}
 	if m, err := ui.LoadMeta(res.JSONPath); err != nil {

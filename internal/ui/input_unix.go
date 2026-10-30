@@ -17,9 +17,9 @@ import (
 type ttyReader struct {
 	f   *os.File
 	old *unix.Termios
-	// closed guards the restore. Detaching gives the terminal back from the
-	// key-reader goroutine while ui.Run still closes the same Input when the
-	// run ends, so the restore has to be both idempotent and race-free.
+	// closed guards the restore. The driver gives the terminal back when the
+	// run ends and ui.Run, or a signal guard, closes the same Input again, so
+	// the restore has to be both idempotent and race-free.
 	closed sync.Once
 	// ignored counts keys typed before raw mode began — during planning,
 	// before the brief existed. They are discarded, not applied: nobody can

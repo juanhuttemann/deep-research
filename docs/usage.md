@@ -51,16 +51,18 @@ under what the terminal already shows, as the `ask ▸` box and the
 `/resume` and `/model` lists are, so the three sit alike. Enter runs it as `-p` would, the brief and the
 live frame included, and then takes questions about its report in an
 `ask ▸` box drawn like the start screen's (see [`ask`](#ask)). An empty
-line or Esc there brings the screen back for the next question; Esc on
+line or Esc there clears the terminal's screen and brings the start screen
+back on it for the next question; Esc on
 the screen ends it, and Ctrl-D at `ask ▸` ends `drsh` at once. Ctrl-C in
 either box clears what is typed; on an empty box it says to press it
 again, and a second press quits (an empty `ask ▸` box: ends `drsh`). Cmd-C
 on macOS is the terminal's copy and never reaches `drsh`. A run that
 fails, or that the brief cancels, returns to the screen, which says why.
-Under the box is the next run's settings row: the `depth`, and any of
+Under the box is the next run's settings row: any of `depth`,
 `sub-topics`, `pages per topic`, `follow-ups`, `format`, `words`, `tables`
 and `clarify` that the config, the flags or a command set away from its
-default; the rest are counted (`+7 more`), and `/` lists them all. They
+default, none when all are at theirs (the brief shows the depth, and `d`
+changes it there); the rest are counted (`+7 more`), and `/` lists them all. They
 are the same settings the serve page's form draws. Each setting has a
 command that changes it for every run the screen starts after: `/mode`,
 `/topics`, `/sources`, `/follow-ups`, `/format`, `/words`, `/tables` and `/clarify`,
@@ -127,7 +129,6 @@ runs it.
 | `--reports DIR` | `reports` | where the `.md` / `.pdf` / `.json` artifacts are written |
 | `--jsonl` | off | machine-readable event stream instead of the live UI |
 | `--silent`, `-s` | off | no live UI; print only the report |
-| `--detach` | off | release the live display as soon as the run starts (same as pressing `b`) |
 | `--no-color` | off | disable ANSI colour (`NO_COLOR=1` does the same) |
 | `--trace` | off | also write `<report>.trace.json`: the plan, every search result with its full page text, and each model phase's prompt and output |
 | `--replay TRACE` | — | re-run analyze, fact-check and summarize on a trace's recorded plan and search results, without searching; see below |
@@ -193,8 +194,7 @@ answers make a new plan to compare, so sub-topics edited in the brief are
 replaced, while its depth, budget, follow-up and format choices stay. Esc
 out of them keeps the plan.
 
-Only a run someone can answer asks: not `--jsonl`, `--silent`, `--detach`,
-a pipe, `--plan`, `--resume` or `--replay`, which make no call for it. A
+Only a run someone can answer asks: not `--jsonl`, `--silent`, a pipe, `--plan`, `--resume` or `--replay`, which make no call for it. A
 script asks in two steps:
 
 ```bash
@@ -429,7 +429,7 @@ A run with `--domains` first sends one `source` event per site, before
 planning, with the check's result in `check` (`domain`, `status`, `pages`,
 `sample`, `chars`, `detail`).
 The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
-`citation`, `token`, `report`, `detach`, `thinking` and `error`; their fields are the
+`citation`, `token`, `report`, `thinking` and `error`; their fields are the
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
 structured result: analysis, fact-check, sources and the whole timeline.
 
@@ -853,14 +853,7 @@ During a run:
 | Key | Action |
 | --- | ------ |
 | `a` | show or hide the activity tail (hidden at the start) |
-| `b` | release the display; the run continues (see below) |
 | `Esc` / `Ctrl-C` | cancel the run |
-
-`b` is not a true backgrounding: there is no second process to hand the work
-to, so the run keeps the foreground until it has written its report. What it
-releases is the live frame and the terminal mode — the terminal echoes what
-you type again and the keys above stop being captured, so `Esc` no longer
-cancels a released run. The report and the exports are written as usual.
 
 ## Output and exports
 
