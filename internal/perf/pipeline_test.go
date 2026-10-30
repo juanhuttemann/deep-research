@@ -78,6 +78,11 @@ func (s *stubAssistant) Summarize(context.Context, string) (*agent.Summary, erro
 	return s.summary, nil
 }
 
+func (s *stubAssistant) Answer(context.Context, string) (*agent.Summary, error) {
+	s.tokens.Add(5000)
+	return s.summary, nil
+}
+
 func (s *stubAssistant) SetSourceBudget(n int)              { s.budget = n }
 func (s *stubAssistant) SkipSources(skip func(string) bool) { s.skip = skip }
 func (s *stubAssistant) SetProgress(logf func(string))      { s.progress = logf }

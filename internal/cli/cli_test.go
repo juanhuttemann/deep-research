@@ -270,6 +270,10 @@ func (stub) Summarize(context.Context, string) (*agent.Summary, error) {
 	return &agent.Summary{Report: "stub report", Executive: "stub", Confidence: "low"}, nil
 }
 
+func (stub) Answer(context.Context, string) (*agent.Summary, error) {
+	return &agent.Summary{Report: "stub answer", Executive: "stub"}, nil
+}
+
 func (stub) Clarify(context.Context, string) ([]agent.Question, error) { return nil, nil }
 
 func (stub) Plan(_ context.Context, question string, _ agent.Breadth, _ []agent.Clarification) (agent.Outline, error) {
@@ -954,5 +958,97 @@ func TestOpenPageFailureNamesTheURL(t *testing.T) {
 		if log.String() != tc.want {
 			t.Errorf("logged %q, want %q", log.String(), tc.want)
 		}
+	}
+}
+
+// planCounter is the stub counting its planner calls.
+type planCounter struct {
+	stub
+	plans *int
+}
+
+func (p planCounter) Plan(ctx context.Context, q string, b agent.Breadth, r []agent.Clarification) (agent.Outline, error) {
+	*p.plans++
+	return p.stub.Plan(ctx, q, b, r)
+}
+
+// An instant run answers from a web search; with search off the model
+// would write the findings it then answers from, unchecked.
+func TestInstantRefusesARunWithSearchOff(t *testing.T) {
+	_, err := runCLI(t, t.TempDir(), stub{}, "-p", "q", "--instant", "--silent", "--reports", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "search is off") {
+		t.Errorf("instant run with search off: %v, want it refused", err)
+	}
+}
+
+// --instant on its own makes no planner call: the plan is the question,
+// and the stream says the plan is instant.
+func TestInstantRunMakesNoPlannerCall(t *testing.T) {
+	dir := t.TempDir()
+	var plans int
+	cfg := config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
+		Config: agent.Config{ModelCallTimeout: time.Second, SearXNGURL: "http://127.0.0.1:1"}}
+	cmd := New(func() (Deps, error) { return Deps{Assistant: always(planCounter{plans: &plans}), Config: cfg}, nil })
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"-p", "q", "--instant", "--jsonl", "--reports", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("instant run: %v", err)
+	}
+	if plans != 0 || !strings.Contains(out.String(), `"instant":true`) {
+		t.Errorf("planner calls %d, stream with instant plan %v; want none and an instant plan",
+			plans, strings.Contains(out.String(), `"instant":true`))
+	}
+}
+
+// --instant sets every setting not given, over the config's values, and a
+// flag given keeps its value in either order; instant: true in the config
+// does the same with no flag.
+func TestInstantFlagLeavesTheGivenSettings(t *testing.T) {
+	d := Deps{Config: config.Config{SourcesPerTopic: 6, Report: agent.ReportSpec{Format: "detailed"}}}
+	for _, args := range [][]string{{"--instant", "--format", "table"}, {"--format", "table", "--instant"}} {
+		cmd := New(func() (Deps, error) { return d, nil })
+		if err := cmd.ParseFlags(args); err != nil {
+			t.Fatal(err)
+		}
+		rs := runSettings(cmd, d)
+		if !rs.Instant || rs.Report.Format != "table" || rs.Sources != 2 || rs.SubTopics != 1 || !rs.NoFollowUps || !rs.NoClarify {
+			t.Errorf("%v: settings %+v", args, rs)
+		}
+	}
+	d.Config.Instant = true
+	cmd := New(func() (Deps, error) { return d, nil })
+	if rs := runSettings(cmd, d); !rs.Instant || rs.Sources != 2 || rs.Report.Format != "brief" {
+		t.Errorf("instant: true in the config: settings %+v", rs)
+	}
+	if rs := defaultSettings(d.Config); !rs.Instant || rs.Sources != 2 {
+		t.Errorf("the page's opening settings with instant: true: %+v", rs)
+	}
+}
+
+// A plan, a checkpoint and a trace carry whether they are instant; a flag
+// beside them would be a second answer.
+func TestInstantIsRefusedBesideAGivenPlan(t *testing.T) {
+	for _, args := range [][]string{{"--plan", "x.json"}, {"--resume", "x.json"}, {"--replay", "x.json"}} {
+		if _, err := runCLI(t, t.TempDir(), stub{}, append(args, "--instant")...); err == nil ||
+			!strings.Contains(err.Error(), "none of the others") {
+			t.Errorf("%v --instant: %v, want the flags refused together", args, err)
+		}
+	}
+}
+
+// A trace's instant bit reaches the plan a resume or replay runs, and the
+// plan's reaches the trace.
+func TestTraceCarriesInstant(t *testing.T) {
+	tr := &replay.Trace{Question: "q", Plan: []agent.SubTopic{{Name: "q"}}, Instant: true}
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	plan, _, err := givenPlan(cmd, Deps{}, tr, "")
+	if err != nil || !plan.Instant {
+		t.Errorf("plan from an instant trace: %+v, %v", plan, err)
+	}
+	if !tracedSettings(plan).Instant {
+		t.Error("the traced settings lost the plan's instant bit")
 	}
 }

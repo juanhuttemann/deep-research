@@ -40,6 +40,9 @@ type Trace struct {
 	// NoFollowUps is the plan's: a resumed run that skipped the round would
 	// otherwise ask for one the run it continues never made.
 	NoFollowUps bool `json:"no_follow_ups,omitempty"`
+	// Instant is the plan's: a resumed or replayed instant run ends in the
+	// one answer call, not the analysis and check it never made.
+	Instant bool `json:"instant,omitempty"`
 	// Scope is the planner's reading of the question, which the brief shows
 	// beside the sub-topics; a resumed run's brief lost it.
 	Scope string `json:"scope,omitempty"`
@@ -157,6 +160,7 @@ func (r *Recorder) Seed(t *Trace) {
 	defer r.mu.Unlock()
 	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
 	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = t.NoFollowUps, t.Scope, t.Report
+	r.trace.Instant = t.Instant
 	r.trace.Questions, r.trace.Clarifications = slices.Clone(t.Questions), slices.Clone(t.Clarifications)
 	if r.finished == nil {
 		r.finished = map[string]bool{}
@@ -204,6 +208,12 @@ func (r *Recorder) Summarize(ctx context.Context, prompt string) (*agent.Summary
 	return out, err
 }
 
+func (r *Recorder) Answer(ctx context.Context, prompt string) (*agent.Summary, error) {
+	out, err := r.Assistant.Answer(ctx, prompt)
+	r.phase("answer", prompt, out, err)
+	return out, err
+}
+
 func (r *Recorder) phase(name, prompt string, out any, err error) {
 	b, _ := json.Marshal(out)
 	p := Phase{Name: name, Prompt: prompt, Output: b}
@@ -221,6 +231,7 @@ type PlanSettings struct {
 	Mode        string
 	Sources     int
 	NoFollowUps bool
+	Instant     bool
 	Scope       string
 	Report      agent.ReportSpec
 	Questions   []agent.Question
@@ -239,6 +250,7 @@ func (r *Recorder) SetPlan(subs []agent.SubTopic, s PlanSettings) {
 	r.trace.Plan = slices.Clone(subs)
 	r.trace.Mode, r.trace.Sources = s.Mode, s.Sources
 	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = s.NoFollowUps, s.Scope, s.Report
+	r.trace.Instant = s.Instant
 	r.trace.Questions, r.trace.Clarifications = slices.Clone(s.Questions), slices.Clone(s.Answers)
 	r.mu.Unlock()
 	r.save()

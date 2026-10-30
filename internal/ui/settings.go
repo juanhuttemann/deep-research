@@ -43,6 +43,10 @@ type Option struct {
 	Value string `json:"value"`
 	Label string `json:"label"`
 	Note  string `json:"note,omitempty"`
+	// Implies are the values choosing this option gives other settings, by
+	// key: what each surface sets when it is chosen, so the serve page
+	// carries no copy of instant's bundle.
+	Implies map[string]string `json:"implies,omitempty"`
 }
 
 // RunSettings are a run's values for the settings, before its plan exists.
@@ -54,6 +58,9 @@ type RunSettings struct {
 	Report      ReportSpec
 	// NoClarify asks no clarifying questions before planning.
 	NoClarify bool
+	// Instant ends the run in one answer call after the search, with no
+	// brief, analysis or fact-check.
+	Instant bool
 }
 
 // Setting keys, the flags they become.
@@ -66,7 +73,17 @@ const (
 	SettingWords     = "words"
 	SettingTables    = "tables"
 	SettingClarify   = "clarify"
+	SettingInstant   = "instant"
 )
+
+// instantImplies are the values switching instant on gives the other
+// settings: each at its least, so the run is one search of two pages and
+// one call. Mode is not among them: it bounds the planner and the budget,
+// which the sub-topics and pages set here decide.
+var instantImplies = map[string]string{
+	SettingClarify: "off", SettingTopics: "1", SettingSources: "2", SettingFollowUps: "off",
+	SettingFormat: "brief", SettingWords: "0", SettingTables: "none",
+}
 
 // sourceChoices are the per-sub-agent budgets offered besides auto.
 var sourceChoices = []int{2, 3, 4, 5, 6, 8, 10}
@@ -87,6 +104,11 @@ func settingsAt(rs RunSettings) []Setting {
 	out := []Setting{
 		{Key: SettingMode, Label: "depth", Help: "How wide and deep the research goes: the most sub-topics, and the pages each reads.",
 			Value: cmp.Or(rs.Mode, "standard"), Opts: modeOptions(), Start: true, Review: true, BriefKey: KeyD},
+		// Not a review setting: an instant run has no brief to review.
+		{Key: SettingInstant, Label: "instant", Help: "One search and one answer from the pages it finds, not fact-checked:" +
+			" no plan to review, and the other settings at their least.",
+			Value: onOff(rs.Instant), Opts: []Option{{Value: "off", Label: "off"},
+				{Value: "on", Label: "on", Note: "not fact-checked", Implies: instantImplies}}, Start: true},
 		{Key: SettingTopics, Label: "sub-topics", Help: "How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.",
 			Value: strconv.Itoa(rs.SubTopics), Opts: countOptions(MaxSubTopics, nil), Start: true, count: true, max: MaxSubTopics},
 		{Key: SettingSources, Label: "pages per topic", Help: "How many pages each sub-topic reads. Auto lets the depth decide.",
@@ -199,10 +221,66 @@ func (s Setting) Flag(v string) (name, value string, err error) {
 	if !s.accepts(v) {
 		return "", "", fmt.Errorf("%s: %q is not one of its choices", s.Label, v)
 	}
-	if s.Key == SettingFollowUps {
+	switch s.Key {
+	case SettingFollowUps:
 		return "no-follow-ups", strconv.FormatBool(v == "off"), nil
+	case SettingInstant:
+		return "instant", strconv.FormatBool(v == "on"), nil
 	}
 	return s.Key, v, nil
+}
+
+// FlagName is the command-line flag the setting becomes.
+func (s Setting) FlagName() string {
+	name, _, _ := s.Flag(s.Opts[0].Value)
+	return name
+}
+
+// WithImplied is rs with what its chosen options imply (Option.Implies) set
+// on every setting not given: --instant puts the rest at their least, and a
+// flag given beside it keeps its value, in whichever order they were typed.
+func (rs RunSettings) WithImplied(given func(key string) bool) (RunSettings, error) {
+	for _, s := range Settings(rs) {
+		o, _ := s.Option(s.Value)
+		for k, v := range o.Implies {
+			if !given(k) {
+				if err := rs.set(k, v); err != nil {
+					return rs, err
+				}
+			}
+		}
+	}
+	var err error
+	rs.Report, err = rs.Report.Normalized()
+	return rs, err
+}
+
+// set gives the setting key the value v, as its flag would.
+func (rs *RunSettings) set(key, v string) error {
+	n, _ := strconv.Atoi(v)
+	switch key {
+	case SettingMode:
+		rs.Mode = v
+	case SettingTopics:
+		rs.SubTopics = n
+	case SettingSources:
+		rs.Sources = n
+	case SettingFollowUps:
+		rs.NoFollowUps = v == "off"
+	case SettingFormat:
+		rs.Report.Format = v
+	case SettingWords:
+		rs.Report.Words = n
+	case SettingTables:
+		rs.Report.Tables = v
+	case SettingClarify:
+		rs.NoClarify = v == "off"
+	case SettingInstant:
+		rs.Instant = v == "on"
+	default:
+		return fmt.Errorf("unknown setting %q", key)
+	}
+	return nil
 }
 
 // SettingFor is the setting named key among settings.

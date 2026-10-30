@@ -3606,3 +3606,29 @@ func TestACommandTypedWholeIsTheOneRun(t *testing.T) {
 		}
 	}
 }
+
+// An instant report opens with the note that it is unchecked. Matched with
+// the note, the answer's opening (its executive summary) was not found in
+// the body and was printed again above the note, unchecked prose first.
+func TestInstantNoteStaysAboveAnAnswerPrintedOnce(t *testing.T) {
+	answer := "## Cost\n\nIt cost ten billion dollars.\n\n## Limits\n\nNone given."
+	sum := &agent.Summary{Report: instantNote(2) + answer, Executive: "It cost ten billion dollars."}
+	md := MarkdownReport(&agent.ResearchResult{Question: "q", Summary: sum, Instant: true})
+	if strings.Count(md, "It cost ten billion dollars.") != 1 {
+		t.Errorf("the answer's opening is printed twice:\n%s", md)
+	}
+	if strings.Index(md, "_Instant answer") > strings.Index(md, "It cost") {
+		t.Errorf("the answer comes before the note that it is unchecked:\n%s", md)
+	}
+}
+
+// An instant run whose answer call failed is still unrated: "unknown" read
+// as the check's verdict on a run that has none.
+func TestFailedInstantAnswerStaysUnchecked(t *testing.T) {
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	res, err := d.partial(context.Background(), &Plan{Question: "q", Instant: true}, nil, nil, nil, nil,
+		"answer failed", errors.New("timeout"))
+	if err != nil || !res.Instant || res.Summary.Confidence != ConfidenceUnchecked {
+		t.Errorf("partial instant result = %+v, %v; want instant and %q", res, err, ConfidenceUnchecked)
+	}
+}

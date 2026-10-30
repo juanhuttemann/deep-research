@@ -25,7 +25,7 @@ import (
 // the phases do not need it alike: the analysis and the fact-check are what
 // the answer rests on, the plan only writes search queries.
 type Effort struct {
-	Plan, Clarify, Search, Analyze, FactCheck, Summarize, Chat string
+	Plan, Clarify, Search, Analyze, FactCheck, Summarize, Answer, Chat string
 }
 
 // EffortLevels are the levels a phase takes besides "default". Not every

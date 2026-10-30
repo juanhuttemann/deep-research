@@ -51,6 +51,32 @@ only the summarizer's prose: the program-written answer, the quote check
 and the export's Fact-Check and citation sections are the same in every
 format.
 
+An instant run (`Plan.Instant`, from `--instant` or `instant: true`) ends
+differently:
+
+```
+research → [follow-ups → follow-up research] → answer
+```
+
+After research the Driver composes the analysis's input (the question, the
+findings, the sub-topics left uncovered) with the report shape and makes one
+call, `agent.Assistant.Answer` (`answerer_instructions`), whose prose is the
+report. There is no analysis, fact-check, repair or summarize call, so
+nothing governs the answer: its confidence is `unchecked`
+(`ui.ConfidenceUnchecked`), its report opens with a note saying so, and
+`ResearchResult.Instant` and the export's `instant` mark it. The quote check
+is the program's and still runs on it. A one-sub-topic instant plan is made
+without the planner (`ui.InstantPlan`, the question searched as asked) and
+is never put on review: `ui.Run` skips the brief and the page launches it
+without its clarify and plan steps. The bit is the plan's, so a plan file, a
+checkpoint and a trace carry it, and a resume or replay of an instant run
+ends in the answer call. The settings it implies (`Option.Implies` on the
+instant setting's `on`) are applied by each surface from that one table:
+`RunSettings.WithImplied` for the flags and the config, the session's
+`/instant` and the page's control for the start screens. With search off
+the CLI refuses it, since the model would write the findings it answers
+from.
+
 Before the plan, a run someone can answer (the terminal, or a
 `--clarify-only` caller such as the serve page) asks the clarifier
 (`agent.Assistant.Clarify`, one call) what the question leaves open. Its

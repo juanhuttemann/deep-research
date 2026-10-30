@@ -118,3 +118,34 @@ func TestDomainsRoundTripBesideLegacyRecords(t *testing.T) {
 		t.Errorf("domains = %v, want [go.dev]", d)
 	}
 }
+
+// An instant record has no analysis or fact-check and says it is instant;
+// it loads beside a checked record and the oldest schema, neither of which
+// is instant.
+func TestInstantRecordsLoadBesideOthers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	legacy := `{"id":"old","question":"q0","analysis":"a","confidence":"low"}`
+	if err := os.WriteFile(path, []byte(legacy+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	checked := agent.ResearchResult{Question: "q1", Analysis: &agent.Analysis{Answer: "a"}, FactCheck: &agent.FactCheckResult{}}
+	instant := agent.ResearchResult{Question: "q2", Instant: true, Summary: &agent.Summary{Report: "r", Confidence: "unchecked"}}
+	for _, r := range []agent.ResearchResult{checked, instant} {
+		if err := st.Save(&ResearchResult{ID: NewID(), ResearchResult: r}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs, skipped, err := st.List()
+	if err != nil || skipped != 0 || len(runs) != 3 {
+		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
+	}
+	for _, r := range runs {
+		if r.Instant != (r.Question == "q2") {
+			t.Errorf("%s: instant = %v", r.Question, r.Instant)
+		}
+	}
+	if r := runs[2]; r.Analysis != nil || r.FactCheck != nil || r.Summary == nil || r.Summary.Confidence != "unchecked" {
+		t.Errorf("instant record = %+v", r)
+	}
+}

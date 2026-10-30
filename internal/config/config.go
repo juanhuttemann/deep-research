@@ -42,6 +42,9 @@ type Config struct {
 	// NoClarify asks no clarifying questions before planning (clarify:
 	// off). A negative, as NoFollowUps is.
 	NoClarify bool
+	// Instant makes every run an instant one unless its flags say otherwise
+	// (instant: true): one search and one answer call, not fact-checked.
+	Instant bool
 	// Parallelism is how many sub-agents search at once. Every other budget
 	// in the tool is configurable; this one used to be a literal 3 in the UI,
 	// so a deep run with six sub-topics could not be widened or, on a rate-
@@ -509,6 +512,7 @@ func Load() (Config, error) {
 	v.SetDefault("report_words", 0)
 	v.SetDefault("report_tables", "auto")
 	v.SetDefault("clarify", "auto")
+	v.SetDefault("instant", false)
 	// The setting was originally spelled max_depth back when it capped a run's
 	// total sources. Config files on disk still use that name, so it keeps
 	// resolving to the same value.
@@ -577,6 +581,7 @@ func runKeys(v *viper.Viper) (Config, error) {
 		SourcesPerTopic: v.GetInt("sources_per_topic"),
 		SubTopics:       max(v.GetInt("sub_topics"), 0),
 		NoFollowUps:     !v.GetBool("follow_ups"),
+		Instant:         v.GetBool("instant"),
 		Parallelism:     v.GetInt("parallelism"),
 	}
 	// A file or env var setting this to 0 or a negative number would
@@ -625,6 +630,8 @@ var effortPhases = []struct {
 	{"analyze", "default", func(e *agent.Effort) *string { return &e.Analyze }},
 	{"fact_check", "default", func(e *agent.Effort) *string { return &e.FactCheck }},
 	{"summarize", "default", func(e *agent.Effort) *string { return &e.Summarize }},
+	// An instant run's one call: the report, written from the findings.
+	{"answer", "default", func(e *agent.Effort) *string { return &e.Answer }},
 	{"chat", "medium", func(e *agent.Effort) *string { return &e.Chat }},
 }
 
@@ -659,7 +666,7 @@ func loadEffort(v *viper.Viper) (agent.Effort, error) {
 	}
 	for k := range v.GetStringMap("reasoning_effort") {
 		if !known[k] {
-			return e, fmt.Errorf("reasoning_effort.%s: no such phase (want plan, clarify, search, analyze, fact_check, summarize or chat)", k)
+			return e, fmt.Errorf("reasoning_effort.%s: no such phase (want plan, clarify, search, analyze, fact_check, summarize, answer or chat)", k)
 		}
 	}
 	return e, nil
@@ -702,6 +709,7 @@ func loadAgentConfig(cfg *Config, a *viper.Viper, path string) error {
 		{"follow_up_instructions", &cfg.FollowUpInstructions},
 		{"fact_checker_instructions", &cfg.FactCheckerInstructions},
 		{"summarizer_instructions", &cfg.SummarizerInstructions},
+		{"answerer_instructions", &cfg.AnswererInstructions},
 		{"search_instructions", &cfg.SearchInstructions},
 		{"planner_instructions", &cfg.PlanningInstructions},
 		{"clarifier_instructions", &cfg.ClarifierInstructions},

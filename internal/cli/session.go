@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,16 @@ type session struct {
 	chat *agent.Chat
 	note string // for the start screen: why the last step ended
 	in   *bufio.Scanner
+	// implied holds, while an option that implies others is chosen (instant
+	// on), each implied setting's flag as it was before, by setting key.
+	implied map[string]impliedFlag
+}
+
+// impliedFlag is a flag an option set: as it was before, and what the
+// option set it to.
+type impliedFlag struct {
+	before, set string
+	changed     bool
 }
 
 // reloadDeps loads the configuration again after /model saved a new one;
@@ -218,7 +229,57 @@ func (s *session) chooseSetting(line string) {
 	}
 	if err := setSetting(s.cmd, name, value); err != nil {
 		s.say("error: " + err.Error())
+		return
 	}
+	s.imply(set, value)
+}
+
+// imply sets what the option chosen for set implies, as the serve page's
+// controls do, so the start screen shows the bundle /instant on stands for
+// and a /command after it changes one setting of it. Switching back puts
+// each implied flag as it was, unless it was changed since: that change
+// was chosen after, and stands.
+//
+// Choosing the value it already has changes nothing: /instant on again
+// would put back the bundle over a setting changed since.
+func (s *session) imply(set ui.Setting, value string) {
+	if set.Value == value {
+		return
+	}
+	o, _ := set.Option(value)
+	if len(o.Implies) > 0 {
+		snap := s.implied == nil
+		if snap {
+			s.implied = map[string]impliedFlag{}
+		}
+		for k, v := range o.Implies {
+			f := s.cmd.Flags().Lookup(flagOf(k))
+			before, changed := f.Value.String(), f.Changed
+			if setSetting(s.cmd, k, v) != nil {
+				continue
+			}
+			if snap {
+				s.implied[k] = impliedFlag{before: before, changed: changed, set: f.Value.String()}
+			}
+		}
+		return
+	}
+	if !slices.ContainsFunc(set.Opts, func(o ui.Option) bool { return len(o.Implies) > 0 }) {
+		return
+	}
+	for k, st := range s.implied {
+		if f := s.cmd.Flags().Lookup(flagOf(k)); f.Value.String() == st.set {
+			_ = f.Value.Set(st.before)
+			f.Changed = st.changed
+		}
+	}
+	s.implied = nil
+}
+
+// flagOf is the flag of the setting key.
+func flagOf(key string) string {
+	s, _ := ui.SettingFor(ui.Settings(ui.RunSettings{}), key)
+	return s.FlagName()
 }
 
 // optionByLabel is the option a typed value names, by its label ("auto")
@@ -264,7 +325,7 @@ func (s *session) resume() {
 // run must not inherit them, so the flags are put back as they were.
 func (s *session) resumeRun(path string) {
 	var undo []func()
-	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups", "format", "words", "tables"} {
+	for _, name := range []string{"resume", "mode", "sources", "topics", "no-follow-ups", "format", "words", "tables", "instant"} {
 		f := s.cmd.Flags().Lookup(name)
 		v, changed := f.Value.String(), f.Changed
 		undo = append(undo, func() { _ = f.Value.Set(v); f.Changed = changed })

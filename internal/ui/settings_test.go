@@ -121,3 +121,47 @@ func TestSettingsCarryTheirDefaults(t *testing.T) {
 		}
 	}
 }
+
+// Instant on stands for every other setting at its least, as a value each
+// one takes: an implied value a setting refused would launch a run its own
+// flag rejects.
+func TestInstantImpliesAValueEachSettingTakes(t *testing.T) {
+	all := Settings(RunSettings{})
+	s, ok := SettingFor(all, SettingInstant)
+	if !ok {
+		t.Fatal("no instant setting")
+	}
+	on, ok := s.Option("on")
+	if !ok || len(on.Implies) == 0 {
+		t.Fatalf("instant on implies nothing: %+v", s.Opts)
+	}
+	for k, v := range on.Implies {
+		other, ok := SettingFor(all, k)
+		if !ok || !other.accepts(v) {
+			t.Errorf("instant implies %s=%q, which it does not take", k, v)
+		}
+	}
+	if name, val, err := s.Flag("on"); err != nil || name != "instant" || val != "true" {
+		t.Errorf("instant on is --%s=%s, %v; want --instant=true", name, val, err)
+	}
+}
+
+// --instant puts every setting not given at its least, over the config's
+// values; one given beside it keeps its value, so --instant --format
+// detailed is an instant run with a detailed report.
+func TestWithImpliedLeavesTheGivenSettings(t *testing.T) {
+	rs := RunSettings{Instant: true, Mode: "deep", Sources: 6, SubTopics: 4, Report: ReportSpec{Format: "detailed"}}
+	got, err := rs.WithImplied(func(key string) bool { return key == SettingFormat })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RunSettings{Instant: true, Mode: "deep", Sources: 2, SubTopics: 1, NoFollowUps: true, NoClarify: true,
+		Report: ReportSpec{Format: "detailed", Tables: "none"}}
+	if got != want {
+		t.Errorf("implied settings = %+v, want %+v", got, want)
+	}
+	plain := RunSettings{Sources: 6}
+	if got, _ := plain.WithImplied(func(string) bool { return false }); got != plain {
+		t.Errorf("without instant the settings changed: %+v", got)
+	}
+}

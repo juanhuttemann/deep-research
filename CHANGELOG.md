@@ -5,6 +5,24 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Instant answers: `--instant`, `/instant` on the start screen, the
+  serve page's instant control and `instant: true` in `config.yaml`. An
+  instant run searches the question as asked and makes one model call that
+  answers from the pages found, citing and quoting them: no planner call,
+  no brief, no clarifying questions or follow-ups, and no analysis,
+  fact-check or report call. Measured on four questions it took a median
+  of 22 seconds and 5 thousand tokens, against 113 seconds and 30 thousand
+  for a quick run with every setting at its least. It sets every setting
+  not given to its least (one sub-topic, two pages, a brief report without
+  tables); a flag given beside it wins. The report says it was not
+  fact-checked, its confidence is `unchecked`, and the quote check still
+  unquotes what no fetched page says. It is refused with search off.
+  Plans, checkpoints and traces record it, so `--plan`, `--resume` and
+  `--replay` end as the run did. New `reasoning_effort.answer` and
+  `answerer_instructions` steer its call.
+
 ### Removed
 
 - The `b` key (and Ctrl-Z) that released the live display, and `--detach`,
