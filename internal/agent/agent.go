@@ -43,8 +43,10 @@ type Config struct {
 	FollowUpInstructions    string
 	FactCheckerInstructions string
 	SummarizerInstructions  string
-	SearchInstructions      string
-	PlanningInstructions    string
+	// AnswererInstructions steer an instant run's one call (Answer).
+	AnswererInstructions string
+	SearchInstructions   string
+	PlanningInstructions string
 	// ClarifierInstructions steer the check for what a question leaves open
 	// (Clarify).
 	ClarifierInstructions string
@@ -324,6 +326,9 @@ type Assistant interface {
 	FactCheck(ctx context.Context, claims string) (*FactCheckResult, error)
 	// Summarize turns analysis and fact-check output into a report.
 	Summarize(ctx context.Context, prompt string) (*Summary, error)
+	// Answer writes an instant run's report from the findings alone, in the
+	// one call that stands in for the analysis, the check and the report.
+	Answer(ctx context.Context, prompt string) (*Summary, error)
 	// Plan breaks a question into ordered research sub-topics used to seed
 	// the parallel sub-agent tree. Breadth is the caller's to bound: the
 	// run's total effort is sources-per-branch times branches, so a depth
@@ -428,6 +433,10 @@ type ResearchResult struct {
 	// which the report answered: kept with it, or the choices that shaped
 	// the report were nowhere in it. Absent from older records.
 	Clarifications []Clarification `json:"clarifications,omitempty"`
+	// Instant marks a run answered in one call from its search, with no
+	// analysis or fact-check (instant mode). Absent from older records,
+	// which were all checked.
+	Instant bool `json:"instant,omitempty"`
 }
 
 type runFunc func(ctx context.Context, prompt string) (string, error)
@@ -488,6 +497,8 @@ func New(cfg Config) (Assistant, error) {
 	impl.clarify = newRunJSON(newAgent("clarifier", cfg.ClarifierInstructions, nil), cfg.Effort.Clarify)
 	impl.summarizer = newRunStreaming(newAgent("summarizer", cfg.SummarizerInstructions, nil), cfg.Effort.Summarize,
 		"writing the report", wordsUnit)
+	impl.answerer = newRunStreaming(newAgent("answerer", cfg.AnswererInstructions, nil), cfg.Effort.Answer,
+		"writing the answer", wordsUnit)
 	// The planner streams: it is the only phase with nothing on screen behind
 	// it, so the wait is dead air unless the run can say how much of the plan
 	// has arrived.
@@ -618,6 +629,7 @@ type impl struct {
 	followUps   runFunc
 	factCheck   runFunc
 	summarizer  runFunc
+	answerer    runFunc
 	plan        runFunc
 	clarify     runFunc
 	searchTools *tools.SearchTools // non-nil when real search+scrape is available
@@ -1609,6 +1621,19 @@ func (a *impl) Summarize(ctx context.Context, prompt string) (*Summary, error) {
 	out, err := a.summarizer(ctx, prompt)
 	// A report cut off at the output limit is still most of a report, and it
 	// is prose: nothing repairs it into something it is not.
+	if err != nil && !errors.Is(err, errCutOff) {
+		return nil, err
+	}
+	out = stripCodeFence(strings.TrimSpace(out))
+	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
+}
+
+// Answer is Summarize for an instant run: the same prose result, from
+// instructions that ask for the answer from the findings, with no analysis or
+// fact-check to write it from.
+func (a *impl) Answer(ctx context.Context, prompt string) (*Summary, error) {
+	a.log(fmt.Sprintf("%-10s  %s · %s", "answer", a.model, a.effortLabel(a.effort.Answer)))
+	out, err := a.answerer(ctx, prompt)
 	if err != nil && !errors.Is(err, errCutOff) {
 		return nil, err
 	}

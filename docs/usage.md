@@ -58,17 +58,21 @@ either box clears what is typed; on an empty box it says to press it
 again, and a second press quits (an empty `ask ▸` box: ends `drsh`). Cmd-C
 on macOS is the terminal's copy and never reaches `drsh`. A run that
 fails, or that the brief cancels, returns to the screen, which says why.
-Under the box is the next run's settings row: any of `depth`,
+Under the box is the next run's settings row: any of `depth`, `instant`,
 `sub-topics`, `pages per topic`, `follow-ups`, `format`, `words`, `tables`
 and `clarify` that the config, the flags or a command set away from its
 default, none when all are at theirs (the brief shows the depth, and `d`
-changes it there); the rest are counted (`+7 more`), and `/` lists them all. They
+changes it there); the rest are counted (`+8 more`), and `/` lists them all. They
 are the same settings the serve page's form draws. Each setting has a
 command that changes it for every run the screen starts after: `/mode`,
-`/topics`, `/sources`, `/follow-ups`, `/format`, `/words`, `/tables` and `/clarify`,
-alone for a list of its choices or with the value (`/mode deep`,
-`/topics 2`, `/follow-ups off`, `/format brief`). Flags given
-with it (`--mode`, `--topics`, `--sources`, `--no-follow-ups`, `--format`,
+`/instant`, `/topics`, `/sources`, `/follow-ups`, `/format`, `/words`,
+`/tables` and `/clarify`, alone for a list of its choices or with the value
+(`/mode deep`, `/instant on`, `/topics 2`, `/follow-ups off`, `/format
+brief`). `/instant on` also sets the settings it stands for (see [Instant
+answers](#instant-answers)), and a command after it changes one of them;
+`/instant off` puts back what it replaced, except a setting changed since.
+Flags given
+with it (`--mode`, `--instant`, `--topics`, `--sources`, `--no-follow-ups`, `--format`,
 `--words`, `--tables`, `--domains`,
 `--reports`, `-o`, `--trace`) apply to every run it starts. A run resumed
 from `/resume` keeps its checkpoint's tier, budget and report shape whatever
@@ -117,6 +121,7 @@ runs it.
 | `--prompt`, `-p QUESTION` | — | the question to research; without it a terminal gets the start screen, and a pipe the help |
 | `--output`, `-o FILE` | — | write the report to a file as well |
 | `--mode quick\|standard\|deep` | `standard` | research budget tier |
+| `--instant` | off | one search and one call that answers from the pages it found: no plan to review, no analysis and no fact-check, and every setting below not given at its least. `instant: true` in `config.yaml` makes it the default; see [Instant answers](#instant-answers) |
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
 | `--topics N` | `0` | plan exactly N sub-topics (1–8); `0` lets the planner choose: it judges the question narrow (one or two sub-topics), multi-part (one per part) or a comparison (one per alternative), up to the `--mode` tier's count (quick 3, standard 4, deep 6), and the brief shows the scope beside the sub-topics. `sub_topics` in `config.yaml` sets it for every run |
 | `--no-follow-ups` | off | skip the follow-up round: one model call and up to three searches fewer, and the analysis gets what the planned searches found. `follow_ups: false` in `config.yaml` makes it the default |
@@ -140,6 +145,48 @@ runs it.
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
 
+### Instant answers
+
+```bash
+drsh -p "how much did the James Webb telescope cost?" --instant
+```
+
+An instant run searches the question as asked and makes one model call,
+which answers it from the pages the search fetched, citing each, quoting
+them verbatim and saying what they leave open. There is no planner call, no
+brief to confirm, no clarifying question, no follow-up round, and no
+analysis, fact-check or report call after the search. In runs measured
+side by side on four questions it took a median of 22 seconds and about
+5 thousand tokens, against 113 seconds and 30 thousand for a quick run
+with every setting at its least.
+
+`--instant` sets every setting not given on the command line: one
+sub-topic (`--topics 1`), two pages (`--sources 2`), no follow-ups, no
+clarifying questions, and a `brief` report without tables (`--words 0`
+leaves the length to the format). The config's values for them do not
+apply; a flag given beside `--instant`, before or after it, does:
+`--instant --format detailed` is an instant run with a detailed report,
+and `--instant --topics 3` has the planner plan three sub-topics, each
+searched, and ends in the same answer call. Mode is left as it is.
+
+The answer is not fact-checked, and says so: the report opens with
+"_Instant answer, written from N sources in one pass and not
+fact-checked._", its confidence is `unchecked`, and its `.json` has
+`"instant": true` and no `analysis` or `fact_check`. What the program
+checks without a model call still runs: a quote that is in no fetched page
+loses its quotation marks. A search that mostly failed still marks the
+report incomplete. An instant run needs a search engine: with
+`search_engine: off` the model would write the findings it then answers
+from, so the run is refused before any model call.
+
+`--plan-only --instant` prints the plan without a model call, and the plan
+records `"instant": true`, as the checkpoint and the trace do: `--plan`,
+`--resume` and `--replay` end the way the run they continue did, and
+cannot be combined with `--instant`. A replay of an instant trace makes its
+one answer call on the recorded evidence. The answer call's reasoning is
+`reasoning_effort.answer`, and its instructions `answerer_instructions` in
+`agent.yaml`.
+
 ### Editing the plan
 
 The interactive brief lets you rename, add and delete sub-topics before a
@@ -158,7 +205,8 @@ A plan carries its question, depth tier (`depth.key`), any pinned
 for the standard report: `{"format": "brief", "words": 300, "tables":
 "none"}`, each part optional), so `--plan` cannot be combined with `-p`,
 `--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`, `--words`,
-`--tables`, `--clarify`, `--clarify-only` or `--answers`; it also carries
+`--tables`, `--clarify`, `--clarify-only`, `--answers` or `--instant` (an
+instant plan has `"instant": true`); it also carries
 the clarifying questions and answers it was made for (`questions`,
 `clarifications`). A format or table amount that is not one of the choices is
 refused. It is checked before it runs: the tier must exist,
@@ -309,7 +357,7 @@ Its sub-agents may take saved results in another order than the first run
 did, so its evidence is close to, not always identical with, what that run
 would have reached. `--resume` cannot be combined with `-p`, `--plan`,
 `--replay`, `--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`,
-`--words` or `--tables`: the checkpoint carries all of them.
+`--words`, `--tables` or `--instant`: the checkpoint carries all of them.
 
 A run killed before its plan was confirmed has nothing saved beyond the
 question; run it again.
@@ -340,7 +388,8 @@ sub-agents run one at a time: in parallel they race for pages several
 searches return, which changes the pages each counts and whether it runs its
 fallback query. Two replays of one trace therefore see the same evidence,
 but a replay can differ from the live run it was recorded from by a page or
-so; compare replays with replays. `--replay` cannot be combined with `-p`.
+so; compare replays with replays. `--replay` cannot be combined with `-p`
+or `--instant`; a replay of an instant run ends in its answer call.
 It writes the report in the shape the trace recorded, and takes `--format`,
 `--words` and `--tables` to write it in another: each replaces its own
 part of the recorded shape (`--words 600` keeps the recorded format). The
@@ -456,11 +505,15 @@ Windows' browser under WSL; nothing on a Linux session with no display, such
 as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question and the same settings the terminal's start screen shows: `--mode`,
-`--topics` (as "Sub-topics", auto by default), `--sources` (as "Pages per
+`--instant`, `--topics` (as "Sub-topics", auto by default), `--sources` (as "Pages per
 topic"), `--no-follow-ups` (as "Follow-ups"), `--format`, `--words`,
 `--tables` and `--clarify`, drawn from the list
 `/api/info` serves (each with its `value` and its `default`) and launched
-as those flags. The depth sits beside the question; the rest, and Search,
+as those flags. Instant on sets the settings it stands for (each served
+option's `implies`), and off puts back those not changed since; an instant
+run is launched straight away, with no clarifying questions or plan to
+review, and its stepper shows Research and Answer. The depth and instant
+sit beside the question; the rest, and Search,
 are under "settings", which names beside it whatever is set away from its
 default, as the terminal's row does. Search is the
 web, or "Only these sites", which opens a box for the list (`--domains`)

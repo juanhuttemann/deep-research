@@ -33,6 +33,7 @@ type Options struct {
 	SourcesPerTopic int        // sources per sub-agent; 0 => derived from depth
 	SubTopics       int        // exact sub-topic count; 0 => the planner chooses up to the tier's
 	NoFollowUps     bool       // skip the follow-up round
+	Instant         bool       // answer in one call after the search, unchecked (instant mode)
 	Report          ReportSpec // the report's shape; the zero value for standard
 	Parallelism     int        // sub-agents searching concurrently; 0 => 3
 	JSONL           bool       // emit structured JSONL events
@@ -302,6 +303,14 @@ func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 		// non-interactive phases expect.
 		defer o.Assistant.SetProgress(func(msg string) { _, _ = fmt.Fprintf(o.Stderr, "%s\n", msg) })
 	}
+	// One sub-topic is the question itself: a planner call to rephrase it
+	// would take longer than the search it plans.
+	if o.Instant && o.SubTopics == 1 {
+		plan := InstantPlan(o.Question, depthMode(o.DepthMode), o.SourcesPerTopic)
+		plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
+		plan.Questions, plan.Clarifications = c.Questions, c.Answers
+		return plan, nil
+	}
 	planner := NewPlanner(o.Assistant, depthMode(o.DepthMode))
 	planner.SubTopics, planner.Reading = o.SubTopics, c.Answers
 	plan, err := planner.Plan(ctx, o.Question)
@@ -309,7 +318,7 @@ func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
-	plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
+	plan.NoFollowUps, plan.Report, plan.Instant = o.NoFollowUps, o.Report, o.Instant
 	plan.Questions, plan.Clarifications = c.Questions, c.Answers
 	if o.SourcesPerTopic <= 0 {
 		return plan, nil
@@ -330,10 +339,11 @@ func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 // so drawing a brief would corrupt it, and there is no human present to
 // confirm a plan.
 //
-// A plan handed in was confirmed where it was edited, and a plan-only run
-// stops before anyone could act on a confirmation.
+// A plan handed in was confirmed where it was edited, a plan-only run
+// stops before anyone could act on a confirmation, and an instant run has
+// no brief: waiting on one would take longer than the run.
 func (o Options) confirmBrief(ctx context.Context, input Input, r *Renderer, plan *Plan, interactive bool) (*Plan, bool) {
-	if o.Plan != nil || o.PlanOnly || (!interactive && (o.KeyScript == "" || o.JSONL)) {
+	if o.Plan != nil || o.PlanOnly || plan.Instant || (!interactive && (o.KeyScript == "" || o.JSONL)) {
 		return plan, false
 	}
 	// --depth / max_depth set the starting budget; pressing "d" is a later,

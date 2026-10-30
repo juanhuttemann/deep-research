@@ -43,6 +43,9 @@ type Meta struct {
 	Clarifications []Clarification `json:"clarifications,omitempty"`
 	// Error is set when a late phase failed and the report is incomplete.
 	Error string `json:"error,omitempty"`
+	// Instant marks a report answered in one call from the search, with no
+	// analysis or fact-check (instant mode).
+	Instant bool `json:"instant,omitempty"`
 	// Topics is the analyzer's per-topic evidence with its own confidence.
 	Topics []agent.Topic `json:"topics,omitempty"`
 	// Analysis is the whole analysis: the decision, its claims and conflicts,
@@ -384,7 +387,31 @@ func WithReading(body string, cs []Clarification) string {
 // Executive is usually an extracted opening paragraph, sometimes truncated;
 // copying it back into that report would repeat the same text.
 func summaryBody(question string, sum *agent.Summary) string {
-	body := strings.TrimSpace(sum.Report)
+	notes, body := leadingNotes(strings.TrimSpace(sum.Report))
+	return strings.TrimSpace(notes + reportBody(question, sum, body))
+}
+
+// leadingNotes splits off the program's notes opening a report, each an
+// italic paragraph of its own (an instant answer's, an incomplete run's).
+// They stay first, and are no part of the opening the executive summary is
+// matched against: matched with them, an instant answer's opening was not
+// found and was printed again above the note that says it is unchecked.
+func leadingNotes(body string) (notes, rest string) {
+	for {
+		para, after, _ := strings.Cut(body, "\n\n")
+		p := strings.TrimSpace(para)
+		// Italic, not bold: "__Resumen ejecutivo__" is a heading.
+		italic := len(p) > 2 && p[0] == '_' && p[1] != '_' && p[len(p)-1] == '_' && p[len(p)-2] != '_'
+		if !italic || strings.Contains(p, "\n") {
+			return notes, body
+		}
+		notes += p + "\n\n"
+		body = strings.TrimSpace(after)
+	}
+}
+
+// reportBody is summaryBody for a body without its notes.
+func reportBody(question string, sum *agent.Summary, body string) string {
 	first, rest, _ := strings.Cut(body, "\n")
 	if strings.HasPrefix(first, "# ") {
 		title := strings.TrimSpace(strings.TrimPrefix(first, "# "))
@@ -448,6 +475,7 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 		ServedBy:         res.ServedBy,
 		Domains:          res.Domains,
 		FactCheck:        res.FactCheck,
+		Instant:          res.Instant,
 	}
 	if res.Analysis != nil {
 		m.Topics, m.Analysis = res.Analysis.Topics, res.Analysis

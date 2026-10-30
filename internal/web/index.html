@@ -428,7 +428,7 @@ mark { background: var(--yellow); color: var(--bg); }
   <!-- start screen -->
   <section id="home" class="home">
     <h1 class="heading">New research</h1>
-    <p class="lede">Every statement in the answer is checked against the pages it cites. You see what passed, what didn't, and why.</p>
+    <p id="lede" class="lede" data-instant="Instant: one search, and an answer written from the pages it finds in one pass. Its quotes are checked against them; its statements are not fact-checked.">Every statement in the answer is checked against the pages it cites. You see what passed, what didn't, and why.</p>
     <form id="launch" class="composer">
       <div class="prompt">
         <label for="q" class="prompt-label">research ▸</label>
@@ -437,8 +437,8 @@ mark { background: var(--yellow); color: var(--bg); }
       <div class="composer-bar">
         <!-- Drawn from the settings /api/info serves (ui.Settings), the list
              the terminal's start screen and brief are drawn from too: the
-             depth here, the rest under "settings", as the terminal's row
-             names only the depth and what was changed. -->
+             depth and instant here, the rest under "settings", as the
+             terminal's row names only those and what was changed. -->
         <span id="start-settings" class="settings"></span>
         <button id="more" class="btn sm ghost" type="button" aria-expanded="false" aria-controls="more-panel">settings ▾</button>
         <span id="changed" class="changed"></span>
@@ -663,14 +663,47 @@ let setup = null;
 const startSettings = {};
 // startList is the start settings as served, for their defaults and labels.
 let startList = [];
+// mainSetting names the settings on the composer's row; the rest are under
+// "settings".
+function mainSetting(st) { return st.key === "mode" || st.key === "instant"; }
+// impliedBefore holds, while an option that implies others is chosen
+// (instant on), each implied setting's value before it, as the terminal's
+// start screen keeps them: switching back puts back those not changed since.
+let impliedBefore = null;
+function drawStart() {
+  const control = st => settingControl({ ...st, value: startSettings[st.key] }, "m-", setStart);
+  $("start-settings").replaceChildren(...startList.filter(mainSetting).map(control));
+  $("more-settings").replaceChildren(...startList.filter(st => !mainSetting(st)).map(control));
+}
+// setStart takes a choice, and what its option implies for the others
+// (the served option's implies): the rule is the server's, not a copy here.
+function setStart(k, v) {
+  // The value it has already: instant on again would put the bundle back
+  // over a setting changed since.
+  if (startSettings[k] === v) return;
+  const st = startList.find(s => s.key === k), opt = st && st.choices.find(c => c.value === v);
+  startSettings[k] = v;
+  if (opt && opt.implies) {
+    const snap = !impliedBefore;
+    if (snap) impliedBefore = {};
+    for (const [ik, iv] of Object.entries(opt.implies)) {
+      if (snap) impliedBefore[ik] = { before: startSettings[ik], set: iv };
+      startSettings[ik] = iv;
+    }
+    drawStart();
+  } else if (impliedBefore && st && st.choices.some(c => c.implies)) {
+    for (const [ik, s] of Object.entries(impliedBefore)) if (startSettings[ik] === s.set) startSettings[ik] = s.before;
+    impliedBefore = null;
+    drawStart();
+  }
+  showChanged();
+}
 async function loadSetup() {
   try {
     const s = await (await fetch("/api/info")).json();
     const start = startList = (s.settings || []).filter(st => st.start);
     for (const st of start) startSettings[st.key] = st.value;
-    const control = st => settingControl(st, "m-", (k, v) => { startSettings[k] = v; showChanged(); });
-    $("start-settings").replaceChildren(...start.filter(st => st.key === "mode").map(control));
-    $("more-settings").replaceChildren(...start.filter(st => st.key !== "mode").map(control));
+    drawStart();
     showChanged();
     if (!s.model) return;
     fillChip("setup-model", s.model, "Model " + s.model + " via " + s.provider);
@@ -683,7 +716,12 @@ async function loadSetup() {
 // set away from their defaults and the sites search, so a closed panel
 // still says what the run will take.
 function showChanged() {
-  const parts = startList.filter(st => st.key !== "mode" && startSettings[st.key] !== st.default).map(st => {
+  // The promise above the box is the checked run's; an instant one does
+  // not make it.
+  const lede = $("lede");
+  if (!lede.dataset.checked) lede.dataset.checked = lede.textContent;
+  lede.textContent = startSettings.instant === "on" ? lede.dataset.instant : lede.dataset.checked;
+  const parts = startList.filter(st => !mainSetting(st) && startSettings[st.key] !== st.default).map(st => {
     const o = st.choices.find(c => c.value === startSettings[st.key]);
     return [st.label + " ", el("b", "", o ? o.label : startSettings[st.key])];
   });
@@ -774,6 +812,9 @@ let running = false, startedAt = 0, endedAt = 0, phase = "", finished = false, a
 // A plan-only run (the first half of Research) ends in the plan review, not
 // in an outcome; its plan arrives as the plan event before its done line.
 let planning = false, madePlan = null, planStamp = "";
+// instantRun is set by an instant plan's plan event: the stepper shows its
+// two phases, and nothing says the fact-check decided anything.
+let instantRun = false;
 // The clarify step (the first launch) ends in its questions, or with none in
 // the plan's launch; they arrive as the clarify event before its done line.
 // runAsked is the request the run's start event echoes: what the next step
@@ -808,9 +849,10 @@ function reset() {
   show("run");
 }
 function stepper() {
-  let cur = PIPELINE.findIndex(p => p.toLowerCase() === phase.toLowerCase());
-  if (phase === "Report" || finished) cur = PIPELINE.length;
-  $("stepper").replaceChildren(...PIPELINE.flatMap((p, i) => {
+  const steps = instantRun ? ["Research", "Answer"] : PIPELINE;
+  let cur = steps.findIndex(p => p.toLowerCase() === phase.toLowerCase());
+  if (phase === "Report" || finished) cur = steps.length;
+  $("stepper").replaceChildren(...steps.flatMap((p, i) => {
     const s = i < cur ? el("span", "step done", "✓ " + p) : i === cur ? el("span", "step current", "▸ " + p) : el("span", "step", "· " + p);
     return i ? [el("span", "step-sep", "─"), s] : [s];
   }));
@@ -928,7 +970,7 @@ function handle(e) {
   switch (e.type) {
   case "start":
     reset(); setRunning(true);
-    planning = !!e.plan_only; madePlan = null; planStamp = e.time;
+    planning = !!e.plan_only; madePlan = null; planStamp = e.time; instantRun = false;
     clarifying = !!e.clarify_only; asked = null; runAsked = e;
     if (planning) $("run-title").textContent = "Planning";
     if (clarifying) { $("run-title").textContent = "Checking the question"; status("Checking what the question leaves open…"); }
@@ -948,9 +990,10 @@ function handle(e) {
   case "clarify": if (clarifying) asked = e.questions || []; break;
   case "plan":
     if (planning) madePlan = e.plan;
+    instantRun = !!e.plan.instant; stepper();
     $("question").textContent = e.plan.question;
     showRunReading(e.plan.clarifications);
-    $("mode-label").textContent = e.plan.depth.key + " mode";
+    $("mode-label").textContent = e.plan.instant ? "instant" : e.plan.depth.key + " mode";
     break;
   case "phase":
     phase = e.phase; stepper();
@@ -1017,6 +1060,7 @@ function done(e) {
     const d = e.detail.replace(/^research failed: /, "");
     msg.append(el("span", "", d.charAt(0).toUpperCase() + d.slice(1)));
   }
+  else if (e.status === "complete" && instantRun) msg.append(el("strong", "", "The answer is ready."), " It was written in one pass and not fact-checked.");
   else if (e.status === "complete") msg.append(el("strong", "", "The report is ready."), " Audit shows what the fact-check decided.");
   // The downloads go in the header, from loadAudit; this box keeps the link
   // back to the run.
@@ -1580,7 +1624,7 @@ function renderAudit() {
     if ((u.claims || []).length) c.append(supportingClaims(u, byId));
     if (u.blocked) { blocked.append(c); failed++; } else { answer.append(c); passed++; }
   }
-  if (!passed) answer.append(el("p", "muted", "No statement passed the fact-check."));
+  if (!passed) answer.append(el("p", "muted", meta.instant ? "Not fact-checked: an instant run answers in one call." : "No statement passed the fact-check."));
   if (!failed) blocked.append(el("p", "muted", "Nothing was blocked."));
   $("c-answer").textContent = passed;
   $("c-blocked").textContent = failed;
@@ -1590,7 +1634,7 @@ function renderAudit() {
     const b = claimRow(c, c.id);
     const li = el("li"); li.append(b); claims.append(li);
   }
-  if (!claims.childElementCount) claims.append(el("li", "empty", meta.error || "The analysis stated no claims."));
+  if (!claims.childElementCount) claims.append(el("li", "empty", meta.error || (meta.instant ? "An instant run states no claims to check." : "The analysis stated no claims.")));
   $("c-claims").textContent = (a.claims || []).length;
 
   const srcs = $("srcs"); srcs.replaceChildren();
@@ -1792,7 +1836,8 @@ $("launch").onsubmit = async ev => {
     domains: onlySites() ? $("domains").value.split(/[\s,]+/).filter(Boolean) : [],
     // The questions first, then the plan for review; Start research in the
     // review runs it. With clarify off the step asks nothing and moves on.
-    clarify_only: true,
+    // An instant run has neither: it is launched as it is.
+    clarify_only: startSettings.instant !== "on",
   };
   if (!body.question) return;
   if (onlySites() && !body.domains.length) { $("msg").textContent = "Add at least one site, or search the web."; showMore(true); $("domains").focus(); return; }
@@ -1867,7 +1912,7 @@ if (permalink) {
     showRunReading(meta.clarifications);
     $("n-sources").textContent = meta.sources || (meta.citations || []).length;
     $("n-tokens").textContent = fmtNum(meta.tokens);
-    $("mode-label").textContent = (meta.depth || "standard") + " mode";
+    $("mode-label").textContent = meta.instant ? "instant" : (meta.depth || "standard") + " mode";
     if (meta.timestamp) $("elapsed").textContent = new Date(meta.timestamp).toLocaleString();
   });
 } else {

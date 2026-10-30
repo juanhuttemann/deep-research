@@ -22,6 +22,11 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // always says how far along it is rather than only what it is doing now.
 var pipeline = []string{"Plan", "Research", "Analyze", "Fact-Check", "Summarize"}
 
+// instantPipeline is an instant run's: no plan to make, one call after the
+// search. The full strip showed three phases it never enters, ticked at the
+// end as though they had run.
+var instantPipeline = []string{"Research", "Answer"}
+
 const (
 	// paintInterval throttles live repaints. A single source produces five
 	// events in a burst; repainting each one costs a full frame of terminal
@@ -91,12 +96,15 @@ type Renderer struct {
 	width int
 	rows  int
 
-	mode   string // brief | tree | report
-	plan   *Plan
-	nodes  map[string]*Node
-	order  []string
-	phase  string
-	detail string
+	mode  string // brief | tree | report
+	plan  *Plan
+	nodes map[string]*Node
+	order []string
+	phase string
+	// instant is set by an instant plan's PlanReady: the strip shows its
+	// two phases.
+	instant bool
+	detail  string
 	// status is the latest transient progress line of the current phase.
 	status   string
 	question string
@@ -326,6 +334,8 @@ func (r *Renderer) withCursor(text string, cursor int) string {
 // apply folds one event into the live state. It must be called with mu held.
 func (r *Renderer) apply(e Event) {
 	switch e.Type {
+	case PlanReady:
+		r.instant = e.Plan != nil && e.Plan.Instant
 	case Phase:
 		r.phase, r.detail, r.status = e.Phase, e.Detail, ""
 		if r.mode == "brief" || r.mode == "" {
@@ -1054,6 +1064,10 @@ func (r *Renderer) progressBar(n *Node) string {
 // run reads as progress through a known sequence rather than a status string
 // that changes without context.
 func (r *Renderer) phaseStrip() string {
+	pipeline := pipeline
+	if r.instant {
+		pipeline = instantPipeline
+	}
 	cur := -1
 	for i, p := range pipeline {
 		if strings.EqualFold(p, r.phase) {

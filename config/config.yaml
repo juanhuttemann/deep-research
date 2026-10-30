@@ -33,6 +33,7 @@ reasoning_effort:
   analyze: default
   fact_check: default
   summarize: default
+  answer: default
   chat: medium
 # Sources gathered per sub-agent. Left at 0 the --mode tier decides
 # (quick 3, standard 4, deep 5), which is what makes changing depth in the
@@ -56,6 +57,14 @@ follow_ups: true
 # --silent, a pipe) never ask; --clarify-only prints the questions
 # and --answers hands them back.
 clarify: auto
+# Instant runs: one web search and one call that answers from the pages it
+# found, with no plan to review, no analysis and no fact-check. It sets the
+# settings above and the report's below to their least (one sub-topic, two
+# pages, no follow-ups, no questions, a brief report without tables); a flag
+# given for one of them still wins. --instant for one run, /instant on the
+# start screen. Needs a search engine: with search_engine off the model would
+# write the findings itself.
+instant: false
 # The report's shape. report_format is a preset: standard (the explanation
 # organized as the question needs), brief (about 300 words, at most one table),
 # detailed (about 1500 words) or table (tables first, little prose).

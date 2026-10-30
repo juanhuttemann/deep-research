@@ -299,7 +299,9 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if d.Input != nil {
 		d.startKeyReader()
 	}
-	d.emit(Event{Type: Phase, Phase: "Plan", Detail: "Planning research scope"})
+	if !plan.Instant {
+		d.emit(Event{Type: Phase, Phase: "Plan", Detail: "Planning research scope"})
+	}
 	d.emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
 
 	findings, uncovered := d.research(ctx, plan)
@@ -317,6 +319,10 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	findings, uncovered = d.followUp(ctx, plan, findings, uncovered)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
+	}
+
+	if plan.Instant {
+		return d.answer(ctx, plan, findings, uncovered)
 	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
@@ -364,6 +370,36 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
 		Clarifications: plan.Clarifications,
 	}), nil
+}
+
+// ConfidenceUnchecked is an instant run's confidence: its answer had no
+// fact-check to be rated by, and "high" or "low" would claim one.
+const ConfidenceUnchecked = "unchecked"
+
+// answer ends an instant run: one call writes the report from the findings,
+// in place of the analysis, the fact-check and the report call. The quote
+// check still runs, since it is the program's and costs no call: a quote in
+// no fetched page loses its quotation marks.
+func (d *Driver) answer(ctx context.Context, plan *Plan, findings []agent.Finding,
+	uncovered []string) (*agent.ResearchResult, error) {
+	d.emit(Event{Type: Phase, Phase: "Answer", Detail: "Answering from " + sourceCount(len(findings))})
+	summary, err := d.Agent.Answer(ctx, analyzePrompt(statedQuestion(plan), findings, uncovered)+reportShape(plan.Report))
+	if err != nil {
+		return d.partial(ctx, plan, findings, nil, nil, nil, "answer failed", err)
+	}
+	d.checkQuotes(summary, plan.Question, fetchedPages(findings), "")
+	summary.Report = instantNote(len(findings)) + summary.Report
+	summary.Confidence = ConfidenceUnchecked
+	return d.finish(&agent.ResearchResult{
+		Question: plan.Question, Findings: findings, Summary: summary,
+		Clarifications: plan.Clarifications, Instant: true,
+	}), nil
+}
+
+// instantNote opens an instant report: the reader must not take it for a
+// checked one, and the confidence line alone said so in one word.
+func instantNote(sources int) string {
+	return "_Instant answer, written from " + sourceCount(sources) + " in one pass and not fact-checked._\n\n"
 }
 
 // runConfidence is the run's confidence: the analyzer's own rating, made
@@ -627,7 +663,11 @@ func (d *Driver) finish(result *agent.ResearchResult) *agent.ResearchResult {
 		if result.Summary != nil {
 			result.Summary.Report = "_Incomplete research: " + why +
 				". Read it as a lead to check, not an answer._\n\n" + result.Summary.Report
-			result.Summary.Confidence = "low"
+			// An instant answer was rated by nothing; the note above says
+			// it is thin, and "low" would read as a check that marked it.
+			if !result.Instant {
+				result.Summary.Confidence = "low"
+			}
 		}
 	}
 	result.Tokens, result.Timestamp = tokens, d.now()
@@ -676,10 +716,14 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 	default:
 		report += "Only the sources the run gathered remain; the saved report lists them under its citations."
 	}
+	// An instant run is rated by nothing whether its answer call ended or not.
+	if plan.Instant {
+		confidence = ConfidenceUnchecked
+	}
 	return d.finish(&agent.ResearchResult{
 		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc,
 		Summary: &agent.Summary{Report: report, Confidence: confidence}, Error: reason,
-		Clarifications: plan.Clarifications,
+		Clarifications: plan.Clarifications, Instant: plan.Instant,
 	}), nil
 }
 

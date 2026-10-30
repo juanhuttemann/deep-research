@@ -50,6 +50,12 @@ type fakeAssistant struct {
 	questions []agent.Question
 	clarifies int
 	readings  [][]agent.Clarification
+	// answer is what Answer returns, answered the prompt it was given and
+	// slow the calls an instant run should not make: Analyze, FactCheck and
+	// Summarize.
+	answer   string
+	answered string
+	slow     atomic.Int32
 }
 
 func (f *fakeAssistant) Clarify(context.Context, string) ([]agent.Question, error) {
@@ -93,17 +99,26 @@ func (f *fakeAssistant) FollowUps(context.Context, string) ([]agent.FollowUpQuer
 
 func (f *fakeAssistant) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
 	f.call()
+	f.slow.Add(1)
 	f.analyzed = prompt
 	return &agent.Analysis{Answer: "synthesized answer", Confidence: "high"}, nil
 }
 
 func (f *fakeAssistant) FactCheck(ctx context.Context, claims string) (*agent.FactCheckResult, error) {
 	f.call()
+	f.slow.Add(1)
 	return &agent.FactCheckResult{Verified: []agent.VerifiedClaim{{Claim: claims, Verified: true, Evidence: "e"}}}, nil
+}
+
+func (f *fakeAssistant) Answer(ctx context.Context, prompt string) (*agent.Summary, error) {
+	f.call()
+	f.answered = prompt
+	return &agent.Summary{Report: f.answer, Executive: "exec"}, nil
 }
 
 func (f *fakeAssistant) Summarize(ctx context.Context, prompt string) (*agent.Summary, error) {
 	f.call()
+	f.slow.Add(1)
 	if f.summary != "" {
 		return &agent.Summary{Report: f.summary, Executive: "exec"}, nil
 	}
@@ -2264,7 +2279,7 @@ func TestStartScreenFrame(t *testing.T) {
 }
 
 // The settings row names what is set away from its default and counts the
-// rest: all eight at auto, on and standard overran the screen's width saying
+// rest: all nine at auto, on, off and standard overran the screen's width saying
 // nothing was chosen. The depth at its default was shown too, and read as
 // fixed until the brief, which shows it again and changes it.
 func TestStartSettingsRowShowsChanges(t *testing.T) {
@@ -2276,7 +2291,7 @@ func TestStartSettingsRowShowsChanges(t *testing.T) {
 	}
 	r.RenderStart(agent.Setup{}, Settings(RunSettings{Mode: "deep", Report: ReportSpec{Words: 1000}}), "an example?", "")
 	row := r.startSettingsRow()
-	for _, want := range []string{"depth deep", "words 1000", "+6 more"} {
+	for _, want := range []string{"depth deep", "words 1000", "+7 more"} {
 		if !strings.Contains(row, want) {
 			t.Errorf("row lacks %q: %q", want, row)
 		}
@@ -2687,5 +2702,100 @@ func TestAskBoxDrawsTheCursorWhereItIs(t *testing.T) {
 	}
 	if none := strings.Join(b.prompt("abc", -1), ""); strings.Contains(none, "█") {
 		t.Errorf("a kept question drew a cursor: %q", none)
+	}
+}
+
+// ---- instant runs ------------------------------------------------------------
+
+// instantRun runs q as an instant run of topics sub-topics on fa, as the
+// stream a script reads.
+func instantRun(t *testing.T, fa *fakeAssistant, q string, topics int) RunResult {
+	t.Helper()
+	res, err := Run(context.Background(), Options{Question: q, Assistant: fa, Instant: true, SubTopics: topics,
+		SourcesPerTopic: 2, NoFollowUps: true, OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, JSONL: true})
+	if err != nil || res.Report == nil {
+		t.Fatalf("instant run: %+v, %v", res, err)
+	}
+	return res
+}
+
+// An instant run is the search and one answer call: no planner, no
+// analysis, fact-check or report call. Its report says it was not checked,
+// and the program's quote check still unquotes what no page says.
+func TestInstantRunAnswersInOneCall(t *testing.T) {
+	q := "How much did the telescope cost?"
+	fa := &fakeAssistant{
+		answer: `It "cost ten billion dollars over two decades" ([page](https://example.com/a)). ` +
+			`It "was paid for entirely by one private donor" ([page](https://example.com/a)).`,
+		findings: map[string][]agent.Finding{q: {{Query: q, Title: "Cost", URL: "https://example.com/a",
+			Content: "The telescope cost ten billion dollars over two decades.", Status: "ok"}}},
+	}
+	res := instantRun(t, fa, q, 1)
+	if len(fa.readings) != 0 || fa.slow.Load() != 0 {
+		t.Errorf("instant run made %d plan and %d analyze, check or report calls; want none", len(fa.readings), fa.slow.Load())
+	}
+	if !strings.Contains(fa.answered, q) || !strings.Contains(fa.answered, "ten billion dollars over two decades") {
+		t.Errorf("the answer call was not given the question and the findings:\n%s", fa.answered)
+	}
+	if !res.Plan.Instant || len(res.Plan.SubTopics) != 1 || res.Plan.SubTopics[0].Query != q {
+		t.Errorf("plan = %+v, want one instant sub-topic searching the question", res.Plan)
+	}
+	checkInstantResult(t, res)
+	if r := res.Report.Summary.Report; !strings.Contains(r, `"cost ten billion dollars over two decades"`) ||
+		strings.Contains(r, `"was paid for entirely by one private donor"`) {
+		t.Errorf("quote check: a found quote must keep its marks and an unfound one lose them:\n%s", r)
+	}
+}
+
+// checkInstantResult checks that res is marked instant and unchecked, in
+// the result and in its .json export, with no analysis or check.
+func checkInstantResult(t *testing.T, res RunResult) {
+	t.Helper()
+	r := res.Report
+	if !r.Instant || r.Summary.Confidence != ConfidenceUnchecked || r.Analysis != nil || r.FactCheck != nil {
+		t.Errorf("result: instant %v, confidence %q, analysis %v, check %v", r.Instant, r.Summary.Confidence, r.Analysis, r.FactCheck)
+	}
+	if !strings.HasPrefix(r.Summary.Report, "_Instant answer") || !strings.Contains(r.Summary.Report, "not fact-checked") {
+		t.Errorf("report does not open with the instant note:\n%s", r.Summary.Report)
+	}
+	raw, err := os.ReadFile(res.JSONPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta Meta
+	if err := json.Unmarshal(raw, &meta); err != nil || !meta.Instant || meta.Confidence != ConfidenceUnchecked {
+		t.Errorf("json export: instant %v, confidence %q, %v", meta.Instant, meta.Confidence, err)
+	}
+}
+
+// --instant --topics 3 asked for three sub-topics: the planner makes them,
+// and the run still ends in the one answer call.
+func TestInstantRunWithTopicsPlansThem(t *testing.T) {
+	fa := &fakeAssistant{answer: "answer"}
+	res := instantRun(t, fa, "q", 2)
+	if len(fa.readings) != 1 || !res.Plan.Instant || fa.answered == "" || fa.slow.Load() != 0 {
+		t.Errorf("plans %d, plan instant %v, answered %v, slow calls %d; want one plan and the answer call",
+			len(fa.readings), res.Plan.Instant, fa.answered != "", fa.slow.Load())
+	}
+}
+
+// A thin search marks any report incomplete, and a checked one low; an
+// instant one keeps "unchecked", since no check rated it.
+func TestThinInstantRunStaysUnchecked(t *testing.T) {
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	d.searchesOK, d.searchesEmpty = 2, 2
+	res := d.finish(&agent.ResearchResult{Instant: true, Summary: &agent.Summary{Report: "r", Confidence: ConfidenceUnchecked}})
+	if res.Summary.Confidence != ConfidenceUnchecked {
+		t.Errorf("confidence = %q, want %q", res.Summary.Confidence, ConfidenceUnchecked)
+	}
+}
+
+// A plan written with --plan-only or kept in a page's review keeps its
+// instant bit through ReadPlan, which rebuilds the plan from its parts.
+func TestReadPlanKeepsInstant(t *testing.T) {
+	raw, _ := json.Marshal(InstantPlan("q", depthMode("quick"), 2))
+	p, err := ReadPlan(bytes.NewReader(raw))
+	if err != nil || !p.Instant || p.PerTopic() != 2 {
+		t.Errorf("read plan = %+v, %v; want instant, 2 per topic", p, err)
 	}
 }

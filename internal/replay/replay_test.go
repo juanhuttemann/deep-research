@@ -40,6 +40,9 @@ func (l *live) FactCheck(context.Context, string) (*agent.FactCheckResult, error
 func (l *live) Summarize(context.Context, string) (*agent.Summary, error) {
 	return &agent.Summary{Report: "r"}, nil
 }
+func (l *live) Answer(context.Context, string) (*agent.Summary, error) {
+	return &agent.Summary{Report: "a"}, nil
+}
 func (l *live) SetSourceBudget(int)           {}
 func (l *live) SkipSources(func(string) bool) {}
 func (l *live) SetProgress(func(string))      {}
@@ -399,5 +402,32 @@ func TestCheckpointKeepsTheClarifications(t *testing.T) {
 	again.save()
 	if tr, err = Load(path); err != nil || len(tr.Questions) != 1 || len(tr.Clarifications) != 1 || tr.Clarifications[0] != answers[0] {
 		t.Errorf("a resumed recording dropped the reading: %+v, %v", tr, err)
+	}
+}
+
+// An instant run's checkpoint says it is instant, through a second stop
+// too, and its answer call is recorded beside the searches: a resumed run
+// that lost the bit would end in the analysis and check it never asked for.
+func TestCheckpointKeepsInstant(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.partial.json")
+	rec := Record(&live{}, "q", "quick", 2)
+	rec.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
+	rec.SetPlan([]agent.SubTopic{{ID: "1", Name: "q", Query: "q"}}, PlanSettings{Mode: "quick", Sources: 2, Instant: true})
+	if _, err := rec.Answer(context.Background(), "prompt"); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(path)
+	if err != nil || !tr.Instant {
+		t.Fatalf("checkpoint = %+v, %v; want instant", tr, err)
+	}
+	again := Record(&live{}, "q", "quick", 2)
+	again.Seed(tr)
+	again.Checkpoint(path, func(err error) { t.Errorf("save failed: %v", err) })
+	again.save()
+	if tr, err = Load(path); err != nil || !tr.Instant {
+		t.Errorf("a resumed recording dropped instant: %+v, %v", tr, err)
+	}
+	if got := rec.trace.Phases; len(got) != 1 || got[0].Name != "answer" {
+		t.Errorf("phases = %+v, want the answer call", got)
 	}
 }

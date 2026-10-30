@@ -67,6 +67,10 @@ type Plan struct {
 	// NoFollowUps skips the follow-up round. It is a negative so that a plan
 	// or trace written before the round could be turned off still runs it.
 	NoFollowUps bool `json:"no_follow_ups,omitempty"`
+	// Instant ends the run in one answer call after the search (instant
+	// mode): no analysis, fact-check or report call. A plan written before
+	// it existed runs the whole pipeline, as it did.
+	Instant bool `json:"instant,omitempty"`
 	// Report is the shape the report is written in, the zero value for the
 	// standard one: a plan written before reports had a shape still runs as
 	// it did.
@@ -156,7 +160,7 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	// The browser hands back the plan it reviewed, typed question included,
 	// so a run of it still reports what the planner corrected.
 	plan.Asked = strings.TrimSpace(p.Asked)
-	plan.NoFollowUps = p.NoFollowUps
+	plan.NoFollowUps, plan.Instant = p.NoFollowUps, p.Instant
 	plan.Scope = p.Scope
 	if plan.Report, err = p.Report.Normalized(); err != nil {
 		return nil, fmt.Errorf("read plan: %w", err)
@@ -175,6 +179,17 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 func PlanFor(question string, depth DepthMode, topics []SubTopic, pin int) *Plan {
 	p := &Plan{Question: question, Depth: depth, SubTopics: topics, PinnedPerTopic: max(pin, 0)}
 	return renumbered(p)
+}
+
+// InstantPlan is an instant run's plan, made without the planner: one
+// sub-topic, searched with the question itself. A planner call would take
+// longer than the search it plans, and for one sub-topic it can only
+// rephrase the question.
+func InstantPlan(question string, depth DepthMode, perTopic int) *Plan {
+	q := clipWords(question, maxQueryLen)
+	p := PlanFor(question, depth, []SubTopic{{Name: question, Query: q}}, perTopic)
+	p.Instant = true
+	return p
 }
 
 // Planner produces a research plan from a question using the assistant's Plan
