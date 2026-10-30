@@ -34,7 +34,7 @@ Expand-Archive -Path $zip -DestinationPath $dir -Force
 $old = Join-Path $dir 'deep-research.exe'
 if (Test-Path $old) {
     Remove-Item $old
-    Write-Host "removed $old: the command is drsh now"
+    Write-Host "removed ${old}: the command is drsh now"
 }
 Remove-Item $zip
 Remove-Item $sumPath

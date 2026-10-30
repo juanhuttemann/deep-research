@@ -5,6 +5,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Windows installer (`install.ps1`) failed to parse in PowerShell:
+  `"removed $old: ..."` reads `$old:` as a drive-qualified variable, so
+  `iex (irm .../install.ps1)` stopped before installing anything. CI now
+  parses both install scripts.
+
 ## [0.27.0] - 2026-10-29
 
 ### Added

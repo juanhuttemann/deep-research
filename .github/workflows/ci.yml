@@ -52,6 +52,15 @@ jobs:
           ./drsh --version
           DEEP_RESEARCH_DATA_FILE="$RUNNER_TEMP/research.jsonl" ./drsh list
 
+      # The one-liner installers are run straight from main, unbuilt and
+      # untested: a parse error in install.ps1 ("$old:" read as a drive-
+      # qualified variable) broke every Windows install while CI stayed
+      # green. Parsing them is their regression test.
+      - name: Parse install scripts
+        run: |
+          sh -n scripts/install.sh
+          pwsh -NoProfile -Command '$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$e); if ($e) { $e | ForEach-Object { Write-Error "install.ps1:$($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }'
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
