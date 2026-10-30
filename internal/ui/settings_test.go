@@ -1,6 +1,10 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/json"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,8 +18,12 @@ func TestModeChoicesComeFromTheTiers(t *testing.T) {
 		t.Fatalf("mode offers %d choices, want the %d tiers", len(s.Opts), len(DepthModes))
 	}
 	for i, m := range DepthModes {
-		if o := s.Opts[i]; o.Value != m.Key || o.Note != "≤"+strconv.Itoa(m.SubTopics) {
-			t.Errorf("choice %d = %+v, want tier %s with ≤%d", i, o, m.Key, m.SubTopics)
+		note := "≤" + strconv.Itoa(m.SubTopics)
+		if m.IsInstant() {
+			note = "not fact-checked"
+		}
+		if o := s.Opts[i]; o.Value != m.Key || o.Note != note {
+			t.Errorf("choice %d = %+v, want tier %s with %q", i, o, m.Key, note)
 		}
 	}
 	topics, _ := SettingFor(Settings(RunSettings{}), SettingTopics)
@@ -122,46 +130,123 @@ func TestSettingsCarryTheirDefaults(t *testing.T) {
 	}
 }
 
-// Instant on stands for every other setting at its least, as a value each
-// one takes: an implied value a setting refused would launch a run its own
-// flag rejects.
+// The instant depth stands for every other setting at its least, as a
+// value each one takes: an implied value a setting refused would launch a
+// run its own flag rejects. It is the only choice that implies others.
 func TestInstantImpliesAValueEachSettingTakes(t *testing.T) {
 	all := Settings(RunSettings{})
-	s, ok := SettingFor(all, SettingInstant)
-	if !ok {
-		t.Fatal("no instant setting")
+	mode, _ := SettingFor(all, SettingMode)
+	instant, ok := mode.Option(ModeInstant)
+	if !ok || len(instant.Implies) == 0 {
+		t.Fatalf("the instant depth implies nothing: %+v", mode.Opts)
 	}
-	on, ok := s.Option("on")
-	if !ok || len(on.Implies) == 0 {
-		t.Fatalf("instant on implies nothing: %+v", s.Opts)
-	}
-	for k, v := range on.Implies {
+	for k, v := range instant.Implies {
 		other, ok := SettingFor(all, k)
 		if !ok || !other.accepts(v) {
 			t.Errorf("instant implies %s=%q, which it does not take", k, v)
 		}
 	}
-	if name, val, err := s.Flag("on"); err != nil || name != "instant" || val != "true" {
-		t.Errorf("instant on is --%s=%s, %v; want --instant=true", name, val, err)
+	for _, s := range all {
+		for _, o := range s.Opts {
+			if len(o.Implies) > 0 && (s.Key != SettingMode || o.Value != ModeInstant) {
+				t.Errorf("%s %s implies other settings; only the instant depth does", s.Key, o.Value)
+			}
+		}
+	}
+	if name, val, err := mode.Flag(ModeInstant); err != nil || name != "mode" || val != ModeInstant {
+		t.Errorf("instant is --%s=%s, %v; want --mode=instant", name, val, err)
 	}
 }
 
-// --instant puts every setting not given at its least, over the config's
-// values; one given beside it keeps its value, so --instant --format
-// detailed is an instant run with a detailed report.
-func TestWithImpliedLeavesTheGivenSettings(t *testing.T) {
-	rs := RunSettings{Instant: true, Mode: "deep", Sources: 6, SubTopics: 4, Report: ReportSpec{Format: "detailed"}}
-	got, err := rs.WithImplied(func(key string) bool { return key == SettingFormat })
+// The brief's d key and the page's review cycle into instant like any
+// depth, and choosing it puts every option at its least: the question as
+// the one sub-topic, two pages, no follow-ups, a brief report without
+// tables. Another depth then applies that depth to the plan, checked.
+func TestBriefCyclesIntoInstantAtItsLeast(t *testing.T) {
+	p := newTestPlan("deep", []SubTopic{{ID: "1", Name: "a"}, {ID: "2", Name: "b"}})
+	p.Report = ReportSpec{Format: "detailed", Words: 900, Tables: "many"}
+	brief, _ := briefSetting(KeyD)
+	if next := brief.Next("deep"); next != ModeInstant {
+		t.Fatalf("d after deep is %q, want instant", next)
+	}
+	if mode, _ := SettingFor(ReviewSettings(p), SettingMode); !slices.ContainsFunc(mode.Opts, func(o Option) bool { return o.Value == ModeInstant }) {
+		t.Errorf("review does not offer instant: %+v", mode.Opts)
+	}
+	ip, err := ApplyToPlan(p, SettingMode, ModeInstant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := RunSettings{Instant: true, Mode: "deep", Sources: 2, SubTopics: 1, NoFollowUps: true, NoClarify: true,
-		Report: ReportSpec{Format: "detailed", Tables: "none"}}
+	want := ReportSpec{Format: "brief", Tables: "none"}
+	if !ip.Instant || !ip.Depth.IsInstant() || len(ip.SubTopics) != 1 || ip.SubTopics[0].Query != p.Question ||
+		ip.PerTopic() != 2 || !ip.NoFollowUps || ip.Report != want {
+		t.Errorf("instant plan = %+v", ip)
+	}
+	checkLeavingInstant(t, ip)
+}
+
+// checkLeavingInstant checks that on the instant plan ip only the depth
+// changes, and that another depth gives a checked plan at it.
+func checkLeavingInstant(t *testing.T, ip *Plan) {
+	t.Helper()
+	for _, key := range []string{SettingFollowUps, SettingFormat} {
+		if _, err := ApplyToPlan(ip, key, "on"); err == nil {
+			t.Errorf("%s changed on an instant plan; only the depth does", key)
+		}
+	}
+	back, err := ApplyToPlan(ip, SettingMode, "quick")
+	if err != nil || back.Instant || back.Depth.Key != "quick" {
+		t.Errorf("leaving instant = %+v, %v; want a checked quick plan", back, err)
+	}
+}
+
+// Instant is every option at its least: over the config's values and over
+// a setting given beside it alike.
+func TestInstantHoldsEveryOptionAtItsLeast(t *testing.T) {
+	rs := RunSettings{Mode: ModeInstant, Sources: 6, SubTopics: 4, Report: ReportSpec{Format: "detailed", Words: 900, Tables: "many"}}
+	got, err := rs.WithImplied()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RunSettings{Mode: ModeInstant, Sources: 2, SubTopics: 1, NoFollowUps: true, NoClarify: true,
+		Report: ReportSpec{Format: "brief", Tables: "none"}}
 	if got != want {
 		t.Errorf("implied settings = %+v, want %+v", got, want)
 	}
-	plain := RunSettings{Sources: 6}
-	if got, _ := plain.WithImplied(func(string) bool { return false }); got != plain {
-		t.Errorf("without instant the settings changed: %+v", got)
+	for _, spelled := range []string{"INSTANT", " instant "} {
+		if got, _ := (RunSettings{Mode: spelled}).WithImplied(); got.Mode != ModeInstant || got.SubTopics != 1 {
+			t.Errorf("--mode %q: %+v, want the instant tier with its settings", spelled, got)
+		}
+	}
+	for _, m := range []string{"", "quick", "standard", "deep"} {
+		plain := RunSettings{Mode: m, Sources: 6}
+		if got, _ := plain.WithImplied(); got != plain || got.Instant() {
+			t.Errorf("at %q the settings changed: %+v", m, got)
+		}
+	}
+}
+
+// d cycles through instant, and leaving it puts back the plan it replaced:
+// its sub-topics, follow-ups and report, as they were, at their own depth
+// with the budget too, and at another depth re-budgeted as a depth choice
+// always is. The page's review round-trips the plan as JSON, so the plan
+// put back has to survive ReadPlan.
+func TestLeavingInstantPutsThePlanBack(t *testing.T) {
+	p := newTestPlan("deep", []SubTopic{{ID: "1", Name: "a", Query: "qa", Terms: []string{"x", "y"}}, {ID: "2", Name: "b"}})
+	p.Report = ReportSpec{Format: "detailed", Tables: "many"}
+	p, _ = p.WithSourcesPerTopic(6)
+	ip, _ := ApplyToPlan(p, SettingMode, ModeInstant)
+	back, _ := ApplyToPlan(ip, SettingMode, "deep")
+	if !reflect.DeepEqual(back, p) {
+		t.Errorf("deep → instant → deep = %+v, want the plan as it was %+v", back, p)
+	}
+	raw, _ := json.Marshal(ip)
+	read, err := ReadPlan(bytes.NewReader(raw))
+	if err != nil || read.Before == nil {
+		t.Fatalf("the page's round trip lost the plan instant replaced: %+v, %v", read, err)
+	}
+	quick, _ := ApplyToPlan(read, SettingMode, "quick")
+	if quick.Instant || quick.Depth.Key != "quick" || len(quick.SubTopics) != 2 || quick.NoFollowUps || quick.Report != p.Report ||
+		quick.SubTopics[0].Query != "qa" || quick.Before != nil {
+		t.Errorf("instant → quick after the round trip = %+v, want the plan back at quick", quick)
 	}
 }

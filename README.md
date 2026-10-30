@@ -178,7 +178,8 @@ minute and per day; a run with web search takes 4 to 13 model requests, and
 
 ```bash
 drsh                                     # ask on the start screen, one run after another
-drsh -p "question" --mode deep          # quick | standard | deep
+drsh -p "question" --mode deep          # quick | standard | deep (all fact-checked)
+drsh -p "question" --mode instant       # one search, one answer, not fact-checked
 drsh -p "question" --topics 3           # exactly 3 sub-topics (default: the planner decides)
 drsh -p "question" --no-follow-ups      # skip the follow-up searches
 drsh -p "question" --format brief       # standard | brief | detailed | table

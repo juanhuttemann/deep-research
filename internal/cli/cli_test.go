@@ -975,13 +975,13 @@ func (p planCounter) Plan(ctx context.Context, q string, b agent.Breadth, r []ag
 // An instant run answers from a web search; with search off the model
 // would write the findings it then answers from, unchecked.
 func TestInstantRefusesARunWithSearchOff(t *testing.T) {
-	_, err := runCLI(t, t.TempDir(), stub{}, "-p", "q", "--instant", "--silent", "--reports", t.TempDir())
+	_, err := runCLI(t, t.TempDir(), stub{}, "-p", "q", "--mode", "instant", "--silent", "--reports", t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "search is off") {
 		t.Errorf("instant run with search off: %v, want it refused", err)
 	}
 }
 
-// --instant on its own makes no planner call: the plan is the question,
+// --mode instant on its own makes no planner call: the plan is the question,
 // and the stream says the plan is instant.
 func TestInstantRunMakesNoPlannerCall(t *testing.T) {
 	dir := t.TempDir()
@@ -993,7 +993,7 @@ func TestInstantRunMakesNoPlannerCall(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"-p", "q", "--instant", "--jsonl", "--reports", dir})
+	cmd.SetArgs([]string{"-p", "q", "--mode", "instant", "--jsonl", "--reports", dir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("instant run: %v", err)
 	}
@@ -1003,39 +1003,44 @@ func TestInstantRunMakesNoPlannerCall(t *testing.T) {
 	}
 }
 
-// --instant sets every setting not given, over the config's values, and a
-// flag given keeps its value in either order; instant: true in the config
-// does the same with no flag.
-func TestInstantFlagLeavesTheGivenSettings(t *testing.T) {
+// --mode instant is every option at its least, over the config's values
+// and over a flag given beside it, in either order; the flag is said to be
+// ignored.
+func TestInstantModeHoldsEveryOptionAtItsLeast(t *testing.T) {
 	d := Deps{Config: config.Config{SourcesPerTopic: 6, Report: agent.ReportSpec{Format: "detailed"}}}
-	for _, args := range [][]string{{"--instant", "--format", "table"}, {"--format", "table", "--instant"}} {
+	for _, args := range [][]string{{"--mode", "instant", "--format", "table"}, {"--format", "table", "--mode", "instant"}} {
 		cmd := New(func() (Deps, error) { return d, nil })
 		if err := cmd.ParseFlags(args); err != nil {
 			t.Fatal(err)
 		}
 		rs := runSettings(cmd, d)
-		if !rs.Instant || rs.Report.Format != "table" || rs.Sources != 2 || rs.SubTopics != 1 || !rs.NoFollowUps || !rs.NoClarify {
+		if !rs.Instant() || rs.Report.Format != "brief" || rs.Sources != 2 || rs.SubTopics != 1 || !rs.NoFollowUps || !rs.NoClarify {
 			t.Errorf("%v: settings %+v", args, rs)
 		}
+		var errOut bytes.Buffer
+		cmd.SetErr(&errOut)
+		_ = checkInstant(cmd, Deps{Config: config.Config{Config: agent.Config{SearXNGURL: "http://x"}}}, start{})
+		if !strings.Contains(errOut.String(), "ignoring --format") {
+			t.Errorf("%v: no word that --format is ignored: %q", args, errOut.String())
+		}
 	}
-	d.Config.Instant = true
 	cmd := New(func() (Deps, error) { return d, nil })
-	if rs := runSettings(cmd, d); !rs.Instant || rs.Sources != 2 || rs.Report.Format != "brief" {
-		t.Errorf("instant: true in the config: settings %+v", rs)
-	}
-	if rs := defaultSettings(d.Config); !rs.Instant || rs.Sources != 2 {
-		t.Errorf("the page's opening settings with instant: true: %+v", rs)
+	if rs := runSettings(cmd, d); rs.Instant() || rs.Sources != 6 || rs.Report.Format != "detailed" {
+		t.Errorf("without --mode instant the config's settings changed: %+v", rs)
 	}
 }
 
-// A plan, a checkpoint and a trace carry whether they are instant; a flag
-// beside them would be a second answer.
-func TestInstantIsRefusedBesideAGivenPlan(t *testing.T) {
-	for _, args := range [][]string{{"--plan", "x.json"}, {"--resume", "x.json"}, {"--replay", "x.json"}} {
-		if _, err := runCLI(t, t.TempDir(), stub{}, append(args, "--instant")...); err == nil ||
-			!strings.Contains(err.Error(), "none of the others") {
-			t.Errorf("%v --instant: %v, want the flags refused together", args, err)
-		}
+// A saved run ends as it ran: the trace's instant bit decides, not the
+// tier a replay is asked at, so a checked run is never replayed unchecked.
+func TestReplayAtInstantOfACheckedRunStaysChecked(t *testing.T) {
+	tr := &replay.Trace{Question: "q", Mode: "quick", Plan: []agent.SubTopic{{Name: "a"}, {Name: "b"}}}
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	if err := cmd.ParseFlags([]string{"--replay=x", "--mode=instant"}); err != nil {
+		t.Fatal(err)
+	}
+	plan, _, err := givenPlan(cmd, Deps{}, tr, "")
+	if err != nil || plan.Instant || len(plan.SubTopics) != 2 {
+		t.Errorf("checked trace replayed at --mode instant: %+v, %v; want it checked, both sub-topics kept", plan, err)
 	}
 }
 

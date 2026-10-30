@@ -3,6 +3,7 @@ package ui
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 
@@ -58,10 +59,11 @@ type RunSettings struct {
 	Report      ReportSpec
 	// NoClarify asks no clarifying questions before planning.
 	NoClarify bool
-	// Instant ends the run in one answer call after the search, with no
-	// brief, analysis or fact-check.
-	Instant bool
 }
+
+// Instant reports whether the run is at the instant tier: one answer call
+// after the search, with no brief, analysis or fact-check.
+func (rs RunSettings) Instant() bool { return depthMode(rs.Mode).IsInstant() }
 
 // Setting keys, the flags they become.
 const (
@@ -73,13 +75,10 @@ const (
 	SettingWords     = "words"
 	SettingTables    = "tables"
 	SettingClarify   = "clarify"
-	SettingInstant   = "instant"
 )
 
-// instantImplies are the values switching instant on gives the other
-// settings: each at its least, so the run is one search of two pages and
-// one call. Mode is not among them: it bounds the planner and the budget,
-// which the sub-topics and pages set here decide.
+// instantImplies are the values the instant tier gives the other settings:
+// each at its least, so the run is one search of two pages and one call.
 var instantImplies = map[string]string{
 	SettingClarify: "off", SettingTopics: "1", SettingSources: "2", SettingFollowUps: "off",
 	SettingFormat: "brief", SettingWords: "0", SettingTables: "none",
@@ -102,13 +101,9 @@ func Settings(rs RunSettings) []Setting {
 
 func settingsAt(rs RunSettings) []Setting {
 	out := []Setting{
-		{Key: SettingMode, Label: "depth", Help: "How wide and deep the research goes: the most sub-topics, and the pages each reads.",
+		{Key: SettingMode, Label: "depth", Help: "How wide and deep the research goes: the most sub-topics, and the pages each reads." +
+			" Instant is one search and one answer from the pages it finds, not fact-checked, with the other settings at their least.",
 			Value: cmp.Or(rs.Mode, "standard"), Opts: modeOptions(), Start: true, Review: true, BriefKey: KeyD},
-		// Not a review setting: an instant run has no brief to review.
-		{Key: SettingInstant, Label: "instant", Help: "One search and one answer from the pages it finds, not fact-checked:" +
-			" no plan to review, and the other settings at their least.",
-			Value: onOff(rs.Instant), Opts: []Option{{Value: "off", Label: "off"},
-				{Value: "on", Label: "on", Note: "not fact-checked", Implies: instantImplies}}, Start: true},
 		{Key: SettingTopics, Label: "sub-topics", Help: "How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.",
 			Value: strconv.Itoa(rs.SubTopics), Opts: countOptions(MaxSubTopics, nil), Start: true, count: true, max: MaxSubTopics},
 		{Key: SettingSources, Label: "pages per topic", Help: "How many pages each sub-topic reads. Auto lets the depth decide.",
@@ -166,6 +161,11 @@ func modeOptions() []Option {
 	out := make([]Option, len(DepthModes))
 	for i, m := range DepthModes {
 		out[i] = Option{Value: m.Key, Label: m.Key, Note: fmt.Sprintf("≤%d", m.SubTopics)}
+		// Said where it is chosen: the tier's one difference that matters is
+		// not its size.
+		if m.IsInstant() {
+			out[i].Note, out[i].Implies = "not fact-checked", instantImplies
+		}
 	}
 	return out
 }
@@ -221,13 +221,21 @@ func (s Setting) Flag(v string) (name, value string, err error) {
 	if !s.accepts(v) {
 		return "", "", fmt.Errorf("%s: %q is not one of its choices", s.Label, v)
 	}
-	switch s.Key {
-	case SettingFollowUps:
+	if s.Key == SettingFollowUps {
 		return "no-follow-ups", strconv.FormatBool(v == "off"), nil
-	case SettingInstant:
-		return "instant", strconv.FormatBool(v == "on"), nil
 	}
 	return s.Key, v, nil
+}
+
+// Implied is what the chosen options of settings imply for the others, by
+// key: the settings instant holds at their least.
+func Implied(settings []Setting) map[string]string {
+	out := map[string]string{}
+	for _, s := range settings {
+		o, _ := s.Option(s.Value)
+		maps.Copy(out, o.Implies)
+	}
+	return out
 }
 
 // FlagName is the command-line flag the setting becomes.
@@ -237,16 +245,20 @@ func (s Setting) FlagName() string {
 }
 
 // WithImplied is rs with what its chosen options imply (Option.Implies) set
-// on every setting not given: --instant puts the rest at their least, and a
-// flag given beside it keeps its value, in whichever order they were typed.
-func (rs RunSettings) WithImplied(given func(key string) bool) (RunSettings, error) {
+// over every other value: instant is every option at its least, and a flag
+// given beside --mode instant does not raise one (the CLI warns that it is
+// ignored, see checkInstant).
+func (rs RunSettings) WithImplied() (RunSettings, error) {
+	// The tier as ParseDepthMode reads it: --mode INSTANT ran the instant
+	// tier while its option, looked up by the exact value, implied nothing.
+	if d, err := ParseDepthMode(rs.Mode); err == nil && rs.Mode != "" {
+		rs.Mode = d.Key
+	}
 	for _, s := range Settings(rs) {
 		o, _ := s.Option(s.Value)
 		for k, v := range o.Implies {
-			if !given(k) {
-				if err := rs.set(k, v); err != nil {
-					return rs, err
-				}
+			if err := rs.set(k, v); err != nil {
+				return rs, err
 			}
 		}
 	}
@@ -275,8 +287,6 @@ func (rs *RunSettings) set(key, v string) error {
 		rs.Report.Tables = v
 	case SettingClarify:
 		rs.NoClarify = v == "off"
-	case SettingInstant:
-		rs.Instant = v == "on"
 	default:
 		return fmt.Errorf("unknown setting %q", key)
 	}
@@ -326,6 +336,9 @@ func ApplyToPlan(p *Plan, key, value string) (*Plan, error) {
 	if !ok || !s.Review {
 		return nil, fmt.Errorf("%q cannot be changed once the plan is made", key)
 	}
+	if p.Instant && key != SettingMode {
+		return nil, fmt.Errorf("instant runs every option at its least: pick another depth to change %s", s.Label)
+	}
 	if _, ok := s.Option(value); !ok {
 		return nil, fmt.Errorf("%s: %q is not one of its choices", s.Label, value)
 	}
@@ -334,6 +347,12 @@ func ApplyToPlan(p *Plan, key, value string) (*Plan, error) {
 		d, err := ParseDepthMode(value)
 		if err != nil {
 			return nil, err
+		}
+		if d.IsInstant() {
+			return p.toInstant(), nil
+		}
+		if p.Instant {
+			return p.fromInstant(d), nil
 		}
 		return p.WithDepth(d), nil
 	case SettingFormat:

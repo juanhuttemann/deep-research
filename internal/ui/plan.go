@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -32,7 +34,19 @@ var DepthModes = []DepthMode{
 	{"quick", "Quick", 3, 3},
 	{"standard", "Standard", 4, 4},
 	{"deep", "Deep", 5, 6},
+	// Instant is a tier of its own, not quick made faster: quick is a checked
+	// run, and a name people already used for one must not drop the check.
+	{ModeInstant, "Instant", 2, 1},
 }
+
+// ModeInstant is the instant tier's key: one search of the question and one
+// answer call, not fact-checked (see InstantPlan and Driver.answer).
+const ModeInstant = "instant"
+
+// IsInstant reports whether d is the instant tier. Only a run started at it
+// is instant: a saved plan or trace says so in its own Instant bit, so one
+// recorded at another tier is never turned into an unchecked run.
+func (d DepthMode) IsInstant() bool { return d.Key == ModeInstant }
 
 // SubTopic is one branch of a research plan — the unit that becomes a
 // parallel sub-agent in the supervisor tree. It reuses the agent package's
@@ -71,6 +85,11 @@ type Plan struct {
 	// mode): no analysis, fact-check or report call. A plan written before
 	// it existed runs the whole pipeline, as it did.
 	Instant bool `json:"instant,omitempty"`
+	// Before is the plan instant replaced in the brief or the page's review,
+	// put back, sub-topics, follow-ups and format included, when another
+	// depth is chosen: d cycles through instant, and passing it must not
+	// lose the plan. Only an instant plan has one, and it is never run.
+	Before *Plan `json:"before,omitempty"`
 	// Report is the shape the report is written in, the zero value for the
 	// standard one: a plan written before reports had a shape still runs as
 	// it did.
@@ -161,6 +180,15 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	// so a run of it still reports what the planner corrected.
 	plan.Asked = strings.TrimSpace(p.Asked)
 	plan.NoFollowUps, plan.Instant = p.NoFollowUps, p.Instant
+	if p.Instant && p.Before != nil {
+		// Read as any plan is, one level deep: it is input too.
+		inner := *p.Before
+		inner.Before = nil
+		raw, _ := json.Marshal(inner)
+		if before, err := ReadPlan(bytes.NewReader(raw)); err == nil && !before.Instant {
+			plan.Before = before
+		}
+	}
 	plan.Scope = p.Scope
 	if plan.Report, err = p.Report.Normalized(); err != nil {
 		return nil, fmt.Errorf("read plan: %w", err)
@@ -190,6 +218,58 @@ func InstantPlan(question string, depth DepthMode, perTopic int) *Plan {
 	p := PlanFor(question, depth, []SubTopic{{Name: question, Query: q}}, perTopic)
 	p.Instant = true
 	return p
+}
+
+// toInstant is p switched to instant in the brief or the page's review,
+// keeping p to put back when another depth is chosen.
+func (p *Plan) toInstant() *Plan {
+	if p.Instant {
+		return p
+	}
+	np := p.Instantly()
+	np.Before = p.clone()
+	return np
+}
+
+// fromInstant is the instant plan p left for depth d: the plan instant
+// replaced, at d. Back at its own depth it is put back as it was, budget
+// included; another depth re-budgets it as choosing a depth always does.
+func (p *Plan) fromInstant(d DepthMode) *Plan {
+	if p.Before == nil {
+		np := p.WithDepth(d)
+		np.Instant, np.Before = false, nil
+		return np
+	}
+	np := p.Before.clone()
+	if np.Depth.Key != d.Key {
+		np = np.WithDepth(d)
+	}
+	return np
+}
+
+// clone is a copy of p sharing nothing a brief key edits in place.
+func (p *Plan) clone() *Plan {
+	np := *p
+	np.SubTopics = make([]SubTopic, len(p.SubTopics))
+	for i, t := range p.SubTopics {
+		t.Terms = slices.Clone(t.Terms)
+		np.SubTopics[i] = t
+	}
+	np.Domains = slices.Clone(p.Domains)
+	np.Questions, np.Clarifications = slices.Clone(p.Questions), slices.Clone(p.Clarifications)
+	np.Before = nil
+	return &np
+}
+
+// Instantly is p at the instant tier: every option at its least, as --mode
+// instant gives them, so one search of the question and one answer call,
+// whatever was planned or edited. Every instant plan is launched through it.
+func (p *Plan) Instantly() *Plan {
+	np := InstantPlan(p.Question, depthMode(ModeInstant), 2)
+	np.Asked, np.Domains = p.Asked, p.Domains
+	np.Questions, np.Clarifications = p.Questions, p.Clarifications
+	np.NoFollowUps, np.Report = true, ReportSpec{Format: "brief", Tables: "none"}
+	return np
 }
 
 // Planner produces a research plan from a question using the assistant's Plan

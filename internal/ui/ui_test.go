@@ -2279,7 +2279,7 @@ func TestStartScreenFrame(t *testing.T) {
 }
 
 // The settings row names what is set away from its default and counts the
-// rest: all nine at auto, on, off and standard overran the screen's width saying
+// rest: all eight at auto, on and standard overran the screen's width saying
 // nothing was chosen. The depth at its default was shown too, and read as
 // fixed until the brief, which shows it again and changes it.
 func TestStartSettingsRowShowsChanges(t *testing.T) {
@@ -2291,7 +2291,7 @@ func TestStartSettingsRowShowsChanges(t *testing.T) {
 	}
 	r.RenderStart(agent.Setup{}, Settings(RunSettings{Mode: "deep", Report: ReportSpec{Words: 1000}}), "an example?", "")
 	row := r.startSettingsRow()
-	for _, want := range []string{"depth deep", "words 1000", "+7 more"} {
+	for _, want := range []string{"depth deep", "words 1000", "+6 more"} {
 		if !strings.Contains(row, want) {
 			t.Errorf("row lacks %q: %q", want, row)
 		}
@@ -2711,7 +2711,7 @@ func TestAskBoxDrawsTheCursorWhereItIs(t *testing.T) {
 // stream a script reads.
 func instantRun(t *testing.T, fa *fakeAssistant, q string, topics int) RunResult {
 	t.Helper()
-	res, err := Run(context.Background(), Options{Question: q, Assistant: fa, Instant: true, SubTopics: topics,
+	res, err := Run(context.Background(), Options{Question: q, Assistant: fa, DepthMode: ModeInstant, SubTopics: topics,
 		SourcesPerTopic: 2, NoFollowUps: true, OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, JSONL: true})
 	if err != nil || res.Report == nil {
 		t.Fatalf("instant run: %+v, %v", res, err)
@@ -2768,7 +2768,7 @@ func checkInstantResult(t *testing.T, res RunResult) {
 	}
 }
 
-// --instant --topics 3 asked for three sub-topics: the planner makes them,
+// --mode instant --topics 3 asked for three sub-topics: the planner makes them,
 // and the run still ends in the one answer call.
 func TestInstantRunWithTopicsPlansThem(t *testing.T) {
 	fa := &fakeAssistant{answer: "answer"}
@@ -2793,9 +2793,74 @@ func TestThinInstantRunStaysUnchecked(t *testing.T) {
 // A plan written with --plan-only or kept in a page's review keeps its
 // instant bit through ReadPlan, which rebuilds the plan from its parts.
 func TestReadPlanKeepsInstant(t *testing.T) {
-	raw, _ := json.Marshal(InstantPlan("q", depthMode("quick"), 2))
+	raw, _ := json.Marshal(InstantPlan("q", depthMode(ModeInstant), 2))
 	p, err := ReadPlan(bytes.NewReader(raw))
 	if err != nil || !p.Instant || p.PerTopic() != 2 {
 		t.Errorf("read plan = %+v, %v; want instant, 2 per topic", p, err)
+	}
+}
+
+// Quick is the smallest checked run, as it was before the instant tier:
+// a quick run plans, analyses and fact-checks, and a quick plan written
+// before instant existed reads back checked.
+func TestQuickStaysChecked(t *testing.T) {
+	fa := &fakeAssistant{summary: "report"}
+	res, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "quick",
+		OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, JSONL: true})
+	if err != nil || res.Plan.Instant || res.Report.Instant || len(fa.readings) != 1 || fa.slow.Load() == 0 || fa.answered != "" {
+		t.Errorf("quick run: instant %v/%v, plans %d, checked calls %d, answer call %v, %v",
+			res.Plan.Instant, res.Report.Instant, len(fa.readings), fa.slow.Load(), fa.answered != "", err)
+	}
+	old := `{"question":"q","depth":{"key":"quick"},"sub_topics":[{"name":"a"}]}`
+	if p, err := ReadPlan(strings.NewReader(old)); err != nil || p.Instant || p.Depth.Key != "quick" {
+		t.Errorf("an old quick plan = %+v, %v; want quick and checked", p, err)
+	}
+}
+
+// In the brief, d up to instant and Enter launch the instant run: one
+// answer call, no analysis, check or report call.
+func TestBriefInstantRunsTheAnswerCall(t *testing.T) {
+	fa := &fakeAssistant{answer: "answer"}
+	res, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "standard",
+		OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, KeyScript: "dd\r"})
+	if err != nil || res.Report == nil {
+		t.Fatalf("run: %+v, %v", res, err)
+	}
+	if !res.Plan.Instant || len(res.Plan.SubTopics) != 1 || fa.answered == "" || fa.slow.Load() != 0 || !res.Report.Instant {
+		t.Errorf("plan instant %v with %d sub-topics, answer call %v, checked calls %d",
+			res.Plan.Instant, len(res.Plan.SubTopics), fa.answered != "", fa.slow.Load())
+	}
+	_, err = Run(context.Background(), Options{Question: "q", Assistant: &fakeAssistant{}, DepthMode: "standard", SearchOff: true,
+		OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, KeyScript: "dd\r"})
+	if err == nil || !strings.Contains(err.Error(), "search is off") {
+		t.Errorf("instant chosen in the brief with search off: %v, want it refused", err)
+	}
+}
+
+// An instant plan is launched at its least whatever was edited on the way:
+// a plan file or the page's review with three sub-topics and a detailed
+// report still searches the question once and answers in one call.
+func TestEditedInstantPlanLaunchesAtItsLeast(t *testing.T) {
+	p := InstantPlan("q", depthMode(ModeInstant), 2)
+	p.SubTopics = append(p.SubTopics, SubTopic{ID: "2", Name: "b"}, SubTopic{ID: "3", Name: "c"})
+	p.NoFollowUps, p.Report = false, ReportSpec{Format: "detailed"}
+	fa := &fakeAssistant{answer: "answer"}
+	res, err := Run(context.Background(), Options{Question: "q", Assistant: fa, Plan: p,
+		OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, JSONL: true})
+	if err != nil || len(res.Plan.SubTopics) != 1 || !res.Plan.NoFollowUps || res.Plan.Report.Format != "brief" || fa.slow.Load() != 0 {
+		t.Errorf("edited instant plan ran as %+v (checked calls %d), %v", res.Plan, fa.slow.Load(), err)
+	}
+}
+
+// In the brief, d through instant and on to quick launches the planned
+// sub-topics with follow-ups on again, checked.
+func TestBriefPastInstantRunsThePlanChecked(t *testing.T) {
+	fa := &fakeAssistant{summary: "report"}
+	res, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "standard",
+		OutDir: t.TempDir(), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, KeyScript: "ddd\r"})
+	if err != nil || res.Plan.Instant || res.Plan.Depth.Key != "quick" || len(res.Plan.SubTopics) != 2 || res.Plan.NoFollowUps ||
+		fa.answered != "" || fa.slow.Load() == 0 {
+		t.Errorf("standard → deep → instant → quick ran %+v (answer call %v, checked calls %d), %v",
+			res.Plan, fa.answered != "", fa.slow.Load(), err)
 	}
 }

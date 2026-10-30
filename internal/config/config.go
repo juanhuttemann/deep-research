@@ -42,9 +42,6 @@ type Config struct {
 	// NoClarify asks no clarifying questions before planning (clarify:
 	// off). A negative, as NoFollowUps is.
 	NoClarify bool
-	// Instant makes every run an instant one unless its flags say otherwise
-	// (instant: true): one search and one answer call, not fact-checked.
-	Instant bool
 	// Parallelism is how many sub-agents search at once. Every other budget
 	// in the tool is configurable; this one used to be a literal 3 in the UI,
 	// so a deep run with six sub-topics could not be widened or, on a rate-
@@ -512,7 +509,6 @@ func Load() (Config, error) {
 	v.SetDefault("report_words", 0)
 	v.SetDefault("report_tables", "auto")
 	v.SetDefault("clarify", "auto")
-	v.SetDefault("instant", false)
 	// The setting was originally spelled max_depth back when it capped a run's
 	// total sources. Config files on disk still use that name, so it keeps
 	// resolving to the same value.
@@ -581,7 +577,6 @@ func runKeys(v *viper.Viper) (Config, error) {
 		SourcesPerTopic: v.GetInt("sources_per_topic"),
 		SubTopics:       max(v.GetInt("sub_topics"), 0),
 		NoFollowUps:     !v.GetBool("follow_ups"),
-		Instant:         v.GetBool("instant"),
 		Parallelism:     v.GetInt("parallelism"),
 	}
 	// A file or env var setting this to 0 or a negative number would

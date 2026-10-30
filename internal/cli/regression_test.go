@@ -428,7 +428,7 @@ func TestDoctorSaysWhatToDoNext(t *testing.T) {
 	if strings.Contains(out.String(), "ready to run") {
 		t.Errorf("a doctor with a problem said ready:\n%s", out.String())
 	}
-	if got := callBudget(true); !strings.Contains(got, "at most 13, in every --mode") {
+	if got := callBudget(true); !strings.Contains(got, "at most 13 in quick, standard and deep") || !strings.Contains(got, "1 in instant") {
 		t.Errorf("web-search budget = %q", got)
 	}
 	if got := configSource(); !strings.Contains(got, "drsh init") {
@@ -710,46 +710,37 @@ func TestClarifyFlagsRefuseWhatTheyCannotMean(t *testing.T) {
 	}
 }
 
-// /instant on on the start screen shows the bundle it stands for, a
-// /command after it changes one setting of it, and /instant off puts back
-// what the bundle replaced, keeping that later change.
-func TestStartScreenInstantAppliesAndRestoresItsBundle(t *testing.T) {
+// /mode instant on the start screen shows the bundle it stands for; a
+// setting it holds is not changed under it, and says so; another depth
+// puts back what the bundle replaced.
+func TestStartScreenInstantHoldsAndRestoresItsBundle(t *testing.T) {
 	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	cmd.SetErr(io.Discard)
 	s := &session{cmd: cmd}
 	d := Deps{}
 	s.chooseSetting("/sources 6")
-	s.chooseSetting("/instant on")
-	if rs := runSettings(cmd, d); !rs.Instant || rs.Sources != 2 || rs.SubTopics != 1 || rs.Report.Format != "brief" {
-		t.Fatalf("after /instant on: %+v", rs)
+	s.chooseSetting("/mode instant")
+	if rs := runSettings(cmd, d); !rs.Instant() || rs.Sources != 2 || rs.SubTopics != 1 || rs.Report.Format != "brief" {
+		t.Fatalf("after /mode instant: %+v", rs)
 	}
 	s.chooseSetting("/topics 3")
-	s.chooseSetting("/instant off")
+	if rs := runSettings(cmd, d); rs.SubTopics != 1 || cmd.Flags().Changed("topics") && func() bool { v, _ := cmd.Flags().GetInt("topics"); return v == 3 }() {
+		t.Errorf("/topics 3 under instant changed it: %+v", rs)
+	}
+	s.chooseSetting("/mode standard")
 	rs := runSettings(cmd, d)
-	if rs.Instant || rs.Sources != 6 || rs.SubTopics != 3 || rs.Report.Format != "" || rs.NoFollowUps {
-		t.Errorf("after /instant off: %+v, want sources 6 back, topics 3 kept, the rest as before", rs)
+	if rs.Instant() || rs.Sources != 6 || rs.SubTopics != 0 || rs.Report.Format != "" || rs.NoFollowUps {
+		t.Errorf("after /mode standard: %+v, want sources 6 back and the rest as before", rs)
 	}
 	if cmd.Flags().Changed("format") {
-		t.Error("/instant off left --format given, so the config's report_format no longer applies")
+		t.Error("leaving instant left --format given, so the config's report_format no longer applies")
 	}
 }
 
-// The page's instant control reaches the run as --instant=true.
+// The page's instant depth reaches the run as --mode=instant.
 func TestWebArgsMapInstant(t *testing.T) {
-	args, _, err := webArgs(web.Request{Question: "q", Settings: map[string]string{"instant": "on"}}, "r")
-	if err != nil || !slices.Contains(args, "--instant=true") {
-		t.Errorf("args = %v, %v; want --instant=true", args, err)
-	}
-}
-
-// /instant on a second time put the bundle back over a setting changed
-// since, and /instant off then lost that change too.
-func TestStartScreenInstantOnAgainKeepsAChange(t *testing.T) {
-	cmd := New(func() (Deps, error) { return Deps{}, nil })
-	s := &session{cmd: cmd}
-	for _, line := range []string{"/instant on", "/topics 3", "/instant on"} {
-		s.chooseSetting(line)
-	}
-	if rs := runSettings(cmd, Deps{}); rs.SubTopics != 3 {
-		t.Errorf("topics after /instant on again = %d, want the 3 chosen after it", rs.SubTopics)
+	args, _, err := webArgs(web.Request{Question: "q", Settings: map[string]string{"mode": "instant"}}, "r")
+	if err != nil || !slices.Contains(args, "--mode=instant") {
+		t.Errorf("args = %v, %v; want --mode=instant", args, err)
 	}
 }

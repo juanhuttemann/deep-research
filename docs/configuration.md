@@ -266,7 +266,6 @@ API: they reject adaptive thinking.
 | `report_words` | `0` | about this many words for the explanation, the program-written answer not counted; `0` leaves it to the format. At most 6000. `--words` for one run |
 | `report_tables` | `auto` | how much of the report is in tables: `auto` (the format's), `none`, `some` or `many`. `--tables` for one run |
 | `clarify` | `auto` | before planning, ask up to three questions about what the question leaves open, none for a clear one (`auto`), or never (`off`). Only runs someone can answer ask: the terminal and the serve page. `--clarify` for one run, `/clarify` on the start screen. Another value fails the load |
-| `instant` | `false` | make every run an [instant answer](usage.md#instant-answers): one search and one answer call, no plan to review, no analysis or fact-check, and the keys above at their least (one sub-topic, two pages, no follow-ups, no clarifying questions, a `brief` report without tables) over their values here. A flag given for one of them still wins. `--instant` for one run, `/instant` on the start screen. Needs a search engine |
 | `parallelism` | `3` | sub-agents searching at once; a plan with more sub-topics queues them |
 | `reasoning_effort.<phase>` | see below | how hard each phase's model reasons: `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
 

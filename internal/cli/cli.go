@@ -73,13 +73,12 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// Scripts and older docs still pass that name, so it keeps working.
 	root.Flags().Int("depth", 0, "deprecated alias for --sources")
 	_ = root.Flags().MarkDeprecated("depth", "use --sources")
-	root.Flags().String("mode", "standard", "research depth: quick | standard | deep")
+	root.Flags().String("mode", "standard", "research depth: quick | standard | deep | instant (one search and one answer, not fact-checked)")
 	root.Flags().Int("topics", 0, "plan exactly this many sub-topics, 1-8 (0 = the planner chooses, up to the --mode tier's)")
 	root.Flags().Bool("no-follow-ups", false, "skip the follow-up round: analyse what the planned searches found")
 	root.Flags().String("format", "standard", "report format: standard | brief | detailed | table")
 	root.Flags().Int("words", 0, "the report's explanation in about this many words (0 = the --format's)")
 	root.Flags().String("tables", "auto", "how much of the report is in tables: auto (the --format's) | none | some | many")
-	root.Flags().Bool("instant", false, "one search and one answer call, not fact-checked: no plan to review, and every setting not given at its least")
 	root.Flags().String("clarify", "auto", "before planning, ask what the question leaves open: auto (only when it does) | off")
 	root.Flags().Bool("clarify-only", false, "ask the clarifying questions, print them (as the clarify event under --jsonl) and stop before planning")
 	root.Flags().String("answers", "", "plan for these answers instead of asking: the JSON --clarify-only printed, with \"answers\" filled in")
@@ -107,7 +106,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// flags as well would leave two answers to each, and a replay carries
 	// its recorded plan.
 	for _, other := range []string{"prompt", "replay", "mode", "sources", "depth", "plan-only", "topics", "no-follow-ups",
-		"format", "words", "tables", "clarify", "clarify-only", "answers", "instant"} {
+		"format", "words", "tables", "clarify", "clarify-only", "answers"} {
 		root.MarkFlagsMutuallyExclusive("plan", other)
 	}
 	root.MarkFlagsMutuallyExclusive("plan-only", "replay")
@@ -118,9 +117,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	}
 	// The report flags are not among them: a replay writes the report again,
 	// live, and the recorded evidence can be written up in another shape.
-	// Nor is instant among the shapes: a replay ends as its recorded plan
-	// did, in the answer call or in the analysis and check.
-	for _, other := range []string{"topics", "no-follow-ups", "clarify", "answers", "instant"} {
+	for _, other := range []string{"topics", "no-follow-ups", "clarify", "answers"} {
 		root.MarkFlagsMutuallyExclusive("replay", other)
 	}
 	root.Flags().StringSlice("domains", nil, "research only these sites (comma-separated); each is checked before planning")
@@ -133,7 +130,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// A checkpoint carries the question, the confirmed plan, its tier and
 	// budget, and the searches already made.
 	for _, other := range []string{"prompt", "replay", "plan", "plan-only", "mode", "sources", "depth", "domains",
-		"topics", "no-follow-ups", "format", "words", "tables", "clarify", "clarify-only", "answers", "instant"} {
+		"topics", "no-follow-ups", "format", "words", "tables", "clarify", "clarify-only", "answers"} {
 		root.MarkFlagsMutuallyExclusive("resume", other)
 	}
 
@@ -518,24 +515,13 @@ func runSettings(cmd *cobra.Command, d Deps) ui.RunSettings {
 		report = d.Config.Report
 	}
 	rs := ui.RunSettings{Mode: mode, SubTopics: subTopics(cmd, d), Sources: sourceBudget(cmd, d), NoFollowUps: noFollowUps(cmd, d),
-		Report: report, NoClarify: noClarify(cmd, d), Instant: instant(cmd, d)}
-	// What an instant run implies is over the config's values, the flags
-	// given over both: the config's report_format: detailed was not asked
-	// for this run, --format detailed was.
-	if implied, err := rs.WithImplied(func(key string) bool { return settingGiven(cmd, key) }); err == nil {
+		Report: report, NoClarify: noClarify(cmd, d)}
+	// The instant tier is every option at its least, over the config's
+	// values and the flags alike (checkInstant warns about the flags).
+	if implied, err := rs.WithImplied(); err == nil {
 		rs = implied
 	}
 	return rs
-}
-
-// instant is whether the run is an instant one: the flag's choice, else
-// the config's.
-func instant(cmd *cobra.Command, d Deps) bool {
-	if cmd.Flags().Changed("instant") {
-		on, _ := cmd.Flags().GetBool("instant")
-		return on
-	}
-	return d.Config.Instant
 }
 
 // settingGiven reports whether the setting key's flag was given, the
@@ -571,12 +557,8 @@ func answers(cmd *cobra.Command) (*ui.Clarified, error) {
 // defaultSettings are the settings a run started now with no flags takes,
 // the ones the serve page opens on.
 func defaultSettings(c config.Config) ui.RunSettings {
-	rs := ui.RunSettings{Mode: "standard", SubTopics: c.SubTopics, Sources: c.SourcesPerTopic, NoFollowUps: c.NoFollowUps,
-		Report: c.Report, NoClarify: c.NoClarify, Instant: c.Instant}
-	if implied, err := rs.WithImplied(func(string) bool { return false }); err == nil {
-		rs = implied
-	}
-	return rs
+	return ui.RunSettings{Mode: "standard", SubTopics: c.SubTopics, Sources: c.SourcesPerTopic, NoFollowUps: c.NoFollowUps,
+		Report: c.Report, NoClarify: c.NoClarify}
 }
 
 // setSetting sets a setting chosen on the start screen as its flag, so every
@@ -663,16 +645,37 @@ func checkRun(cmd *cobra.Command, d Deps, question string) error {
 // write the findings it then answers from, and an answer in one unchecked
 // call from what the model recalls is what instant runs promise not to be.
 // A replay is exempt: it answers from the searches it recorded.
+//
+// A flag given beside --mode instant for a setting instant holds at its
+// least is ignored, and said to be: instant is every option at its least.
 func checkInstant(cmd *cobra.Command, d Deps, st start) error {
-	on := runSettings(cmd, d).Instant
+	rs := runSettings(cmd, d)
+	on := rs.Instant()
 	if st.plan != nil {
 		on = st.plan.Instant
 	}
 	if on && !st.replay && !d.Config.SearchEnabled() {
-		return errors.New("an instant run answers from a web search, and search is off: set search_engine (drsh setup), or run without --instant")
+		return errors.New("an instant run answers from a web search, and search is off: set search_engine (drsh setup), or pick another --mode")
+	}
+	if st.plan == nil && rs.Instant() {
+		var ignored []string
+		for k := range ui.Implied(ui.Settings(rs)) {
+			if settingGiven(cmd, k) {
+				s, _ := ui.SettingFor(ui.Settings(rs), k)
+				ignored = append(ignored, "--"+s.FlagName())
+			}
+		}
+		if len(ignored) > 0 {
+			slices.Sort(ignored)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: --mode instant runs every option at its least; ignoring %s\n", strings.Join(ignored, ", "))
+		}
 	}
 	return nil
 }
+
+// searchOff reports a run with no web search to answer an instant plan
+// from. A replay has its recorded searches.
+func searchOff(d Deps, st start) bool { return !d.Config.SearchEnabled() && !st.replay }
 
 func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, error) {
 	st, err := runStart(cmd, d, question)
@@ -738,7 +741,7 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		SourcesPerTopic: rs.Sources,
 		SubTopics:       rs.SubTopics,
 		NoFollowUps:     rs.NoFollowUps,
-		Instant:         rs.Instant,
+		SearchOff:       searchOff(d, st),
 		Report:          rs.Report,
 		Parallelism:     d.Config.Parallelism,
 		JSONL:           jsonl,
@@ -1135,21 +1138,26 @@ func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 // revises a blocked recommendation; LLM search adds up to two calls per
 // sub-topic and per follow-up.
 func callBudget(webSearch bool) string {
-	parts := make([]string, len(ui.DepthModes))
-	for i, m := range ui.DepthModes {
+	var parts []string
+	for _, m := range ui.DepthModes {
+		// An instant run is refused without web search (checkInstant).
+		if m.IsInstant() {
+			continue
+		}
 		n := 6 + ui.MaxCheckCalls
 		if !webSearch {
 			n += 2 * (m.SubTopics + ui.MaxFollowUps)
 		}
-		parts[i] = fmt.Sprintf("%s %d", m.Key, n)
+		parts = append(parts, fmt.Sprintf("%s %d", m.Key, n))
 	}
-	// With web search every tier spends the same: the tiers differ in
+	// With web search every checked tier spends the same: they differ in
 	// searches, not model calls. "quick 7, standard 7, deep 7" read as a
-	// bug, so a uniform budget is said once.
+	// bug, so a uniform budget is said once. Instant is its one answer call.
 	if webSearch {
-		return fmt.Sprintf("model requests per run: at most %d, in every --mode (the modes differ in searches)", 6+ui.MaxCheckCalls)
+		return fmt.Sprintf("model requests per run: at most %d in quick, standard and deep (they differ in searches); 1 in instant",
+			6+ui.MaxCheckCalls)
 	}
-	return "model requests per run: " + strings.Join(parts, ", ")
+	return "model requests per run: " + strings.Join(parts, ", ") + "; instant needs web search"
 }
 
 func runList(cmd *cobra.Command, d Deps) error {
