@@ -51,6 +51,21 @@ only the summarizer's prose: the program-written answer, the quote check
 and the export's Fact-Check and citation sections are the same in every
 format.
 
+Before the plan, a run someone can answer (the terminal, or a
+`--clarify-only` caller such as the serve page) asks the clarifier
+(`agent.Assistant.Clarify`, one call) what the question leaves open. Its
+questions are put to the reader by `ui.Run` (the picker on the terminal,
+radio groups on the page from the `clarify` event) and the answers
+(`agent.Clarification`, aliased in `ui`) go on the plan beside the
+questions (`Plan.Clarifications`, `Plan.Questions`). The planner gets them
+as its own argument, never folded into the question, which still titles
+the report; the Driver appends them to the question it composes into the
+analysis, follow-up, repair and summarizer prompts (`statedQuestion`), and
+never into the fact-check's. With none, every prompt is what it was. A
+brief that asks the questions again returns to `ui.Run`, which makes the
+new plan: the brief's key loop calls no model. A run with no one to ask
+makes no call.
+
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
 each phase. The planner is given a breadth (`agent.Breadth`): by default a

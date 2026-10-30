@@ -168,3 +168,63 @@ func runPressingAfterReport(t *testing.T, key string) bool {
 	}
 	return res.Detached
 }
+
+// The questions were drawn on the run's own renderer, and the guard that
+// gives the terminal back after them closed it: the brief that followed was
+// never drawn, and the run sat waiting on a key for a screen nobody saw.
+func TestBriefIsDrawnAfterTheQuestions(t *testing.T) {
+	master, slave := openPTY(t)
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 100}); err != nil {
+		t.Skipf("TIOCSWINSZ: %v", err)
+	}
+	var mu sync.Mutex
+	var screen bytes.Buffer
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := master.Read(buf)
+			mu.Lock()
+			screen.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	// Esc at the first question, then q at the brief, each once its screen
+	// is up.
+	go func() {
+		for _, step := range []struct{ shown, key string }{{"A FEW QUESTIONS FIRST", "\x1b"}, {"RESEARCH BRIEF", "q"}} {
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+				mu.Lock()
+				shown := bytes.Contains(screen.Bytes(), []byte(step.shown))
+				mu.Unlock()
+				if shown {
+					time.Sleep(3 * keyPoll)
+					_, _ = master.Write([]byte(step.key))
+					break
+				}
+			}
+		}
+	}()
+	done := make(chan RunResult, 1)
+	go func() {
+		res, err := Run(context.Background(), Options{
+			Question: "q", Assistant: &fakeAssistant{questions: []Question{{Text: "Which?", Options: []string{"a", "b"}}}},
+			OutDir: t.TempDir(), Input: slave, Stdout: slave, Stderr: slave, Clarify: true,
+		})
+		if err != nil {
+			t.Errorf("Run: %v", err)
+		}
+		done <- res
+	}()
+	select {
+	case res := <-done:
+		if !res.Cancelled {
+			t.Errorf("the run was not cancelled at the brief: %+v", res)
+		}
+	case <-time.After(15 * time.Second):
+		_, _ = master.Write([]byte("q"))
+		t.Fatal("no brief after the questions")
+	}
+}

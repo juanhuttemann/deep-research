@@ -289,6 +289,20 @@ search_instructions: |
   quotation or an excerpt, and makes no claim about the page's current text.
   Never invent a URL.
 
+clarifier_instructions: |
+  You check a research question before it is researched. Ask only what
+  would change the research: a reading the question leaves open whose answer
+  differs (the audience, the jurisdiction or market, the time frame, which of
+  several products, people or events of that name, the use case). Never ask
+  about the report's length, format or depth, about something the question
+  already states, or for preferences that would not change what is searched.
+  Most questions are clear: then ask nothing. Ask at most three, each with
+  two to four short options, the likeliest reading first, in the language of
+  the question. Never offer "other", "not sure" or "any" as an option: the
+  reader can always answer in their own words or skip.
+  Respond ONLY with JSON of the shape:
+  {"questions":[{"id":"...","text":"...","options":["...","..."]}]}
+
 planner_instructions: |
   You are a research planner. Decompose the following question into focused,
   non-overlapping research sub-topics that together answer it, as many as the

@@ -16,11 +16,14 @@ import (
 // tiers, their counts and the budget rules, and the copies drifted.
 type Setting struct {
 	// Key is the flag's name, the /command and the page's field.
-	Key   string   `json:"key"`
-	Label string   `json:"label"`
-	Help  string   `json:"help"`
-	Value string   `json:"value"`
-	Opts  []Option `json:"choices"`
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Help  string `json:"help"`
+	Value string `json:"value"`
+	// Default is the value with nothing set, by which the start screen and
+	// the page show only what was chosen.
+	Default string   `json:"default"`
+	Opts    []Option `json:"choices"`
 	// Start settings are chosen before the plan is made; Review settings can
 	// still change in the brief once it is on screen.
 	Start  bool `json:"start"`
@@ -49,6 +52,8 @@ type RunSettings struct {
 	Sources     int
 	NoFollowUps bool
 	Report      ReportSpec
+	// NoClarify asks no clarifying questions before planning.
+	NoClarify bool
 }
 
 // Setting keys, the flags they become.
@@ -60,6 +65,7 @@ const (
 	SettingFormat    = "format"
 	SettingWords     = "words"
 	SettingTables    = "tables"
+	SettingClarify   = "clarify"
 )
 
 // sourceChoices are the per-sub-agent budgets offered besides auto.
@@ -70,6 +76,14 @@ var wordChoices = []int{300, 600, 1000, 1500, 2500}
 
 // Settings describes every setting at the values rs holds.
 func Settings(rs RunSettings) []Setting {
+	out, defaults := settingsAt(rs), settingsAt(RunSettings{})
+	for i := range out {
+		out[i].Default = defaults[i].Value
+	}
+	return out
+}
+
+func settingsAt(rs RunSettings) []Setting {
 	out := []Setting{
 		{Key: SettingMode, Label: "depth", Help: "How wide and deep the research goes: the most sub-topics, and the pages each reads.",
 			Value: cmp.Or(rs.Mode, "standard"), Opts: modeOptions(), Start: true, Review: true, BriefKey: KeyD},
@@ -88,6 +102,9 @@ func Settings(rs RunSettings) []Setting {
 			Value: strconv.Itoa(rs.Report.Words), Opts: countOptions(0, wordChoices), Start: true, count: true, max: agent.MaxReportWords},
 		{Key: SettingTables, Label: "tables", Help: "How much of the report is in tables. Auto lets the format decide.",
 			Value: cmp.Or(rs.Report.Tables, agent.ReportTables[0]), Opts: plainOptions(agent.ReportTables), Start: true},
+		// Not a review setting: by the brief the questions were asked or not.
+		{Key: SettingClarify, Label: "clarify", Help: "Before planning, ask up to three questions when the question leaves open what to research. Auto asks only when it does.",
+			Value: clarifyValue(!rs.NoClarify), Opts: []Option{{Value: "auto", Label: "auto"}, {Value: "off", Label: "off"}}, Start: true},
 	}
 	for i := range out {
 		out[i].Opts = withValue(out[i], out[i].Value)
@@ -254,4 +271,13 @@ func ApplyToPlan(p *Plan, key, value string) (*Plan, error) {
 		np.NoFollowUps = value == "off"
 		return &np, nil
 	}
+}
+
+// clarifyValue is the clarify setting's value: auto asks only when the
+// question leaves something open.
+func clarifyValue(on bool) string {
+	if on {
+		return "auto"
+	}
+	return "off"
 }

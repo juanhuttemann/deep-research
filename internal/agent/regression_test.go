@@ -36,7 +36,7 @@ func TestMalformedOutputDoesNotInventResearch(t *testing.T) {
 			t.Errorf("%q invented findings: %+v", out, got)
 		}
 		a := &impl{plan: func(context.Context, string) (string, error) { return out, nil }}
-		out, err := a.Plan(context.Background(), "original question", Breadth{Max: 3})
+		out, err := a.Plan(context.Background(), "original question", Breadth{Max: 3}, nil)
 		got := out.SubTopics
 		if err != nil || len(got) != 1 || got[0].Name != "original question" || got[0].ID == "" {
 			t.Errorf("fallback must research original question: %+v, %v", got, err)
@@ -194,7 +194,7 @@ func TestPlanAgainstDeadEndpointFailsFast(t *testing.T) {
 	a.SetProgress(func(msg string) { logged = append(logged, msg) })
 
 	start := time.Now()
-	_, err = a.Plan(context.Background(), "question", Breadth{Max: 3})
+	_, err = a.Plan(context.Background(), "question", Breadth{Max: 3}, nil)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected an error against a dead endpoint")
@@ -262,7 +262,7 @@ func TestRetriesAreNotMultipliedBySDK(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if _, err = a.Plan(context.Background(), "question", Breadth{Max: 3}); err == nil {
+	if _, err = a.Plan(context.Background(), "question", Breadth{Max: 3}, nil); err == nil {
 		t.Fatal("expected an error from a failing provider")
 	}
 	// ModelCallRetries: 1 means exactly two attempts, not two times the SDK's.
@@ -340,7 +340,7 @@ func TestStreamedPlanReportsProgressAndKeepsUsage(t *testing.T) {
 	var progress []string
 	a.SetProgress(func(msg string) { mu.Lock(); progress = append(progress, msg); mu.Unlock() })
 
-	out, err := a.Plan(context.Background(), "question", Breadth{Max: 3})
+	out, err := a.Plan(context.Background(), "question", Breadth{Max: 3}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1026,7 +1026,7 @@ func planMessages(t *testing.T, instructions, question string, b Breadth) map[st
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Plan(context.Background(), question, b); err != nil {
+	if _, err := a.Plan(context.Background(), question, b, nil); err != nil {
 		t.Fatal(err)
 	}
 	return got
@@ -1272,7 +1272,7 @@ func checkFix(t *testing.T, asked, proposed, want string) {
 	t.Helper()
 	out := `{"question":` + strconv.Quote(proposed) + `,"subtopics":[{"name":"Pricing"}]}`
 	a := &impl{plan: func(context.Context, string) (string, error) { return out, nil }}
-	got, err := a.Plan(context.Background(), asked, Breadth{Max: 3})
+	got, err := a.Plan(context.Background(), asked, Breadth{Max: 3}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

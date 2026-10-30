@@ -124,6 +124,9 @@ type Renderer struct {
 	example string
 	// commandAt is the highlighted row of the start screen's command menu.
 	commandAt int
+	// quitNote, while a Ctrl-C on an empty box has armed the next to
+	// leave, stands in for the box's keys (see armQuit).
+	quitNote string
 	// inline, when set, is where the frame is drawn instead of from the top
 	// of the screen (see Inline).
 	inline *region
@@ -133,6 +136,10 @@ type Renderer struct {
 	pickRows  []Choice
 	pickShown []int
 	pickAt    int
+	pickHints string
+	pickRight string
+	pickLead  string
+	pickFree  bool
 
 	startTime time.Time
 	detached  bool
@@ -749,6 +756,14 @@ func (r *Renderer) briefHead() []string {
 		r.rule(),
 		"  " + r.T.bold(r.plan.Question),
 	}
+	// The reading the plan was made for, which the question as shown does
+	// not say.
+	switch {
+	case len(r.plan.Clarifications) > 0:
+		head = append(head, r.readingRows(r.plan.Clarifications)...)
+	case len(r.plan.Questions) > 0:
+		head = append(head, "  "+r.T.dim("read as  the research's guess: no question answered"))
+	}
 	// The question as typed is not shown under the planner's fix: the fix
 	// is nearly always a capital and a question mark, and a row repeating
 	// the question to say so was noise.
@@ -761,6 +776,21 @@ func (r *Renderer) briefHead() []string {
 		"",
 		"  "+r.T.dim("planned sub-topics")+r.scopeNote(),
 	)
+}
+
+// readingRows are the brief's answers, each after the question it answers:
+// the answers alone, joined, said "US · 2020s" without saying to what.
+func (r *Renderer) readingRows(cs []Clarification) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		lead := "  " + r.T.dim("read as  ")
+		if i > 0 {
+			lead = "           "
+		}
+		room := max(r.width-11-dispWidth(c.Answer)-1, 8)
+		out[i] = lead + r.T.dim(clip(c.Question, room)) + " " + r.T.bold(c.Answer)
+	}
+	return out
 }
 
 // scopeNote says what the planner judged the question to be, which is why
@@ -792,6 +822,10 @@ func (r *Renderer) briefFoot() []string {
 		if s.Review && s.BriefKey != 0 {
 			hints += fmt.Sprintf("   [%c] %s", s.BriefKey, s.Label)
 		}
+	}
+	if len(r.plan.Questions) > 0 {
+		// A new reading is a new plan: what was edited here is replaced.
+		hints += "   [c] answers (plans again)"
 	}
 	out = append(out, r.hintRows(hints+"   [q] cancel")...)
 	return append(out, "")
@@ -896,10 +930,13 @@ func (r *Renderer) treeLines() []string {
 	head := []string{
 		r.heading("DEEP RESEARCH", formatDuration(r.clock().Sub(r.startTime))),
 		"  " + r.T.dim(clip(r.question, r.width-2)),
-		r.rule(),
-		r.phaseStrip(),
-		r.rule(),
 	}
+	// What the run is researching the question as, all the way through,
+	// not only in the brief the run left.
+	if r.plan != nil && len(r.plan.Clarifications) > 0 {
+		head = append(head, "  "+r.T.dim("read as  ")+clip(clarifiedLine(r.plan.Clarifications), r.width-11))
+	}
+	head = append(head, r.rule(), r.phaseStrip(), r.rule())
 	agents := r.agentLines()
 	// A blank row under the keys, as the start screen ends: counted in the
 	// footer so the tail gives it up rather than the frame overflowing.
@@ -909,11 +946,6 @@ func (r *Renderer) treeLines() []string {
 	// fixed sections leave, so the frame height is constant and the header,
 	// tree and footer never move.
 	budget := r.rows - 1 - len(head) - len(agents) - len(foot) - 1
-	// The reasoning takes its rows from the tail, never from the fixed
-	// sections, and leaves the tail a few rows of its own.
-	thinking := r.thinkingLines(min(maxThinkingRows, budget-3))
-	agents = append(agents, thinking...)
-	budget -= len(thinking)
 	var tail []string
 	if r.showActivity && budget >= 2 {
 		tail = append(tail, r.rule())
@@ -973,6 +1005,10 @@ func (r *Renderer) agentLines() []string {
 	// a minute. This row is what says the run is still working, and on what.
 	if r.statusShown() {
 		text := r.detail
+		// The status's first line only. The reasoning after it was wrapped
+		// in rows under this one, and its latest words, replaced as they
+		// streamed, were too hard to read and follow; the serve page shows
+		// it whole, from the thinking events.
 		if r.status != "" {
 			text, _, _ = strings.Cut(r.status, "\n")
 		}
@@ -997,30 +1033,6 @@ func (r *Renderer) followUpTotal() (n int) {
 // after research, whose single model calls leave the tree still.
 func (r *Renderer) statusShown() bool {
 	return r.detail != "" && !strings.EqualFold(r.phase, "Research") && !r.done
-}
-
-// maxThinkingRows bounds the reasoning shown under the status row.
-const maxThinkingRows = 5
-
-// thinkingLines wraps the reasoning a status carries after its first line into
-// at most n rows under the status row, keeping the latest. Quoted on the
-// status row itself it was clipped to a fragment nobody could read.
-func (r *Renderer) thinkingLines(n int) []string {
-	_, thinking, ok := strings.Cut(r.status, "\n")
-	if !ok || n <= 0 || !r.statusShown() {
-		return nil
-	}
-	const indent = "    "
-	// One column is kept for the ellipsis that marks older text cut off.
-	rows := wrapWords(thinking, r.width-len(indent)-1)
-	if len(rows) > n {
-		rows = rows[len(rows)-n:]
-		rows[0] = "…" + rows[0]
-	}
-	for i, row := range rows {
-		rows[i] = indent + r.T.dim(row)
-	}
-	return rows
 }
 
 func (r *Renderer) stateMark(n *Node) string {
@@ -1249,13 +1261,22 @@ func (r *Renderer) reportLines() []string {
 	counters := fmt.Sprintf("  %s  %d%s      %s  %s",
 		r.T.dim("sources"), r.sources, r.T.dim(sourceQuality(r.result)),
 		r.T.dim("tokens"), formatCount(r.tokens))
-	out := []string{
-		r.heading("RESEARCH COMPLETE", formatDuration(r.clock().Sub(r.startTime))),
+	out := []string{r.heading("RESEARCH COMPLETE", formatDuration(r.clock().Sub(r.startTime)))}
+	// The question the report answers, and the reading it was answered in:
+	// the card replaces the live frame that showed them, and the report
+	// under it opens with its own title, not the question.
+	for _, l := range wrapWords(r.result.Question, r.width-4) {
+		out = append(out, "  "+r.T.bold(l))
+	}
+	if cs := r.result.Clarifications; len(cs) > 0 {
+		out = append(out, "  "+r.T.dim("read as  ")+clip(clarifiedLine(cs), r.width-11))
+	}
+	out = append(out,
 		r.rule(),
 		counters,
 		"",
 		r.T.bold("  Source Breakdown"),
-	}
+	)
 	for _, b := range sourceBreakdown(r.result) {
 		out = append(out, fmt.Sprintf("    %s %s: %d",
 			r.T.dim("·"), b.label, b.count))

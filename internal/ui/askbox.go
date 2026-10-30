@@ -26,7 +26,10 @@ func Ask(stdin io.Reader, w io.Writer, noColor bool, back string) (q string, ok 
 		AskBox(w, noColor, back)
 		line, err := in.NextLine()
 		EndAsk(w)
-		return strings.TrimSpace(strings.ReplaceAll(line, "\x1b", "")), err == nil || line != ""
+		// Raw input marks a paste even when the output is not drawn on;
+		// the markers are not the question.
+		line = strings.NewReplacer(pasteStart, "", pasteEnd, "", "\x1b", "").Replace(line)
+		return strings.TrimSpace(line), err == nil || line != ""
 	}
 	keys := &keptInput{Input: in}
 	return newAskBox(r, back, func() int { return cursorRow(keys, r.write) }).read(keys)
@@ -93,7 +96,8 @@ func (b *askBox) read(in Input) (string, bool) {
 	}
 	b.r.write(cursorHide)
 	b.r.hidden = true
-	e := &commandEditor{paint: func(text string, at, cursor int) { b.g.paint(b.lines(text, at, cursor)) }}
+	e := &commandEditor{paint: func(text string, at, cursor int) { b.g.paint(b.lines(text, at, cursor)) },
+		quit: b.r.armQuit("press Ctrl-C again to exit")}
 	q, ok := e.read(keys, false)
 	if !ok {
 		q = ""

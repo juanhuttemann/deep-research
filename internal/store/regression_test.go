@@ -169,3 +169,29 @@ func TestModelAndErrorFieldsRoundTripBesideLegacyRecords(t *testing.T) {
 		t.Errorf("new record lost fields: %+v", r)
 	}
 }
+
+// The clarifying answers are kept with a run's history record, and a record
+// from before they existed, legacy or not, still loads without them.
+func TestClarificationsRoundTripBesideOlderRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	older := `{"id":"old","question":"q0","analysis":"a","confidence":"low"}` + "\n" +
+		`{"id":"mid","question":"q1","analysis":{"answer":"b"}}` + "\n"
+	if err := os.WriteFile(path, []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	cs := []agent.Clarification{{Question: "Which market?", Answer: "the US"}}
+	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{Question: "q2", Clarifications: cs}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := st.List()
+	if err != nil || skipped != 0 || len(runs) != 3 {
+		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
+	}
+	if runs[0].Clarifications != nil || runs[1].Clarifications != nil || runs[0].Analysis == nil {
+		t.Errorf("older records = %+v, %+v", runs[0], runs[1])
+	}
+	if got := runs[2].Clarifications; len(got) != 1 || got[0] != cs[0] {
+		t.Errorf("clarifications = %v, want %v", got, cs)
+	}
+}

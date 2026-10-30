@@ -7,6 +7,26 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Added
 
+- Clarifying questions. Before planning, one low-effort call checks what
+  the question leaves open that would change the research (the audience,
+  the market, the period, which product) and asks up to three questions,
+  none for a clear question. In the terminal they open in the picker: pick
+  a reading, type your own, skip one, or Esc to leave the rest. On the serve
+  page they are radio groups before the plan. The answers reach the
+  planner, the analysis and the report, never the fact-check, and never
+  rewrite the question. The brief shows each answer under the question it
+  answers, the live run keeps them under the question, and the report
+  opens with them as "Read as" (terminal, `.md`, PDF, `/resume`, the serve
+  page's run view). `c` (the page's "change answers") asks again and plans
+  for the new answers, keeping the brief's settings. `--clarify auto|off` (key `clarify`,
+  `/clarify`) turns it off; `reasoning_effort.clarify` and
+  `clarifier_instructions` tune it. Runs nobody can answer (`--jsonl`,
+  `--silent`, a pipe, `--detach`, `--plan`, `--resume`, `--replay`) make
+  no call. Scripts use `--clarify-only` to get the questions as JSON and
+  `--answers` to hand them back. Plans, checkpoints, traces and the `.json`
+  sidecar carry the questions and answers, and the history record the
+  answers.
+
 - Report formats. `--format standard|brief|detailed|table` (key
   `report_format`) picks the report's shape: `brief` is about 300 words
   with at most a table or two, `detailed` about 1500 words, and `table`
@@ -24,8 +44,40 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- The terminal's live frame no longer shows the model's reasoning under the
+  status row. Replaced as it streamed, it was hard to read and follow; the
+  status line still says which phase is thinking and for how long, and the
+  serve page still shows the reasoning whole.
 - A report that opens with a table no longer has that table's first rows
   as its executive summary.
+- The start screen's settings row shows the depth and only the settings
+  set away from their defaults, with a count of the rest (`+7 more`); `/`
+  still lists them all. All eight at auto, on and standard overran the
+  terminal's width to say nothing had been chosen. The serve page's form
+  does the same: the depth beside the question, the other settings and
+  Search under a "settings" toggle laid out as a label column and a
+  control column, and what is set away from its default named beside the
+  toggle. Each setting in `/api/info` carries its `default`.
+- Ctrl-C in the start screen's box and at `ask ▸` clears what is typed
+  instead of quitting. On an empty box it says "press Ctrl-C again to
+  quit", and a second press, with no other key between, quits as one did.
+  One press threw the session away when it was meant to clear a line, as
+  it does at a shell.
+
+### Fixed
+
+- The terminal's completion card names the question the report answers,
+  with the clarifying answers under it. It replaced the live frame, the
+  last thing on screen that showed the question, and the report printed
+  under it opens with its own title, so a finished run never said what it
+  had answered.
+- Pasting into the terminal's boxes. A paste was read key by key, so a
+  copied line break was Enter: text ending in one started the run before
+  it could be read, and what followed reached the brief as keys (`x`
+  deleted a sub-topic, `q` cancelled). The terminal now marks pastes
+  (bracketed paste, on while drsh holds the terminal): a box takes one as
+  one line, its breaks and tabs as spaces, and the brief and the live run
+  ignore it.
 
 ## [0.26.0] - 2026-10-28
 

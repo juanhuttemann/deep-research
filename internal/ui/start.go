@@ -43,7 +43,7 @@ func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup,
 
 func askQuestion(in Input, r *Renderer, s agent.Setup, settings []Setting, example, note string) string {
 	r.RenderStart(s, settings, example, note)
-	e := &commandEditor{example: example, paint: r.SetCommand}
+	e := &commandEditor{example: example, paint: r.SetCommand, quit: r.armQuit("press Ctrl-C again to quit")}
 	q, _ := e.read(in, true)
 	return q
 }
@@ -88,16 +88,25 @@ func (r *Renderer) startLines() []string {
 	return out
 }
 
-// startSettingsRow is the next run's start settings, as the serve page's
-// form shows them; each one's /command changes it.
+// startSettingsRow is the next run's start settings: the depth, which
+// every run is chosen by, and those set away from their defaults. Listing
+// all of them at auto, on and standard filled the screen's width with
+// nothing chosen; the rest are counted, and "/" lists them.
 func (r *Renderer) startSettingsRow() string {
-	row := ""
+	row, more := "", 0
 	for _, s := range r.settings {
 		if !s.Start {
 			continue
 		}
+		if s.Key != SettingMode && s.Value == s.Default {
+			more++
+			continue
+		}
 		o, _ := s.Option(s.Value)
 		row += fmt.Sprintf("  %s %s ", r.T.dim(s.Label), o.Label)
+	}
+	if more > 0 && row != "" {
+		row += "  " + r.T.dim(fmt.Sprintf("+%d more", more))
 	}
 	return row
 }

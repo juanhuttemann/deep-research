@@ -71,6 +71,12 @@ type Plan struct {
 	// standard one: a plan written before reports had a shape still runs as
 	// it did.
 	Report ReportSpec `json:"report,omitzero"`
+	// Questions are what the clarifier asked before planning, kept so the
+	// brief and the page's review can ask them again; Clarifications are the
+	// reader's answers, the reading the plan was made for. Neither ever
+	// rewrites Question: the report is titled with what was asked.
+	Questions      []Question      `json:"questions,omitempty"`
+	Clarifications []Clarification `json:"clarifications,omitempty"`
 }
 
 // PerTopic is the source budget for a single sub-agent: the whole-
@@ -155,6 +161,11 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	if plan.Report, err = p.Report.Normalized(); err != nil {
 		return nil, fmt.Errorf("read plan: %w", err)
 	}
+	c, err := Clarified{Questions: p.Questions, Answers: p.Clarifications}.Checked()
+	if err != nil {
+		return nil, fmt.Errorf("read plan: %w", err)
+	}
+	plan.Questions, plan.Clarifications = c.Questions, c.Answers
 	return plan, nil
 }
 
@@ -175,6 +186,8 @@ type Planner struct {
 	// SubTopics, when positive, asks for exactly that many sub-topics;
 	// otherwise the planner chooses up to the tier's count.
 	SubTopics int
+	// Reading is what the reader clarified about the question.
+	Reading []Clarification
 }
 
 func NewPlanner(a agent.Assistant, depth DepthMode) *Planner {
@@ -187,7 +200,7 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 	// title.
 	question = strings.Join(strings.Fields(question), " ")
 	b := pl.Breadth()
-	out, err := pl.Assistant.Plan(ctx, question, b)
+	out, err := pl.Assistant.Plan(ctx, question, b, pl.Reading)
 	if err != nil {
 		return nil, err
 	}

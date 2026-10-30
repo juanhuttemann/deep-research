@@ -291,7 +291,7 @@ func (s *session) reopen(path string) {
 		fmt.Fprintf(s.cmd.ErrOrStderr(), "warning: the earlier questions could not be read: %v\n", err)
 	}
 	out := s.cmd.OutOrStdout()
-	fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, "# "+m.Question+"\n\n"+m.Report, s.noColor()))
+	fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, ui.WithReading("# "+m.Question+"\n\n"+m.Report, m.Clarifications), s.noColor()))
 	s.open(path, m, turns)
 }
 

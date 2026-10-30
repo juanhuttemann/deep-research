@@ -28,6 +28,7 @@ model_call_retries: 2
 # DEEP_RESEARCH_REASONING_EFFORT_FACT_CHECK=medium.
 reasoning_effort:
   plan: low
+  clarify: low
   search: default
   analyze: default
   fact_check: default
@@ -47,6 +48,14 @@ sub_topics: 0
 # false skips it (one model call and up to three searches fewer); --no-follow-ups
 # skips it for one run, and f in the research brief turns it on or off.
 follow_ups: true
+# Clarifying questions: before planning, one call checks what the question
+# leaves open that would change the research (the audience, the jurisdiction,
+# the period, which product) and asks up to three questions, none for a clear
+# question. auto asks in the terminal and on the serve page; off never asks.
+# --clarify off skips it for one run. Runs with no one to answer (--jsonl,
+# --silent, a pipe, --detach) never ask; --clarify-only prints the questions
+# and --answers hands them back.
+clarify: auto
 # The report's shape. report_format is a preset: standard (the explanation
 # organized as the question needs), brief (about 300 words, at most one table),
 # detailed (about 1500 words) or table (tables first, little prose).

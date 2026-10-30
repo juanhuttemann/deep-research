@@ -51,15 +51,19 @@ under what the terminal already shows, as the `ask ▸` box and the
 `/resume` and `/model` lists are, so the three sit alike. Enter runs it as `-p` would, the brief and the
 live frame included, and then takes questions about its report in an
 `ask ▸` box drawn like the start screen's (see [`ask`](#ask)). An empty
-line or Esc there brings the screen back for the next question; Esc or
-Ctrl-C on the screen ends it, and Ctrl-C or Ctrl-D at `ask ▸` ends `drsh`
-at once. A run that
+line or Esc there brings the screen back for the next question; Esc on
+the screen ends it, and Ctrl-D at `ask ▸` ends `drsh` at once. Ctrl-C in
+either box clears what is typed; on an empty box it says to press it
+again, and a second press quits (an empty `ask ▸` box: ends `drsh`). Cmd-C
+on macOS is the terminal's copy and never reaches `drsh`. A run that
 fails, or that the brief cancels, returns to the screen, which says why.
-Under the box is the next run's settings row: `depth`, `sub-topics`,
-`pages per topic`, `follow-ups`, `format`, `words` and `tables`. It is the same list the serve page's form
-draws, at the values the config and the flags give. Each setting has a
+Under the box is the next run's settings row: the `depth`, and any of
+`sub-topics`, `pages per topic`, `follow-ups`, `format`, `words`, `tables`
+and `clarify` that the config, the flags or a command set away from its
+default; the rest are counted (`+7 more`), and `/` lists them all. They
+are the same settings the serve page's form draws. Each setting has a
 command that changes it for every run the screen starts after: `/mode`,
-`/topics`, `/sources`, `/follow-ups`, `/format`, `/words` and `/tables`,
+`/topics`, `/sources`, `/follow-ups`, `/format`, `/words`, `/tables` and `/clarify`,
 alone for a list of its choices or with the value (`/mode deep`,
 `/topics 2`, `/follow-ups off`, `/format brief`). Flags given
 with it (`--mode`, `--topics`, `--sources`, `--no-follow-ups`, `--format`,
@@ -75,7 +79,11 @@ cursor: Left and Right move it, Ctrl-Left and Ctrl-Right (Option-Left and
 Option-Right on macOS) by a word, Home and End or Ctrl-A and Ctrl-E to the
 ends; typing inserts at it, Backspace and Delete remove the character
 before and under it, Ctrl-W the word before it, Ctrl-U everything before
-it and Ctrl-K everything after.
+it and Ctrl-K everything after. A paste goes in at the cursor as one line,
+its line breaks and tabs as spaces, and waits for Enter; where keys are
+read instead (the brief, the live run) a paste is ignored. This takes a
+terminal with bracketed paste, which the common ones have; in one without
+it, a pasted line break still presses Enter.
 
 Each run is a session. Its questions and answers are kept beside its
 `.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box
@@ -113,6 +121,9 @@ runs it.
 | `--format standard\|brief\|detailed\|table` | `standard` | the report's shape: `standard` organizes the explanation as the question needs; `brief` is about 300 words with at most a table or two and the limits in a sentence or two; `detailed` is about 1500 words, discussing each claim it may state; `table` puts the comparison in tables, with prose only to connect them. Every format keeps the program-written answer, the Fact-Check section and the citations. `report_format` sets the default |
 | `--words N` | `0` | about N words for the explanation (the answer section the program writes is not counted); `0` leaves it to `--format`. At most 6000. `report_words` sets the default. The length is a target the model aims at, not a guarantee |
 | `--tables auto\|none\|some\|many` | `auto` | how much of the report is in tables, over the format's own amount; `report_tables` sets the default |
+| `--clarify auto\|off` | `auto` | before planning, ask up to three questions about what the question leaves open (the audience, the market, the period, which product), none for a clear question; `off` never asks. Only a run someone can answer asks: the terminal, or `--clarify-only`. `clarify` in `config.yaml` sets the default; see [Clarifying questions](#clarifying-questions) |
+| `--clarify-only` | off | ask the clarifying questions, print them as JSON (under `--jsonl`, as the `clarify` event) and stop before planning |
+| `--answers JSON` | — | plan for these answers instead of asking: the JSON `--clarify-only` printed, with `answers` filled in |
 | `--reports DIR` | `reports` | where the `.md` / `.pdf` / `.json` artifacts are written |
 | `--jsonl` | off | machine-readable event stream instead of the live UI |
 | `--silent`, `-s` | off | no live UI; print only the report |
@@ -145,8 +156,10 @@ A plan carries its question, depth tier (`depth.key`), any pinned
 (`no_follow_ups`, absent for on) and the report's shape (`report`, absent
 for the standard report: `{"format": "brief", "words": 300, "tables":
 "none"}`, each part optional), so `--plan` cannot be combined with `-p`,
-`--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`, `--words`
-or `--tables`. A format or table amount that is not one of the choices is
+`--mode`, `--sources`, `--topics`, `--no-follow-ups`, `--format`, `--words`,
+`--tables`, `--clarify`, `--clarify-only` or `--answers`; it also carries
+the clarifying questions and answers it was made for (`questions`,
+`clarifications`). A format or table amount that is not one of the choices is
 refused. It is checked before it runs: the tier must exist,
 at least one sub-topic must have a name, sub-topics are renumbered in
 order, and the source budget is worked out again from the tier rather than
@@ -154,6 +167,48 @@ read from the file. When you rename a sub-topic, clear its `query` and
 `terms`: they were written for the old name, and the run searches them as
 written. A plan-only run writes no report and no history record; `-o FILE`
 writes its plan to FILE instead of stdout.
+
+### Clarifying questions
+
+A question can leave open what to research: "the best heat pump" for which
+market, which kind, which climate. Before planning, one low-effort call
+(`clarifier_instructions`, `reasoning_effort.clarify`) checks for that and
+asks up to three questions, each with two to four readings, the likeliest
+first. A clear question gets none, and the run goes straight to its plan.
+
+In the terminal each question opens in the picker: arrows and Enter pick a
+reading, typing filters them, and Enter on text that matches none takes it
+as your own answer. `skip` leaves one to the research, Esc leaves the rest,
+and Ctrl-C ends the run. The answers go to the planner, the analysis, the
+follow-up round and the report as the reading to research and answer in;
+the fact-check never sees them, and they never rewrite the question, which
+still titles the report. The brief shows each under the question it
+answers (`read as  Which kind of heat pump? Ductless mini-split`), the live
+run keeps the answers under the question (`read as  Ductless mini-split ·
+Canada`), and the report opens with them as "Read as", in the terminal,
+the `.md`, the PDF and `/resume`; the serve page shows them under the
+run's question. Their effect is first seen in the brief's sub-topics,
+which were planned for them: `c` asks the questions again, and new
+answers make a new plan to compare, so sub-topics edited in the brief are
+replaced, while its depth, budget, follow-up and format choices stay. Esc
+out of them keeps the plan.
+
+Only a run someone can answer asks: not `--jsonl`, `--silent`, `--detach`,
+a pipe, `--plan`, `--resume` or `--replay`, which make no call for it. A
+script asks in two steps:
+
+```bash
+drsh -p "best heat pump" --clarify-only > questions.json   # one model request
+# fill in "answers": [{"question": "...", "answer": "..."}]
+drsh -p "best heat pump" --answers "$(cat questions.json)"
+```
+
+`--answers '{"answers":[]}'` answers nothing and asks nothing. A plan
+carries the questions (`questions`) and the answers (`clarifications`), and
+so do checkpoints, traces, the `.json` sidecar and the history record: a resumed run, a replay
+and `ask` keep the reading. `--clarify-only` cannot be combined with
+`--plan-only`, `--answers` or `--replay`, and checks no `--domains` list:
+the plan that follows does.
 
 ### Researching only your own sites
 
@@ -304,8 +359,8 @@ complete report.
 
 While a model call streams, the live frame shows one status line for it,
 replaced in place: how long it has waited for the model to start, then, for
-a reasoning model, how long it has been thinking with the latest of its
-reasoning wrapped in a few rows under the line, then progress in a unit that
+a reasoning model, how long it has been thinking (the reasoning itself is
+on the serve page, not in the terminal), then progress in a unit that
 fits the phase — the part of the analysis being written and its claims so
 far, statements judged for the fact-check, words for the report — with the
 change since the last line, and "no new output for Ns" once the stream stops
@@ -402,9 +457,12 @@ as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question and the same settings the terminal's start screen shows: `--mode`,
 `--topics` (as "Sub-topics", auto by default), `--sources` (as "Pages per
-topic"), `--no-follow-ups` (as "Follow-ups"), `--format`, `--words` and
-`--tables`, drawn from the list
-`/api/info` serves and launched as those flags. Then Search: the
+topic"), `--no-follow-ups` (as "Follow-ups"), `--format`, `--words`,
+`--tables` and `--clarify`, drawn from the list
+`/api/info` serves (each with its `value` and its `default`) and launched
+as those flags. The depth sits beside the question; the rest, and Search,
+are under "settings", which names beside it whatever is set away from its
+default, as the terminal's row does. Search is the
 web, or "Only these sites", which opens a box for the list (`--domains`)
 and keeps the last one typed. The empty question box shows an example, and
 Tab takes it as the question: a hot question from Stack Exchange's space,
@@ -412,12 +470,17 @@ history or physics site, which the browser fetches from
 `api.stackexchange.com` on each load, or one of ten built-in ones until
 that answers or when it cannot. The run then opens with a checklist of the
 sites, each marked usable, from snippets only, or dropped with the reason,
-and the plan review shows them. Research makes the plan first (the same
-as `--plan-only`) and opens it for review, as the CLI's brief does: rename,
+and the plan review shows them. Research first asks the clarifying
+questions (the same as `--clarify-only`), as radio groups with a box for a
+reading of your own and a skip, when the question leaves something open;
+otherwise, or with Clarify off, it goes on by itself. Then it makes the
+plan (the same as `--plan-only`, with `--answers`) and opens it for review, as the CLI's brief does: rename,
 add and remove sub-topics, change the search each one runs, change the
 depth, turn the follow-up round off or on, or change the report's format:
 the review settings the terminal brief's keys change (`d`, `f`, `t`), drawn
-from the same list. Each
+from the same list. Under the question is the reading the plan was made
+for, with "change answers", which opens the questions again and makes a new
+plan for the new answers, keeping the review's settings. Each
 change is worked out by the server (`/api/plan`) as the brief works it out,
 budget per sub-agent included. Under each name is the planner's description of the sub-topic, which
 is for reading: research never sends it. Below that is the query the
@@ -522,7 +585,7 @@ signed in: `claude -p` cannot call the two tools.
 
 A run watched in the terminal UI takes questions under "Ask about this
 report" once its report is printed, in an `ask ▸` box with its keys under
-it; an empty line, Esc, Ctrl-C or Ctrl-D ends them, and `/resume` and `/model` work as
+it; an empty line, Esc, Ctrl-D or Ctrl-C twice ends them, and `/resume` and `/model` work as
 in [a bare `drsh`](#a-bare-drsh). Those questions, unlike `ask`'s, are kept
 in the run's session.
 
@@ -778,6 +841,7 @@ sub-topics' heading names how the planner read the question
 | `d` | cycle depth: quick → standard → deep |
 | `f` | turn the follow-up round on or off (the brief's `follow-ups` field says which) |
 | `t` | cycle the report's format: standard → brief → detailed → table (the words and tables chosen with the question stay) |
+| `c` | answer the clarifying questions again and plan for the new answers (only when questions were asked); sub-topics edited here are replaced, the depth, budget, follow-up and format choices stay, and Esc keeps the plan |
 | `q` / `Esc` / `Ctrl-C` | cancel |
 
 Keys pressed while the plan is still being made are discarded — a plan

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"io"
 	"strings"
 )
@@ -27,11 +28,48 @@ func Pick(stdin io.Reader, stdout io.Writer, noColor bool, title, label string, 
 }
 
 func pick(in Input, r *Renderer, title, label string, rows []Choice) int {
-	text, shown, at, cursor := "", matching(rows, ""), 0, 0
-	paint := func() { r.RenderPick(title, label, text, cursor, rows, shown, at) }
+	got := pickWith(in, r, pickSpec{title: title, label: label, rows: rows})
+	if got.back {
+		return -1
+	}
+	return got.row
+}
+
+// pickSpec is what a picker shows: its rows, the row it opens on, the text
+// already typed and its key hints ("" for the default). free lets Enter take
+// the typed text as the answer when no row holds it.
+type pickSpec struct {
+	// right is shown at the heading's end, lead under it.
+	title, right, lead, label string
+	rows                      []Choice
+	at                        int
+	text, hints               string
+	free                      bool
+}
+
+// picked is how a picker ended: a row, typed text (row -1), or back. Ctrl-C
+// is told apart from Esc and the end of input, which go back: it stops the
+// run where Esc only leaves the picker.
+type picked struct {
+	row        int
+	text       string
+	back, stop bool
+}
+
+func pickWith(in Input, r *Renderer, sp pickSpec) picked {
+	keys, ok := in.(*keptInput)
+	if !ok {
+		keys = &keptInput{Input: in}
+	}
+	text, shown, cursor := sp.text, matching(sp.rows, sp.text), len(sp.text)
+	at := 0
+	if sp.text == "" {
+		at = max(min(sp.at, len(shown)-1), 0)
+	}
+	paint := func() { r.RenderPick(sp, text, cursor, shown, at) }
 	echo := func(t string, c int) {
 		if t != text {
-			text, shown, at = t, matching(rows, t), 0
+			text, shown, at = t, matching(sp.rows, t), 0
 		}
 		cursor = c
 		paint()
@@ -46,12 +84,14 @@ func pick(in Input, r *Renderer, title, label string, rows []Choice) int {
 		paint()
 	}
 	for {
-		_, ok := readPromptRaw(in, []byte(text), nil, echo, arrow)
-		if !ok {
-			return -1
-		}
-		if len(shown) > 0 {
-			return shown[at]
+		_, ok := readPromptRaw(keys, []byte(text), nil, echo, arrow, nil)
+		switch {
+		case !ok:
+			return picked{row: -1, back: true, stop: keys.last == byte(KeyCtrlC)}
+		case len(shown) > 0:
+			return picked{row: shown[at]}
+		case sp.free && strings.TrimSpace(text) != "":
+			return picked{row: -1, text: strings.TrimSpace(text)}
 		}
 	}
 }
@@ -74,11 +114,17 @@ func matching(rows []Choice, filter string) []int {
 }
 
 // RenderPick shows the picker: rows[shown[at]] is highlighted.
-func (r *Renderer) RenderPick(title, label, text string, cursor int, rows []Choice, shown []int, at int) {
+func (r *Renderer) RenderPick(sp pickSpec, text string, cursor int, shown []int, at int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.mode, r.pickTitle, r.pickRows, r.pickShown, r.pickAt = "pick", title, rows, shown, at
-	r.promptLabel, r.promptText, r.promptCursor, r.example = label, text, cursor, "type to filter"
+	r.mode, r.pickTitle, r.pickRows, r.pickShown, r.pickAt = "pick", sp.title, sp.rows, shown, at
+	r.pickRight, r.pickLead = sp.right, sp.lead
+	r.pickHints, r.pickFree = cmp.Or(sp.hints, "[enter] open   [↑↓] move   [esc] back"), sp.free
+	example := "type to filter"
+	if sp.free {
+		example = "type to filter, or your own answer"
+	}
+	r.promptLabel, r.promptText, r.promptCursor, r.example = sp.label, text, cursor, example
 	if !r.plain {
 		r.paintLocked(true)
 	}
@@ -87,7 +133,14 @@ func (r *Renderer) RenderPick(title, label, text string, cursor int, rows []Choi
 // pickLines is the picker, its rows scrolled to keep the highlighted one in
 // view.
 func (r *Renderer) pickLines() []string {
-	out := []string{r.heading(r.pickTitle, ""), r.rule(), r.promptRow(), r.rule()}
+	out := []string{r.heading(r.pickTitle, r.pickRight)}
+	if r.pickLead != "" {
+		out = append(out, "")
+		for _, l := range r.wrapNote(r.pickLead, r.width-4) {
+			out = append(out, "  "+r.T.bold(l))
+		}
+	}
+	out = append(out, r.rule(), r.promptRow(), r.rule())
 	// The rule, the keys and the blank row under them, as the start screen
 	// ends, are kept below the rows.
 	room := max(r.rows-1-len(out)-3, 1)
@@ -103,8 +156,12 @@ func (r *Renderer) pickLines() []string {
 		}
 		out = append(out, row)
 	}
-	if len(r.pickShown) == 0 {
+	switch {
+	case len(r.pickShown) > 0:
+	case r.pickFree && strings.TrimSpace(r.promptText) != "":
+		out = append(out, "  "+r.T.magenta("▸ ")+"answer: "+r.T.bold(strings.TrimSpace(r.promptText)))
+	default:
 		out = append(out, "  "+r.T.dim("nothing matches"))
 	}
-	return append(out, r.rule(), "  "+r.T.hints("[enter] open   [↑↓] move   [esc] back"), "")
+	return append(out, r.rule(), "  "+r.T.hints(r.pickHints), "")
 }

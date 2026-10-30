@@ -48,15 +48,22 @@ type commandEditor struct {
 	cursor  int
 	example string
 	paint   func(text string, at, cursor int)
+	// quit, when set, is told when a Ctrl-C has armed the next to leave
+	// (see twice); without it one Ctrl-C leaves.
+	quit func(armed bool)
 }
 
 // read takes a line, its keys handled as the menu needs; an empty line is
 // waited past only when wait is set. ok is false when the reader went back
 // (Esc, Ctrl-C) or the input ended.
 func (e *commandEditor) read(in Input, wait bool) (string, bool) {
+	var quit *twice
+	if e.quit != nil {
+		quit = &twice{show: e.quit}
+	}
 	q, ok := "", true
 	for ok {
-		if q, ok = readPromptRaw(in, nil, e.tab, e.echo, e.arrow); q != "" || !wait {
+		if q, ok = readPromptRaw(in, nil, e.tab, e.echo, e.arrow, quit); q != "" || !wait {
 			break
 		}
 	}
@@ -99,11 +106,27 @@ func (e *commandEditor) tab(t string) string {
 	return e.pick(t)
 }
 
+// armQuit has the box's keys say what a second Ctrl-C does, note, while
+// armed is set.
+func (r *Renderer) armQuit(note string) func(armed bool) {
+	return func(armed bool) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.quitNote = ""
+		if armed {
+			r.quitNote = note
+		}
+	}
+}
+
 // commandBlock is what a box shows under its lower rule, a blank row under
 // it as every screen ends: the command menu while a command is typed, keys
 // otherwise. esc is what Esc does there.
 func (r *Renderer) commandBlock(text string, at int, keys, esc string) []string {
 	m := completions(text)
+	if r.quitNote != "" && text == "" {
+		return []string{"  " + r.T.yellow(r.quitNote), ""}
+	}
 	if len(m) == 0 {
 		return []string{"  " + r.T.hints(keys), ""}
 	}

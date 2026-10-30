@@ -45,6 +45,7 @@ func RunOverview(m *Meta) string {
 	var sb strings.Builder
 	sb.WriteString("Research question: ")
 	sb.WriteString(m.Question)
+	sb.WriteString(agent.ClarifiedBlock(m.Clarifications))
 	sb.WriteString("\n\n")
 	if a := m.Analysis; a != nil && a.Interpretation != "" {
 		sb.WriteString("How it was read: ")

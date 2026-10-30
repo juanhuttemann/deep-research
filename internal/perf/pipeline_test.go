@@ -33,7 +33,9 @@ type stubAssistant struct {
 	tokens atomic.Int64
 }
 
-func (s *stubAssistant) Plan(context.Context, string, agent.Breadth) (agent.Outline, error) {
+func (s *stubAssistant) Clarify(context.Context, string) ([]agent.Question, error) { return nil, nil }
+
+func (s *stubAssistant) Plan(context.Context, string, agent.Breadth, []agent.Clarification) (agent.Outline, error) {
 	subs := make([]agent.SubTopic, 0, 6)
 	for _, t := range []struct{ id, name, query string }{
 		{"s1", "Iterator signatures", "range over func iterator signature yield"},

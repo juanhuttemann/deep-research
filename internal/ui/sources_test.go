@@ -44,9 +44,9 @@ func (s *scopingAssistant) CheckDomains(_ context.Context, domains []string) ([]
 
 func (s *scopingAssistant) ScopeTo(domains []string) { s.scoped = domains }
 
-func (s *scopingAssistant) Plan(ctx context.Context, q string, b agent.Breadth) (agent.Outline, error) {
+func (s *scopingAssistant) Plan(ctx context.Context, q string, b agent.Breadth, _ []agent.Clarification) (agent.Outline, error) {
 	s.planned++
-	return s.fakeAssistant.Plan(ctx, q, b)
+	return s.fakeAssistant.Plan(ctx, q, b, nil)
 }
 
 func runWithDomains(t *testing.T, a agent.Assistant, domains []string) (RunResult, []Event, error) {

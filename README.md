@@ -88,19 +88,22 @@ cheap request each.
 In the terminal:
 
 1. **Start screen** (a bare `drsh`): type the question. The row under the box
-   is the run's settings: depth, sub-topics, pages per topic, follow-ups and
-   the report's format, words and tables, each changed with its command
-   (`/mode deep`, `/topics 2`, `/follow-ups off`, `/format brief`).
-2. **Research brief**: the planned sub-topics. The planner sizes the plan to
+   is the run's settings: depth, sub-topics, pages per topic, follow-ups,
+   the report's format, words and tables, and clarifying questions, each
+   changed with its command (`/mode deep`, `/topics 2`, `/follow-ups off`,
+   `/format brief`, `/clarify off`).
+2. **Clarifying questions**, only when the question leaves open what to
+   research (which market, which kind, for whom): up to three, each a pick
+   of readings or your own answer, any of them skippable.
+3. **Research brief**: the planned sub-topics. The planner sizes the plan to
    the question and says how it read it: a narrow question gets one or two
    sub-topics, a multi-part one a sub-topic per part, a comparison one per
    alternative. Add, rename or delete them, change the depth (`d`), turn
-   the follow-up searches off (`f`) or pick the report's format (`t`), then
-   press Enter.
-3. **Live frame**: the pipeline stage, one row per parallel sub-agent, the
-   sources as they are read, and a status line for the model call in flight,
-   with a reasoning model's latest thinking under it.
-4. **Report**: rendered in the terminal and saved to `reports/` as `.md`,
+   the follow-up searches off (`f`), pick the report's format (`t`) or
+   answer the questions again (`c`), then press Enter.
+4. **Live frame**: the pipeline stage, one row per parallel sub-agent, the
+   sources as they are read, and a status line for the model call in flight.
+5. **Report**: rendered in the terminal and saved to `reports/` as `.md`,
    `.pdf` and `.json`.
 
 The report opens with the answer (for a choice: which option, under which

@@ -578,7 +578,7 @@ func TestPlanningSurfacesAssistantProgress(t *testing.T) {
 	fa := &progressDuringPlan{fakeAssistant: &fakeAssistant{}, msg: "asking test-model for sub-topics"}
 	var stderr bytes.Buffer
 	o := Options{Question: "q", Assistant: fa, Stderr: &stderr, Stdout: &stderr, DepthMode: "quick"}.withDefaults()
-	if _, err := o.buildPlan(context.Background()); err != nil {
+	if _, err := o.buildPlan(context.Background(), Clarified{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stderr.String(), "asking test-model") {
@@ -596,11 +596,11 @@ type progressDuringPlan struct {
 
 func (p *progressDuringPlan) SetProgress(logf func(string)) { p.logf = logf }
 
-func (p *progressDuringPlan) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
+func (p *progressDuringPlan) Plan(ctx context.Context, question string, b agent.Breadth, _ []agent.Clarification) (agent.Outline, error) {
 	if p.logf != nil {
 		p.logf(p.msg)
 	}
-	return p.fakeAssistant.Plan(ctx, question, b)
+	return p.fakeAssistant.Plan(ctx, question, b, nil)
 }
 
 // syncBuffer is a bytes.Buffer safe to read while a goroutine writes to it.
@@ -673,7 +673,7 @@ type breadthRecorder struct {
 	give int
 }
 
-func (r *breadthRecorder) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
+func (r *breadthRecorder) Plan(ctx context.Context, question string, b agent.Breadth, _ []agent.Clarification) (agent.Outline, error) {
 	r.asked = b
 	n := cmp.Or(r.give, b.Max)
 	if r.over > 0 {
@@ -1555,7 +1555,7 @@ func TestBriefSaysKeysTypedDuringPlanningWereIgnored(t *testing.T) {
 	r := NewRenderer(&buf, Theme{})
 	o := Options{KeyScript: "\r"}.withDefaults()
 	plan := newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}})
-	if _, cancelled := o.confirmBrief(ignoringInput{NewByteReader([]byte("\r"))}, r, plan, true); cancelled {
+	if _, cancelled := o.confirmBrief(context.Background(), ignoringInput{NewByteReader([]byte("\r"))}, r, plan, true); cancelled {
 		t.Fatal("brief cancelled")
 	}
 	if !strings.Contains(buf.String(), "typed while planning") {
@@ -3044,8 +3044,8 @@ type fixingPlanner struct {
 	fixed string
 }
 
-func (f *fixingPlanner) Plan(ctx context.Context, question string, b agent.Breadth) (agent.Outline, error) {
-	out, err := f.fakeAssistant.Plan(ctx, question, b)
+func (f *fixingPlanner) Plan(ctx context.Context, question string, b agent.Breadth, _ []agent.Clarification) (agent.Outline, error) {
+	out, err := f.fakeAssistant.Plan(ctx, question, b, nil)
 	out.Question = f.fixed
 	return out, err
 }
@@ -3328,7 +3328,7 @@ func TestCancelledBriefLeavesTheScreenWhereItWas(t *testing.T) {
 	r := NewRenderer(&buf, Theme{})
 	r.width, r.rows, r.plain = 100, 30, false
 	plan := &Plan{Question: "q?", SubTopics: []SubTopic{{Name: "one"}}}
-	if _, cancelled := (Options{}).confirmBrief(NewByteReader([]byte("q")), r, plan, true); !cancelled {
+	if _, cancelled := (Options{}).confirmBrief(context.Background(), NewByteReader([]byte("q")), r, plan, true); !cancelled {
 		t.Fatal("q did not cancel the brief")
 	}
 	out := buf.String()
@@ -3589,3 +3589,160 @@ func TestReadPlanKeepsTheReportShape(t *testing.T) {
 		t.Errorf("a standard plan writes a report shape: %s", b)
 	}
 }
+
+// A paste was typed into a box key by key: its line break was Enter, and
+// copied text ending in one started the run before it could be read, the
+// rest of it left for the brief to take as keys. Bracketed, it is one line
+// of text, its breaks and tabs spaces, until Enter is pressed.
+func TestPasteIsTextNotKeys(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	keys := "why \x1b[200~line one\r\n\tline two\r\n\x1b[201~?\r"
+	got := askQuestion(NewByteReader([]byte(keys)), r, agent.Setup{}, nil, "an example?", "")
+	if want := "why line one line two?"; got != want {
+		t.Errorf("pasted question = %q, want %q", got, want)
+	}
+}
+
+// Where single keys are read (the brief, the run), a paste's letters were
+// the keys they spell: x deleted a sub-topic, q cancelled, Enter launched.
+func TestPasteIsNotReadAsKeys(t *testing.T) {
+	in := NewByteReader([]byte("\x1b[200~xq\r\x1b[201~d"))
+	for i, want := range []Key{KeyUnknown, KeyD} {
+		k, err := readKey(in)
+		if err != nil || k.Key != want {
+			t.Fatalf("key %d = %v, %v; want %v", i, k.Key, err, want)
+		}
+	}
+}
+
+// A paste keeps its text but not its control codes, which corrupted the
+// frame, and a paste whose end never came still ends.
+func TestPastedText(t *testing.T) {
+	if got, want := pastedText("a\x07b\r\n  c\x1b[31m"), "ab c[31m"; got != want {
+		t.Errorf("pastedText = %q, want %q", got, want)
+	}
+	in := NewByteReader([]byte("xunended"))
+	_, _ = in.Next() // the scripted reader buffers on its first read
+	if got := readPaste(in); got != "unended" {
+		t.Errorf("unended paste = %q", got)
+	}
+}
+
+// One Ctrl-C in the start screen's box quit drsh, whatever was typed: a
+// press meant to clear the line, as at a shell, threw the session away.
+// It now clears a typed line, and on an empty one says a second leaves; a
+// key between the two makes the next press arm again.
+func TestCtrlCClearsThenQuitsOnSecondPress(t *testing.T) {
+	cases := []struct{ name, keys, want string }{
+		{"clears what is typed", "a typo\x03why\r", "why"},
+		{"one on an empty box stays", "\x03why\r", "why"},
+		{"two on an empty box quit", "\x03\x03why\r", ""},
+		{"a key between disarms", "\x03a\x03\x03b\r", "b"},
+	}
+	for _, c := range cases {
+		r := NewRenderer(&bytes.Buffer{}, Theme{})
+		if got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "an example?", ""); got != c.want {
+			t.Errorf("%s: askQuestion = %q, want %q", c.name, got, c.want)
+		}
+	}
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 30, false
+	r.RenderStart(agent.Setup{}, nil, "an example?", "")
+	r.armQuit("press Ctrl-C again to quit")(true)
+	frame := strings.Join(r.frameLines(), "\n")
+	if !strings.Contains(frame, "press Ctrl-C again to quit") || strings.Contains(frame, "[enter] research") {
+		t.Errorf("armed, the keys are not the note:\n%s", frame)
+	}
+	r.armQuit("press Ctrl-C again to quit")(false)
+	if frame := strings.Join(r.frameLines(), "\n"); !strings.Contains(frame, "[enter] research") {
+		t.Errorf("disarmed, the keys are not back:\n%s", frame)
+	}
+}
+
+// The clarifying answers shaped the plan, the analysis and the report, but
+// past the brief they were shown nowhere: not in the live run, not in the
+// report or its files, and the brief named the answers without the
+// questions they answered. Each now carries them.
+func TestReadingIsShownPastTheBrief(t *testing.T) {
+	cs := []Clarification{{Question: "Which market?", Answer: "the US"}, {Question: "Which period?", Answer: "since 2020"}}
+	topics := []agent.SubTopic{{ID: "1", Name: "Widgets"}}
+	plan := newTestPlan("quick", topics)
+	plan.Clarifications = cs
+	q := subQueries(plan.Question, topics[0])[0]
+	fa := &fakeAssistant{planTopics: topics,
+		findings: map[string][]agent.Finding{q: {{Query: q, Title: "Survey", URL: "https://a.example/", Content: "Widgets."}}}}
+	res, err := NewDriver(fa, &MultiSink{}, nil, 1).Run(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(res.Clarifications, cs) {
+		t.Errorf("result reading = %v, want %v", res.Clarifications, cs)
+	}
+	md := MarkdownReport(res)
+	if !strings.Contains(md, "**Read as:**\n\n- Which market? **the US**\n- Which period? **since 2020**") {
+		t.Errorf("report lacks the reading:\n%s", md)
+	}
+	if got, want := WithReading("# Title\n\nBody", cs[:1]), "# Title\n\n**Read as:**\n\n- Which market? **the US**\n\nBody"; got != want {
+		t.Errorf("WithReading = %q, want %q", got, want)
+	}
+
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 40, false
+	r.RenderBrief(plan)
+	brief := strings.Join(r.frameLines(), "\n")
+	for _, want := range []string{"read as  Which market? the US", "Which period? since 2020"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief lacks %q:\n%s", want, brief)
+		}
+	}
+	live := strings.Join(r.treeLines(), "\n")
+	if !strings.Contains(live, "read as  the US · since 2020") {
+		t.Errorf("live frame lacks the reading:\n%s", live)
+	}
+}
+
+// The completion card replaced the live frame, the last thing on screen that
+// showed the question, and the report under it opens with its own title: a
+// finished run never said what it had answered.
+func TestCompletionCardShowsTheQuestion(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows = 100, 40
+	r.result = &agent.ResearchResult{Question: "When could a quantum computer break RSA-2048?",
+		Clarifications: []Clarification{{Question: "Which estimate?", Answer: "expert surveys"}}}
+	card := strings.Join(r.reportLines(), "\n")
+	for _, want := range []string{"RESEARCH COMPLETE", "When could a quantum computer break RSA-2048?", "read as  expert surveys"} {
+		if !strings.Contains(card, want) {
+			t.Errorf("card lacks %q:\n%s", want, card)
+		}
+	}
+}
+
+// A paste over the bound stopped being read at it, and the rest was read as
+// keys: a q past the first 64 KiB cancelled the run from the brief. The rest
+// is read through the end marker and dropped.
+func TestOversizedPasteIsReadToItsEnd(t *testing.T) {
+	in := &wholeInput{data: []byte(strings.Repeat("a", maxPaste+100) + "q\r" + pasteEnd + "d")}
+	if got := readPaste(in); len(got) != maxPaste || strings.ContainsAny(got, "q\r\x1b") {
+		t.Errorf("paste kept %d bytes, ending %q", len(got), got[max(len(got)-8, 0):])
+	}
+	if k, err := readKey(in); err != nil || k.Key != KeyD {
+		t.Errorf("key after the paste = %v, %v; want d", k.Key, err)
+	}
+}
+
+// wholeInput is a scripted Input whose every byte is pending at once, as a
+// paste is: NewByteReader's reports none pending at each 4 KiB refill.
+type wholeInput struct{ data []byte }
+
+func (w *wholeInput) Next() (byte, error) {
+	if len(w.data) == 0 {
+		return 0, io.EOF
+	}
+	c := w.data[0]
+	w.data = w.data[1:]
+	return c, nil
+}
+func (w *wholeInput) NextWithin(time.Duration) (byte, error) { return w.Next() }
+func (w *wholeInput) NextLine() (string, error)              { return "", io.EOF }
+func (w *wholeInput) Close()                                 {}
+func (w *wholeInput) Raw() bool                              { return true }
