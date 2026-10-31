@@ -116,6 +116,11 @@ func loadLoginState(ctx context.Context) (loginState, error) {
 
 // pickAndSave runs the picker and saves what it returns.
 func pickAndSave(cmd *cobra.Command, opts setup.Options) error {
+	return pickAndSaveTo(cmd, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+}
+
+// pickAndSaveTo is pickAndSave saying what was saved to out and errOut.
+func pickAndSaveTo(cmd *cobra.Command, out, errOut io.Writer, opts setup.Options) error {
 	if !isTerminal(cmd.InOrStdin()) || !isTerminal(cmd.OutOrStdout()) {
 		return errors.New("the picker needs a terminal; script it with:" +
 			" echo \"$KEY\" | drsh login --provider <id> --model <id> --key-stdin")
@@ -145,7 +150,7 @@ func pickAndSave(cmd *cobra.Command, opts setup.Options) error {
 	if err != nil || !ok {
 		return err
 	}
-	return save(cmd.OutOrStdout(), cmd.ErrOrStderr(), st, res)
+	return save(out, errOut, st, res)
 }
 
 // isTerminal reports whether v is a terminal; a command's streams are

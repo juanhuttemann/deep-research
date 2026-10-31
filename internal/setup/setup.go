@@ -1,12 +1,11 @@
 // Package setup is the terminal side of `drsh setup`, `drsh login` and
-// `drsh model`. The model picker is one searchable list of every model of
-// every provider, each row naming its provider; then the key, behind a mask
-// of asterisks, when that provider has none; then one free request to check
-// it.
+// `drsh model`. The model picker is two steps: a searchable list of the
+// providers, each saying where its key comes from, then that provider's
+// models; then the key, behind a mask of asterisks, when that provider has
+// none; then one free request to check it.
 //
 // It decides nothing about where a key is stored; the caller gets a Result
-// and saves it. The single list across providers is Crush's model picker,
-// written for this tool.
+// and saves it.
 package setup
 
 import (
@@ -62,12 +61,12 @@ type Result struct {
 type step int
 
 const (
-	stepPick       step = iota // the list of every provider's models
+	stepProvider   step = iota // the list of providers
 	stepModelID                // a model ID the catalog does not list
 	stepBaseURL                // the custom endpoint's URL
 	stepKey                    // the API key
 	stepLoadModels             // listing a custom endpoint's models
-	stepModel                  // a custom endpoint's models
+	stepModel                  // the chosen provider's models
 	stepCheck                  // the check request in flight
 	stepCheckFailed
 	stepDone
@@ -82,8 +81,8 @@ const inputWidth = 60
 // the OpenAI client will not send a request without some key.
 const NoKey = "none"
 
-// Where a provider's key comes from, shown on its heading. Empty is a
-// provider that needs one: it is asked for when a model is picked.
+// Where a provider's key comes from, shown on its row. Empty is a provider
+// that needs one: it is asked for when a model is picked.
 const (
 	MarkStored = "✓ key stored"
 	MarkEnv    = "✓ key from your environment"
@@ -110,7 +109,7 @@ type Model struct {
 // keepID is the Keep row's id; no provider is called that.
 const keepID = "\x1fkeep"
 
-// New returns the picker on the list of every model.
+// New returns the picker on the list of providers.
 func New(opts Options) Model {
 	if opts.StoredEndpoint == nil {
 		opts.StoredEndpoint = func(string) (string, bool) { return "", false }
@@ -119,44 +118,62 @@ func New(opts Options) Model {
 		opts.EnvEndpoint = func(string) (string, bool) { return "", false }
 	}
 	m := Model{opts: opts, st: newStyles()}
-	m.list = newList(m.pickItems(), "search a model or a provider", false)
-	m.list.selectID(rowID(opts.Current.Provider, opts.Current.Model))
+	m = m.providerStep(opts.Current.Provider)
 	if opts.Keep != "" {
 		m.list.selectID(keepID)
 	}
 	return m
 }
 
-// rowID identifies a row of the pick list.
-func rowID(provider, model string) string { return provider + "\x1f" + model }
-
-// otherModel is the model half of a provider's "other model ID" row.
+// otherModel is the id of a provider's "other model ID" row; no model is
+// called that.
 const otherModel = "\x1fother"
 
-// pickItems is every model of every provider, the providers with a key
-// first, each followed by its row for a model the catalog does not list.
-func (m Model) pickItems() []item {
+// providerStep opens the list of providers on the one with id.
+func (m Model) providerStep(id string) Model {
+	m.step, m.checkErr = stepProvider, nil
+	m.list = newList(m.providerItems(), "search a provider", false)
+	m.list.selectID(id)
+	return m
+}
+
+// providerItems is every provider, the ones with a key first.
+func (m Model) providerItems() []item {
 	var ready, rest []item
 	if m.opts.Keep != "" {
-		ready = append(ready, item{id: keepID, group: "Now", title: "keep " + m.opts.Keep, mark: "✓ what runs use now"})
+		ready = append(ready, item{id: keepID, title: "keep " + m.opts.Keep, mark: "✓ what runs use now"})
 	}
 	for _, p := range m.opts.Providers {
-		mark := m.keyMark(p)
-		rows := m.providerRows(p, mark)
-		if mark != "" {
-			ready = append(ready, rows...)
+		it := item{id: p.ID, title: p.Name, keywords: p.ID, mark: m.keyMark(p),
+			detail: fmt.Sprintf("%4d models", len(p.Models))}
+		if p.ID == catalog.Custom {
+			it.detail = "your own server: vLLM, LM Studio, llama.cpp, Ollama…"
+		}
+		if it.mark != "" {
+			ready = append(ready, it)
 		} else {
-			rest = append(rest, rows...)
+			rest = append(rest, it)
 		}
 	}
 	return append(ready, rest...)
 }
 
-func (m Model) providerRows(p catalog.Provider, mark string) []item {
-	if p.ID == catalog.Custom {
-		return []item{{id: rowID(p.ID, ""), group: "Custom endpoint",
-			title: "your own server: vLLM, LM Studio, llama.cpp, Ollama…", mark: mark}}
+// modelStep opens the chosen provider's models on the saved one, or on the
+// provider's default.
+func (m Model) modelStep() Model {
+	m.step, m.checkErr = stepModel, nil
+	m.list = newList(m.modelItems(), "search "+m.provider.Name+"'s models", false)
+	m.list.selectID(m.provider.DefaultModel)
+	if m.opts.Current.Provider == m.provider.ID {
+		m.list.selectID(m.opts.Current.Model)
 	}
+	return m
+}
+
+// modelItems is the provider's models, then a row for one its catalog
+// entry does not list.
+func (m Model) modelItems() []item {
+	p := m.provider
 	rows := make([]item, 0, len(p.Models)+1)
 	for _, md := range p.Models {
 		detail := modelDetail(md)
@@ -164,12 +181,10 @@ func (m Model) providerRows(p catalog.Provider, mark string) []item {
 			// API prices are not what a subscription costs.
 			detail = contextDetail(md)
 		}
-		rows = append(rows, item{id: rowID(p.ID, md.ID), group: p.Name, title: md.ID,
-			keywords: md.Name, detail: detail, mark: mark})
+		rows = append(rows, item{id: md.ID, title: md.ID, keywords: md.Name, detail: detail})
 	}
 	// Catalogs lag behind providers: a model released last week is typed in.
-	return append(rows, item{id: rowID(p.ID, otherModel), group: p.Name,
-		title: "other model ID…", mark: mark, searchOnly: true})
+	return append(rows, item{id: otherModel, title: "other model ID…", detail: "one the list does not have yet"})
 }
 
 // keyMark says whether p can run without a new key, and why.
@@ -220,6 +235,9 @@ func (m Model) selection() auth.Selection {
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if k, ok := msg.(tea.KeyPressMsg); ok && (k.String() == "ctrl+c" || k.String() == "esc") {
+		if back, ok := m.back(); ok && k.String() == "esc" {
+			return back, nil
+		}
 		m.quit = true
 		return m, tea.Quit
 	}
@@ -230,7 +248,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.checked(msg)
 	}
 	switch m.step {
-	case stepPick, stepModel:
+	case stepProvider, stepModel:
 		return m.updateList(msg)
 	case stepModelID, stepBaseURL, stepKey:
 		return m.updateInput(msg)
@@ -238,6 +256,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCheckFailed(msg)
 	}
 	return m, nil
+}
+
+// back is the step Esc returns to: the provider's models from what follows
+// them, the providers from the models. ok is false on the providers, where
+// Esc quits, and while a request is in flight.
+func (m Model) back() (Model, bool) {
+	switch {
+	case m.step == stepModelID, m.step == stepKey && m.model != "" && m.provider.ID != catalog.Custom:
+		return m.modelStep(), true
+	case m.step == stepModel, m.step == stepBaseURL, m.step == stepKey:
+		return m.providerStep(m.provider.ID), true
+	}
+	return m, false
 }
 
 func enter(msg tea.Msg) bool {
@@ -255,29 +286,32 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.step == stepModel {
-		return m.modelChosen(it.id)
+	switch {
+	case m.step == stepProvider:
+		return m.providerChosen(it.id)
+	case it.id == otherModel:
+		return m.ask(stepModelID, "model ID: ", "as the provider names it, e.g. deepseek-v4.1-flash", false, "")
 	}
-	if it.id == keepID {
+	return m.modelChosen(it.id)
+}
+
+// providerChosen opens the provider's models, or for a custom endpoint asks
+// for its URL first.
+func (m Model) providerChosen(id string) (tea.Model, tea.Cmd) {
+	if id == keepID {
 		m.keep, m.step = true, stepDone
 		return m, tea.Quit
 	}
-	providerID, modelID, _ := strings.Cut(it.id, "\x1f")
-	p, _ := catalog.Find(m.opts.Providers, providerID)
-	if p.ID != m.provider.ID {
-		// A key typed for the provider of a failed check is not this one's:
-		// kept, it would be checked against, and saved for, another host.
-		m.key = ""
-	}
-	m.provider, m.baseURL = p, p.BaseURL
-	switch {
-	case p.ID == catalog.Custom:
+	p, _ := catalog.Find(m.opts.Providers, id)
+	// A key typed before is dropped even for the same provider: for a
+	// custom endpoint it was typed for a URL about to be entered again, and
+	// kept, it would be checked against, and saved for, another host.
+	m.provider, m.baseURL, m.model, m.key = p, p.BaseURL, "", ""
+	if p.ID == catalog.Custom {
 		ep, _ := m.opts.StoredEndpoint(p.ID)
 		return m.ask(stepBaseURL, "base URL: ", "http://localhost:8000/v1", false, ep)
-	case modelID == otherModel:
-		return m.ask(stepModelID, "model ID: ", "as the provider names it, e.g. deepseek-v4.1-flash", false, "")
 	}
-	return m.modelChosen(modelID)
+	return m.modelStep(), nil
 }
 
 // modelChosen asks for the key when the provider has none, else checks.
@@ -457,14 +491,13 @@ func (m Model) updateCheckFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.step = stepDone
 		return m, tea.Quit
 	case "m":
-		// Back to the whole list; a new key stays for the same provider.
+		// Back to the provider's models; a new key stays for it, and Esc
+		// there goes on to the other providers.
 		m.checkErr, m.model = nil, ""
 		if m.provider.ID == catalog.Custom {
 			return m.customModels()
 		}
-		m.step = stepPick
-		m.list = newList(m.pickItems(), "search a model or a provider", false)
-		return m, nil
+		return m.modelStep(), nil
 	case "k":
 		if !m.provider.NoKey {
 			m.checkErr, m.opts.NewKey = nil, true
@@ -490,8 +523,8 @@ func (m Model) render() string {
 	var b strings.Builder
 	b.WriteString(m.st.title.Render("deep-research · " + m.heading()))
 	b.WriteString("\n")
-	if cur := m.opts.Current; cur.Model != "" && m.step == stepPick {
-		b.WriteString(m.st.dim.Render("now: " + cur.Provider + " · " + cur.Model))
+	if sub := m.subheading(); sub != "" {
+		b.WriteString(sub)
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
@@ -509,7 +542,7 @@ func (m Model) render() string {
 
 func (m Model) body() string {
 	switch m.step {
-	case stepPick, stepModel:
+	case stepProvider, stepModel:
 		return m.list.view(m.st)
 	case stepKey:
 		return m.input.View() + "\n" + m.st.dim.Render("  saved to auth.json, readable only by you") + "\n"
@@ -525,16 +558,34 @@ func (m Model) body() string {
 	return ""
 }
 
+// subheading is the line under the title: the model runs use now, above
+// the providers; where the key comes from, above a provider's models.
+func (m Model) subheading() string {
+	switch {
+	case m.step == stepProvider && m.opts.Current.Model != "":
+		return m.st.dim.Render("now: " + m.opts.Current.Provider + " · " + m.opts.Current.Model)
+	case m.step != stepModel || m.provider.ID == catalog.Custom:
+		return ""
+	}
+	if mark := m.keyMark(m.provider); mark != "" {
+		return m.st.ok.Render(mark)
+	}
+	return m.st.dim.Render("needs a key: asked for when you pick a model")
+}
+
 func (m Model) heading() string {
 	switch m.step {
-	case stepPick:
-		return "choose a model"
+	case stepProvider:
+		return "choose a provider"
 	case stepBaseURL:
 		return "custom endpoint"
 	case stepModelID:
 		return m.provider.Name + " · model ID"
 	case stepModel:
-		return m.baseURL + " · choose a model"
+		if m.provider.ID == catalog.Custom {
+			return m.baseURL + " · choose a model"
+		}
+		return m.provider.Name + " · choose a model"
 	case stepKey:
 		if m.model != "" {
 			return m.provider.Name + " API key, for " + m.model
@@ -546,10 +597,10 @@ func (m Model) heading() string {
 
 func (m Model) help() string {
 	switch m.step {
-	case stepPick:
+	case stepProvider:
 		return "type to search · ↑/↓ move · enter select · esc quit"
 	case stepModel:
-		return "type to search · ↑/↓ move · enter select · esc quit"
+		return "type to search · ↑/↓ move · enter select · esc back to providers"
 	case stepCheckFailed:
 		h := "s save anyway · m pick another model · "
 		if !m.provider.NoKey {
@@ -557,18 +608,20 @@ func (m Model) help() string {
 		}
 		return h + "q quit"
 	}
+	if _, ok := m.back(); ok {
+		return "enter confirm · esc back"
+	}
 	return "enter confirm · esc quit"
 }
 
 type styles struct {
-	title, dim, group, cursor, selected, ok, err lipgloss.Style
+	title, dim, cursor, selected, ok, err lipgloss.Style
 }
 
 func newStyles() styles {
 	return styles{
 		title:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Cyan),
 		dim:      lipgloss.NewStyle().Faint(true),
-		group:    lipgloss.NewStyle().Foreground(lipgloss.Magenta),
 		cursor:   lipgloss.NewStyle().Foreground(lipgloss.Cyan),
 		selected: lipgloss.NewStyle().Bold(true),
 		ok:       lipgloss.NewStyle().Foreground(lipgloss.Green),

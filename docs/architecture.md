@@ -311,8 +311,8 @@ internal/
             .env; never the working directory. Also what setup needs from
             it: a draft resolved as a run would, the variables that would
             override it, and config.yaml with only setup's keys changed
-  setup     the Bubble Tea screens behind setup, login and model: every
-            provider's models in one searchable list, then the masked key
+  setup     the Bubble Tea screens behind setup, login and model: the
+            providers, then the chosen one's models, then the masked key
             when needed, then the check; the search and scraper steps; the
             review prompt. Returns the choices, saves nothing
   replay    --trace recorder and --replay player: wraps the assistant to

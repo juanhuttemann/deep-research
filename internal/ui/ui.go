@@ -713,14 +713,16 @@ func notify(msg string) {
 // reportFiles lists the artifacts that were actually written. Printing the
 // "Saved to" header unconditionally told the reader their report had been
 // saved even when every write had failed and the list below it was empty.
+// It is indented as the completion card's headings above it are; flush left,
+// it stood out of their column.
 func reportFiles(w io.Writer, dir string, res RunResult) {
 	paths := res.Paths()
 	if len(paths) == 0 {
-		_, _ = fmt.Fprintf(w, "\nno report files were written (see the warnings above)\n")
+		_, _ = fmt.Fprintf(w, "\n  no report files were written (see the warnings above)\n")
 		return
 	}
-	_, _ = fmt.Fprintf(w, "\nSaved to %s:\n", dir)
+	_, _ = fmt.Fprintf(w, "\n  Saved to %s:\n", dir)
 	for _, p := range paths {
-		_, _ = fmt.Fprintf(w, "  • %s\n", p)
+		_, _ = fmt.Fprintf(w, "    • %s\n", p)
 	}
 }

@@ -785,19 +785,17 @@ drsh logout openrouter  # remove a stored key
 drsh logout exa         # or a search service's
 ```
 
-Both open one list of every model of every provider, grouped under a heading
-per provider that says where its key comes from: stored, from your
-environment (only for the endpoint the environment names), not needed (the
-Claude subscription), or "needs a key", asked for when you pick one of its
-models. Each model shows its context size and price per million tokens
-(not for the subscription, which your plan pays for). Type to search
-provider and model together: `deep` lists DeepSeek's own models first, then
-the DeepSeek models other providers serve; `deepseek v4.1` narrows to that
-model wherever it is offered.
-While searching, each matching provider also has an "other model ID…" row,
-for a model the catalog does not list yet.
+Both open in two steps. First the providers, each saying where its key
+comes from: stored, from your environment (only for the endpoint the
+environment names), or not needed (the Claude subscription); the ones with a
+key come first. Then the chosen provider's models, each with its context
+size and price per million tokens (not for the subscription, which your plan
+pays for), and an "other model ID…" row last, for a model the catalog does
+not list yet. Type to search either list: `deep` finds DeepSeek among the
+providers, `v4.1` narrows its models. Esc goes back a step (from the models
+to the providers, from the key to the models) and quits from the providers.
 
-Pick a row with Enter. If its provider has no key, the key is asked for next,
+Pick a model with Enter. If its provider has no key, the key is asked for next,
 shown as `*`. Then one free request — the same one `doctor` makes — checks the
 pair before anything is saved; when it fails you can enter the key again,
 pick another model, or save anyway. `login --new-key` asks for a key even
