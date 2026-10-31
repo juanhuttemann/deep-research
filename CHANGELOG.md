@@ -7,7 +7,7 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Added
 
-- A [Pi](https://pi.dev) extension, `pi-deep-research` (`integrations/pi`).
+- A [Pi](https://pi.dev) extension, `@juanhuttemann/pi-deep-research` (`integrations/pi`).
   - The `deep_research` tool shows a run's progress live in Pi. It asks the
     clarifying questions in Pi's dialogs, offers a plan review, stops on Esc
     keeping its checkpoint, and resumes from one.

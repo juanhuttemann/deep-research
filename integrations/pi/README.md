@@ -1,4 +1,4 @@
-# pi-deep-research
+# @juanhuttemann/pi-deep-research
 
 Fact-checked, cited web research inside [Pi](https://pi.dev). The extension
 runs [deep-research](https://github.com/juanhuttemann/deep-research)
@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/juanhuttemann/deep-research/main/sc
 Then:
 
 ```sh
-pi install npm:pi-deep-research
+pi install npm:@juanhuttemann/pi-deep-research
 ```
 
 From a clone, `pi install ./integrations/pi`. For one session,

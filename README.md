@@ -228,7 +228,7 @@ dialogs, a `/research` command, and follow-up questions with
 Pi's own sign-in, so drsh needs no model setup of its own:
 
 ```sh
-pi install npm:pi-deep-research
+pi install npm:@juanhuttemann/pi-deep-research
 ```
 
 See [integrations/pi](integrations/pi/README.md).
