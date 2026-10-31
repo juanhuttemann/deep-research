@@ -334,6 +334,10 @@ internal/
             questions about a run, a reviewed plan re-derived; the run, the
             answer, the setup and the plan edit are functions cli injects
 config/     embedded default config.yaml and agent.yaml
+integrations/
+  pi        the Pi extension (TypeScript, its own package): drives the
+            drsh binary over --jsonl, and answers drsh's model calls
+            through a local OpenAI-compatible bridge onto Pi's model
 ```
 
 The frame is clamped to the terminal and repainted in place; on a pipe it
@@ -348,7 +352,9 @@ from that list: the terminal start screen's settings row and its `/mode`,
 `/topics`, `/sources`, `/follow-ups` commands, the brief's settings row,
 keys and hints, and the serve page, which gets the list from `/api/info`
 and launches with a `settings` map that `cli.webArgs` turns into the same
-flags. A review change goes through `ui.ApplyToPlan`, from the brief's key
+flags. Outside the binary, `drsh settings` prints the same list with each
+option's flag (`Option.Arg`), and the Pi extension builds its tool
+parameters, `/research` flags and settings screen from it. A review change goes through `ui.ApplyToPlan`, from the brief's key
 or the page's `/api/plan`, which also returns the budget, so the page keeps
 no copy of the tiers or the budget rules. A new setting is one entry there,
 its flag, and its effect on the run.
@@ -376,6 +382,15 @@ nothing from `ui`; a launch is the cli's own `--jsonl` command run
 in-process. Nothing in the driver exists
 for the page's sake: what the page needs and lacks belongs in the event
 stream or the artifact.
+
+`integrations/pi` is outside the Go layering altogether: it imports
+nothing from this module and knows drsh only through its command line,
+the `--jsonl` events, the `.json` artifact and `drsh settings`. Its
+bridge (`src/bridge.ts`) is a local endpoint speaking the OpenAI chat
+API, so drsh's own OpenAI-compatible provider is what talks to Pi's model;
+nothing in `agent` knows Pi exists. A Go test decodes the extension's
+event fixtures into `ui.Event` with unknown fields refused, and the
+extension's tests run a drsh built from the tree against the bridge.
 
 ## Platform split
 

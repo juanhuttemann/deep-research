@@ -1,0 +1,53 @@
+{
+  "name": "pi-deep-research",
+  "version": "0.1.0",
+  "description": "Fact-checked, cited web research inside Pi: runs the deep-research CLI (drsh) on Pi's own model, with live progress, clarifying questions and plan review",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "research",
+    "web-search",
+    "fact-check",
+    "citations"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/juanhuttemann/deep-research/tree/main/integrations/pi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juanhuttemann/deep-research.git",
+    "directory": "integrations/pi"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import jiti/register --test --test-reporter=spec \"test/*.test.ts\""
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-tui": "1.4.0",
+    "@types/node": "^22.19.0",
+    "jiti": "2.7.0",
+    "typebox": "1.3.27",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

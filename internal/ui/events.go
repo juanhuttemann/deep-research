@@ -112,6 +112,11 @@ type Event struct {
 	Transient bool `json:"transient,omitempty"`
 	// Artifacts are the report files a finished run wrote (Done only).
 	Artifacts []string `json:"artifacts,omitempty"`
+	// Checkpoint is the file --resume continues the run from, when a
+	// cancelled, failed or incomplete run left one (Done only). A caller
+	// had to glob the reports directory for *.partial.json, and could not
+	// tell a stale one from this run's.
+	Checkpoint string `json:"checkpoint,omitempty"`
 	// Plan is the plan about to run (PlanReady only).
 	Plan *Plan `json:"plan,omitempty"`
 	// Questions are a clarify event's; a clear question sends an empty

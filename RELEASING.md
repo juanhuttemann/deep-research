@@ -11,6 +11,9 @@ In `CHANGELOG.md`, rename the `## [Unreleased]` section to
 above it. Pick the next semver number (`0.MINOR.0` for a release with new
 features, `0.x.PATCH` for fixes only — the project is pre-1.0).
 
+Then, in `integrations/pi/package.json`, bump `version` when the extension
+changed since its last publish.
+
 ## 2. Commit and tag
 
 ```sh
@@ -53,3 +56,18 @@ to publish.
 The one-liner installers (`scripts/install.sh`, `scripts/install.ps1`) and
 the `releases/latest/download/...` URLs only see the release after it is
 published.
+
+## 5. Publish the Pi extension
+
+When its version was bumped, publish it to npm from a clean checkout of the
+tag. It needs an npm account that owns `pi-deep-research`:
+
+```sh
+cd integrations/pi
+npm ci && npm run typecheck && npm test
+npm publish
+```
+
+Publish only after the GitHub release. The extension tells users to run
+`drsh update` when their drsh lacks `drsh settings`, and that update has to
+find the release.

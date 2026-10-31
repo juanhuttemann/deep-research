@@ -31,12 +31,16 @@ type Setting struct {
 	Review bool `json:"review"`
 	// BriefKey cycles the setting in the terminal brief; 0 for none.
 	BriefKey Key `json:"-"`
-	// count settings take any whole number from 0 (auto) to max (0 for no
+	// Count settings take any whole number from 0 (auto) to Max (0 for no
 	// bound), not only the choices offered: a config file's
 	// sources_per_topic: 7 is a budget the CLI runs, and the page that
 	// offered it as the value must be able to launch it.
-	count bool
-	max   int
+	Count bool `json:"count,omitempty"`
+	Max   int  `json:"max,omitempty"`
+	// CLIFlag is the command-line flag the setting becomes, filled in by
+	// Settings: a caller outside Go (the Pi extension) builds a count's
+	// --flag=N from it rather than from a copy of the key-to-flag mapping.
+	CLIFlag string `json:"flag"`
 }
 
 // Option is one value a setting takes.
@@ -48,6 +52,11 @@ type Option struct {
 	// key: what each surface sets when it is chosen, so the serve page
 	// carries no copy of instant's bundle.
 	Implies map[string]string `json:"implies,omitempty"`
+	// Arg is the command-line argument that chooses this option, filled in
+	// by Settings through Setting.Flag: follow-ups off is
+	// --no-follow-ups=true, and a caller outside Go passes it as it is
+	// instead of keeping its own copy of that inversion.
+	Arg string `json:"arg,omitempty"`
 }
 
 // RunSettings are a run's values for the settings, before its plan exists.
@@ -105,9 +114,9 @@ func settingsAt(rs RunSettings) []Setting {
 			" Instant is one search and one answer from the pages it finds, not fact-checked, with the other settings at their least.",
 			Value: cmp.Or(rs.Mode, "standard"), Opts: modeOptions(), Start: true, Review: true, BriefKey: KeyD},
 		{Key: SettingTopics, Label: "sub-topics", Help: "How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.",
-			Value: strconv.Itoa(rs.SubTopics), Opts: countOptions(MaxSubTopics, nil), Start: true, count: true, max: MaxSubTopics},
+			Value: strconv.Itoa(rs.SubTopics), Opts: countOptions(MaxSubTopics, nil), Start: true, Count: true, Max: MaxSubTopics},
 		{Key: SettingSources, Label: "pages per topic", Help: "How many pages each sub-topic reads. Auto lets the depth decide.",
-			Value: strconv.Itoa(rs.Sources), Opts: countOptions(0, sourceChoices), Start: true, count: true},
+			Value: strconv.Itoa(rs.Sources), Opts: countOptions(0, sourceChoices), Start: true, Count: true},
 		{Key: SettingFollowUps, Label: "follow-ups", Help: "After the planned searches, up to three more for what the findings leave open.",
 			Value: onOff(!rs.NoFollowUps), Opts: []Option{{Value: "on", Label: "on"}, {Value: "off", Label: "off"}},
 			Start: true, Review: true, BriefKey: KeyF},
@@ -116,7 +125,7 @@ func settingsAt(rs RunSettings) []Setting {
 		// Words and tables are chosen with the question: on review, the
 		// format alone keeps the brief's row to what its keys change.
 		{Key: SettingWords, Label: "words", Help: "How long the explanation is, in words. Auto lets the format decide.",
-			Value: strconv.Itoa(rs.Report.Words), Opts: countOptions(0, wordChoices), Start: true, count: true, max: agent.MaxReportWords},
+			Value: strconv.Itoa(rs.Report.Words), Opts: countOptions(0, wordChoices), Start: true, Count: true, Max: agent.MaxReportWords},
 		{Key: SettingTables, Label: "tables", Help: "How much of the report is in tables. Auto lets the format decide.",
 			Value: cmp.Or(rs.Report.Tables, agent.ReportTables[0]), Opts: plainOptions(agent.ReportTables), Start: true},
 		// Not a review setting: by the brief the questions were asked or not.
@@ -125,6 +134,11 @@ func settingsAt(rs RunSettings) []Setting {
 	}
 	for i := range out {
 		out[i].Opts = withValue(out[i], out[i].Value)
+		out[i].CLIFlag = out[i].FlagName()
+		for j, o := range out[i].Opts {
+			name, v, _ := out[i].Flag(o.Value)
+			out[i].Opts[j].Arg = "--" + name + "=" + v
+		}
 	}
 	return out
 }
@@ -154,7 +168,7 @@ func (s Setting) accepts(v string) bool {
 		return true
 	}
 	n, err := strconv.Atoi(v)
-	return s.count && err == nil && n >= 0 && (s.max == 0 || n <= s.max)
+	return s.Count && err == nil && n >= 0 && (s.Max == 0 || n <= s.Max)
 }
 
 func modeOptions() []Option {

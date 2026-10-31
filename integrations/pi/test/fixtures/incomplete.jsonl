@@ -1,0 +1,2 @@
+{"type":"phase","time":"2026-10-31T16:08:58Z","phase":"Summarize","detail":"Writing the report"}
+{"type":"done","time":"2026-10-31T16:08:58Z","status":"incomplete","detail":"3 of 4 searches failed (rate-limited)","artifacts":["REPORTS/run.md","REPORTS/run.json"],"checkpoint":"REPORTS/run.abc.partial.json"}

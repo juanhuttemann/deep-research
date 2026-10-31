@@ -147,6 +147,7 @@ func New(load func() (Deps, error)) *cobra.Command {
 	root.AddCommand(setupCmd(),
 		initCmd,
 		doctorCmd(load),
+		settingsCmd(load),
 		loginCmd(),
 		modelCmd(),
 		logoutCmd(),
@@ -269,6 +270,30 @@ func doctorCmd(load func() (Deps, error)) *cobra.Command {
 	}
 	cmd.Flags().StringSlice("domains", nil, "also check that these sites can be searched and read (comma-separated)")
 	return cmd
+}
+
+// settingsCmd prints the run settings as JSON, at the values a run started
+// now would take: the list the terminal and the serve page draw their
+// controls from, with each option's flag. An integration outside Go (the Pi
+// extension) builds its controls from it, so it carries no copy of the
+// tiers, counts or the instant bundle to drift.
+func settingsCmd(load func() (Deps, error)) *cobra.Command {
+	return &cobra.Command{
+		Use:   "settings",
+		Short: "print the run settings, their choices and flags, as JSON",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			d, err := load()
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(struct {
+				Settings []ui.Setting `json:"settings"`
+			}{ui.Settings(defaultSettings(d.Config))})
+		},
+	}
 }
 
 // serveCmd runs the browser UI on this machine.
@@ -603,7 +628,7 @@ func research(cmd *cobra.Command, load func() (Deps, error)) (ui.RunResult, erro
 // wrote. An incomplete run also returns an error, so it is told apart from a
 // failed one by the report it still delivered.
 func doneEvent(res ui.RunResult, err error) ui.Event {
-	e := ui.Event{Type: ui.Done, Time: time.Now(), Status: "complete", Artifacts: res.Paths()}
+	e := ui.Event{Type: ui.Done, Time: time.Now(), Status: "complete", Artifacts: res.Paths(), Checkpoint: res.Checkpoint}
 	switch {
 	case res.Report != nil && res.Report.Error != "":
 		e.Status = "incomplete"
@@ -733,7 +758,9 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 	// call timeout tied it to the one part of a run that is not the slow part:
 	// search and scrape dominate the wall clock on a wide plan, so a deep run
 	// could expire while every individual model call still had budget.
-	ctx, cancel := context.WithTimeout(cmd.Context(), runDeadline(d))
+	parent, stop := stopOnSignal(cmd, drawsUI(cmd, silent, jsonl))
+	defer stop()
+	ctx, cancel := context.WithTimeout(parent, runDeadline(d))
 	defer cancel()
 
 	rs := runSettings(cmd, d)
@@ -763,16 +790,35 @@ func runResearch(cmd *cobra.Command, d Deps, question string) (ui.RunResult, err
 		Answers:         given,
 	})
 	if err != nil {
+		res.Checkpoint = checkpointLeft(rec)
 		return res, fmt.Errorf("research failed: %w", err)
 	}
 	if res.Cancelled {
+		res.Checkpoint = checkpointLeft(rec)
 		return res, nil
 	}
 	if clarifyOnly || planOnly {
 		return res, printStage(cmd, res, jsonl)
 	}
 	writeTrace(cmd, rec, &res)
-	return res, finish(cmd, d, rec, res, !st.replay, silent, jsonl)
+	err = finish(cmd, d, rec, res, !st.replay, silent, jsonl)
+	// finish removed the checkpoint of a run that finished in full.
+	res.Checkpoint = checkpointLeft(rec)
+	return res, err
+}
+
+// checkpointLeft is the checkpoint rec wrote, when it is on disk: one is
+// written only once a plan exists, so a run stopped at its questions or its
+// plan call has none to resume from.
+func checkpointLeft(rec *replay.Recorder) string {
+	p := rec.CheckpointPath()
+	if p == "" {
+		return ""
+	}
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 // finish delivers a run that ended and, once it finished in full, removes its

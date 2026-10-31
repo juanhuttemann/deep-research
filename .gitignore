@@ -22,3 +22,8 @@ PENDING.md
 # demo.tape capture (re-recorded with script, see the tape)
 /demo.tty
 /demo.timing
+
+# The Pi extension's dev dependencies (integrations/pi).
+/integrations/pi/node_modules/
+# Its event-stream fixtures are test data, not run output.
+!/integrations/pi/test/fixtures/*.jsonl

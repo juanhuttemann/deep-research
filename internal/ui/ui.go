@@ -82,7 +82,10 @@ type RunResult struct {
 	JSONPath  string
 	// TracePath is the --trace file, written by the CLI after the run.
 	TracePath string
-	Cancelled bool
+	// Checkpoint is the resumable checkpoint a run that did not finish in
+	// full left on disk, set by the CLI; empty once a run completes.
+	Checkpoint string
+	Cancelled  bool
 	// KeysHeld is set when the run could not stop reading keys from the
 	// terminal: what is typed at it next goes to that reader, not to a
 	// prompt opened after the run.

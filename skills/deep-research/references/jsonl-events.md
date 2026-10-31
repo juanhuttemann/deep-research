@@ -20,7 +20,7 @@ stderr. Every field except `type` and `time` is optional. The full struct is
 | `info` | progress, retries, which model is asked | `detail`; `transient: true` replaces the previous status line |
 | `error` | a failure, fatal or not | `detail` |
 | `report` | the report is written | |
-| `done` | last line of every run | `status`, `detail`, `artifacts` |
+| `done` | last line of every run | `status`, `detail`, `artifacts`, `checkpoint` (the file `--resume` takes, when the run left one) |
 
 ## Reading progress
 
