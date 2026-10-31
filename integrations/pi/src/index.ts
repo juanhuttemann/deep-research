@@ -15,6 +15,7 @@ import { Type, type TSchema } from "typebox";
 import type { Answer } from "./args.ts";
 import { startBridge, type Bridge } from "./bridge.ts";
 import type { Question } from "./events.ts";
+import { planLines, subTopicNames, withSubTopics, type Plan } from "./plan.ts";
 import { outcomeLines, progressLines, type ResearchDetails } from "./render.ts";
 import { research, type Hooks, type Request, type Result, type RunRecord } from "./research.ts";
 import { runPlain } from "./runner.ts";
@@ -210,19 +211,33 @@ export default function deepResearch(pi: ExtensionAPI) {
 		return out;
 	}
 
-	// reviewPlan opens the plan as JSON: sub-topics, their queries and terms,
-	// follow-ups and the report shape can all be edited before any search.
-	async function reviewPlan(ctx: ExtensionContext, plan: unknown, signal?: AbortSignal): Promise<unknown | "stop"> {
-		let text = JSON.stringify(plan, null, 2);
-		for (;;) {
-			const edited = await untilAborted(ctx.ui.editor("Review the plan (edit, then save to run it; cancel to stop)", text), signal);
-			if (edited === undefined) return "stop";
-			try {
-				return JSON.parse(edited);
-			} catch (err) {
-				ctx.ui.notify(`The plan is not valid JSON: ${(err as Error).message}`, "error");
-				text = edited;
+	// reviewPlan shows the plan's sub-topics as a list, with a menu to run it,
+	// edit the sub-topics as plain text (one per line), or stop. Esc stops.
+	async function reviewPlan(ctx: ExtensionContext, raw: unknown, signal?: AbortSignal): Promise<unknown | "stop"> {
+		const run = "▶ Run this plan";
+		const edit = "Edit sub-topics";
+		const stop = "Cancel";
+		let plan = (raw ?? {}) as Plan;
+		try {
+			for (;;) {
+				ctx.ui.setWidget("deep-research-plan", planLines(plan));
+				const pick = await ctx.ui.select("Review the plan", [run, edit, stop], { signal });
+				if (pick === undefined || pick === stop) return "stop";
+				if (pick === run) return plan;
+				const text = await untilAborted(
+					ctx.ui.editor("Sub-topics, one per line: change, add or delete lines", subTopicNames(plan).join("\n")),
+					signal,
+				);
+				if (text === undefined) continue;
+				const edited = withSubTopics(plan, text);
+				if (!edited.sub_topics?.length) {
+					ctx.ui.notify("A plan needs at least one sub-topic", "warning");
+					continue;
+				}
+				plan = edited;
 			}
+		} finally {
+			ctx.ui.setWidget("deep-research-plan", undefined);
 		}
 	}
 
