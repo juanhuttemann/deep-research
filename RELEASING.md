@@ -60,7 +60,10 @@ published.
 ## 5. Publish the Pi extension
 
 When its version was bumped, publish it to npm from a clean checkout of the
-tag. It needs an npm account that owns `pi-deep-research`:
+tag. It is `@juanhuttemann/pi-deep-research`, so it needs the npm account
+`juanhuttemann` (`npm login`; `corepack npm@10` stands in for a missing
+npm). Being scoped, it would publish as private; `publishConfig.access` in
+its package.json makes it public:
 
 ```sh
 cd integrations/pi

@@ -1,5 +1,5 @@
 {
-  "name": "pi-deep-research",
+  "name": "@juanhuttemann/pi-deep-research",
   "version": "0.1.0",
   "description": "Fact-checked, cited web research inside Pi: runs the deep-research CLI (drsh) on Pi's own model, with live progress, clarifying questions and plan review",
   "keywords": [
@@ -20,7 +20,8 @@
   },
   "files": [
     "src/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
@@ -49,5 +50,8 @@
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
