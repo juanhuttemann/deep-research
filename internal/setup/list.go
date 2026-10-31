@@ -12,34 +12,32 @@ import (
 // item is one row of a picker list.
 type item struct {
 	id     string
-	group  string // the provider, in its own column
 	title  string
 	detail string // dimmed, after the title
 	mark   string // e.g. "✓ key stored"
 	// keywords are searched but not shown: a model's display name, so
 	// "v4.1 flash" finds deepseek-v4.1-flash and "opus" finds claude-opus-5.
 	keywords string
-	// searchOnly rows appear only while searching, and only when the
-	// search names their group: "DeepSeek · other model ID…" is for someone
-	// who typed deepseek, not a row in every provider's block.
-	searchOnly bool
 }
 
 // list is a filterable list: typing narrows it, the arrows move, Enter picks.
-// It holds every model of every provider, so the search is the main way
-// through it, as in Crush's and pi's model pickers.
+// A provider can list hundreds of models, so the search is the main way
+// through it.
 type list struct {
 	items    []item
 	filter   textinput.Model
 	shown    []int // indexes into items that pass the filter
 	cursor   int   // index into shown
 	height   int   // rows visible at once
-	grouped  bool  // rows carry a provider: headed by it, not repeating it
+	column   int   // the widest title with a detail: details start after it
 	freeText bool  // Enter with no match picks the typed text
 	// plain lists are a handful of choices: no search box, and typing does
 	// nothing but move.
 	plain bool
 }
+
+// maxColumn is the widest a list's title column grows.
+const maxColumn = 36
 
 // newInput is a text input drawn in the picker's own colours. The defaults
 // are fixed grays, the prompt and cursor light and the placeholder dark, so
@@ -68,8 +66,13 @@ func newList(items []item, placeholder string, freeText bool) list {
 	f.Focus()
 	l := list{items: items, filter: f, height: 18, freeText: freeText}
 	for _, it := range items {
-		l.grouped = l.grouped || it.group != ""
+		if it.detail != "" {
+			l.column = max(l.column, lipgloss.Width(it.title))
+		}
 	}
+	// One very long model ID would push every row's detail off a narrow
+	// terminal; past this it overflows on its own row only.
+	l.column = min(l.column, maxColumn)
 	l.refilter()
 	return l
 }
@@ -87,41 +90,31 @@ func matches(s, q string) bool {
 	return true
 }
 
-// refilter keeps the rows matching the search, best first: the provider
-// named by it ("deep" puts DeepSeek's own models first), then rows holding
-// it as one phrase ("glm 5" puts GLM 5 above GLM 4.5), then rows holding
-// each of its words.
+// refilter keeps the rows matching the search, best first: rows holding it
+// as one phrase ("glm 5" puts GLM 5 above GLM 4.5), then rows holding each
+// of its words.
 func (l *list) refilter() {
 	q := strings.ToLower(strings.TrimSpace(l.filter.Value()))
-	var tiers [3][]int
+	var tiers [2][]int
 	for i, it := range l.items {
-		if t := l.tier(it, q); t >= 0 {
+		if t := tier(it, q); t >= 0 {
 			tiers[t] = append(tiers[t], i)
 		}
 	}
-	l.shown = append(append(tiers[0], tiers[1]...), tiers[2]...)
+	l.shown = append(tiers[0], tiers[1]...)
 	l.cursor = min(l.cursor, max(len(l.shown)-1, 0))
 }
 
 // tier ranks it for q: 0 best, -1 hidden.
-func (l *list) tier(it item, q string) int {
-	group := strings.ToLower(it.group)
-	if it.searchOnly {
-		if q != "" && (strings.Contains(group, q) || strings.Contains(q, group)) {
-			return 0
-		}
-		return -1
-	}
-	text := strings.ToLower(it.id + " " + it.group + " " + it.title + " " + it.detail + " " + it.keywords)
+func tier(it item, q string) int {
+	text := strings.ToLower(it.id + " " + it.title + " " + it.detail + " " + it.keywords)
 	switch {
 	case q == "":
-		return 2
-	case group != "" && strings.Contains(group, q):
-		return 0
-	case strings.Contains(text, q):
 		return 1
+	case strings.Contains(text, q):
+		return 0
 	case matches(text, q):
-		return 2
+		return 1
 	}
 	return -1
 }
@@ -210,53 +203,19 @@ func (l list) view(st styles) string {
 	return b.String()
 }
 
-// window renders at most l.height lines around the cursor: the rows, and in
-// a grouped list a heading wherever the provider changes. A heading is a
-// line too, so the first row is moved down until the cursor's row fits.
+// window renders at most l.height rows around the cursor.
 func (l list) window(st styles) (lines []string, start, end int) {
-	start = max(0, min(l.cursor-l.height/3, len(l.shown)-1))
-	for {
-		lines, end = l.render(st, start)
-		if end > l.cursor || start >= l.cursor {
-			return lines, start, end
-		}
-		start++
-	}
-}
-
-func (l list) render(st styles, start int) (lines []string, end int) {
-	prev := ""
+	start = max(0, min(l.cursor-l.height/3, len(l.shown)-l.height))
 	for end = start; end < len(l.shown) && len(lines) < l.height; end++ {
-		it := l.items[l.shown[end]]
-		if l.grouped && (end == start || it.group != prev) {
-			if len(lines)+2 > l.height {
-				break
-			}
-			lines = append(lines, l.heading(st, it))
-		}
-		prev = it.group
-		lines = append(lines, l.row(st, it, end == l.cursor))
+		lines = append(lines, l.row(st, l.items[l.shown[end]], end == l.cursor))
 	}
-	return lines, end
-}
-
-// heading names a provider and where its key comes from, once above its
-// models rather than on each of them.
-func (l list) heading(st styles, it item) string {
-	status := st.dim.Render("needs a key: asked for when you pick a model")
-	if it.mark != "" {
-		status = st.ok.Render(it.mark)
-	}
-	return st.group.Render(it.group) + "  " + status
+	return lines, start, end
 }
 
 func (l list) row(st styles, it item, current bool) string {
 	prefix, title := "  ", it.title
 	if current {
 		prefix, title = st.cursor.Render("› "), st.selected.Render(it.title)
-	}
-	if l.grouped {
-		prefix = "  " + prefix
 	}
 	line := prefix + title
 	if l.plain {
@@ -269,10 +228,15 @@ func (l list) row(st styles, it item, current bool) string {
 		}
 		return line
 	}
+	if it.detail != "" || it.mark != "" {
+		// Padded to the widest title, so the details and marks are columns
+		// rather than a ragged edge.
+		line += strings.Repeat(" ", max(l.column-lipgloss.Width(it.title), 0))
+	}
 	if it.detail != "" {
 		line += "  " + st.dim.Render(it.detail)
 	}
-	if !l.grouped && it.mark != "" {
+	if it.mark != "" {
 		line += "  " + st.ok.Render(it.mark)
 	}
 	return line

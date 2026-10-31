@@ -63,34 +63,68 @@ func steps(parts ...[]tea.Msg) []tea.Msg {
 
 func one(m tea.Msg) []tea.Msg { return []tea.Msg{m} }
 
-// shownRows is the visible rows' "group · title", in order.
+// shownRows is the visible rows' titles, in order.
 func shownRows(m Model) []string {
 	var rows []string
 	for _, i := range m.list.shown {
-		rows = append(rows, m.list.items[i].group+" · "+m.list.items[i].title)
+		rows = append(rows, m.list.items[i].title)
 	}
 	return rows
 }
 
-// TestSearchShowsEachModelWithItsProvider: typing "deep" lists DeepSeek's
-// own models first, each row naming its provider, then a row for a model
-// DeepSeek's catalog entry lacks, then DeepSeek models other providers serve.
-func TestSearchShowsEachModelWithItsProvider(t *testing.T) {
-	m := drive(t, New(Options{Providers: providers}), typed("deep")...)
-	rows := shownRows(m)
-	want := []string{"DeepSeek · deepseek-v4-flash", "DeepSeek · deepseek-v4-pro", "DeepSeek · other model ID…",
-		"OpenRouter · deepseek/deepseek-v4.1-flash"}
-	if strings.Join(rows, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
+// provider picks the provider whose name holds name, from the first step.
+func provider(name string) []tea.Msg { return steps(typed(name), one(enterKey)) }
+
+// TestProviderThenItsModels: the picker opens on the providers alone; the
+// one picked opens on its own models, then a row for one its catalog entry
+// lacks, and none of another provider's.
+func TestProviderThenItsModels(t *testing.T) {
+	m := New(Options{Providers: providers})
+	want := "Claude subscription,OpenRouter,DeepSeek,Custom endpoint"
+	if got := strings.Join(shownRows(m), ","); got != want {
+		t.Fatalf("first step rows = %s, want %s", got, want)
 	}
-	if view := m.render(); !strings.Contains(view, "DeepSeek") || !strings.Contains(view, "deepseek-v4-pro") {
-		t.Errorf("view lacks the provider column:\n%s", view)
+	m = drive(t, m, typed("deep")...)
+	if got := strings.Join(shownRows(m), ","); got != "DeepSeek" {
+		t.Fatalf("search deep = %s, want DeepSeek", got)
 	}
-	// The other-model row is not in the unsearched list.
-	for _, r := range shownRows(New(Options{Providers: providers})) {
-		if strings.Contains(r, "other model ID") {
-			t.Errorf("unsearched list shows %q", r)
-		}
+	m = drive(t, m, enterKey)
+	if m.step != stepModel {
+		t.Fatalf("step = %d, want the model list", m.step)
+	}
+	want = "deepseek-v4-flash,deepseek-v4-pro,other model ID…"
+	if got := strings.Join(shownRows(m), ","); got != want {
+		t.Fatalf("DeepSeek's rows = %s, want %s", got, want)
+	}
+	view := m.render()
+	if !strings.Contains(view, "DeepSeek · choose a model") || !strings.Contains(view, "needs a key") {
+		t.Errorf("model step does not name its provider and key:\n%s", view)
+	}
+}
+
+// TestEscGoesBackAStep: Esc on a provider's models returns to the providers,
+// on that provider; Esc there quits.
+func TestEscGoesBackAStep(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape}
+	m := drive(t, New(Options{Providers: providers}), steps(provider("deepseek"), one(esc))...)
+	if m.step != stepProvider || m.quit {
+		t.Fatalf("step = %d quit %v, want the providers", m.step, m.quit)
+	}
+	if it, _ := m.list.selected(); it.id != "deepseek" {
+		t.Errorf("cursor on %q, want deepseek", it.id)
+	}
+	m = drive(t, m, steps(provider("deepseek"), typed("pro"), one(enterKey), one(esc))...)
+	if m.step != stepModel {
+		t.Errorf("esc on the key: step %d, want the models", m.step)
+	}
+	if m = drive(t, m, esc); m.step != stepProvider {
+		t.Fatalf("esc on the models: step %d, want the providers", m.step)
+	}
+	if m = drive(t, m, esc); !m.quit {
+		t.Error("esc on the providers did not quit")
+	}
+	if _, ok := m.Result(); ok {
+		t.Error("esc produced a result")
 	}
 }
 
@@ -102,7 +136,7 @@ func TestModelThenMaskedKey(t *testing.T) {
 		checkedKey = key
 		return nil
 	}})
-	m = drive(t, m, steps(typed("deep pro"), one(enterKey), typed("sk-ds-secret"))...)
+	m = drive(t, m, steps(provider("deepseek"), typed("pro"), one(enterKey), typed("sk-ds-secret"))...)
 	if m.step != stepKey {
 		t.Fatalf("step = %d, want the key step", m.step)
 	}
@@ -124,7 +158,7 @@ func TestModelThenMaskedKey(t *testing.T) {
 // TestOtherModelID: a model the catalog does not list yet is typed in.
 func TestOtherModelID(t *testing.T) {
 	m := New(Options{Providers: providers, StoredEndpoint: storedAt("deepseek", "https://api.deepseek.com/v1")})
-	m = drive(t, m, steps(typed("deepseek"), one(downKey), one(downKey), one(enterKey))...)
+	m = drive(t, m, steps(provider("deepseek"), one(downKey), one(downKey), one(enterKey))...)
 	if m.step != stepModelID {
 		t.Fatalf("step = %d, want the model ID input", m.step)
 	}
@@ -140,7 +174,7 @@ func TestStoredOrEnvKeyIsNotAskedFor(t *testing.T) {
 		"stored": {Providers: providers, StoredEndpoint: storedAt("openrouter", or)},
 		"env":    {Providers: providers, EnvEndpoint: func(tr string) (string, bool) { return or, tr == "openai" }},
 	} {
-		m := drive(t, New(opts), steps(typed("glm"), one(enterKey))...)
+		m := drive(t, New(opts), steps(provider("openrouter"), typed("glm"), one(enterKey))...)
 		if res, ok := m.Result(); !ok || res.Key != "" || res.Selection.Model != "z-ai/glm-5" {
 			t.Errorf("%s: result = %+v, %v (step %d)", name, res, ok, m.step)
 		}
@@ -150,7 +184,7 @@ func TestStoredOrEnvKeyIsNotAskedFor(t *testing.T) {
 	}
 	// An environment key for OpenRouter is no key for DeepSeek.
 	m := New(Options{Providers: providers, EnvEndpoint: func(string) (string, bool) { return or, true }})
-	m = drive(t, m, steps(typed("deep pro"), one(enterKey))...)
+	m = drive(t, m, steps(provider("deepseek"), typed("pro"), one(enterKey))...)
 	if m.step != stepKey {
 		t.Errorf("DeepSeek with only an OpenRouter env key: step %d, want the key prompt", m.step)
 	}
@@ -211,7 +245,7 @@ func TestFailedCheckOffersRetry(t *testing.T) {
 		}
 		return nil
 	}})
-	m = drive(t, m, steps(typed("glm"), one(enterKey), typed("bad"), one(enterKey))...)
+	m = drive(t, m, steps(provider("openrouter"), typed("glm"), one(enterKey), typed("bad"), one(enterKey))...)
 	if m.step != stepCheckFailed || !strings.Contains(m.render(), "401") {
 		t.Fatalf("step = %d:\n%s", m.step, m.render())
 	}
@@ -224,11 +258,15 @@ func TestFailedCheckOffersRetry(t *testing.T) {
 
 func TestCurrentSelectionIsPreselected(t *testing.T) {
 	m := New(Options{Providers: providers, Current: auth.Selection{Provider: "openrouter", Model: "z-ai/glm-5"}})
-	if it, _ := m.list.selected(); it.id != rowID("openrouter", "z-ai/glm-5") {
-		t.Errorf("cursor on %q", it.id)
+	if it, _ := m.list.selected(); it.id != "openrouter" {
+		t.Errorf("provider cursor on %q", it.id)
 	}
 	if !strings.Contains(m.render(), "now: openrouter · z-ai/glm-5") {
 		t.Errorf("current model not shown:\n%s", m.render())
+	}
+	m = drive(t, m, enterKey)
+	if it, _ := m.list.selected(); it.id != "z-ai/glm-5" {
+		t.Errorf("model cursor on %q", it.id)
 	}
 }
 
@@ -275,11 +313,39 @@ func TestKeyDoesNotFollowToAnotherProvider(t *testing.T) {
 		checked = append(checked, sel.Provider+"="+key)
 		return errors.New("401 Unauthorized")
 	}})
-	m = drive(t, m, steps(typed("glm"), one(enterKey), typed("sk-or"), one(enterKey), typed("m"), typed("deep pro"), one(enterKey))...)
+	m = drive(t, m, steps(provider("openrouter"), typed("glm"), one(enterKey), typed("sk-or"), one(enterKey), typed("m"),
+		one(tea.KeyPressMsg{Code: tea.KeyEscape}), provider("deepseek"), typed("pro"), one(enterKey))...)
 	if m.step != stepKey {
 		t.Fatalf("step = %d after switching to DeepSeek, want its key prompt (checked %v)", m.step, checked)
 	}
 	if len(checked) != 1 {
 		t.Errorf("checks = %v, want only OpenRouter's", checked)
+	}
+}
+
+// TestCustomKeyDoesNotFollowToAnotherURL: a key typed for one custom URL,
+// then Esc back to the providers and Custom again with another URL that has
+// a stored key, must not be sent to the second.
+func TestCustomKeyDoesNotFollowToAnotherURL(t *testing.T) {
+	var listedWith []string
+	opts := Options{Providers: providers, StoredEndpoint: storedAt(catalog.Custom, "http://b:8000/v1"),
+		ListModels: func(_ context.Context, base, key string) ([]string, error) {
+			listedWith = append(listedWith, base+"="+key)
+			return []string{"m"}, nil
+		}}
+	m := New(opts)
+	m = drive(t, m, steps(provider("custom"))...)
+	m.input.SetValue("")
+	m = drive(t, m, steps(typed("http://a:8000/v1"), one(enterKey), typed("sk-a"), one(enterKey),
+		one(tea.KeyPressMsg{Code: tea.KeyEscape}), provider("custom"))...)
+	m.input.SetValue("")
+	m = drive(t, m, steps(typed("http://b:8000/v1"), one(enterKey))...)
+	for _, l := range listedWith {
+		if strings.HasPrefix(l, "http://b") && strings.HasSuffix(l, "=sk-a") {
+			t.Errorf("endpoint b listed with a's key: %v", listedWith)
+		}
+	}
+	if m.key == "sk-a" {
+		t.Errorf("a's key kept for b")
 	}
 }

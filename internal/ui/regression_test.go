@@ -3865,3 +3865,34 @@ func TestDeeplyNestedBlocksKeepTheirWidth(t *testing.T) {
 		t.Errorf("nested PDF is %d bytes, flat %d", nested, flat)
 	}
 }
+
+// "Saved to reports:" was printed flush left under the completion card,
+// whose "RESEARCH COMPLETE" and "Source Breakdown" are indented two
+// columns, so it sat out of their line.
+func TestSavedToListLinesUpWithTheCard(t *testing.T) {
+	var buf strings.Builder
+	reportFiles(&buf, "reports", RunResult{MDPath: "reports/a.md"})
+	r := NewRenderer(io.Discard, Theme{})
+	heading := r.heading("RESEARCH COMPLETE", "")
+	indent := heading[:len(heading)-len(strings.TrimLeft(heading, " "))]
+	lines := strings.Split(strings.Trim(buf.String(), "\n"), "\n")
+	if got := lines[0]; got != indent+"Saved to reports:" {
+		t.Errorf("header %q is not indented %d columns as the card's headings are", got, len(indent))
+	}
+	if got := lines[1]; !strings.HasPrefix(got, indent+"  • ") {
+		t.Errorf("file row %q is not indented under the header", got)
+	}
+}
+
+// /model's confirmation was printed above the start screen, flush left out
+// of its column. It is the screen's note now, each of its lines kept.
+func TestStartNoteKeepsItsLines(t *testing.T) {
+	r := NewRenderer(io.Discard, Theme{})
+	r.width, r.briefNote = 80, "using openrouter · z-ai/glm-5\nkey stored in auth.json"
+	got := strings.Join(r.startLines(), "\n")
+	for _, want := range []string{"\n  using openrouter · z-ai/glm-5\n", "\n  key stored in auth.json\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("start screen lacks %q:\n%s", want, got)
+		}
+	}
+}

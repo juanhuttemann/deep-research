@@ -24,8 +24,19 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - A page title holding `](https://…)` set its citation's link target in
   the exported `.md` and `.pdf`. Titles and URLs are escaped.
 
+### Changed
+
+- The model picker (`setup`, `login`, `model`, and "other model…" in
+  `/model`) asks for the provider first, then lists only that provider's
+  models, instead of one list of every model of every provider. Esc goes
+  back a step.
+
 ### Fixed
 
+- "Saved to reports:" after a run, and `/model`'s "using provider · model"
+  on the start screen, were printed flush left, out of the column of the
+  screen around them. Both are indented as it is; the latter is the start
+  screen's note now.
 - An instant run left the planning spinner running: it repainted stderr
   for the rest of the process, over the report and the follow-up questions.
 - A history line cut short by a kill was glued to the next run's, and both

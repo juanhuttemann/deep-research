@@ -81,8 +81,12 @@ func (r *Renderer) startLines() []string {
 	out = append(out, r.commandBlock(r.promptText, r.commandAt,
 		"[enter] research   [/] settings", "quit")...)
 	if r.briefNote != "" {
-		for _, l := range wrapWords(r.briefNote, r.width-4) {
-			out = append(out, "  "+r.T.yellow(l))
+		// Each line of the note wrapped on its own: a model switch says
+		// what it uses and where its key went, which run together as one.
+		for para := range strings.SplitSeq(r.briefNote, "\n") {
+			for _, l := range wrapWords(para, r.width-4) {
+				out = append(out, "  "+r.T.yellow(l))
+			}
 		}
 		out = append(out, "")
 	}

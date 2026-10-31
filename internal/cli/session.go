@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strings"
@@ -140,7 +141,9 @@ func (s *session) noColor() bool {
 // they are going, beside the box they will type in next, where it is read.
 func (s *session) say(msg string) {
 	if s.run == "" && s.home {
-		s.note = msg
+		// Added to, not replaced: /model's confirmation and a reload error
+		// after it are both for the reader.
+		s.note = strings.TrimPrefix(s.note+"\n"+msg, "\n")
 		return
 	}
 	fmt.Fprintln(s.cmd.ErrOrStderr(), msg)
@@ -372,7 +375,14 @@ func (s *session) reopen(path string) {
 // switchModel is /model. The next run, and the questions about the open
 // report, use what it saves.
 func (s *session) switchModel() {
-	if err := chooseModel(s.cmd, s.noColor()); err != nil {
+	// What was saved is said as any other note: printed above the start
+	// screen, it sat flush left out of the screen's column.
+	var said strings.Builder
+	err := chooseModel(s.cmd, s.noColor(), &said)
+	if msg := strings.TrimSpace(said.String()); msg != "" {
+		s.say(msg)
+	}
+	if err != nil {
 		s.say("error: " + err.Error())
 		return
 	}
@@ -396,8 +406,8 @@ func (s *session) switchModel() {
 
 // chooseModel offers the model runs use now and the ones picked before it,
 // then every provider's in the full picker; a pick is saved as `drsh model`
-// saves it.
-func chooseModel(cmd *cobra.Command, noColor bool) error {
+// saves it. What was saved is said to out.
+func chooseModel(cmd *cobra.Command, noColor bool, out io.Writer) error {
 	dir, err := config.AuthDir()
 	if err != nil {
 		return err
@@ -426,12 +436,12 @@ func chooseModel(cmd *cobra.Command, noColor bool) error {
 	case i < 0 || (i == 0 && ok):
 		return nil
 	case i == len(sels):
-		return pickAndSave(cmd, setup.Options{})
+		return pickAndSaveTo(cmd, out, out, setup.Options{})
 	}
 	if err := auth.SaveSelection(dir, sels[i]); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "using %s · %s\n", sels[i].Provider, sels[i].Model)
-	warnOverrides(cmd.ErrOrStderr(), sels[i])
+	fmt.Fprintf(out, "using %s · %s\n", sels[i].Provider, sels[i].Model)
+	warnOverrides(out, sels[i])
 	return nil
 }
