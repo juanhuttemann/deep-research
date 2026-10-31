@@ -74,6 +74,15 @@ func TestKilledRunGivesTheTerminalBack(t *testing.T) {
 		})
 		return
 	}
+	// SIGQUIT's default action, a goroutine dump, ran no defer either.
+	for _, s := range []syscall.Signal{syscall.SIGTERM, syscall.SIGQUIT} {
+		t.Run(s.String(), func(t *testing.T) { killRun(t, s) })
+	}
+}
+
+// killRun starts a run on a pseudo-terminal, sends it s once the terminal
+// is raw, and checks the terminal was given back.
+func killRun(t *testing.T, s syscall.Signal) {
 	master, slave := openPTY(t)
 	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 100}); err != nil {
 		t.Skipf("TIOCSWINSZ: %v", err)
@@ -82,6 +91,7 @@ func TestKilledRunGivesTheTerminalBack(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestKilledRunGivesTheTerminalBack$")
 	cmd.Env = append(os.Environ(), "UI_KILLED_RUN_HELPER=1")
 	cmd.ExtraFiles = []*os.File{slave}
+	cmd.Stderr = io.Discard // SIGQUIT's goroutine dump
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +101,14 @@ func TestKilledRunGivesTheTerminalBack(t *testing.T) {
 			t.Fatal("the run never put the terminal in raw mode")
 		}
 	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
+	_ = cmd.Process.Signal(s)
 	err := cmd.Wait()
-	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGTERM {
-		t.Errorf("the run did not end by SIGTERM: %v", err)
+	// The Go runtime ends a process on SIGQUIT itself, with exit status 2.
+	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); s == syscall.SIGTERM && (!ok || !ws.Signaled() || ws.Signal() != s) {
+		t.Errorf("the run did not end by %s: %v", s, err)
 	}
 	if rawMode(t, slave) {
-		t.Error("a run killed by SIGTERM left the terminal raw")
+		t.Errorf("a run killed by %s left the terminal raw", s)
 	}
 }
 
@@ -180,5 +191,121 @@ func TestClearScreenClearsOnlyATerminal(t *testing.T) {
 	ClearScreen(&out)
 	if out.Len() > 0 {
 		t.Errorf("a non-terminal got %q", out.String())
+	}
+}
+
+// An instant run returned its plan before stopping the planning spinner,
+// whose goroutine then repainted "Planning research" on the terminal for the
+// rest of the process. Nothing is written once the plan is back.
+func TestInstantPlanLeavesNoSpinnerBehind(t *testing.T) {
+	master, slave := openPTY(t)
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
+		t.Skipf("TIOCSWINSZ: %v", err)
+	}
+	var mu sync.Mutex
+	var screen bytes.Buffer
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := master.Read(buf)
+			mu.Lock()
+			screen.Write(buf[:n])
+			mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}()
+	o := Options{Question: "q", Assistant: &fakeAssistant{}, DepthMode: "instant", SubTopics: 1, Stderr: slave}
+	if _, err := o.buildPlan(context.Background(), Clarified{}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * tickInterval)
+	mu.Lock()
+	before := screen.Len()
+	mu.Unlock()
+	time.Sleep(5 * tickInterval)
+	mu.Lock()
+	defer mu.Unlock()
+	if screen.Len() != before || bytes.Contains(screen.Bytes(), []byte("Planning research")) {
+		t.Errorf("the terminal was written to after the instant plan: %q", screen.String())
+	}
+}
+
+// With stderr not a terminal (2>file) the ask box is not drawn, and the
+// terminal was put raw anyway: the question was typed blind, with no echo
+// or editing, and backspaces reached the model as bytes. The terminal stays
+// cooked, and its own line editing applies.
+func TestAskWithoutADrawnBoxReadsACookedLine(t *testing.T) {
+	master, slave := openPTY(t)
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80}); err != nil {
+		t.Skipf("TIOCSWINSZ: %v", err)
+	}
+	go func() { _, _ = io.Copy(io.Discard, master) }()
+	type answer struct {
+		q  string
+		ok bool
+	}
+	done := make(chan answer, 1)
+	go func() {
+		q, ok := Ask(slave, &bytes.Buffer{}, true, "back")
+		done <- answer{q, ok}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if rawMode(t, slave) {
+		t.Error("the terminal went raw for a box that is not drawn")
+	}
+	_, _ = master.Write([]byte("helo\x7flo\n"))
+	select {
+	case a := <-done:
+		if a.q != "hello" || !a.ok {
+			t.Errorf("Ask = %q, %v; want the edited line", a.q, a.ok)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Ask never returned")
+	}
+}
+
+// The brief and the questions waited for a key with no regard for the run:
+// past its deadline, or cancelled from the serve page, the process sat on
+// the screen until a key came. The wait ends with the run's context.
+func TestPickerWaitEndsWithTheRun(t *testing.T) {
+	master, slave := openPTY(t)
+	in, err := newTTYInput(slave)
+	if err != nil {
+		t.Skipf("raw mode: %v", err)
+	}
+	defer in.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		_, action := waitBrief(&keptInput{Input: ctxInput{Input: in, ctx: ctx}}, NewRenderer(io.Discard, Theme{}), newTestPlan("quick", nil))
+		done <- action
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		_, _ = master.Write([]byte("q"))
+		t.Fatal("the brief still waits for a key after the run's deadline")
+	}
+}
+
+// Bound to the run, the brief's input hid the terminal under it, and the
+// keys typed while a plan was made again were no longer dropped: an Enter
+// pressed then launched the new plan before it was shown.
+func TestKeysTypedWhilePlanningAreDroppedUnderTheRunsContext(t *testing.T) {
+	master, slave := openPTY(t)
+	in, err := newTTYInput(slave)
+	if err != nil {
+		t.Skipf("raw mode: %v", err)
+	}
+	defer in.Close()
+	keys := &keptInput{Input: ctxInput{Input: in, ctx: context.Background()}}
+	_, _ = master.Write([]byte("\r\r"))
+	time.Sleep(50 * time.Millisecond)
+	discardTyped(keys)
+	if b, err := keys.NextWithin(50 * time.Millisecond); err == nil {
+		t.Errorf("key %q typed while planning was kept", b)
 	}
 }

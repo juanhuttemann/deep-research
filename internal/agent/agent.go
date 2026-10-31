@@ -586,6 +586,9 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 
 type impl struct {
 	logf func(string)
+	// early holds what was logged before a logger was set, as connecting
+	// does: SetProgress hands it to the first logger.
+	early []string
 	// statusf receives streamed-phase progress, which is status rather than
 	// history: the live UI shows it in one row replaced in place. Unset, it
 	// falls back to logf.
@@ -698,6 +701,10 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 			}
 		}
 		out, callErr := a.attempt(ctx, ag, prompt, budget, progress, opts)
+		if callErr != nil && out != nil {
+			// A failed attempt's tokens are billed all the same.
+			a.addUsage(out)
+		}
 		if errors.Is(callErr, errStillStreaming) {
 			// The same prompt runs as long again, or loops again: a retry
 			// would only double the wait for the same failure.
@@ -764,7 +771,7 @@ func (a *impl) attempt(ctx context.Context, ag *agent.Agent, prompt string, budg
 	// The provider's error for a cancelled request is "context canceled";
 	// which timer cancelled it is the part worth reporting.
 	if cause := context.Cause(callCtx); err != nil && (errors.Is(cause, errSilent) || errors.Is(cause, errStillStreaming)) {
-		return nil, cause
+		return out, cause
 	}
 	return out, err
 }
@@ -944,7 +951,7 @@ func providerUnreachable(baseURL, setting string, err error) error {
 	}
 	// Redact before the fallback: the fallback is a label, not a URL, and
 	// parsing it as one escapes its spaces.
-	endpoint := safeEndpoint(baseURL)
+	endpoint := SafeEndpoint(baseURL)
 	if endpoint == "" {
 		endpoint = "the configured provider"
 	}
@@ -1188,7 +1195,10 @@ func collectResponse(stream agent.ResponseStream, progress func(string)) (*agent
 	)
 	for update, err := range stream {
 		if err != nil {
-			return nil, err
+			// What arrived is returned with the error: the provider bills the
+			// tokens of an attempt cut off or failed mid-stream, and they
+			// belong in the run's total.
+			return &resp, err
 		}
 		resp.Update(update)
 		progress(text.add(len(resp.Messages), update.String()))
@@ -1474,6 +1484,12 @@ func (a *impl) SkipSources(skip func(url string) bool) {
 
 func (a *impl) SetProgress(logf func(string)) {
 	a.logf = logf
+	if logf != nil {
+		for _, msg := range a.early {
+			logf(msg)
+		}
+		a.early = nil
+	}
 	if a.searchTools != nil {
 		a.searchTools.SetLogger(logf)
 	}
@@ -1482,7 +1498,9 @@ func (a *impl) SetProgress(logf func(string)) {
 func (a *impl) log(msg string) {
 	if a.logf != nil {
 		a.logf(msg)
+		return
 	}
+	a.early = append(a.early, msg)
 }
 
 // SetStatus wires the channel for transient progress. It is not part of
@@ -2352,7 +2370,7 @@ func parseVerdicts(v any) []Verdict {
 	var out []Verdict
 	for _, m := range objects(v) {
 		vd := Verdict{ID: scalar(m["id"]), Claim: getString(m, "claim", ""),
-			Status: strings.ToLower(getString(m, "status", "")), Reason: getString(m, "reason", "")}
+			Status: strings.ToLower(scalar(m["status"])), Reason: getString(m, "reason", "")}
 		for _, e := range objects(m["evidence"]) {
 			vd.Evidence = append(vd.Evidence, Evidence{Source: scalar(e["source"]), Quote: getString(e, "quote", "")})
 		}
@@ -2413,7 +2431,10 @@ func IsEmphasizedHeading(line string) bool {
 	if inner == "" || strings.ContainsAny(inner, "*_") || len(strings.Fields(inner)) > 6 {
 		return false
 	}
-	return !strings.ContainsAny(inner[len(inner)-1:], ".!?")
+	// The last rune, not byte: a CJK sentence ends in 。, whose last byte
+	// matched nothing, and a bold one-sentence report lost its summary.
+	last, _ := utf8.DecodeLastRuneInString(inner)
+	return !strings.ContainsRune(".!?。！？", last)
 }
 
 // extractExecutive pulls the report's opening paragraph as its executive
@@ -2456,9 +2477,13 @@ func getStringSlice(m map[string]any, key string, fallback []string) []string {
 	if !ok {
 		return fallback
 	}
-	result := make([]string, len(arr))
-	for i, item := range arr {
-		result[i], _ = item.(string)
+	// An item that is not a string, a {"gap": ...} object, was an empty
+	// string here: a bare "- " bullet in the prompt and the exports.
+	result := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+			result = append(result, s)
+		}
 	}
 	return result
 }

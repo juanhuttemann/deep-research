@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -103,5 +105,24 @@ func TestLoadRevalidatesAndFallsBack(t *testing.T) {
 	}
 	if hits.Load() != 4 {
 		t.Errorf("server hit %d times", hits.Load())
+	}
+}
+
+// With no user cache directory the cache fell back to a fixed directory in
+// the shared temp dir, where another user could plant a catalog whose
+// endpoints login sends a pasted key to. It is now no cache at all.
+func TestNoUserCacheDirMeansNoCache(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("LocalAppData", "")
+	if d := CacheDir(); d != "" && strings.HasPrefix(d, os.TempDir()) {
+		t.Errorf("CacheDir() = %q, in the shared temp dir", d)
+	}
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(cacheFile, []byte("planted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b := readCache("", cacheFile); b != nil {
+		t.Errorf("no cache read %q from the working directory", b)
 	}
 }

@@ -140,7 +140,7 @@ runs it.
 | `--plan FILE` | — | run a plan `--plan-only` wrote, edited or not, without planning again; `-` reads stdin |
 | `--domains LIST` | — | research only these sites (comma-separated hosts or URLs); each is checked before planning; see below |
 | `--resume CHECKPOINT` | — | continue an interrupted run from its `<reports>/*.partial.json`, without searching again what it searched; see below |
-| `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts |
+| `--depth N` | — | **deprecated** alias for `--sources`, kept for existing scripts; refused beside `--sources` |
 
 `--jsonl` and `--silent` both write to stdout, so they cannot be combined.
 
@@ -223,7 +223,8 @@ also has `"instant": true`); it also carries
 the clarifying questions and answers it was made for (`questions`,
 `clarifications`). A format or table amount that is not one of the choices is
 refused. It is checked before it runs: the tier must exist,
-at least one sub-topic must have a name, sub-topics are renumbered in
+at least one sub-topic must have a name and at most 8 may (the `--topics`
+ceiling), sub-topics are renumbered in
 order, and the source budget is worked out again from the tier rather than
 read from the file. When you rename a sub-topic, clear its `query` and
 `terms`: they were written for the old name, and the run searches them as
@@ -514,7 +515,8 @@ drsh serve --addr 127.0.0.1:0   # any free port
 ```
 
 A page for launching a run and auditing what it decided. `serve` opens it
-in the default browser once it is listening (`$BROWSER` if set; `wslview` or
+in the default browser once it is listening (`$BROWSER` if set, a program or
+a command line such as `firefox --new-window` or `firefox %s`; `wslview` or
 Windows' browser under WSL; nothing on a Linux session with no display, such
 as SSH, where the URL it prints is the way in); `--no-open` leaves that to
 you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
@@ -619,9 +621,10 @@ in the tab and starts again when another run is opened.
   server that has not run anything yet sends `idle` on connect, so a tab
   left open across a restart stops showing the old run as live.
 - It is a tool for this machine, with no authentication. It answers only
-  requests addressed to `localhost`, `127.0.0.1` or `[::1]`, whatever
-  `--addr` binds, so a page that rebinds its own name to your address is
-  refused. It refuses cross-site POSTs, and a launch or a question must be
+  requests from this machine addressed to `localhost`, `127.0.0.1` or
+  `[::1]`, whatever `--addr` binds, so a page that rebinds its own name to
+  your address is refused, and so is another machine, whatever `Host` it
+  sends. It refuses cross-site POSTs, and a launch or a question must be
   `application/json`, so another site cannot spend your API credits.
 - A question does not wait for the run slot: you can ask about one run
   while another runs.
@@ -643,7 +646,9 @@ again; a question the run's pages do not answer is answered as such, with
 the suggestion to research it as a new question.
 
 Each question carries the conversation before it, so "and the second one?"
-works. The answers are not fact-checked: the model is told to state as fact
+works: its latest 8 questions and answers, each cut to 4000 characters, so a
+long conversation never outgrows the model's context. The whole of it is
+still saved. The answers are not fact-checked: the model is told to state as fact
 only what the run established and to give the status of a claim that was
 not, but nothing holds it to that the way the report's answer is held.
 Asking needs a model that supports tool calls; with one that does not, the

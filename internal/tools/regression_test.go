@@ -927,3 +927,154 @@ func TestSearchLogsNoLinePerPage(t *testing.T) {
 		}
 	}
 }
+
+// An answer with no results was a success: the instance was preferred and
+// asked first for every later query, and a healthy instance behind it was
+// never asked, so a whole run found nothing.
+func TestEmptyAnswerDoesNotWinThePool(t *testing.T) {
+	empty := newSearXNGServer(t, nil)
+	var goodHits atomic.Int32
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{{"url": "https://a.example/", "title": "A", "content": "c"}}})
+	}))
+	t.Cleanup(good.Close)
+	c := NewSearXNGClient(empty.URL+","+good.URL, 0)
+	for range 3 {
+		res, err := c.Search(context.Background(), "q")
+		if err != nil || len(res) != 1 {
+			t.Fatalf("Search = %d results, %v; want the healthy instance's one", len(res), err)
+		}
+	}
+	if c.Preferred() != good.URL {
+		t.Errorf("preferred %q, want the instance with results", c.Preferred())
+	}
+	alone := NewSearXNGClient(empty.URL+","+empty.URL+"/x", 0)
+	if res, err := alone.Search(context.Background(), "q"); err != nil || len(res) != 0 {
+		t.Errorf("all empty = %d results, %v; want an empty answer", len(res), err)
+	}
+}
+
+// A model writes URLs without their scheme, and url.Parse files all of it
+// under Path: "go.dev/doc/x" was its own identity beside the fetched
+// https://go.dev/doc/x, and a claim citing it lost its source.
+func TestCanonicalURLReadsASchemelessURLAsTheFetchedPage(t *testing.T) {
+	want := CanonicalURL("https://go.dev/doc/x")
+	for _, raw := range []string{"go.dev/doc/x", "go.dev/doc/x/", "//go.dev/doc/x", " GO.dev/doc/x"} {
+		if got := CanonicalURL(raw); got != want {
+			t.Errorf("CanonicalURL(%q) = %q, want %q", raw, got, want)
+		}
+	}
+	for _, raw := range []string{"not a url", "/relative/path", ""} {
+		if got := CanonicalURL(raw); got != strings.TrimRight(raw, "/") {
+			t.Errorf("CanonicalURL(%q) = %q, want it as written", raw, got)
+		}
+	}
+}
+
+// An international name was kept as typed, and engines return it as
+// punycode: no page of bücher.de was ever in its own scope.
+func TestInternationalDomainMatchesItsPunycodePages(t *testing.T) {
+	ds, err := ParseDomains([]string{"bücher.de"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"https://xn--bcher-kva.de/x", "https://www.bücher.de/y"} {
+		if !InDomains(u, ds) {
+			t.Errorf("InDomains(%q, %q) = false", u, ds)
+		}
+	}
+	if InDomains("https://example.de/", ds) {
+		t.Error("another site matched")
+	}
+}
+
+// Whether to read an instance through HTML was looked at again after its
+// JSON answer: a refusal another query got meanwhile threw this query's
+// good JSON answer away for an HTML request, which could fail it.
+func TestJSONAnswerSurvivesAConcurrentRefusal(t *testing.T) {
+	release := make(chan struct{})
+	var htmlForA atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q, asJSON := r.URL.Query().Get("q"), r.URL.Query().Get("format") == "json"
+		switch {
+		case q == "b" && asJSON:
+			w.WriteHeader(http.StatusForbidden)
+		case q == "a" && asJSON:
+			<-release
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{{"url": "https://a.example/", "title": "A", "content": "c"}}})
+		default:
+			if q == "a" {
+				htmlForA.Add(1)
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := NewSearXNGClient(srv.URL, 0)
+	done := make(chan error, 1)
+	go func() {
+		res, err := c.Search(context.Background(), "a")
+		if err == nil && len(res) != 1 {
+			err = fmt.Errorf("%d results", len(res))
+		}
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	_, _ = c.Search(context.Background(), "b") // refuses JSON: the instance is read through HTML from now on
+	close(release)
+	if err := <-done; err != nil || htmlForA.Load() != 0 {
+		t.Errorf("query a: %v after %d HTML requests; want its JSON answer", err, htmlForA.Load())
+	}
+}
+
+// A body past the read limit failed the decode whole, though each page is
+// cut to its limit once decoded: one huge page lost a search all its
+// results. Strings are cut on the way in, and the document stays whole.
+func TestOversizedPageTextIsCutNotFatal(t *testing.T) {
+	huge := strings.Repeat("é\\\"x", 1<<20)
+	doc := `{"results":[{"url":"https://a.example/","raw_content":"` + huge + `"},{"url":"https://b.example/","raw_content":"short"}]}`
+	var out struct {
+		Results []struct {
+			URL        string `json:"url"`
+			RawContent string `json:"raw_content"`
+		} `json:"results"`
+	}
+	// The limit is far below the document, as a body past it was.
+	if err := json.NewDecoder(cappedJSON(strings.NewReader(doc), 1000, 4096)).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Results) != 2 || out.Results[1].RawContent != "short" || len(out.Results[0].RawContent) > 1000 {
+		t.Errorf("results = %d, first %d bytes, second %q", len(out.Results), len(out.Results[0].RawContent), out.Results[1].RawContent)
+	}
+	if !strings.HasPrefix(out.Results[0].RawContent, "é\"x") {
+		t.Errorf("cut text starts %q", out.Results[0].RawContent[:10])
+	}
+}
+
+// IsPrivate leaves out shared address space, where carrier NAT and a
+// tailnet's machines sit: a model-supplied http://100.101.102.103/ was
+// scraped though only a public address may be.
+func TestScrapeTargetRefusesSharedAndReservedAddresses(t *testing.T) {
+	for _, u := range []string{"http://100.101.102.103/", "http://192.0.0.8/", "http://198.18.0.1/", "http://240.0.0.1/", "http://[::ffff:100.64.0.1]/"} {
+		if err := checkScrapeTarget(u); err == nil {
+			t.Errorf("checkScrapeTarget(%q) passed", u)
+		}
+	}
+	if err := checkScrapeTarget("http://100.0.0.1/"); err != nil {
+		t.Errorf("a public address was refused: %v", err)
+	}
+}
+
+// Searching a run's pages built a transformer per page per question; the
+// scorer built once for the question judges every page as before.
+func TestPageScorerJudgesAsASearchResult(t *testing.T) {
+	sc := NewPageScorer("énergie nucléaire coûts")
+	for _, page := range []string{"Les coûts de l'énergie nucléaire — en hausse", "nothing here", "ENERGIE nucleaire couts", ""} {
+		if got, want := sc.Score(page), relevance(queryWords(newFolder(), "énergie nucléaire coûts"), "", page); got != want {
+			t.Errorf("Score(%q) = %v, want %v", page, got, want)
+		}
+	}
+}

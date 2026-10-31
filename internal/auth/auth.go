@@ -326,14 +326,26 @@ func WriteFile(p string, data []byte) error {
 // prompt nobody sees should fail the run, not hang it.
 const commandTimeout = 10 * time.Second
 
+// resolvedFor is how long a "!command" key is reused. A run reads its config
+// a few times and makes many model calls, so the command is not run for
+// each; kept for the whole process, a token command's answer outlived the
+// token, and drsh serve, which loads the config for every run, sent the
+// expired one until it was restarted.
+const resolvedFor = 5 * time.Minute
+
+type resolvedKey struct {
+	key string
+	at  time.Time
+}
+
 var (
 	resolvedMu sync.Mutex
-	resolved   = map[string]string{}
+	resolved   = map[string]resolvedKey{}
 )
 
 // Resolve returns key, or for "!command" the command's trimmed output. A
-// command runs once per process; one run makes many model calls. Its errors
-// never include the output, which may be the key.
+// command runs at most once every resolvedFor. Its errors never include the
+// output, which may be the key.
 func Resolve(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	cmd, ok := strings.CutPrefix(key, "!")
@@ -342,14 +354,14 @@ func Resolve(key string) (string, error) {
 	}
 	resolvedMu.Lock()
 	defer resolvedMu.Unlock()
-	if v, ok := resolved[cmd]; ok {
-		return v, nil
+	if v, ok := resolved[cmd]; ok && time.Since(v.at) < resolvedFor {
+		return v.key, nil
 	}
 	v, err := runKeyCommand(cmd)
 	if err != nil {
 		return "", err
 	}
-	resolved[cmd] = v
+	resolved[cmd] = resolvedKey{v, time.Now()}
 	return v, nil
 }
 
@@ -363,7 +375,15 @@ func runKeyCommand(command string) (string, error) {
 		c = exec.CommandContext(ctx, "sh", "-c", command)
 	}
 	c.Stderr = io.Discard
+	// Output waits for stdout to close, and a grandchild that inherited it
+	// (a helper left running in the background) kept it open past the
+	// timeout's kill: the wait was unbounded.
+	c.WaitDelay = time.Second
 	out, err := c.Output()
+	if errors.Is(err, exec.ErrWaitDelay) {
+		// The command itself exited 0; only the child's pipe was cut.
+		err = nil
+	}
 	if ctx.Err() != nil {
 		return "", fmt.Errorf("key command did not finish within %s", commandTimeout)
 	}

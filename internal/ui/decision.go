@@ -36,7 +36,10 @@ const (
 // saw or a dangling claim ID reached the report looking sourced.
 func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 	evidence := evidenceURLs(findings)
-	ids := map[string]bool{}
+	ids, given := map[string]bool{}, map[string]bool{}
+	for _, c := range a.Claims {
+		given[c.ID] = true
+	}
 	for i := range a.Claims {
 		c := &a.Claims[i]
 		c.Sources = claimSources(c.Sources, findings, evidence)
@@ -44,9 +47,15 @@ func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 			c.Status, c.Note = statusUnsourced, "no page the run fetched states it"
 		}
 		// A repeated ID made every reference to it ambiguous; references go
-		// to the first claim that used it.
+		// to the first claim that used it. The new ID is one no claim was
+		// given: c1, c1, c1.2 renamed the second c1 to c1.2, and references
+		// to the real c1.2 resolved to it.
 		if ids[c.ID] {
-			c.ID = c.ID + "." + strconv.Itoa(i+1)
+			id := c.ID
+			for k := i + 1; ids[id] || given[id]; k++ {
+				id = c.ID + "." + strconv.Itoa(k)
+			}
+			c.ID = id
 		}
 		ids[c.ID] = true
 	}

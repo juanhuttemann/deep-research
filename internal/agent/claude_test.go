@@ -793,3 +793,56 @@ echo call >>`, 1)
 		t.Errorf("the analysis line claims an effort it did not send:\n%s", strings.Join(logged, "\n"))
 	}
 }
+
+// Every streamed phase asked for adaptive thinking, which models before 4.6
+// (Haiku 4.5) refuse with a 400: the run died at its first streamed call. It
+// is asked again without the thinking, and left out from then on.
+func TestRefusedThinkingIsDroppedAndRemembered(t *testing.T) {
+	noClaudeCode(t)
+	var api *anthropicServer
+	api = newAnthropicServer(t, func(n int) anthropicReply {
+		if _, asked := api.bodies[n]["thinking"]; asked {
+			return anthropicReply{status: http.StatusBadRequest,
+				errBody: `{"type":"error","error":{"type":"invalid_request_error","message":"adaptive thinking is not supported on this model"}}`}
+		}
+		return text(`{"answer":"a"}`)
+	})
+	a, err := New(Config{Provider: "claude", ClaudeModel: "claude-haiku-4-5", ClaudeAPIOnly: true,
+		AnthropicAPIKey: "sk", AnthropicBaseURL: api.URL, ModelCallTimeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if _, err := a.Summarize(ctx, "p"); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if n := len(api.bodies); n != 3 {
+		t.Errorf("%d requests, want the refused one, its retry and one without thinking", n)
+	}
+}
+
+// A claude auth status that failed for any reason read as signed out: the
+// run moved to the API key, billing it in place of the subscription, and
+// said nothing. The fallback now says why.
+func TestUnreadableClaudeSignInIsReported(t *testing.T) {
+	fakeClaudeCode(t, "Error: could not lock the credentials file", "")
+	a, err := New(Config{Provider: "claude", ClaudeModel: "m", AnthropicAPIKey: "sk", AnthropicBaseURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	a.SetProgress(func(msg string) { lines = append(lines, msg) })
+	if !strings.Contains(strings.Join(lines, "\n"), "sign-in could not be read") {
+		t.Errorf("the fallback to the API key was not reported: %q", lines)
+	}
+	if _, _, err := claudeCodeLogin(context.Background()); err == nil {
+		t.Error("an unreadable status was taken for signed out")
+	}
+	fakeClaudeCode(t, `{"loggedIn":false}`, "")
+	if _, _, err := claudeCodeLogin(context.Background()); err != nil {
+		t.Errorf("signed out is an error: %v", err)
+	}
+}

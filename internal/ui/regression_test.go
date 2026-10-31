@@ -32,6 +32,8 @@ import (
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/tools"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 func TestFinalResultRetainsReportedUsage(t *testing.T) {
@@ -2086,7 +2088,7 @@ func TestPublicSearchRefusalIsExplainedOnce(t *testing.T) {
 	sink := &MultiSink{}
 	d := NewDriver(nil, sink, nil, 1)
 	for range 3 {
-		d.noteSearch(searchErr, nil)
+		d.noteSearch(time.Now(), searchErr, nil)
 	}
 	hints := 0
 	for _, e := range sink.TimelineSnapshot() {
@@ -2170,8 +2172,8 @@ func TestRunOnMostlyFailedSearchIsReportedIncomplete(t *testing.T) {
 	a := newRefusedPool(t, 3)
 	sink := &MultiSink{}
 	d := NewDriver(a, sink, nil, 1)
-	d.noteSearch(errors.New("refused"), nil)
-	d.noteSearch(errors.New("refused"), nil)
+	d.noteSearch(time.Now(), errors.New("refused"), nil)
+	d.noteSearch(time.Now(), errors.New("refused"), nil)
 	res, err := d.Run(context.Background(), newTestPlan("quick", refusedTopics))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2195,9 +2197,9 @@ func TestRunOnMostlyFailedSearchIsReportedIncomplete(t *testing.T) {
 func TestSearchWithOnlyOffTopicResultsCountsAsGivingNothing(t *testing.T) {
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
 	empty := &agent.ResearchDetail{Skipped: []agent.SkippedSource{{URL: "https://ruby-hotels.example", Domain: "ruby-hotels.example"}}}
-	d.noteSearch(nil, empty)
-	d.noteSearch(nil, empty)
-	d.noteSearch(errors.New("refused"), nil)
+	d.noteSearch(time.Now(), nil, empty)
+	d.noteSearch(time.Now(), nil, empty)
+	d.noteSearch(time.Now(), errors.New("refused"), nil)
 	if why := d.thinSearch(); !strings.Contains(why, "3 of 3 searches gave nothing") || !strings.Contains(why, "2 found nothing on the subject") {
 		t.Errorf("thinSearch = %q", why)
 	}
@@ -2207,7 +2209,7 @@ func TestSearchWithOnlyOffTopicResultsCountsAsGivingNothing(t *testing.T) {
 // report the search failed to deliver evidence for, not for one refusal.
 func TestRunWithAFewFailedSearchesIsComplete(t *testing.T) {
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
-	d.noteSearch(errors.New("one refusal"), nil)
+	d.noteSearch(time.Now(), errors.New("one refusal"), nil)
 	res, err := d.Run(context.Background(), newTestPlan("quick", []agent.SubTopic{{ID: "1", Name: "A"}, {ID: "2", Name: "B"}}))
 	if err != nil || res.Error != "" {
 		t.Errorf("err=%v result error=%q, want a complete run", err, res.Error)
@@ -3630,5 +3632,236 @@ func TestFailedInstantAnswerStaysUnchecked(t *testing.T) {
 		"answer failed", errors.New("timeout"))
 	if err != nil || !res.Instant || res.Summary.Confidence != ConfidenceUnchecked {
 		t.Errorf("partial instant result = %+v, %v; want instant and %q", res, err, ConfidenceUnchecked)
+	}
+}
+
+// A quotation holding another, or wrapped over two lines, was never paired
+// as one span: the inner marks cut it into pieces checkable refused, and
+// words invented around a genuine inner quotation kept their marks.
+func TestQuotesAroundAQuoteOrOverALineAreChecked(t *testing.T) {
+	pages := quotePages(`The docs state "the battery lasts all day" for most users of the laptop.`)
+	for _, tc := range []struct{ name, report, want string }{
+		{"invented around a genuine inner quote",
+			`It [src](https://a.example/) says "the docs state "the battery lasts all day" for every laptop model".`,
+			`It [src](https://a.example/) says the docs state "the battery lasts all day" for every laptop model.`},
+		{"curly inside curly, invented",
+			"It [src](https://a.example/) says “the docs state “the battery lasts all day” for every laptop model”.",
+			"It [src](https://a.example/) says the docs state “the battery lasts all day” for every laptop model."},
+		{"invented around two genuine inner quotes",
+			`It [src](https://a.example/) says "the docs state "the battery lasts all day" and "for most users" on every model".`,
+			`It [src](https://a.example/) says the docs state "the battery lasts all day" and "for most users" on every model.`},
+		{"genuine around a genuine inner quote",
+			`It [src](https://a.example/) says "the docs state "the battery lasts all day" for most users".`,
+			`It [src](https://a.example/) says "the docs state "the battery lasts all day" for most users".`},
+		{"invented over two lines",
+			"It [src](https://a.example/) says \"the battery lasts a week\nfor every laptop model sold\".",
+			"It [src](https://a.example/) says the battery lasts a week\nfor every laptop model sold."},
+		{"genuine over two lines",
+			"It [src](https://a.example/) says \"the battery lasts all day\" for most\nusers.",
+			"It [src](https://a.example/) says \"the battery lasts all day\" for most\nusers."},
+	} {
+		if got, _ := unquoteUnfound(tc.report, pages); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+	wrapped := "It [src](https://a.example/) says \"the docs state the battery\nlasts all day for most users\"."
+	if _, n := unquoteUnfound(wrapped, quotePages("The docs state the battery lasts all day for most users.")); n != 0 {
+		t.Errorf("a genuine quote wrapped over two lines lost its marks")
+	}
+}
+
+// A script written without spaces is one "word" to strings.Fields, so no
+// quotation in Chinese, Japanese or Thai was ever checked, invented or not.
+func TestQuotesInASpacelessScriptAreChecked(t *testing.T) {
+	pages := quotePages("该报告指出，电池续航时间在大多数情况下可以持续一整天，用户反馈良好。")
+	invented := `报告[src](https://a.example/)称"这是一个完全编造的引文它根本不在任何页面中"。`
+	if got, n := unquoteUnfound(invented, pages); n != 1 || strings.Contains(got, `"`) {
+		t.Errorf("an invented Chinese quote kept its marks: %q (%d)", got, n)
+	}
+	genuine := `报告[src](https://a.example/)称"电池续航时间在大多数情况下可以持续一整天"。`
+	if got, n := unquoteUnfound(genuine, pages); n != 0 {
+		t.Errorf("a genuine Chinese quote lost its marks: %q", got)
+	}
+}
+
+// Looked up with the backslash that escaped its closing mark, a genuine
+// \"...\" quote was never found and always lost its marks.
+func TestEscapedQuoteOfAPageKeepsItsMarks(t *testing.T) {
+	report := `It says \"widgets will double in price next year\"` + src + `.`
+	if got, n := unquoteUnfound(report, quotePages("Analysts expect widgets will double in price next year.")); n != 0 {
+		t.Errorf("a genuine escaped quote lost its marks: %q", got)
+	}
+}
+
+// Sub-agents search at once, and searchDown was whatever search finished
+// last: one sent before a refusal and answered after it cleared the flag,
+// and the follow-up round sent its queries into a pool that was refusing.
+func TestSearchSentBeforeARefusalDoesNotClearIt(t *testing.T) {
+	refused := newRefusedPool(t, 0)
+	_, err := refused.ResearchDetail(context.Background(), "q", nil)
+	if !searchRefused(err) && !tools.SearchResting(err) {
+		t.Fatalf("pool error %v is not a refusal", err)
+	}
+	d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+	before := time.Now()
+	d.noteSearch(time.Now(), err, nil)
+	d.noteSearch(before, nil, &agent.ResearchDetail{Findings: []agent.Finding{{URL: "https://a.example"}}})
+	if !d.isSearchDown() {
+		t.Error("a search sent before the refusal cleared it")
+	}
+	d.noteSearch(time.Now(), nil, &agent.ResearchDetail{Findings: []agent.Finding{{URL: "https://a.example"}}})
+	if d.isSearchDown() {
+		t.Error("a search sent after the refusal did not clear it")
+	}
+}
+
+// nilDetail answers every search with no result and no error, as a replayed
+// trace with a bare search entry did.
+type nilDetail struct{ *fakeAssistant }
+
+func (nilDetail) ResearchDetail(context.Context, string, []string) (*agent.ResearchDetail, error) {
+	return nil, nil
+}
+
+// A search answered with neither a result nor an error was dereferenced, and
+// the run died with a nil-pointer panic.
+func TestSearchWithNoResultAndNoErrorDoesNotPanic(t *testing.T) {
+	d := NewDriver(nilDetail{&fakeAssistant{}}, &MultiSink{}, nil, 1)
+	_, _ = d.Run(context.Background(), newTestPlan("quick", nil))
+}
+
+// ReadPlan never capped the sub-topics: every one takes a source whatever
+// the budget, so a hand-edited plan of sixty ran sixty sub-agents and
+// fetched past the run's source cap.
+func TestReadPlanRefusesMoreSubTopicsThanTheCeiling(t *testing.T) {
+	var topics []string
+	for i := range MaxSubTopics + 1 {
+		topics = append(topics, fmt.Sprintf(`{"id":"%d","name":"topic %d","query":"q%d"}`, i, i, i))
+	}
+	raw := `{"question":"q","depth":{"key":"deep"},"sub_topics":[` + strings.Join(topics, ",") + `]}`
+	if _, err := ReadPlan(strings.NewReader(raw)); err == nil {
+		t.Errorf("a plan of %d sub-topics was accepted", MaxSubTopics+1)
+	}
+}
+
+// The width table stopped at the emoji block's edges: 🈁, 🀄, 🩰 and ❤️ were
+// measured one column, a terminal draws two, and a row holding one wrapped
+// and scrolled the frame.
+func TestEmojiOutsideTheMainBlockIsTwoColumns(t *testing.T) {
+	for _, s := range []string{"🈁", "🀄", "🩰", "❤️", "☕", "✅", "⭐"} {
+		if w := dispWidth(s); w != 2 {
+			t.Errorf("dispWidth(%q) = %d, want 2", s, w)
+		}
+	}
+	for _, s := range []string{"a", "❤", "é", "→"} {
+		if w := dispWidth(s); w != 1 {
+			t.Errorf("dispWidth(%q) = %d, want 1", s, w)
+		}
+	}
+}
+
+// A page's title went into its citation's link as written: one holding
+// "](https://evil.example/phish)" closed the label, and the exported .md and
+// .pdf linked the real source's name to the page's chosen site.
+func TestCitationTitleCannotSetTheLinkTarget(t *testing.T) {
+	var sb strings.Builder
+	writeCitationList(&sb, "Sources", []MetaCitation{{Title: "Legit ](https://evil.example/phish) title", URL: "https://good.example/a (b)", Status: "ok"}})
+	md := sb.String()
+	if bytes.Contains(BuildPDF(md), []byte("/URI (https://evil")) {
+		t.Errorf("the PDF links the injected target:\n%s", md)
+	}
+	doc := markdownParser.Parse(text.NewReader([]byte(md)))
+	var dests []string
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if l, ok := n.(*ast.Link); ok && entering {
+			dests = append(dests, string(l.Destination))
+		}
+		return ast.WalkContinue, nil
+	})
+	if len(dests) != 1 || !strings.HasPrefix(dests[0], "https://good.example/a") {
+		t.Errorf("links = %q, want the one to good.example:\n%s", dests, md)
+	}
+}
+
+// refindingAssistant finds a page for "alpha" and, for every other query,
+// only that same page again, already cited.
+type refindingAssistant struct{ *fakeAssistant }
+
+func (refindingAssistant) ResearchDetail(_ context.Context, q string, _ []string) (*agent.ResearchDetail, error) {
+	if strings.Contains(q, "alpha") {
+		return &agent.ResearchDetail{Findings: []agent.Finding{{URL: "https://a.example/", Title: "A", Content: "page", Query: q}}}, nil
+	}
+	return &agent.ResearchDetail{Known: []agent.SkippedSource{{URL: "https://a.example/", Domain: "a.example"}}}, nil
+}
+
+// A branch whose results were all pages another branch had cited kept no
+// new source, and was reported to the analysis as having found nothing.
+func TestBranchThatOnlyRefoundCitedPagesIsCovered(t *testing.T) {
+	d := NewDriver(refindingAssistant{&fakeAssistant{}}, &MultiSink{}, nil, 1)
+	_, uncovered := d.research(context.Background(), newTestPlan("quick", []agent.SubTopic{
+		{ID: "1", Name: "Alpha", Query: "alpha"}, {ID: "2", Name: "Beta", Query: "beta"}}))
+	if len(uncovered) != 0 {
+		t.Errorf("uncovered = %q, want none", uncovered)
+	}
+}
+
+// Sub-agents record the queries that re-found a page as they finish, so a
+// page's also_found_by differed between runs that found the same pages.
+func TestAlsoFoundByDoesNotDependOnCompletionOrder(t *testing.T) {
+	page := []agent.SkippedSource{{URL: "https://a.example/"}}
+	var lists [][]string
+	for _, order := range [][2]string{{"q1", "q2"}, {"q2", "q1"}} {
+		d := NewDriver(&fakeAssistant{}, &MultiSink{}, nil, 1)
+		d.noteKnown("1", order[0], page)
+		d.noteKnown("2", order[1], page)
+		lists = append(lists, d.withFoundAgain([]agent.Finding{{URL: "https://a.example/", Query: "q0"}})[0].AlsoFoundBy)
+	}
+	if !slices.Equal(lists[0], lists[1]) {
+		t.Errorf("also_found_by = %q and %q for the same pages", lists[0], lists[1])
+	}
+}
+
+// A repeated claim ID was renamed to ID.n without looking at the others:
+// with c1, c1, c1.2 the second c1 became c1.2, and a reference to the real
+// c1.2 was judged against the wrong claim.
+func TestRenamedDuplicateClaimIDTakesNoOtherClaimsID(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{{ID: "c1", Text: "x"}, {ID: "c1", Text: "y"}, {ID: "c1.2", Text: "z"}}}
+	checkAnalysis(a, nil)
+	seen := map[string]bool{}
+	for _, c := range a.Claims {
+		if seen[c.ID] {
+			t.Errorf("ID %s given twice: %+v", c.ID, a.Claims)
+		}
+		seen[c.ID] = true
+	}
+	if a.Claims[2].ID != "c1.2" || a.Claims[0].ID != "c1" {
+		t.Errorf("an original ID changed: %+v", a.Claims)
+	}
+}
+
+// A multi-byte character was drawn after each of its bytes, so the frame
+// held a lone lead byte, invalid UTF-8, until the rest arrived.
+func TestPromptEchoesOnlyWholeCharacters(t *testing.T) {
+	var echoes []string
+	got, ok := readPromptRaw(NewByteReader([]byte("añ€\n")), nil, nil, func(text string, _ int) { echoes = append(echoes, text) }, nil, nil)
+	if !ok || got != "añ€" {
+		t.Fatalf("read %q, %v", got, ok)
+	}
+	for _, e := range echoes {
+		if !utf8.ValidString(e) {
+			t.Errorf("echoed invalid UTF-8 %q", e)
+		}
+	}
+}
+
+// Each nesting level indented a block further with no floor on the width
+// left: past about 28 levels the text was set a character a line, off the
+// page, and the file grew some fifty times.
+func TestDeeplyNestedBlocksKeepTheirWidth(t *testing.T) {
+	text := strings.Repeat("word ", 300)
+	flat := len(BuildPDF("> " + text))
+	nested := len(BuildPDF(strings.Repeat("> ", 40) + text))
+	if nested > 3*flat {
+		t.Errorf("nested PDF is %d bytes, flat %d", nested, flat)
 	}
 }

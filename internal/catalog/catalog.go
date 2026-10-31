@@ -200,7 +200,7 @@ const fetchTimeout = 3 * time.Second
 func Load(ctx context.Context, client *http.Client, url, cacheDir string) []Provider {
 	b, err := refresh(ctx, client, url, cacheDir)
 	if err != nil {
-		b, _ = os.ReadFile(filepath.Join(cacheDir, cacheFile))
+		b = readCache(cacheDir, cacheFile)
 	}
 	if len(b) == 0 {
 		return Embedded()
@@ -229,8 +229,8 @@ func refresh(ctx context.Context, client *http.Client, url, cacheDir string) ([]
 	if err != nil {
 		return nil, err
 	}
-	cached, _ := os.ReadFile(filepath.Join(cacheDir, cacheFile))
-	if etag, _ := os.ReadFile(filepath.Join(cacheDir, etagFile)); len(etag) > 0 && len(cached) > 0 {
+	cached := readCache(cacheDir, cacheFile)
+	if etag := readCache(cacheDir, etagFile); len(etag) > 0 && len(cached) > 0 {
 		req.Header.Set("If-None-Match", strings.TrimSpace(string(etag)))
 	}
 	resp, err := client.Do(req)
@@ -252,18 +252,30 @@ func refresh(ctx context.Context, client *http.Client, url, cacheDir string) ([]
 	if _, err := Parse(b); err != nil {
 		return nil, errors.New("catalog: unreadable response")
 	}
-	if os.MkdirAll(cacheDir, 0o755) == nil {
+	if cacheDir != "" && os.MkdirAll(cacheDir, 0o755) == nil {
 		_ = os.WriteFile(filepath.Join(cacheDir, cacheFile), b, 0o644)
 		_ = os.WriteFile(filepath.Join(cacheDir, etagFile), []byte(resp.Header.Get("ETag")), 0o644)
 	}
 	return b, nil
 }
 
-// CacheDir is where Load keeps the live catalog.
+// readCache is a cached file, or nil with no cache.
+func readCache(cacheDir, name string) []byte {
+	if cacheDir == "" {
+		return nil
+	}
+	b, _ := os.ReadFile(filepath.Join(cacheDir, name))
+	return b
+}
+
+// CacheDir is where Load keeps the live catalog, "" for nowhere. With no
+// user cache directory it is nowhere: the fallback was a fixed directory in
+// the shared temp dir, which another user of the machine could create first
+// and fill with a catalog whose endpoints login sends a pasted key to.
 func CacheDir() string {
 	d, err := os.UserCacheDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "deep-research")
+		return ""
 	}
 	return filepath.Join(d, "deep-research")
 }

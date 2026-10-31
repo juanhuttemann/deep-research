@@ -73,6 +73,9 @@ func New(load func() (Deps, error)) *cobra.Command {
 	// Scripts and older docs still pass that name, so it keeps working.
 	root.Flags().Int("depth", 0, "deprecated alias for --sources")
 	_ = root.Flags().MarkDeprecated("depth", "use --sources")
+	// Both at once named two budgets, and --sources won whatever their
+	// order on the line, with nothing said.
+	root.MarkFlagsMutuallyExclusive("depth", "sources")
 	root.Flags().String("mode", "standard", "research depth: quick | standard | deep | instant (one search and one answer, not fact-checked)")
 	root.Flags().Int("topics", 0, "plan exactly this many sub-topics, 1-8 (0 = the planner chooses, up to the --mode tier's)")
 	root.Flags().Bool("no-follow-ups", false, "skip the follow-up round: analyse what the planned searches found")
@@ -460,7 +463,7 @@ func keyHint(d Deps, err error) error {
 // flag overrides it. --depth is the old name for --sources and still works.
 func sourceBudget(cmd *cobra.Command, d Deps) int {
 	sources := d.Config.SourcesPerTopic
-	for _, name := range []string{"depth", "sources"} {
+	for _, name := range []string{"depth", "sources"} { // never both
 		if cmd.Flags().Changed(name) {
 			sources, _ = cmd.Flags().GetInt(name)
 		}
@@ -929,6 +932,13 @@ func printJSON[T any](cmd *cobra.Command, v *T, jsonl bool) error {
 		return err
 	}
 	if out, _ := cmd.Flags().GetString("output"); out != "" {
+		// As for a report: written into a directory that did not exist yet,
+		// the plan the planner was paid for was lost, and stdout had no copy.
+		if dir := filepath.Dir(out); dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+		}
 		return os.WriteFile(out, append(b, '\n'), 0o644)
 	}
 	if jsonl {

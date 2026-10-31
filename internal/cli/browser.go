@@ -30,9 +30,14 @@ var openBrowser = func(url string) (bool, error) {
 // or fail.
 func browserCommand(goos string, getenv func(string) string, lookPath func(string) (string, error), url string) (string, []string) {
 	// $BROWSER is the reader's own choice, wherever they are; it may list
-	// several, colon-separated, and the first is the one wanted.
-	if b, _, _ := strings.Cut(getenv("BROWSER"), ":"); strings.TrimSpace(b) != "" {
-		return strings.TrimSpace(b), []string{url}
+	// several, colon-separated, and the first is the one wanted. Windows
+	// paths have a colon of their own, so there it is one command.
+	b := getenv("BROWSER")
+	if goos != "windows" {
+		b, _, _ = strings.Cut(b, ":")
+	}
+	if b = strings.TrimSpace(b); b != "" {
+		return browserEntry(b, lookPath, url)
 	}
 	switch goos {
 	case "darwin":
@@ -53,4 +58,28 @@ func browserCommand(goos string, getenv func(string) string, lookPath func(strin
 		return "", nil
 	}
 	return "xdg-open", []string{url}
+}
+
+// browserEntry is the command a $BROWSER entry names. Taken whole as a
+// program's name, "firefox --new-window" and the conventional "firefox %s"
+// named no program, and serve opened nothing. An entry that is a program as
+// it stands ("C:\Program Files\...\firefox.exe") is run as it is; else
+// it is a command line, with %s standing for the URL, which goes last when
+// it has no %s.
+func browserEntry(entry string, lookPath func(string) (string, error), url string) (string, []string) {
+	if _, err := lookPath(entry); err == nil {
+		return entry, []string{url}
+	}
+	fields := strings.Fields(entry)
+	args, placed := make([]string, 0, len(fields)), false
+	for _, f := range fields[1:] {
+		if strings.Contains(f, "%s") {
+			f, placed = strings.ReplaceAll(f, "%s", url), true
+		}
+		args = append(args, strings.ReplaceAll(f, "%%", "%"))
+	}
+	if !placed {
+		args = append(args, url)
+	}
+	return fields[0], args
 }

@@ -341,7 +341,7 @@ func review(st loginState, d setupDraft) string {
 	if len(overrides) > 0 {
 		b.WriteString("\n  The environment overrides part of this, so a run will not use it as chosen:\n")
 		for _, o := range overrides {
-			fmt.Fprintf(&b, "    %s=%s, set in %s — %s\n", o.Var, o.Value, o.Source, overrideFix(o))
+			fmt.Fprintf(&b, "    %s=%s, set in %s — %s\n", o.Var, shownURL(o.Value), o.Source, overrideFix(o))
 		}
 	}
 	if (d.services.SearchAsked || d.services.ScraperAsked) && full.Engine != "off" {
@@ -390,11 +390,21 @@ func engineLine(s setup.Services) string {
 	case s.Engine != "searxng":
 		return serviceTitle(s.Engine)
 	case s.Docker:
-		return "local SearXNG in Docker at " + s.SearXNGURL
+		return "local SearXNG in Docker at " + shownURL(s.SearXNGURL)
 	case strings.EqualFold(s.SearXNGURL, "auto"):
 		return "public SearXNG instances"
 	}
-	return "SearXNG at " + s.SearXNGURL
+	return "SearXNG at " + shownURL(s.SearXNGURL)
+}
+
+// shownURL is an address as the screen shows it: without the credentials
+// a URL can carry (agent.SafeEndpoint), which a scrollback, a recording or
+// a scripted run's log keeps. Anything else is shown as it is.
+func shownURL(v string) string {
+	if !strings.Contains(v, "://") {
+		return v
+	}
+	return agent.SafeEndpoint(v)
 }
 
 func scraperLine(s setup.Services) string {
@@ -405,7 +415,7 @@ func scraperLine(s setup.Services) string {
 		}
 		return "none (search snippets only)"
 	case config.ServiceFirecrawl:
-		return "Firecrawl at " + s.FirecrawlURL
+		return "Firecrawl at " + shownURL(s.FirecrawlURL)
 	}
 	return serviceTitle(s.Scraper)
 }
@@ -482,11 +492,14 @@ func saveSetup(out io.Writer, st loginState, d setupDraft) error {
 // writeSetup writes each file in turn and returns the ones written, up to
 // the first that failed.
 func writeSetup(st loginState, d setupDraft, cfgFile *config.PendingFile) (wrote []string, err error) {
-	if err := saveKeys(st, d); err != nil {
-		return wrote, fmt.Errorf("%s: %w", st.store.Path(), err)
-	}
-	if d.model.Key != "" || len(d.services.Keys) > 0 {
+	// Each key is its own write: one that failed after another was saved
+	// left that one on disk, and the message said nothing was saved.
+	saved, err := saveKeys(st, d)
+	if saved > 0 {
 		wrote = append(wrote, st.store.Path())
+	}
+	if err != nil {
+		return wrote, fmt.Errorf("%s: %w", st.store.Path(), err)
 	}
 	if cfgFile != nil {
 		if err := cfgFile.Write(); err != nil {
@@ -512,22 +525,25 @@ func writeSetup(st loginState, d setupDraft, cfgFile *config.PendingFile) (wrote
 }
 
 // saveKeys stores the keys typed in setup: the model's for its provider and
-// endpoint, each service's for the address it goes to.
-func saveKeys(st loginState, d setupDraft) error {
+// endpoint, each service's for the address it goes to. It returns how many
+// it saved before any failure.
+func saveKeys(st loginState, d setupDraft) (saved int, err error) {
 	if sel := d.model.Selection; d.model.Key != "" {
 		if err := st.store.Set(sel.Provider, auth.Credential{Key: d.model.Key, BaseURL: sel.BaseURL}); err != nil {
-			return err
+			return saved, err
 		}
+		saved++
 	}
 	for _, name := range slices.Sorted(maps.Keys(d.services.Keys)) {
 		// Bound to the address it was typed for, not to where the service
 		// points after an edit.
 		c := d.services.Keys[name]
 		if err := st.store.SetService(name, c.Key, c.BaseURL); err != nil {
-			return err
+			return saved, err
 		}
+		saved++
 	}
-	return nil
+	return saved, nil
 }
 
 // setupDone says what a run now uses, read back the way a run reads it, and

@@ -9,7 +9,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,7 +108,7 @@ func checkScrapeTarget(raw string) error {
 		return fmt.Errorf("%w: host %q", errBlockedTarget, host)
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || inReserved(ip) {
 			return fmt.Errorf("%w: address %s", errBlockedTarget, ip)
 		}
 		return nil
@@ -127,6 +129,28 @@ func checkScrapeTarget(raw string) error {
 	}
 	// Anything else is a name, left to the scraper's own resolver.
 	return nil
+}
+
+// reservedNets are ranges IsPrivate leaves out that are still no public
+// address: shared address space (100.64.0.0/10, carrier NAT and Tailscale,
+// where a tailnet's machines sit), IETF protocol assignments, benchmarking,
+// and the reserved class E. A model-supplied http://100.x.y.z/ was scraped.
+var reservedNets = func() []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range []string{"100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4"} {
+		out = append(out, netip.MustParsePrefix(s))
+	}
+	return out
+}()
+
+// inReserved reports whether ip is in one of reservedNets.
+func inReserved(ip net.IP) bool {
+	a, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	a = a.Unmap()
+	return slices.ContainsFunc(reservedNets, func(p netip.Prefix) bool { return p.Contains(a) })
 }
 
 // numericLabel reports whether a host label is a number as a URL parser reads
@@ -193,7 +217,7 @@ func (c *FirecrawlClient) ScrapeURL(ctx context.Context, fetchURL string) (*Scra
 		} `json:"data"`
 	}
 
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&data); err != nil {
+	if err := json.NewDecoder(cappedJSON(resp.Body, maxJSONString, 2*1024*1024)).Decode(&data); err != nil {
 		return nil, fmt.Errorf("decode scrape response: %w", err)
 	}
 
@@ -441,10 +465,22 @@ func dedupeResults(in []SearchResult) []SearchResult {
 // one search, where SearXNG returns a page once per engine, and across the
 // run's sub-agents, which all search the same question and are handed the same
 // pages back.
+//
+// A model often writes a URL without its scheme ("go.dev/doc/x"), which
+// url.Parse files under Path: kept as written, the page it names had a
+// second identity, and a claim citing it lost its source. It is read as
+// https, the scheme the pages it names are fetched with nearly always.
 func CanonicalURL(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err == nil && u.Scheme == "" && u.Host == "" && bareHost(raw) {
+		u, err = url.Parse("https://" + strings.TrimPrefix(raw, "//"))
+	}
 	if err != nil || u.Host == "" {
-		return strings.TrimRight(strings.TrimSpace(raw), "/")
+		return strings.TrimRight(raw, "/")
+	}
+	if u.Scheme == "" {
+		u.Scheme = "https"
 	}
 	u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
 	// A default port names the same page as no port; trimming the suffix
@@ -455,6 +491,16 @@ func CanonicalURL(raw string) string {
 	u.Fragment = ""
 	u.Path = strings.TrimRight(u.Path, "/")
 	return u.String()
+}
+
+// bareHost reports whether raw, which has no scheme, opens with a host name:
+// a dotted first segment with no space in it.
+func bareHost(raw string) bool {
+	host := strings.TrimPrefix(raw, "//")
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	return strings.Contains(host, ".") && !strings.ContainsAny(host, " \t") && !strings.HasPrefix(host, ".")
 }
 
 // Search performs a real web search and enriches each result with the page's

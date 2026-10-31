@@ -242,10 +242,20 @@ func writeCitationList(sb *strings.Builder, heading string, cits []MetaCitation)
 		if label != "" {
 			label = " — " + label
 		}
-		fmt.Fprintf(sb, "%d. [%s](%s)%s\n", i+1, c.Title, c.URL, label)
+		fmt.Fprintf(sb, "%d. [%s](%s)%s\n", i+1, citeLabel.Replace(c.Title), citeTarget.Replace(c.URL), label)
 	}
 	sb.WriteString("\n")
 }
+
+// citeLabel and citeTarget make a page's title and URL, which the page
+// chose, safe inside a Markdown link. Unescaped, a title holding
+// "](https://elsewhere)" closed the label and set the link's target, and the
+// exported .md and .pdf linked the real source's name to another site; a URL
+// with a space or a parenthesis cut the link short.
+var (
+	citeLabel  = strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`, "\n", " ", "\r", " ")
+	citeTarget = strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E", "\n", "", "\r", "")
+)
 
 // sourceNote says how a listed source was obtained, in the words the page's
 // audit uses. A page read in full, the usual case, gets none: "— ok" after

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"html"
 	"regexp"
 	"slices"
@@ -32,12 +33,17 @@ import (
 // words, so a wrong call costs a pair of quotation marks and nothing else.
 
 var (
-	// proseQuote is a double-quoted span on one line, straight or curly. It
-	// has no minimum length: with one, a short quote's opening mark was
+	// proseQuote is a double-quoted span on one line of the mask, straight
+	// or curly; a paragraph's soft line breaks are spaces there (proseMask).
+	// It has no minimum length: with one, a short quote's opening mark was
 	// skipped and its closing mark taken as the next quote's opening, and the
 	// quote after it went unchecked. Length is checkable's call, once the
 	// marks are paired.
 	proseQuote = regexp.MustCompile(`"([^"\n]*)"|“([^”\n]*)”`)
+	// lineJoin is a line break inside a paragraph with the next line's
+	// indentation or blockquote marker, which a quote that wraps reads as a
+	// space.
+	lineJoin = regexp.MustCompile(`[ \t]*\n[ \t>]*`)
 	// quoteCode is a code span inside a quote: its "..." and brackets are code
 	// (INSERT ... ON CONFLICT, data[0]), not an elision or an edit.
 	quoteCode = regexp.MustCompile("(?s)``.+?``|`[^`]+`")
@@ -96,18 +102,21 @@ var (
 func unquoteUnfound(report string, sources map[string]*pageText) (string, int) {
 	var sb strings.Builder
 	n, at := 0, 0
-	for _, m := range proseQuote.FindAllSubmatchIndex(proseMask(report), -1) {
+	for _, m := range quoteSpans(proseMask(report)) {
 		lo, hi := m[2], m[3]
 		if lo < 0 {
 			lo, hi = m[4], m[5]
 		}
-		inner := report[lo:hi]
-		if !checkable(inner) || !linkedSentence(report, m[0], m[1]) || quoteFound(inner, sources) {
-			continue
-		}
-		start, words := m[0], inner
+		// The escapes go before the lookup: looked up with the backslash
+		// that escaped its closing mark, a genuine \"...\" quote was never
+		// found and always lost its marks.
+		start, words := m[0], report[lo:hi]
 		if m[2] >= 0 {
-			start, words = dropEscapes(report, start, inner)
+			start, words = dropEscapes(report, start, words)
+		}
+		q := lineJoin.ReplaceAllString(words, " ")
+		if !checkable(q) || !linkedSentence(report, m[0], m[1]) || quoteFound(q, sources) {
+			continue
 		}
 		sb.WriteString(report[at:start])
 		sb.WriteString(keepInline(report[strings.LastIndexByte(report[:start], '\n')+1:start], words))
@@ -117,6 +126,82 @@ func unquoteUnfound(report string, sources map[string]*pageText) (string, int) {
 	sb.WriteString(report[at:])
 	return sb.String(), n
 }
+
+// quoteSpans pairs the quotation marks in the masked report, as proseQuote
+// matches. A quotation that holds another, straight marks in straight ones
+// or curly in curly, is one span: paired left to right, its marks were cut
+// into the pieces around the inner quotation, each opening or closing on a
+// space, which checkable refuses, and words invented around a genuine inner
+// quotation kept their marks unchecked.
+func quoteSpans(mask []byte) [][]int {
+	ms := proseQuote.FindAllSubmatchIndex(mask, -1)
+	var out [][]int
+	for i := 0; i < len(ms); i++ {
+		m := ms[i]
+		if m[2] >= 0 {
+			if outer, used := nestedStraight(mask, ms[i:]); used > 0 {
+				out = append(out, outer)
+				i += used
+				continue
+			}
+		}
+		if m[4] >= 0 {
+			m = nestedCurly(mask, m)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// nestedStraight joins ms[0] and the straight-quoted spans after it into
+// the quotation around inner ones, and says how many it joined after the
+// first. Paired left to right, "a "b" c "d" e" is "a ", " c " and " e":
+// the first opens on a word and ends on the space before an inner opening
+// mark, each middle one runs from an inner closing mark to the next inner
+// opening one, and the last closes the quotation on a word. Between each two
+// is an inner quotation, on one line, opening and closing on a word.
+func nestedStraight(mask []byte, ms [][]int) ([]int, int) {
+	first := mask[ms[0][2]:ms[0][3]]
+	if len(first) == 0 || isSpace(first[0]) || !isSpace(first[len(first)-1]) {
+		return nil, 0
+	}
+	for j := 1; j < len(ms) && ms[j][2] >= 0; j++ {
+		nested, span := mask[ms[j-1][1]:ms[j][0]], mask[ms[j][2]:ms[j][3]]
+		if len(nested) == 0 || isSpace(nested[0]) || isSpace(nested[len(nested)-1]) ||
+			bytes.IndexByte(nested, '\n') >= 0 || len(span) == 0 || startsWord(span) {
+			return nil, 0
+		}
+		if !isSpace(span[len(span)-1]) {
+			return []int{ms[0][0], ms[j][1], ms[0][2], ms[j][3], -1, -1}, j
+		}
+	}
+	return nil, 0
+}
+
+// nestedCurly extends a curly-quoted span whose words open another curly
+// quotation to the closing mark after the inner one's, on the same line.
+func nestedCurly(mask []byte, m []int) []int {
+	if !bytes.Contains(mask[m[4]:m[5]], []byte("“")) {
+		return m
+	}
+	line := mask[m[1]:]
+	if i := bytes.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	c := bytes.Index(line, []byte("”"))
+	if c < 0 || bytes.Contains(line[:c], []byte("“")) {
+		return m
+	}
+	end := m[1] + c
+	return []int{m[0], end + len("”"), -1, -1, m[4], end}
+}
+
+func startsWord(b []byte) bool {
+	r, _ := utf8.DecodeRune(b)
+	return wordRune(r)
+}
+
+func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' }
 
 // keepInline is words, taken out of their quotation marks, escaped where
 // they would otherwise open a block: at the start of a line, past only
@@ -158,7 +243,7 @@ func escapes(s string) bool {
 }
 
 // proseMask is the report with all but its prose text blanked out, byte for
-// byte so offsets carry over, newlines kept: quotation marks are paired on
+// byte so offsets carry over, newlines kept but for a paragraph's own: quotation marks are paired on
 // it and edited in the report. What is blanked is Markdown syntax as goldmark
 // parses it, the parser the PDF is laid out with: code spans and blocks, a
 // link's target and title, emphasis markers, raw HTML. Matched by hand, every
@@ -182,6 +267,13 @@ func proseMask(report string) []byte {
 		case *ast.Text:
 			if entering {
 				copy(masked[t.Segment.Start:t.Segment.Stop], src[t.Segment.Start:t.Segment.Stop])
+				// A line break inside a paragraph is a space, so a quotation
+				// Markdown wrapped over two lines is still one span.
+				if t.SoftLineBreak() || t.HardLineBreak() {
+					if i := bytes.IndexByte(src[t.Segment.Stop:], '\n'); i >= 0 {
+						masked[t.Segment.Stop+i] = ' '
+					}
+				}
 			}
 		}
 		return ast.WalkContinue, nil
@@ -239,9 +331,30 @@ func endsSentence(s string, i, j int) bool {
 // opens or closes on a space is the close of one quotation paired with the
 // opening of the next. Bold and links inside are checked as the words they
 // show: refusing a span with either let any quotation with one bold word
-// stand unchecked.
+// stand unchecked. A script written without spaces (Chinese, Japanese,
+// Thai, ...) has no words to count: a whole quotation was one field and none
+// was ever checked, so there two characters count as a word.
 func checkable(q string) bool {
-	return strings.TrimSpace(q) == q && len(strings.Fields(q)) >= 6
+	if strings.TrimSpace(q) != q {
+		return false
+	}
+	words := 0
+	for _, f := range strings.Fields(q) {
+		n := 0
+		for _, r := range f {
+			if spaceless(r) {
+				n++
+			}
+		}
+		words += max(1, (n+1)/2)
+	}
+	return words >= 6
+}
+
+// spaceless is a letter of a script written without spaces between words,
+// where any two letters may be a word's edge.
+func spaceless(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Thai, unicode.Lao, unicode.Khmer, unicode.Myanmar)
 }
 
 // quoteFound reports whether a quote is in some fetched page. It accepts
@@ -370,6 +483,11 @@ func joinedAt(s string, k int) bool {
 	if n == 0 || k == len(s) {
 		return false
 	}
+	// Between two letters of a space-less script is a word's edge as often
+	// as not: read as one word, a quote of such a page was never found in it.
+	if spaceless(p) || spaceless(r) {
+		return false
+	}
 	return letter(p) && letter(r) || unicode.IsDigit(p) && unicode.IsDigit(r)
 }
 
@@ -430,7 +548,7 @@ func quotePieces(q string, literal bool) []quotePiece {
 	var out []quotePiece
 	elided, open, at := false, true, 0
 	add := func(text string, closed bool) {
-		if text = strings.Trim(text, " ,.;:!?"); text == "" {
+		if text = strings.Trim(text, " ,.;:!?。，、；：！？"); text == "" {
 			return
 		}
 		pc := quotePiece{text: text, loose: comparable(text, literal), near: !elided && len(out) > 0, open: open, close: closed}

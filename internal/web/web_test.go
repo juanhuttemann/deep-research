@@ -642,3 +642,30 @@ func TestPlanEditsGoToThePlanFunc(t *testing.T) {
 		t.Errorf("no PlanFunc: status %d, want 501", resp2.StatusCode)
 	}
 }
+
+// The guard read only the Host header, which any client sets: with --addr
+// off loopback, another machine sending Host: localhost launched runs on
+// this machine's credentials. The peer address is checked too.
+func TestRemotePeerIsRefusedWhateverItsHost(t *testing.T) {
+	ran := make(chan struct{}, 1)
+	run := func(context.Context, Request, io.Writer) { ran <- struct{}{} }
+	h := New(context.Background(), fstest.MapFS{}, run).Handler()
+	req := httptest.NewRequest("POST", "http://localhost/api/run", strings.NewReader(`{"question":"q"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.9:40000"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("remote peer with Host: localhost = %d, want 403", rec.Code)
+	}
+	select {
+	case <-ran:
+		t.Error("a remote peer launched a run")
+	case <-time.After(50 * time.Millisecond):
+	}
+	for _, peer := range []string{"127.0.0.1:5000", "[::1]:5000", "[::ffff:127.0.0.1]:5000"} {
+		if !loopbackPeer(peer) {
+			t.Errorf("loopbackPeer(%q) = false", peer)
+		}
+	}
+}

@@ -169,3 +169,29 @@ func TestEnvKeyGoesOnlyToItsEndpoint(t *testing.T) {
 		t.Errorf("key = %q", cfg.OpenAIAPIKey)
 	}
 }
+
+// With no login saved, provider claude and an Anthropic-compatible endpoint
+// from the environment went through claude -p, which drops that URL and key:
+// the subscription was billed and the Kimi model's name sent to Anthropic.
+func TestEnvOnlyCompatibleEndpointIsTheAPI(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("DEEP_RESEARCH_PROVIDER", "claude")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.moonshot.ai/anthropic")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-kimi")
+	if cfg := loginIn(t, nil, nil); !cfg.ClaudeAPIOnly {
+		t.Errorf("apiOnly=false for %s set from the environment", cfg.AnthropicBaseURL)
+	}
+	sub := &auth.Selection{Provider: "claude-subscription", Transport: "claude", BaseURL: "https://api.anthropic.com", Model: "claude-x"}
+	if cfg := loginIn(t, sub, nil); !cfg.ClaudeAPIOnly {
+		t.Error("a subscription with a compatible endpoint and its key went through Claude Code")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	if cfg := loginIn(t, sub, nil); cfg.ClaudeAPIOnly {
+		t.Error("a subscription with no key for the endpoint lost Claude Code")
+	}
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant")
+	if cfg := loginIn(t, nil, nil); cfg.ClaudeAPIOnly {
+		t.Error("Anthropic's own endpoint, with no login saved, lost the Claude Code sign-in")
+	}
+}

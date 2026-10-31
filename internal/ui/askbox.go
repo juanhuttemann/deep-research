@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"bufio"
 	"errors"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -18,8 +20,8 @@ import (
 // questions as they did when the terminal read the line.
 func Ask(stdin io.Reader, w io.Writer, noColor bool, back string) (q string, ok bool) {
 	sig := catchSignals(true)
-	in := NewInput(stdin, nil)
 	r := NewRenderer(w, Theme{Enabled: !noColor})
+	in := askInput(stdin, r.plain)
 	defer guardTerminal(sig, in, r)()
 	if !in.Raw() || r.plain {
 		// A terminal that will not go raw reads the line itself.
@@ -33,6 +35,17 @@ func Ask(stdin io.Reader, w io.Writer, noColor bool, back string) (q string, ok 
 	}
 	keys := &keptInput{Input: in}
 	return newAskBox(r, back, func() int { return cursorRow(keys, r.write) }).read(keys)
+}
+
+// askInput is the input the ask box reads. With the box not drawn (w is no
+// terminal, as with 2>file) a terminal stdin is left cooked: put raw, it read
+// the line blind, with no echo and no editing, and stored backspaces and
+// arrow keys in the question as bytes.
+func askInput(stdin io.Reader, plain bool) Input {
+	if f, ok := stdin.(*os.File); ok && plain && IsTTYFile(f) {
+		return &lineReader{scan: bufio.NewReader(f)}
+	}
+	return NewInput(stdin, nil)
 }
 
 // keptInput is an Input with bytes put back ahead of it: the keys typed
