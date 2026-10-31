@@ -195,3 +195,39 @@ func TestClarificationsRoundTripBesideOlderRecords(t *testing.T) {
 		t.Errorf("clarifications = %v, want %v", got, cs)
 	}
 }
+
+// Save appended straight after a torn final line, so the next run was glued
+// to it and both were one unreadable line: the new run was lost as well.
+func TestSaveAfterATornTailKeepsTheNewRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	if err := os.WriteFile(path, []byte(`{"id":"1","question":"torn`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	if err := st.Save(&ResearchResult{ID: "2", ResearchResult: agent.ResearchResult{Question: "kept"}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := st.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != "2" || skipped != 1 {
+		t.Fatalf("got %+v and %d skipped, want run 2 and 1 skipped", runs, skipped)
+	}
+}
+
+// null and {} parse without error into a blank record: list showed them as
+// runs and the unreadable count stayed at zero, hiding the corruption.
+func TestBlankHistoryLinesCountAsUnreadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	if err := os.WriteFile(path, []byte("null\n{}\n"+`{"id":"a","question":"q"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := Open(path).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || skipped != 2 {
+		t.Fatalf("got %d runs and %d skipped, want 1 and 2", len(runs), skipped)
+	}
+}

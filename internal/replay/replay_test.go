@@ -431,3 +431,50 @@ func TestCheckpointKeepsInstant(t *testing.T) {
 		t.Errorf("phases = %+v, want the answer call", got)
 	}
 }
+
+// A search entry with a query and neither result nor error loaded, and the
+// replay served it as a nil result the driver dereferenced: a panic.
+func TestTraceSearchWithoutResultOrErrorIsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.trace.json")
+	bad := `{"version":1,"question":"q","plan":[{"id":"1","name":"A","query":"q"}],"searches":[{"query":"q","terms":["a"]}]}`
+	if err := os.WriteFile(path, []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "no result or error") {
+		t.Errorf("Load = %v, want the bare search refused", err)
+	}
+	p := Play(&live{}, &Trace{Question: "q", Searches: []Search{{Query: "q"}}})
+	if det, err := p.ResearchDetail(context.Background(), "q", nil); err == nil {
+		t.Errorf("ResearchDetail = %v, nil; want an error", det)
+	}
+}
+
+// The recorder keeps a query's failures and its first success, and replay
+// served the first entry: a search the run recovered from failed the replay.
+func TestReplayServesTheSuccessAfterAFailure(t *testing.T) {
+	ok := &agent.ResearchDetail{Findings: []agent.Finding{{URL: "https://a.example"}}}
+	p := Play(&live{}, &Trace{Question: "q", Searches: []Search{{Query: "q", Error: "rate limited"}, {Query: "q", Result: ok}}})
+	if det, err := p.ResearchDetail(context.Background(), "q", nil); err != nil || det != ok {
+		t.Errorf("ResearchDetail = %v, %v; want the recorded success", det, err)
+	}
+}
+
+// Searches were told apart by their query alone: two sub-topics sending one
+// query with different terms were served the first one's evidence.
+func TestSearchesWithTheSameQueryAndOtherTermsAreKeptApart(t *testing.T) {
+	a := &agent.ResearchDetail{Findings: []agent.Finding{{URL: "https://a.example"}}}
+	b := &agent.ResearchDetail{Findings: []agent.Finding{{URL: "https://b.example"}}}
+	tr := &Trace{Question: "q", Searches: []Search{{Query: "q", Terms: []string{"x"}, Result: a}, {Query: "q", Terms: []string{"y"}, Result: b}}}
+	if det, _ := Play(&live{}, tr).ResearchDetail(context.Background(), "q", []string{"y"}); det != b {
+		t.Error("replay served the other terms' search")
+	}
+	if det, _ := Resume(&live{}, tr).ResearchDetail(context.Background(), "q", []string{"y"}); det != b {
+		t.Error("resume served the other terms' search")
+	}
+	rec := Record(&live{}, "q", "quick", 3)
+	_, _ = rec.ResearchDetail(context.Background(), "q", []string{"x"})
+	_, _ = rec.ResearchDetail(context.Background(), "q", []string{"y"})
+	if n := len(rec.trace.Searches); n != 2 {
+		t.Errorf("recorded %d searches, want both", n)
+	}
+}

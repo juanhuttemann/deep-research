@@ -189,13 +189,14 @@ func priorAnswer(q Question, prior []Clarification) (at int, text string) {
 // planning, so the brief that follows still discards the keys typed while
 // the plan was made, and the guard that gives the terminal back closes the
 // renderer with it, which drawn on the run's left the brief never shown.
-func (o Options) askOnTerminal() askFunc {
+func (o Options) askOnTerminal(ctx context.Context) askFunc {
 	return func(qs []Question, prior []Clarification) ([]Clarification, bool) {
 		sig := catchSignals(true)
 		in := NewInput(o.Input, nil)
 		r := NewRenderer(o.Stdout, Theme{Enabled: !o.NoColor})
 		defer guardTerminal(sig, in, r)()
-		keys := &keptInput{Input: in}
+		// The run's deadline and a cancel end the questions too.
+		keys := &keptInput{Input: ctxInput{Input: in, ctx: ctx}}
 		defer r.Inline(keys)()
 		answers, _, stop := answerQuestions(keys, r, qs, prior)
 		return answers, stop
@@ -284,6 +285,10 @@ func discardTyped(in Input) {
 	if k, ok := in.(*keptInput); ok {
 		k.kept = nil
 		in = k.Input
+	}
+	// The brief's input is bound to the run; the terminal is under it.
+	if c, ok := in.(ctxInput); ok {
+		in = c.Input
 	}
 	t, ok := in.(interface {
 		terminalOwner

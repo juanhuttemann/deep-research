@@ -21,8 +21,10 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/config"
 	"github.com/juanhuttemann/deep-research/internal/replay"
+	"github.com/juanhuttemann/deep-research/internal/setup"
 	"github.com/juanhuttemann/deep-research/internal/ui"
 	"github.com/juanhuttemann/deep-research/internal/web"
+	"github.com/spf13/cobra"
 )
 
 func TestHistoryPreservesResearchAndVerification(t *testing.T) {
@@ -742,5 +744,44 @@ func TestWebArgsMapInstant(t *testing.T) {
 	args, _, err := webArgs(web.Request{Question: "q", Settings: map[string]string{"mode": "instant"}}, "r")
 	if err != nil || !slices.Contains(args, "--mode=instant") {
 		t.Errorf("args = %v, %v; want --mode=instant", args, err)
+	}
+}
+
+// Setup's review printed the endpoints as typed, credentials and all, into
+// scrollback, screen recordings and the logs of scripted runs.
+func TestSetupReviewHidesEndpointCredentials(t *testing.T) {
+	s := setup.Services{Engine: "searxng", SearXNGURL: "http://user:hunter2-secret@searx.example", Scraper: config.ServiceFirecrawl,
+		FirecrawlURL: "https://fc.example/v1?token=tok-0123456789"}
+	for _, line := range []string{engineLine(s), scraperLine(s)} {
+		if strings.Contains(line, "hunter2") || strings.Contains(line, "tok-0123456789") {
+			t.Errorf("review line shows a credential: %q", line)
+		}
+	}
+}
+
+// --plan-only -o into a directory not made yet failed after the planner was
+// paid for, and with -o set stdout had no copy: the plan was lost.
+func TestPlanOutputMakesItsDirectory(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("output", "", "")
+	out := filepath.Join(t.TempDir(), "new", "dir", "plan.json")
+	_ = cmd.Flags().Set("output", out)
+	if err := printJSON(cmd, &struct{ Q string }{"q"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("plan not written: %v", err)
+	}
+}
+
+// --depth is the old --sources, and given both, --sources won whatever
+// their order with nothing said: --depth 9 --sources 4 ran 4.
+func TestDepthAndSourcesTogetherAreRefused(t *testing.T) {
+	cmd := New(func() (Deps, error) { t.Fatal("the run started"); return Deps{}, nil })
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-p", "q", "--depth", "9", "--sources", "4"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "depth") {
+		t.Errorf("Execute = %v, want the two flags refused together", err)
 	}
 }

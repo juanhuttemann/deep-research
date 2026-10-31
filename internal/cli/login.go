@@ -227,7 +227,7 @@ func warnOverrides(w io.Writer, sel auth.Selection) {
 	if cfg.Provider != sel.Transport || model != sel.Model || !auth.SameEndpoint(base, sel.BaseURL) {
 		fmt.Fprintf(w, "note: the environment overrides this choice (a run uses provider %s, %s at %s);"+
 			" check DEEP_RESEARCH_PROVIDER, OPENAI_* and ANTHROPIC_* in your shell and .env\n",
-			cfg.Provider, model, base)
+			cfg.Provider, model, shownURL(base))
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStoreRoundTrip(t *testing.T) {
@@ -232,5 +233,43 @@ func TestServiceKeysStayApart(t *testing.T) {
 	}
 	if key, _ := s2.ServiceKey("exa", "https://elsewhere"); key != "" {
 		t.Errorf("ServiceKey at another address = %q", key)
+	}
+}
+
+// A "!command" key was cached for the life of the process: drsh serve kept
+// a token command's first answer after the token expired.
+func TestCommandKeyIsResolvedAgainLater(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh command")
+	}
+	n := filepath.Join(t.TempDir(), "n")
+	cmd := "!echo x >> " + n + "; wc -l < " + n
+	first, err := Resolve(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := Resolve(cmd); again != first {
+		t.Errorf("resolved again at once: %q then %q", first, again)
+	}
+	resolvedMu.Lock()
+	resolved[strings.TrimPrefix(cmd, "!")] = resolvedKey{first, time.Now().Add(-resolvedFor)}
+	resolvedMu.Unlock()
+	if later, _ := Resolve(cmd); later == first {
+		t.Errorf("an expired key %q was reused", later)
+	}
+}
+
+// Output waits for stdout to close, and a background child holding it kept
+// a key command waiting long past its timeout.
+func TestKeyCommandIsNotHeldByABackgroundChild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sh command")
+	}
+	start := time.Now()
+	if _, err := Resolve("!sleep 5 & echo sk-bg"); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("the key command took %s, held by its background child", d)
 	}
 }

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -399,11 +401,24 @@ func applyKeys(cfg *Config, v *viper.Viper, store *auth.Store, sel auth.Selectio
 		// through Claude Code and bill the plan instead. The choice decides
 		// it, not the endpoint: an ANTHROPIC_BASE_URL overriding it for a run
 		// (a proxy) is still the API, and claude -p would ignore that URL.
-		cfg.ClaudeAPIOnly = sel.Transport == "claude" && sel.Provider != catalogClaudeSubscription
+		// An endpoint other than Anthropic's is the choice too, when nothing
+		// else was chosen or when it has a key: set up from the environment,
+		// a Kimi or MiniMax URL and key were dropped for claude -p, which
+		// billed the subscription and sent their model's name to Anthropic.
+		// A subscription with no key for such a URL keeps the subscription.
+		picked := sel.Transport == "claude"
+		elsewhere := !anthropicHost(base) && (!picked || key != "")
+		cfg.ClaudeAPIOnly = picked && sel.Provider != catalogClaudeSubscription || elsewhere
 		return nil
 	}
 	cfg.OpenAIAPIKey = key
 	return nil
+}
+
+// anthropicHost reports whether base is Anthropic's own API.
+func anthropicHost(base string) bool {
+	u, err := url.Parse(strings.TrimSpace(base))
+	return err == nil && strings.EqualFold(u.Hostname(), "api.anthropic.com")
 }
 
 // applyServiceKeys puts a key `drsh setup` stored for a search service in
@@ -571,10 +586,14 @@ func expandHome(path string) (string, error) {
 // runKeys are the keys that shape a run: where it is saved, its deadline,
 // its breadth and budget, and its report.
 func runKeys(v *viper.Viper) (Config, error) {
+	runTimeout, err := duration(v, "run_timeout")
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		DataFile:        v.GetString("data_file"),
-		RunTimeout:      v.GetDuration("run_timeout"),
-		SourcesPerTopic: v.GetInt("sources_per_topic"),
+		RunTimeout:      runTimeout,
+		SourcesPerTopic: sourcesPerTopic(v),
 		SubTopics:       max(v.GetInt("sub_topics"), 0),
 		NoFollowUps:     !v.GetBool("follow_ups"),
 		Parallelism:     v.GetInt("parallelism"),
@@ -586,7 +605,6 @@ func runKeys(v *viper.Viper) (Config, error) {
 	}
 	// A misspelt format is an error here, where the key that holds it can be
 	// named, rather than in the middle of a run that already planned.
-	var err error
 	if cfg.Report, err = (agent.ReportSpec{Format: v.GetString("report_format"), Words: v.GetInt("report_words"),
 		Tables: v.GetString("report_tables")}).Normalized(); err != nil {
 		return Config{}, fmt.Errorf("config: %w", err)
@@ -600,8 +618,37 @@ func runKeys(v *viper.Viper) (Config, error) {
 	return cfg, nil
 }
 
+// duration reads a duration key. A bare number is refused: viper reads it as
+// nanoseconds, so run_timeout: 1800, meant as seconds, was 1.8µs, and every
+// run failed with a deadline that named no key.
+func duration(v *viper.Viper, key string) (time.Duration, error) {
+	raw := strings.TrimSpace(v.GetString(key))
+	if _, err := strconv.ParseFloat(raw, 64); err == nil && raw != "0" {
+		return 0, fmt.Errorf("config: %s %s: give a unit, as in 30m or 300s (%s in config.yaml, or %s_%s)",
+			key, raw, key, EnvPrefix, strings.ToUpper(key))
+	}
+	return v.GetDuration(key), nil
+}
+
+// sourcesPerTopic reads sources_per_topic, or its older max_depth spelling.
+// The alias makes viper look the env var up under the new name only, so
+// DEEP_RESEARCH_MAX_DEPTH, a documented spelling, was silently ignored; it
+// is read by hand, below the new name's own variable.
+func sourcesPerTopic(v *viper.Viper) int {
+	if _, set := os.LookupEnv(EnvPrefix + "_SOURCES_PER_TOPIC"); !set {
+		if raw, set := os.LookupEnv(EnvPrefix + "_MAX_DEPTH"); set {
+			if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+				return n
+			}
+		}
+	}
+	return v.GetInt("sources_per_topic")
+}
+
 func loadModelCalls(cfg *Config, v *viper.Viper) (err error) {
-	cfg.ModelCallTimeout = v.GetDuration("model_call_timeout")
+	if cfg.ModelCallTimeout, err = duration(v, "model_call_timeout"); err != nil {
+		return err
+	}
 	cfg.ModelCallRetries = v.GetInt("model_call_retries")
 	cfg.Effort, err = loadEffort(v)
 	return err

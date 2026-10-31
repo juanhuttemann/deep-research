@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	aoption "github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
@@ -244,5 +246,27 @@ func TestDiagnoseWarnsAboutWeakSetups(t *testing.T) {
 	cfg.SearchEngine, cfg.ExaAPIKey = "exa", "k"
 	if c := checkScraper(context.Background(), cfg); c.Warn {
 		t.Errorf("a hosted engine needs no scraper, yet it warned: %+v", c)
+	}
+}
+
+// Any 404 fell back to the model list, which Anthropic's API serves too: a
+// misspelt model passed doctor, and login saved it. There the 404 stands.
+func TestMisspeltModelFailsOnAnthropicsOwnAPI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"not_found_error","message":"model: claude-typo"}}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[],"has_more":false}`)
+	}))
+	defer srv.Close()
+	client := anthropic.NewClient(aoption.WithAPIKey("sk"), aoption.WithBaseURL(srv.URL), aoption.WithMaxRetries(0))
+	if err := lookUpClaudeModel(context.Background(), client, "claude-typo", "api.anthropic.com"); err == nil {
+		t.Error("a model Anthropic's API does not know passed")
+	}
+	if err := lookUpClaudeModel(context.Background(), client, "k3", "api.moonshot.ai"); err != nil {
+		t.Errorf("a compatible endpoint without the route failed: %v", err)
 	}
 }

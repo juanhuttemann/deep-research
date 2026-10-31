@@ -1363,3 +1363,94 @@ func TestReportSpecNormalized(t *testing.T) {
 		}
 	}
 }
+
+// Every other scalar the checker writes is trimmed, its status was not:
+// "supported " fell through to unrecognized, and the claim the checker
+// supported blocked everything resting on it.
+func TestVerdictStatusIsTrimmed(t *testing.T) {
+	fc := parseFactCheck(`{"verdicts":[{"id":"c1","status":"Supported \n","reason":"r"}]}`)
+	if len(fc.Verdicts) != 1 || fc.Verdicts[0].Status != "supported" {
+		t.Errorf("verdicts = %+v, want status supported", fc.Verdicts)
+	}
+}
+
+// The heading test cut a byte off the end of a CJK sentence, which matched
+// no full stop: a bold one-sentence Japanese report was read as a heading
+// and its executive summary came back empty.
+func TestBoldCJKSentenceIsNotAHeading(t *testing.T) {
+	if IsEmphasizedHeading("**これは重要な発見です。**") {
+		t.Error("a bold Japanese sentence was read as a heading")
+	}
+	if !IsEmphasizedHeading("**概要**") {
+		t.Error("a bold Japanese heading was read as a sentence")
+	}
+}
+
+// A gap written as an object was read as an empty string, and the prompt
+// and the exports got a bare "- " bullet in its place.
+func TestStringListSkipsNonStrings(t *testing.T) {
+	a := parseAnalysis(`{"answer":"a","gaps":[{"gap":"x"},"  ","real gap"]}`)
+	if len(a.Gaps) != 1 || a.Gaps[0] != "real gap" {
+		t.Errorf("gaps = %q, want only the real gap", a.Gaps)
+	}
+}
+
+// Only the userinfo was cleared: a gateway key in the query or the path
+// reached stderr, --jsonl, the history and doctor's output.
+func TestEndpointKeysAreRedactedOutsideTheUserinfo(t *testing.T) {
+	for _, raw := range []string{
+		"https://host.example/v1?api_key=sk-secret-123456",
+		"https://host.example/sk-secret-123456/v1",
+		"https://user:sk-secret-123456@host.example/v1",
+		"https://host.example/v1#sk-secret-123456",
+	} {
+		got := SafeEndpoint(raw)
+		if strings.Contains(got, "sk-secret") || !strings.Contains(got, "host.example") {
+			t.Errorf("SafeEndpoint(%q) = %q", raw, got)
+		}
+	}
+	if got := SafeEndpoint("https://openrouter.ai/api/v1"); got != "https://openrouter.ai/api/v1" {
+		t.Errorf("a plain endpoint changed: %q", got)
+	}
+	base := "https://host.example/v1?api_key=sk-secret-123456"
+	err := endpointError(base, errors.New(`POST "https://host.example/v1/chat/completions?api_key=sk-secret-123456": 401`))
+	if strings.Contains(err.Error(), "sk-secret") {
+		t.Errorf("request URL kept the key: %v", err)
+	}
+}
+
+// Every question carried the whole conversation, which is saved and
+// reloaded with the run: a long one outgrew the context window and every
+// later question failed. Only the latest turns are sent, each bounded.
+func TestChatSendsOnlyTheLatestTurns(t *testing.T) {
+	var mu sync.Mutex
+	var last string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		last = string(raw)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": "ok"}}}})
+	}))
+	defer srv.Close()
+	chat, err := NewChat(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test"}, "overview", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 20 {
+		chat.Turns = append(chat.Turns, Turn{Question: fmt.Sprintf("question number %d", i), Answer: strings.Repeat("a", 10000)})
+	}
+	if _, err := chat.Ask(context.Background(), "now"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Contains(last, "question number 0\\n") || !strings.Contains(last, "question number 19") {
+		t.Errorf("the request does not hold just the latest turns")
+	}
+	if len(last) > chatTurnsSent*(chatAnswerRunes+200)+2000 {
+		t.Errorf("request is %d bytes for %d turns", len(last), len(chat.Turns))
+	}
+}

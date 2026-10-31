@@ -39,11 +39,26 @@ func NewChat(cfg Config, overview string, tools []tool.Tool) (*Chat, error) {
 	return &Chat{impl: impl, ag: newAgent("chat", cfg.ChatInstructions+"\n\n"+overview, tools)}, nil
 }
 
-// Ask answers q, with the conversation so far ahead of it.
+// chatTurnsSent and chatAnswerRunes bound the conversation each question
+// carries. The whole of it went with every question, and it is saved and
+// reloaded with the run: a long one grew past the context window, and from
+// then on every question about the run failed the same way. The latest
+// turns are what a follow-up refers to; an older answer can be asked again.
+const (
+	chatTurnsSent   = 8
+	chatAnswerRunes = 4000
+)
+
+// Ask answers q, with the latest of the conversation so far ahead of it.
 func (c *Chat) Ask(ctx context.Context, q string) (string, error) {
 	var sb strings.Builder
-	for _, t := range c.Turns {
-		fmt.Fprintf(&sb, "Earlier question: %s\nYour answer: %s\n\n", t.Question, t.Answer)
+	turns := c.Turns
+	if n := len(turns) - chatTurnsSent; n > 0 {
+		fmt.Fprintf(&sb, "(%d earlier questions of this conversation are left out.)\n\n", n)
+		turns = turns[n:]
+	}
+	for _, t := range turns {
+		fmt.Fprintf(&sb, "Earlier question: %s\nYour answer: %s\n\n", clip(t.Question, chatAnswerRunes), clip(t.Answer, chatAnswerRunes))
 	}
 	sb.WriteString(q)
 	answer, err := c.impl.call(ctx, c.ag, sb.String(), c.impl.effort.Chat)

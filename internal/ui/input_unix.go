@@ -37,10 +37,6 @@ type ttyReader struct {
 // ownsTerminal marks the one Input that changed the terminal's mode.
 func (t *ttyReader) ownsTerminal() {}
 
-// keyPoll is how long one wait for a key lasts before the reader checks
-// whether it was closed: the most a Close waits for a read in progress.
-const keyPoll = 100 * time.Millisecond
-
 // Ignored reports how many keys typed before the brief were discarded.
 func (t *ttyReader) Ignored() int { return t.ignored }
 

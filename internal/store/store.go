@@ -105,7 +105,7 @@ func (s *Store) Save(r *ResearchResult) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
-	f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", s.Path, err)
 	}
@@ -113,6 +113,11 @@ func (s *Store) Save(r *ResearchResult) error {
 	if err != nil {
 		_ = f.Close()
 		return fmt.Errorf("marshal result: %w", err)
+	}
+	// A record a kill cut short is ended first: appended straight after it,
+	// this run was glued to the torn line and lost with it.
+	if tornTail(f) {
+		line = append([]byte{'\n'}, line...)
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		_ = f.Close()
@@ -122,6 +127,18 @@ func (s *Store) Save(r *ResearchResult) error {
 		return fmt.Errorf("close %s: %w", s.Path, err)
 	}
 	return nil
+}
+
+// tornTail reports whether f ends without a newline, the mark of a Save a
+// kill or a full disk cut short.
+func tornTail(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return false
+	}
+	last := make([]byte, 1)
+	_, err = f.ReadAt(last, fi.Size()-1)
+	return err == nil && last[0] != '\n'
 }
 
 // List reads the run history. It also reports how many lines were unreadable:
@@ -146,7 +163,9 @@ func (s *Store) List() (results []ResearchResult, skipped int, err error) {
 		line, readErr := br.ReadString('\n')
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			var r ResearchResult
-			if err := json.Unmarshal([]byte(trimmed), &r); err != nil {
+			// null and {} unmarshal without error into a blank record, which
+			// list showed as a run and the unreadable count did not see.
+			if err := json.Unmarshal([]byte(trimmed), &r); err != nil || (r.ID == "" && r.Question == "") {
 				skipped++
 			} else {
 				results = append(results, r)

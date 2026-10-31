@@ -111,12 +111,15 @@ func checkModel(ctx context.Context, cfg Config) Check {
 // is free.
 func checkClaude(ctx context.Context, cfg Config) Check {
 	c := Check{Name: "model"}
+	var readErr error
 	if !useClaudeCode(cfg) {
 		// Chosen over the subscription, or not Anthropic at all: the key is
 		// what a run would use, so the key is what to check.
-	} else if _, plan := claudeCodeLogin(ctx); plan != "" {
+	} else if _, plan, err := claudeCodeLogin(ctx); plan != "" {
 		c.OK, c.Detail = true, fmt.Sprintf("%s via Claude Code (%s subscription)", cfg.ClaudeModel, plan)
 		return c
+	} else if err != nil {
+		readErr = err
 	}
 	key := strings.TrimSpace(cfg.AnthropicAPIKey)
 	if key == "" {
@@ -124,6 +127,10 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 		if useClaudeCode(cfg) {
 			c.Detail = "Claude Code is not signed in to a subscription (run `claude auth login`)," +
 				" and there is no API key (`drsh setup`, or ANTHROPIC_API_KEY)"
+		}
+		if readErr != nil {
+			c.Detail = fmt.Sprintf("Claude Code's sign-in could not be read (%v), and there is no API key"+
+				" (`drsh setup`, or ANTHROPIC_API_KEY)", readErr)
 		}
 		return c
 	}
@@ -135,7 +142,7 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 	defer cancel()
 	client := anthropic.NewClient(aoption.WithAPIKey(key), aoption.WithBaseURL(cfg.AnthropicBaseURL),
 		aoption.WithHTTPClient(providerHTTPClient()), aoption.WithMaxRetries(0))
-	if err := lookUpClaudeModel(ctx, client, cfg.ClaudeModel); err != nil {
+	if err := lookUpClaudeModel(ctx, client, cfg.ClaudeModel, host); err != nil {
 		// The SDK's error text is the URL and the raw body; the status says it.
 		if status, _ := apiResponse(err); status != 0 {
 			err = fmt.Errorf("%d %s", status, http.StatusText(status))
@@ -144,16 +151,21 @@ func checkClaude(ctx context.Context, cfg Config) Check {
 		return c
 	}
 	c.OK, c.Detail = true, fmt.Sprintf("%s via %s answers%s", cfg.ClaudeModel, host, keyFrom(cfg))
+	if readErr != nil {
+		c.Detail += fmt.Sprintf("; Claude Code's sign-in could not be read (%v), so a run bills the key", readErr)
+	}
 	return c
 }
 
 // lookUpClaudeModel asks for the model by ID. Anthropic-compatible providers
 // need not serve that route — Kimi answers 404 there, while its model list
 // and its Messages endpoint work — so a 404 falls back to the list, which
-// still proves the endpoint and the key.
-func lookUpClaudeModel(ctx context.Context, client anthropic.Client, model string) error {
+// still proves the endpoint and the key. Anthropic's own API serves the
+// route, and its 404 is the answer: falling back there passed a misspelt
+// model, and login saved it.
+func lookUpClaudeModel(ctx context.Context, client anthropic.Client, model, host string) error {
 	_, err := client.Models.Get(ctx, model, anthropic.ModelGetParams{})
-	if status, _ := apiResponse(err); status != http.StatusNotFound {
+	if status, _ := apiResponse(err); status != http.StatusNotFound || strings.EqualFold(host, "api.anthropic.com") {
 		return err
 	}
 	_, err = client.Models.List(ctx, anthropic.ModelListParams{})
@@ -250,11 +262,11 @@ func getJSON(ctx context.Context, u, key string) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: %d %s", safeEndpoint(u), resp.StatusCode, http.StatusText(resp.StatusCode))
+		return nil, fmt.Errorf("GET %s: %d %s", SafeEndpoint(u), resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 	var raw json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("GET %s: %w", safeEndpoint(u), endpointError(u, err))
+		return nil, fmt.Errorf("GET %s: %w", SafeEndpoint(u), endpointError(u, err))
 	}
 	return raw, nil
 }

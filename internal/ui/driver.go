@@ -58,6 +58,10 @@ type Driver struct {
 	// foundAgain is, per page, the queries that found it after it was read.
 	// The page is one source, but its excerpt covers what each asked of it.
 	foundAgain map[string][]string
+	// refoundBy counts, per sub-agent, the pages it found that another had
+	// already cited: a branch that kept no new source but found those still
+	// found its evidence, and was reported to the analysis as having none.
+	refoundBy map[string]int
 	// searchesOK and searchErr tell a run that found nothing apart from a run
 	// whose every search was refused: only the second is a failure.
 	searchesOK int
@@ -69,10 +73,14 @@ type Driver struct {
 	// searchesEmpty are answered searches with nothing on the subject in
 	// them: every result off-topic, or none at all.
 	searchesEmpty int
-	// searchDown is set while the last search was refused: asked nothing,
-	// every instance resting, or answered with a limit or a challenge.
-	// Queries sent then fail too, and push the limit further.
+	// searchDown is set while search is refusing: asked nothing, every
+	// instance resting, or answered with a limit or a challenge. Queries
+	// sent then fail too, and push the limit further. downAt is when the
+	// last refusal came back: only a search sent after it clears the flag.
+	// Sub-agents search at once, and a search sent before the refusal and
+	// answered after it said nothing about the pool now, but cleared it.
 	searchDown bool
+	downAt     time.Time
 	// refusalHinted is set once the run has said what to do about public
 	// SearXNG instances refusing it. Every sub-agent hits the same wall, and
 	// the advice repeated per failed search would bury the activity log.
@@ -242,9 +250,20 @@ func (d *Driver) noteKnown(id, query string, known []agent.SkippedSource) int {
 		}
 		key := tools.CanonicalURL(k.URL)
 		d.foundAgain[key] = append(d.foundAgain[key], query)
+		if d.refoundBy == nil {
+			d.refoundBy = map[string]int{}
+		}
+		d.refoundBy[id]++
 		d.mu.Unlock()
 	}
 	return len(known)
+}
+
+// refound reports whether sub-agent id found pages another had cited.
+func (d *Driver) refound(id string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.refoundBy[id] > 0
 }
 
 // withFoundAgain carries the queries noteKnown recorded onto their pages.
@@ -253,7 +272,10 @@ func (d *Driver) withFoundAgain(findings []agent.Finding) []agent.Finding {
 	defer d.mu.Unlock()
 	for i := range findings {
 		f := &findings[i]
-		for _, q := range d.foundAgain[tools.CanonicalURL(f.URL)] {
+		// Sorted: sub-agents record these as they finish, in whatever order
+		// that is, and two runs that found the same pages wrote different
+		// also_found_by lists.
+		for _, q := range slices.Sorted(slices.Values(d.foundAgain[tools.CanonicalURL(f.URL)])) {
 			if q != f.Query && !slices.Contains(f.AlsoFoundBy, q) {
 				f.AlsoFoundBy = append(f.AlsoFoundBy, q)
 			}
@@ -787,7 +809,7 @@ func (d *Driver) research(ctx context.Context, plan *Plan) (findings []agent.Fin
 	var all []agent.Finding
 	for i, sub := range plan.SubTopics {
 		all = append(all, found[i]...)
-		if kept[i] == 0 {
+		if kept[i] == 0 && !d.refound(sub.ID) {
 			uncovered = append(uncovered, sub.Name)
 		}
 	}
@@ -921,8 +943,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 		}
 		d.emit(Event{Type: Search, Query: q, Terms: sub.Terms, SubID: id, SubName: sub.Name, Line: "Searching: " + q})
 
-		det, err := d.Agent.ResearchDetail(sctx, q, sub.Terms)
-		d.noteSearch(err, det)
+		det, err := d.search(sctx, q, sub.Terms)
 		if err != nil {
 			// A limiter or a challenge is a state of the run, so it travels on
 			// the event rather than only inside the message text.
@@ -1075,8 +1096,21 @@ func searchRefused(err error) bool {
 	return false
 }
 
+// search asks the agent for query and records the outcome.
+func (d *Driver) search(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
+	started := time.Now()
+	det, err := d.Agent.ResearchDetail(ctx, query, terms)
+	if err == nil && det == nil {
+		// An answer with nothing in it, as a replayed trace can hold: read
+		// as a result, it was dereferenced.
+		det = &agent.ResearchDetail{}
+	}
+	d.noteSearch(started, err, det)
+	return det, err
+}
+
 // noteSearch records the outcome of one search.
-func (d *Driver) noteSearch(err error, det *agent.ResearchDetail) {
+func (d *Driver) noteSearch(started time.Time, err error, det *agent.ResearchDetail) {
 	d.mu.Lock()
 	hint := tools.PublicSearchRefused(err) && !d.refusalHinted
 	switch {
@@ -1091,7 +1125,11 @@ func (d *Driver) noteSearch(err error, det *agent.ResearchDetail) {
 	default:
 		d.searchesOK++
 	}
-	d.searchDown = tools.SearchResting(err) || searchRefused(err)
+	if tools.SearchResting(err) || searchRefused(err) {
+		d.searchDown, d.downAt = true, time.Now()
+	} else if started.After(d.downAt) {
+		d.searchDown = false
+	}
 	d.mu.Unlock()
 	if hint {
 		d.emit(Event{Type: Error, Detail: publicRefusalHint})

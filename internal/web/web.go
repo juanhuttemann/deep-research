@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path"
 	"regexp"
@@ -191,7 +192,7 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, 
 	if err != nil {
 		return err
 	}
-	// localhost, whatever the bind: the Host check refuses any other name.
+	// localhost, whatever the bind: localOnly refuses any other name or peer.
 	url := fmt.Sprintf("http://localhost:%d", ln.Addr().(*net.TCPAddr).Port)
 	_, _ = fmt.Fprintf(log, "serving on %s\n", url)
 	s := New(ctx, root.FS(), run)
@@ -199,12 +200,42 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, 
 	s.Ask = ask
 	s.Info = info
 	s.Plan = plan
-	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	// No ReadTimeout or WriteTimeout: a question and the event stream run
+	// for minutes, and either one cancels a request that outlives it. Bodies
+	// are read under a deadline of their own (decodeBody), the stream writes
+	// under one per write (events), and an idle keep-alive is closed.
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	if ready != nil {
 		ready(url)
 	}
 	return srv.Serve(ln)
 }
+
+// localOnly answers a request only from this machine and addressed to it.
+// The Host header alone was the guard, and any client can send Host:
+// localhost: with --addr off loopback, another machine could launch runs on
+// these credentials and read every report. The peer is checked as well.
+// bodyTimeout bounds reading a request's body: a client that sent its
+// headers and stalled on the body held the handler for good.
+const bodyTimeout = 30 * time.Second
+
+// decodeBody reads r's JSON body into v, at most limit bytes and within
+// bodyTimeout. The deadline is lifted after, for a handler that runs long.
+func decodeBody(w http.ResponseWriter, r *http.Request, limit int64, v any) error {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(bodyTimeout))
+	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v)
+}
+
+// sseWriteTimeout bounds one write to the event stream, and ssePing is how
+// often an idle stream is written to: a client that stopped reading (a
+// suspended laptop, a dropped network) held its handler and the buffers it
+// copied for as long as the process ran.
+const (
+	sseWriteTimeout = 30 * time.Second
+	ssePing         = 30 * time.Second
+)
 
 func localOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -212,12 +243,22 @@ func localOnly(next http.Handler) http.Handler {
 		if err != nil {
 			host = r.Host
 		}
-		if h := strings.Trim(host, "[]"); h != "localhost" && h != "127.0.0.1" && h != "::1" {
+		if h := strings.Trim(host, "[]"); (h != "localhost" && h != "127.0.0.1" && h != "::1") || !loopbackPeer(r.RemoteAddr) {
 			http.Error(w, "serve answers only to localhost", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loopbackPeer reports whether the connection came from this machine.
+func loopbackPeer(remote string) bool {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.Unmap().IsLoopback()
 }
 
 // info serves the setup a run started now would use.
@@ -281,7 +322,7 @@ func (s *Server) launch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req Request
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+	if err := decodeBody(w, r, 64<<10, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -448,7 +489,7 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		Question string `json:"question"`
 		Turns    []Turn `json:"turns"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAskBody)).Decode(&req); err != nil {
+	if err := decodeBody(w, r, maxAskBody, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -497,7 +538,7 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 		Key   string          `json:"key"`
 		Value string          `json:"value"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAskBody)).Decode(&req); err != nil {
+	if err := decodeBody(w, r, maxAskBody, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -592,7 +633,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	if idle {
 		_, _ = io.WriteString(w, "event: idle\ndata: {}\n\n")
 	}
+	ping := time.NewTicker(ssePing)
+	defer ping.Stop()
 	for {
+		_ = rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
 		lines, from, gap, changed := s.since(cursor)
 		if gap {
 			_, _ = io.WriteString(w, "event: gap\ndata: {}\n\n")
@@ -608,6 +652,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case <-changed:
+		case <-ping.C:
+			// A comment line, which the page ignores: a peer that is gone
+			// is found out by the write failing.
+			_ = rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
+			if _, err := io.WriteString(w, ": ping\n\n"); err != nil || rc.Flush() != nil {
+				return
+			}
 		case <-r.Context().Done():
 			return
 		}

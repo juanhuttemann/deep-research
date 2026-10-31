@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -73,8 +74,10 @@ func openAIParams(effort string, streamed bool) []agent.Option {
 // then shows nothing. An unstreamed one replaces the agent's own parameters,
 // so it carries their output limit.
 //
-// ponytail: adaptive thinking is what 4.6 and later models accept; earlier
-// ones (Haiku 4.5) reject it, and need a model check to stream.
+// Adaptive thinking is what 4.6 and later models accept; earlier ones (Haiku
+// 4.5) and some compatible endpoints refuse it, and every streamed phase
+// failed at its first call. effortFallback sends such a request again
+// without it, as it does a refused effort.
 func claudeParams(effort string, streamed bool) []agent.Option {
 	if !streamed && effort == "" {
 		return nil
@@ -166,7 +169,7 @@ func (a *impl) effortFallback(req *http.Request, next option.MiddlewareNext) (*h
 		return nil, err
 	}
 	without, level := body, ""
-	if bytes.Contains(body, []byte("effort")) {
+	if bytes.Contains(body, []byte("effort")) || bytes.Contains(body, []byte("thinking")) {
 		without, level = stripEffort(body)
 	}
 	if level == "" {
@@ -184,7 +187,11 @@ func (a *impl) effortFallback(req *http.Request, next option.MiddlewareNext) (*h
 	resp, err = next(withBody(req, without))
 	if err == nil && resp.StatusCode < http.StatusMultipleChoices {
 		a.refused.add(level)
-		a.log(fmt.Sprintf("the endpoint refused reasoning effort %s (%s); asking without it from now on", level, reason))
+		what := "reasoning effort " + level
+		if level == "default" {
+			what = "adaptive thinking"
+		}
+		a.log(fmt.Sprintf("the endpoint refused %s (%s); asking without it from now on", what, reason))
 	}
 	return resp, err
 }
@@ -198,9 +205,11 @@ func withBody(req *http.Request, body []byte) *http.Request {
 	return r
 }
 
-// stripEffort is a request body without its effort, and the level it had:
-// reasoning_effort on an OpenAI-compatible request, output_config.effort on a
-// Messages API one. level is "" when the body sets none.
+// stripEffort is a request body without its reasoning settings, and the
+// level it had: reasoning_effort on an OpenAI-compatible request,
+// output_config.effort and thinking on a Messages API one. A Messages API
+// body with thinking and no effort has level "default". level is "" when the
+// body sets neither.
 func stripEffort(body []byte) (without []byte, level string) {
 	var req map[string]json.RawMessage
 	if json.Unmarshal(body, &req) != nil {
@@ -211,15 +220,21 @@ func stripEffort(body []byte) (without []byte, level string) {
 		return remarshal(req, body), unquote(raw)
 	}
 	var cfg map[string]json.RawMessage
-	if json.Unmarshal(req["output_config"], &cfg) != nil || cfg["effort"] == nil {
-		return body, ""
+	if json.Unmarshal(req["output_config"], &cfg) == nil && cfg["effort"] != nil {
+		level = unquote(cfg["effort"])
+		delete(cfg, "effort")
+		if len(cfg) == 0 {
+			delete(req, "output_config")
+		} else {
+			req["output_config"] = remarshal(cfg, req["output_config"])
+		}
 	}
-	level = unquote(cfg["effort"])
-	delete(cfg, "effort")
-	if len(cfg) == 0 {
-		delete(req, "output_config")
-	} else {
-		req["output_config"] = remarshal(cfg, req["output_config"])
+	if _, ok := req["thinking"]; ok {
+		delete(req, "thinking")
+		level = cmp.Or(level, "default")
+	}
+	if level == "" {
+		return body, ""
 	}
 	return remarshal(req, body), level
 }
@@ -252,7 +267,7 @@ func refusesEffort(resp *http.Response, err error) (reason string, refused bool)
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
 	msg := strings.ToLower(string(head))
-	if !strings.Contains(msg, "reasoning") && !strings.Contains(msg, "effort") {
+	if !strings.Contains(msg, "reasoning") && !strings.Contains(msg, "effort") && !strings.Contains(msg, "thinking") {
 		return "", false
 	}
 	return clip(errorMessage(head), 160), true

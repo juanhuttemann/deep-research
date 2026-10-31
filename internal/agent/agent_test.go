@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1006,5 +1007,26 @@ func TestFactCheckWithNoVerdictsLogsWhatCameBack(t *testing.T) {
 		return strings.Contains(l, `the fact-check answered with no verdicts (13 characters): "{\"claims\":[]}"`)
 	}) {
 		t.Errorf("the empty answer was not logged:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// A streamed attempt that failed after its usage arrived returned nothing,
+// and the tokens the provider billed for it never reached the run's total.
+func TestFailedStreamKeepsItsUsage(t *testing.T) {
+	stream := agent.ResponseStream(func(yield func(*agent.ResponseUpdate, error) bool) {
+		if !yield(&agent.ResponseUpdate{Role: message.RoleAssistant, Contents: message.Contents{
+			&message.UsageContent{Details: message.UsageDetails{InputTokenCount: 120, OutputTokenCount: 30}}}}, nil) {
+			return
+		}
+		yield(nil, errors.New("stream cut"))
+	})
+	resp, err := collectResponse(stream, func(string) {})
+	if err == nil {
+		t.Fatal("the stream's error was lost")
+	}
+	a := &impl{}
+	a.addUsage(resp)
+	if got := a.tokens.Load(); got != 150 {
+		t.Errorf("tokens = %d, want the failed attempt's 150", got)
 	}
 }

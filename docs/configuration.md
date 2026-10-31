@@ -210,7 +210,14 @@ two ways, decided when it starts:
    and do not let it read that sign-in's credentials, so deep-research never
    touches them.
 2. **`ANTHROPIC_API_KEY`, through the Messages API**, when Claude Code is
-   missing, signed out, or signed in to API billing.
+   missing, signed out, or signed in to API billing. An
+   `anthropic_base_url` other than `api.anthropic.com` (Kimi, MiniMax, a
+   gateway) goes this way too, when no model was chosen in `drsh login` or
+   `drsh setup` or when there is a key for it: `claude -p` would drop that
+   URL and key and bill the subscription. If
+   `claude auth status` fails outright (a timeout, an answer that is not
+   its status), the run says so before it uses the key, and `doctor` says
+   why.
 
 With both, a run that reaches the subscription's usage limit says so and
 continues on the key for the rest of the run. Without a key the limit fails
@@ -248,8 +255,9 @@ fallback beta). If the API refuses the fallback itself (an account with none
 configured, or a retired beta), the run sends its requests without it, as
 Claude Code does. A refusal that still comes back, from either provider,
 fails the phase as "declined" instead of passing on an empty answer. Models
-older than the 4.6 generation, such as Haiku 4.5, are not supported on the
-API: they reject adaptive thinking.
+older than the 4.6 generation, such as Haiku 4.5, and compatible endpoints
+reject adaptive thinking: the refused request is sent again without it, and
+the run says so once and leaves it out from then on.
 
 ## `config.yaml` keys
 
@@ -258,8 +266,8 @@ API: they reject adaptive thinking.
 | `data_file` | `~/.deep-research/research.jsonl` | append-only run history |
 | `model_call_timeout` | `120s` | one attempt at one model call. For the streamed phases (plan, analysis, fact-check, report) it is how long the model may send nothing: each piece of reasoning or answer restarts it, so a model still working is not cut off. A streamed attempt stops at five times this (10 minutes at the default) however steadily it streams, and is not retried: the same prompt would run as long again |
 | `model_call_retries` | `2` | extra attempts for a failed call; each retry doubles that timeout. A rejected key (401) is not retried |
-| `run_timeout` | `30m` | the whole run, including search and scraping |
-| `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works |
+| `run_timeout` | `30m` | the whole run, including search and scraping. A duration needs its unit (`30m`, `1800s`): a bare number, here or in `model_call_timeout`, is refused, since it would read as nanoseconds |
+| `sources_per_topic` | `0` | sources per sub-agent; `0` lets the `--mode` tier decide. The older `max_depth` spelling still works, `DEEP_RESEARCH_MAX_DEPTH` included; `DEEP_RESEARCH_SOURCES_PER_TOPIC` wins when both are set |
 | `sub_topics` | `0` | sub-topics per plan; `0` lets the planner choose as few as the question needs, up to the `--mode` tier's count (quick 3, standard 4, deep 6); 1–8 asks for exactly that many in every mode. `--topics` overrides it |
 | `follow_ups` | `true` | run the follow-up round between the planned searches and the analysis; `false` skips it (`--no-follow-ups` for one run, `f` in the brief) |
 | `report_format` | `standard` | the report's shape: `standard`, `brief` (about 300 words), `detailed` (about 1500 words) or `table` (tables first). `--format` for one run, `t` in the brief. A value that is not one of these fails the load |

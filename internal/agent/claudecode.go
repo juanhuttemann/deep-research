@@ -46,26 +46,37 @@ const claudeAuthTimeout = 15 * time.Second
 
 // claudeCodeLogin finds the claude binary and the subscription it is signed in
 // to. It is empty when Claude Code is missing, signed out, or signed in to API
-// billing, which is not a subscription.
-func claudeCodeLogin(ctx context.Context) (bin, plan string) {
-	bin, err := exec.LookPath("claude")
+// billing, which is not a subscription. err says why the sign-in could not be
+// read at all (a timeout, an answer that is not the status): read as signed
+// out, that failure moved the run to the API key with nothing said, and the
+// key was billed in place of the subscription.
+func claudeCodeLogin(ctx context.Context) (bin, plan string, err error) {
+	bin, err = exec.LookPath("claude")
 	if err != nil {
-		return "", ""
+		return "", "", nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, claudeAuthTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "auth", "status", "--json")
 	cmd.Env = claudeCodeEnv()
-	out, _ := cmd.Output() // signed out exits 1, with the JSON still on stdout
+	// A grandchild holding stdout open kept Output waiting past the timeout.
+	cmd.WaitDelay = time.Second
+	out, runErr := cmd.Output() // signed out exits 1, with the JSON still on stdout
 	var s struct {
 		LoggedIn         bool   `json:"loggedIn"`
 		AuthMethod       string `json:"authMethod"`
 		SubscriptionType string `json:"subscriptionType"`
 	}
-	if json.Unmarshal(out, &s) != nil || !s.LoggedIn || (s.AuthMethod != "claude.ai" && s.AuthMethod != "oauth_token") {
-		return "", ""
+	if jsonErr := json.Unmarshal(out, &s); jsonErr != nil {
+		if ctx.Err() != nil {
+			return "", "", fmt.Errorf("claude auth status: %w", ctx.Err())
+		}
+		return "", "", fmt.Errorf("claude auth status: %w", cmp.Or(runErr, jsonErr))
 	}
-	return bin, cmp.Or(s.SubscriptionType, "claude.ai")
+	if !s.LoggedIn || (s.AuthMethod != "claude.ai" && s.AuthMethod != "oauth_token") {
+		return "", "", nil
+	}
+	return bin, cmp.Or(s.SubscriptionType, "claude.ai"), nil
 }
 
 // claudeCodeEnv is this process's environment without the Anthropic API

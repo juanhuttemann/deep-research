@@ -311,3 +311,42 @@ func TestInitDoesNotCreateWorldReadableSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A bare number is nanoseconds to viper: run_timeout: 1800, meant as
+// seconds, was 1.8µs, and every run failed with a deadline naming no key.
+func TestBareNumberDurationIsRefusedNamingItsKey(t *testing.T) {
+	for _, tc := range []struct{ yaml, env, key string }{
+		{yaml: "run_timeout: 1800\n", key: "run_timeout"},
+		{yaml: "model_call_timeout: 300\n", key: "model_call_timeout"},
+		{env: "1800", key: "run_timeout"},
+	} {
+		cfgDir := chdirTemp(t)
+		writeFile(t, filepath.Join(cfgDir, "config.yaml"), tc.yaml+"model_call_retries: 2\n")
+		if tc.env != "" {
+			t.Setenv("DEEP_RESEARCH_RUN_TIMEOUT", tc.env)
+		}
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.key) {
+			t.Errorf("%q / env %q: Load = %v, want an error naming %s", tc.yaml, tc.env, err, tc.key)
+		}
+	}
+}
+
+// max_depth is an alias, and viper looks an alias's env var up under the
+// new name only: DEEP_RESEARCH_MAX_DEPTH, the documented older spelling,
+// was silently ignored.
+func TestLegacyMaxDepthEnvApplies(t *testing.T) {
+	cfgDir := chdirTemp(t)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "max_depth: 5\n")
+	t.Setenv("DEEP_RESEARCH_MAX_DEPTH", "7")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourcesPerTopic != 7 {
+		t.Errorf("SourcesPerTopic = %d, want the env's 7", cfg.SourcesPerTopic)
+	}
+	t.Setenv("DEEP_RESEARCH_SOURCES_PER_TOPIC", "3")
+	if cfg, _ = Load(); cfg.SourcesPerTopic != 3 {
+		t.Errorf("SourcesPerTopic = %d, want the new name's 3 over the old", cfg.SourcesPerTopic)
+	}
+}

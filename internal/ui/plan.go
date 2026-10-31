@@ -168,6 +168,12 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 	if len(topics) == 0 {
 		return nil, errors.New("read plan: no sub-topics to research")
 	}
+	// The ceiling --topics is held to: every sub-topic takes a source
+	// whatever the budget, so sixty of them ran sixty sub-agents and
+	// fetched past the run's source cap.
+	if len(topics) > MaxSubTopics {
+		return nil, fmt.Errorf("read plan: %d sub-topics: at most %d", len(topics), MaxSubTopics)
+	}
 	// An edited list is input like any other: a private host typed into it
 	// is refused here as it is on the command line.
 	domains, err := tools.ParseDomains(p.Domains)

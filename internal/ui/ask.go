@@ -149,8 +149,9 @@ func searchPages(m *Meta, query string) string {
 		score float64
 	}
 	var hits []hit
+	score := tools.NewPageScorer(query)
 	for u, page := range m.Pages {
-		if s := tools.PageRelevance(query, page); s > 0 {
+		if s := score.Score(page); s > 0 {
 			hits = append(hits, hit{u, s})
 		}
 	}

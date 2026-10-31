@@ -27,6 +27,10 @@ const hostedContentLimit = 40000
 // cap raw_content on its side.
 const hostedBodyLimit = 16 * 1024 * 1024
 
+// maxJSONString is the most of one string a response decode keeps (see
+// cappedJSON): far past any page limit here, which is applied after.
+const maxJSONString = 1 << 20
+
 // Tavily's own statuses for a key out of credits: 432 is the plan's limit,
 // 433 the pay-as-you-go cap the account set.
 const (
@@ -87,8 +91,71 @@ func (c *hostedClient) post(ctx context.Context, path string, body, out any) err
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("%s: %w", c.service, &httpError{Code: resp.StatusCode, Body: strings.TrimSpace(string(msg)), Keyed: true})
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, hostedBodyLimit)).Decode(out); err != nil {
+	if err := json.NewDecoder(cappedJSON(resp.Body, maxJSONString, hostedBodyLimit)).Decode(out); err != nil {
 		return fmt.Errorf("decode %s response: %w", c.service, err)
 	}
 	return nil
+}
+
+// cappedJSON is r, a JSON document, with every string in it cut to max
+// bytes, and what is left read to at most limit bytes. A page is cut to its
+// limit only once decoded, and a body past the read limit failed the decode
+// whole: one huge raw_content lost a search all ten of its results, one huge
+// page its scrape. Cut on the way in, the document stays whole, and limit
+// bounds only the rest of it; a cut through a character decodes as U+FFFD,
+// which the page limit cuts off anyway.
+func cappedJSON(r io.Reader, max, limit int64) io.Reader {
+	return io.LimitReader(&stringCapper{r: r, max: max}, limit)
+}
+
+// stringCapper is cappedJSON's reader. esc is the bytes of an escape still
+// to come, -1 for the one after its backslash; an escape is kept or dropped
+// whole, so a cut never leaves half of one.
+type stringCapper struct {
+	r        io.Reader
+	max, n   int64
+	in, kept bool
+	esc      int
+}
+
+func (c *stringCapper) Read(p []byte) (int, error) {
+	for {
+		n, err := c.r.Read(p)
+		w := 0
+		for _, b := range p[:n] {
+			if c.keep(b) {
+				p[w] = b
+				w++
+			}
+		}
+		if w > 0 || err != nil {
+			return w, err
+		}
+	}
+}
+
+func (c *stringCapper) keep(b byte) bool {
+	switch {
+	case !c.in:
+		c.in, c.n = b == '"', 0
+		return true
+	case c.esc == -1:
+		c.esc = 0
+		if b == 'u' {
+			c.esc = 4
+		}
+		return c.kept
+	case c.esc > 0:
+		c.esc--
+		return c.kept
+	case b == '"':
+		c.in = false
+		return true
+	case b == '\\':
+		c.esc, c.kept = -1, c.n < c.max
+		c.n += 2
+		return c.kept
+	}
+	c.n++
+	return c.n <= c.max
 }

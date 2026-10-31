@@ -43,14 +43,18 @@ func (a *impl) connectClaude(cfg Config, withTools bool) (newAgentFunc, error) {
 		return api, nil
 	}
 	if useClaudeCode(cfg) {
-		if bin, _ := claudeCodeLogin(context.Background()); bin != "" {
+		bin, _, err := claudeCodeLogin(context.Background())
+		if err != nil && api != nil {
+			a.log(fmt.Sprintf("Claude Code's sign-in could not be read (%v); using the API key instead", err))
+		}
+		if bin != "" {
 			a.via = "claude-code"
 			cc := &claudeCode{bin: bin, model: cfg.ClaudeModel, impl: a, api: api}
 			return cc.newAgent, nil
 		}
 	}
 	if api == nil && !useClaudeCode(cfg) {
-		return nil, fmt.Errorf("no API key for %s (run `drsh setup`, or set ANTHROPIC_API_KEY)", safeEndpoint(cfg.AnthropicBaseURL))
+		return nil, fmt.Errorf("no API key for %s (run `drsh setup`, or set ANTHROPIC_API_KEY)", SafeEndpoint(cfg.AnthropicBaseURL))
 	}
 	if api == nil {
 		return nil, errors.New("provider claude needs Claude Code signed in to a Claude subscription" +

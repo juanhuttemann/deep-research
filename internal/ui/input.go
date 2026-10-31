@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -314,6 +315,48 @@ func keyOrLiteral(b byte) Key {
 	return KeyUnknown
 }
 
+// keyPoll is how long one wait for a key lasts before the reader checks
+// whether it was closed, or its run ended: the most a Close waits for a read
+// in progress.
+const keyPoll = 100 * time.Millisecond
+
+// ctxInput is an Input that ends, as at the end of input, once ctx is done.
+// A picker waiting for a key took no notice of the run's deadline or of a
+// cancel, and the process sat on the screen past both until a key came. A
+// reader that cannot wait in steps (a cooked terminal) still blocks.
+type ctxInput struct {
+	Input
+	ctx context.Context
+}
+
+func (c ctxInput) Next() (byte, error) {
+	// Only a terminal waits in steps: a scripted reader's NextWithin ends
+	// the input at a byte not yet buffered.
+	t, ok := c.Input.(timedInput)
+	if _, tty := c.Input.(terminalOwner); !ok || !tty {
+		return c.Input.Next()
+	}
+	for {
+		if c.ctx.Err() != nil {
+			return 0, io.EOF
+		}
+		b, err := t.NextWithin(keyPoll)
+		if !errors.Is(err, errNoKeyPending) {
+			return b, err
+		}
+	}
+}
+
+func (c ctxInput) NextWithin(d time.Duration) (byte, error) {
+	if c.ctx.Err() != nil {
+		return 0, io.EOF
+	}
+	if t, ok := c.Input.(timedInput); ok {
+		return t.NextWithin(d)
+	}
+	return 0, errNoKeyPending
+}
+
 // lineReader reads from a terminal that could not be put in raw mode. Keys
 // still work, but only once Enter is pressed, so Raw reports false and callers
 // treat a whole line as one keystroke.
@@ -371,7 +414,10 @@ func catchSignals(interactive bool) chan os.Signal {
 		return nil
 	}
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	// SIGQUIT too: its default action dumps the goroutines and exits with no
+	// defer run, raw mode and the hidden cursor left behind. Raw mode makes
+	// Ctrl-\ a key, so it comes from outside, as the others do.
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	return sig
 }
 
@@ -499,9 +545,24 @@ func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text
 			l.deleteForward()
 		default:
 			l.edit(c, tab)
+			if l.midRune() {
+				// Drawn now, the frame would hold a lone lead byte: invalid
+				// UTF-8 until the rest of the character arrives.
+				continue
+			}
 		}
 		show()
 	}
+}
+
+// midRune reports whether the cursor sits after the first bytes of a
+// character still arriving.
+func (l *lineEdit) midRune() bool {
+	i := l.cur - 1
+	for i > 0 && !utf8.RuneStart(l.buf[i]) {
+		i--
+	}
+	return i >= 0 && !utf8.FullRune(l.buf[i:l.cur])
 }
 
 // afterEsc applies what follows an Esc, and reports false for an Esc that

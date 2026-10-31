@@ -5,6 +5,93 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Security
+
+- `serve` answered any client that sent `Host: localhost`, so with `--addr`
+  off loopback another machine could launch runs on your credentials and
+  read every report. It now also requires the connection to come from this
+  machine.
+- Credentials in an endpoint's query or path (`?api_key=…`, `/sk-…/v1`)
+  reached error messages, `--jsonl`, the history and `doctor`; only the
+  userinfo was removed. `setup`'s review and `login`'s override note printed
+  SearXNG, Firecrawl and model endpoints with their credentials. All of
+  them are redacted now.
+- With no user cache directory, the provider catalog was cached in a fixed
+  directory under the shared temp dir, where another user could plant the
+  endpoints `login` sends a pasted key to. There is no cache then.
+- The scrape guard let shared address space (100.64.0.0/10, carrier NAT
+  and Tailscale), 192.0.0.0/24, 198.18.0.0/15 and 240.0.0.0/4 through.
+- A page title holding `](https://…)` set its citation's link target in
+  the exported `.md` and `.pdf`. Titles and URLs are escaped.
+
+### Fixed
+
+- An instant run left the planning spinner running: it repainted stderr
+  for the rest of the process, over the report and the follow-up questions.
+- A history line cut short by a kill was glued to the next run's, and both
+  were lost. `null` and `{}` lines were listed as blank runs and not
+  counted as unreadable.
+- `--replay` of a trace with a search that has neither a result nor an
+  error panicked; it is refused on load. A query that failed and was then
+  answered replayed the failure.
+- Quotations that hold another quotation, or that wrap onto a second line,
+  were never checked, and invented words around a genuine inner quotation
+  kept their marks. Quotations in Chinese, Japanese, Thai and other
+  scripts written without spaces were never checked at all. An escaped
+  `\"…\"` quotation of a page always lost its marks.
+- A `--plan` file with more than 8 sub-topics ran them all, past the run's
+  source budget; it is refused.
+- A SearXNG instance answering every query with no results was preferred,
+  and a healthy one behind it never asked.
+- A claim citing a URL without its scheme (`go.dev/doc/x`) lost its source.
+- A fact-check status with whitespace around it (`"supported "`) was read
+  as unrecognized and blocked what rested on the claim.
+- `run_timeout: 1800` meant 1.8 microseconds, and every run failed with a
+  deadline naming no key; a bare number is now refused with the key named.
+  `DEEP_RESEARCH_MAX_DEPTH` was ignored.
+- `provider: claude` with an Anthropic-compatible `ANTHROPIC_BASE_URL` from
+  the environment alone went through Claude Code, which dropped that URL
+  and key. A `claude auth status` that failed moved the run to the API key
+  silently; it is now said.
+- Claude models that refuse adaptive thinking (Haiku 4.5) failed every
+  streamed phase; the request is sent again without it.
+- `doctor` and `login` passed a misspelt model on Anthropic's own API.
+- Emoji outside the main block (🈁, 🀄, 🩰, ❤️, ☕, ✅) were measured one
+  column, and a row holding one scrolled the live frame.
+- A long follow-up conversation outgrew the context window, and every later
+  question about the run failed. Each question now carries the latest 8
+  turns.
+- With stderr redirected, the ask box read the question blind, with no echo
+  or line editing; the terminal now edits the line as a shell's does.
+- The brief and the clarifying questions waited for a key past the run's
+  deadline and through a cancel from the serve page.
+- Tokens of an attempt that failed mid-stream were left out of the total.
+- A sub-topic that only re-found pages another had cited was reported to
+  the analysis as having found nothing. `also_found_by` depended on which
+  sub-agent finished first. A search sent before a refusal and answered
+  after it cleared the "search is refusing" state.
+- A repeated claim ID could be renamed to another claim's ID.
+- SIGQUIT left the terminal raw and the cursor hidden.
+- A multi-byte character was drawn byte by byte while typed.
+- `--plan-only -o` into a directory that did not exist lost the plan.
+- `setup` could say nothing was saved after saving a key.
+- A `!command` key whose command left a child running could wait past its
+  timeout, as could `claude auth status`. A `!command` key is resolved
+  again after five minutes, so `serve` no longer sends an expired token.
+- `$BROWSER` set to a command line (`firefox %s`, `firefox --new-window`)
+  or a Windows path opened nothing.
+- An international `--domains` entry (`bücher.de`) matched none of its
+  pages, which engines return as punycode.
+- A JSON answer from SearXNG could be thrown away for an HTML request when
+  another query was refused meanwhile.
+- One page over the size limit failed a whole hosted search or scrape; its
+  text is cut instead.
+- `serve` held a stalled client's request body or event stream forever.
+- Deeply nested lists or quotes set PDF text a character a line, off the
+  page.
+- `--depth` and `--sources` together are refused; `--sources` used to win
+  silently.
+
 ## [0.28.0] - 2026-10-30
 
 ### Added

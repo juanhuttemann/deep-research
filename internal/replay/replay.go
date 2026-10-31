@@ -137,14 +137,14 @@ func (r *Recorder) ResearchDetail(ctx context.Context, query string, terms []str
 		s.Error = "cancelled before the search finished"
 	}
 	r.mu.Lock()
-	if s.Error != "" || !r.finished[query] {
+	if s.Error != "" || !r.finished[searchKey(query, terms)] {
 		r.trace.Searches = append(r.trace.Searches, s)
 	}
 	if s.Error == "" {
 		if r.finished == nil {
 			r.finished = map[string]bool{}
 		}
-		r.finished[query] = true
+		r.finished[searchKey(query, terms)] = true
 	}
 	r.mu.Unlock()
 	r.save()
@@ -166,9 +166,9 @@ func (r *Recorder) Seed(t *Trace) {
 		r.finished = map[string]bool{}
 	}
 	for _, s := range t.Searches {
-		if s.Error == "" && s.Result != nil && !r.finished[s.Query] {
+		if k := searchKey(s.Query, s.Terms); s.Error == "" && s.Result != nil && !r.finished[k] {
 			r.trace.Searches = append(r.trace.Searches, s)
-			r.finished[s.Query] = true
+			r.finished[k] = true
 		}
 	}
 }
@@ -386,6 +386,13 @@ func Load(path string) (*Trace, error) {
 	if t.Question == "" || len(t.Plan) == 0 {
 		return nil, fmt.Errorf("read trace %s: no question or plan recorded", path)
 	}
+	// A search with neither its result nor its error is unreadable, and
+	// served as a result it was a nil the driver dereferenced.
+	for i, s := range t.Searches {
+		if s.Error == "" && s.Result == nil {
+			return nil, fmt.Errorf("read trace %s: search %d (%q) has no result or error", path, i+1, s.Query)
+		}
+	}
 	for _, s := range t.Searches {
 		for j, key := range s.PageKeys {
 			if s.Result != nil && j < len(s.Result.Findings) {
@@ -416,21 +423,40 @@ func (t *Trace) addPage(url, content string) string {
 	}
 }
 
+// searchKey is what tells two searches apart: the query and the terms that
+// rank its results. Keyed by the query alone, two sub-topics sending the
+// same query with different terms were one search, and the second was
+// served the first's evidence on replay and resume.
+func searchKey(query string, terms []string) string {
+	return query + "\x00" + strings.Join(terms, "\x1f")
+}
+
 // Player serves a trace's plan and search results and passes the model
 // phases to the live assistant it wraps.
 type Player struct {
 	agent.Assistant
 	trace   *Trace
+	byKey   map[string]Search
 	byQuery map[string]Search
+}
+
+// keep puts s in m under key unless m holds a success for it already.
+func keep(m map[string]Search, key string, s Search) {
+	if old, seen := m[key]; !seen || old.Error != "" && s.Error == "" {
+		m[key] = s
+	}
 }
 
 // Play replays t, calling live only for the model phases.
 func Play(live agent.Assistant, t *Trace) *Player {
-	p := &Player{Assistant: live, trace: t, byQuery: map[string]Search{}}
+	p := &Player{Assistant: live, trace: t, byKey: map[string]Search{}, byQuery: map[string]Search{}}
+	// The recorder keeps every failure and the first success of a search, so
+	// one that failed and was then answered has both: served the first, the
+	// replay failed on a search the run had recovered from. A success wins;
+	// a failure only stands for a search that never got one.
 	for _, s := range t.Searches {
-		if _, seen := p.byQuery[s.Query]; !seen {
-			p.byQuery[s.Query] = s
-		}
+		keep(p.byKey, searchKey(s.Query, s.Terms), s)
+		keep(p.byQuery, s.Query, s)
 	}
 	return p
 }
@@ -506,13 +532,21 @@ func recordedFollowUps(t *Trace) []agent.FollowUpQuery {
 // recorded run never issued — a follow-up the replayed analysis thought of —
 // fails rather than searching live: the point of a replay is that the
 // evidence does not change.
-func (p *Player) ResearchDetail(_ context.Context, query string, _ []string) (*agent.ResearchDetail, error) {
-	s, ok := p.byQuery[query]
+func (p *Player) ResearchDetail(_ context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
+	// The query alone is the fallback: a follow-up's terms can differ from
+	// the recorded run's and still be the search it made.
+	s, ok := p.byKey[searchKey(query, terms)]
+	if !ok {
+		s, ok = p.byQuery[query]
+	}
 	if !ok {
 		return nil, fmt.Errorf("replay: %q was not searched in the recorded run", query)
 	}
 	if s.Error != "" {
 		return nil, fmt.Errorf("replay: recorded search failed: %s", s.Error)
+	}
+	if s.Result == nil {
+		return nil, fmt.Errorf("replay: recorded search %q has no result", query)
 	}
 	return s.Result, nil
 }
@@ -524,22 +558,24 @@ func (p *Player) ResearchDetail(_ context.Context, query string, _ []string) (*a
 // the analysis retry depends on asking again.
 type Resumer struct {
 	agent.Assistant
-	byQuery map[string]Search
+	bySearch map[string]Search
 }
 
 // Resume continues t on live.
 func Resume(live agent.Assistant, t *Trace) *Resumer {
-	r := &Resumer{Assistant: live, byQuery: map[string]Search{}}
+	r := &Resumer{Assistant: live, bySearch: map[string]Search{}}
 	for _, s := range t.Searches {
-		if s.Error == "" && s.Result != nil {
-			r.byQuery[s.Query] = s
+		if k := searchKey(s.Query, s.Terms); s.Error == "" && s.Result != nil {
+			if _, seen := r.bySearch[k]; !seen {
+				r.bySearch[k] = s
+			}
 		}
 	}
 	return r
 }
 
 func (r *Resumer) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
-	if s, ok := r.byQuery[query]; ok {
+	if s, ok := r.bySearch[searchKey(query, terms)]; ok {
 		return s.Result, nil
 	}
 	return r.Assistant.ResearchDetail(ctx, query, terms)

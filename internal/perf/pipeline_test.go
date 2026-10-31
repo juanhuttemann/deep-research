@@ -2,8 +2,10 @@ package perf
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -52,7 +54,7 @@ func (s *stubAssistant) Plan(context.Context, string, agent.Breadth, []agent.Cla
 }
 
 func (s *stubAssistant) ResearchDetail(context.Context, string, []string) (*agent.ResearchDetail, error) {
-	out := &agent.ResearchDetail{Findings: s.findings}
+	out := &agent.ResearchDetail{Findings: slices.Clone(s.findings)}
 	for _, f := range s.findings {
 		out.Signals = append(out.Signals, agent.SourceSignal{URL: f.URL, Status: "ok", Domain: tools.DomainOf(f.URL)})
 	}
@@ -65,22 +67,22 @@ func (s *stubAssistant) FollowUps(context.Context, string) ([]agent.FollowUpQuer
 
 func (s *stubAssistant) Analyze(context.Context, string) (*agent.Analysis, error) {
 	s.tokens.Add(24000)
-	return s.analysis, nil
+	return clone(s.analysis), nil
 }
 
 func (s *stubAssistant) FactCheck(context.Context, string) (*agent.FactCheckResult, error) {
 	s.tokens.Add(26000)
-	return s.check, nil
+	return clone(s.check), nil
 }
 
 func (s *stubAssistant) Summarize(context.Context, string) (*agent.Summary, error) {
 	s.tokens.Add(14000)
-	return s.summary, nil
+	return clone(s.summary), nil
 }
 
 func (s *stubAssistant) Answer(context.Context, string) (*agent.Summary, error) {
 	s.tokens.Add(5000)
-	return s.summary, nil
+	return clone(s.summary), nil
 }
 
 func (s *stubAssistant) SetSourceBudget(n int)              { s.budget = n }
@@ -90,6 +92,23 @@ func (s *stubAssistant) TokensUsed() int                    { return int(s.token
 func (s *stubAssistant) ScopeTo(domains []string)           { s.domains = domains }
 func (s *stubAssistant) CheckDomains(context.Context, []string) ([]agent.DomainCheck, error) {
 	return nil, nil
+}
+
+// clone is a deep copy of a phase's answer. The run edits what a phase
+// returns (the fact-check governs the analysis, the quote check rewrites the
+// report), and handed the same value every iteration, each measured a run
+// over the last one's edits: the result depended on -benchtime. The copy
+// costs every iteration alike.
+func clone[T any](v *T) *T {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	out := new(T)
+	if err := json.Unmarshal(b, out); err != nil {
+		panic(err)
+	}
+	return out
 }
 
 // newStub builds the assistant over the captured run's data.

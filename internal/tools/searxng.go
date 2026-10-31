@@ -155,6 +155,12 @@ func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearchResul
 	// restart into minutes of searches that never ask.
 	pool := len(insts) > 1
 	failed := &poolError{total: len(insts), public: c.Public}
+	// An answer with no results is kept only until another instance has
+	// results: taken as a success and preferred, an instance answering
+	// every query empty was asked first for the rest of the run, and a
+	// healthy one behind it never.
+	var empty []SearchResult
+	answered := false
 	for _, in := range insts {
 		if why := in.resting(c.clock()); pool && why != nil {
 			failed.skipped++
@@ -162,28 +168,41 @@ func (c *SearXNGClient) Search(ctx context.Context, query string) ([]SearchResul
 			continue
 		}
 		res, err := c.searchOne(ctx, in, query)
-		if err == nil {
+		if err == nil && (len(res) > 0 || !pool) {
 			c.prefer(in)
 			return res, nil
+		}
+		if err == nil {
+			empty, answered = res, true
+			continue
 		}
 		if ctx.Err() != nil {
 			// The query's deadline, not the instance's answer.
 			failed.errs = append(failed.errs, fmt.Errorf("%s: %w", in.url, err))
 			break
 		}
-		if pool {
-			in.rest(c.clock(), err)
-		}
-		// An unreachable instance already names itself.
-		if _, named := errors.AsType[*unreachableError](err); !named {
-			err = fmt.Errorf("%s: %w", in.url, err)
-		}
-		failed.errs = append(failed.errs, err)
+		failed.errs = append(failed.errs, c.failed(in, pool, err))
 	}
-	if len(failed.errs) == 1 && failed.skipped == 0 {
+	switch {
+	case answered:
+		return empty, nil
+	case len(failed.errs) == 1 && failed.skipped == 0:
 		return nil, failed.errs[0]
 	}
 	return nil, failed
+}
+
+// failed rests an instance of a pool that failed a query with err, and
+// returns err naming the instance.
+func (c *SearXNGClient) failed(in *searxInstance, pool bool, err error) error {
+	if pool {
+		in.rest(c.clock(), err)
+	}
+	// An unreachable instance already names itself.
+	if _, named := errors.AsType[*unreachableError](err); !named {
+		err = fmt.Errorf("%s: %w", in.url, err)
+	}
+	return err
 }
 
 func (c *SearXNGClient) clock() time.Time {
@@ -399,13 +418,17 @@ func (c *SearXNGClient) prefer(in *searxInstance) {
 func (c *SearXNGClient) searchOne(ctx context.Context, in *searxInstance, query string) ([]SearchResult, error) {
 	var res []SearchResult
 	var err error
-	if !in.html.Load() {
+	// Decided once, from what was known when the query started: read again
+	// after the JSON answer, a refusal another query got meanwhile threw this
+	// query's good JSON answer away for an HTML request.
+	html := in.html.Load()
+	if !html {
 		res, err = c.searchJSON(ctx, in.url, query)
-		if refusedJSON(err) {
+		if html = refusedJSON(err); html {
 			in.html.Store(true)
 		}
 	}
-	if in.html.Load() {
+	if html {
 		res, err = c.searchHTML(ctx, in.url, query)
 	}
 	for i := range res {
@@ -497,7 +520,7 @@ func (c *SearXNGClient) searchJSON(ctx context.Context, base, query string) ([]S
 		Results      []SearchResult `json:"results"`
 		Unresponsive [][]string     `json:"unresponsive_engines"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&data); err != nil {
+	if err := json.NewDecoder(cappedJSON(resp.Body, maxJSONString, 2*1024*1024)).Decode(&data); err != nil {
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
 	if len(data.Results) == 0 && len(data.Unresponsive) > 0 {

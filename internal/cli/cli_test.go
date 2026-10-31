@@ -925,6 +925,11 @@ func TestBrowserCommand(t *testing.T) {
 		{"WSL with wslu", "linux", map[string]string{"WSL_DISTRO_NAME": "Ubuntu"}, found, []string{"wslview", url}},
 		{"WSL without wslu", "linux", map[string]string{"WSL_INTEROP": "/run/WSL/1_interop"}, missing, []string{"explorer.exe", url}},
 		{"BROWSER first of a list", "linux", map[string]string{"BROWSER": "firefox:chromium"}, missing, []string{"firefox", url}},
+		// Taken whole as a program's name, these opened nothing.
+		{"BROWSER with %s", "linux", map[string]string{"BROWSER": "firefox %s"}, missing, []string{"firefox", url}},
+		{"BROWSER with flags", "linux", map[string]string{"BROWSER": "firefox --new-window"}, missing, []string{"firefox", "--new-window", url}},
+		{"BROWSER a Windows path", "windows", map[string]string{"BROWSER": `C:\Program Files\Mozilla Firefox\firefox.exe`}, found,
+			[]string{`C:\Program Files\Mozilla Firefox\firefox.exe`, url}},
 		{"FreeBSD desktop", "freebsd", nil, missing, []string{"xdg-open", url}},
 	} {
 		name, args := browserCommand(tc.goos, func(k string) string { return tc.env[k] }, tc.look, url)

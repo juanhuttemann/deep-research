@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 // maxDomains bounds a source list. SearXNG gets the list as site: operators in
@@ -59,7 +61,7 @@ func domainHost(entry string) (string, error) {
 	if err != nil || u.Hostname() == "" {
 		return "", errors.New("not a domain")
 	}
-	host := strings.TrimPrefix(strings.ToLower(strings.Trim(u.Hostname(), ".")), "www.")
+	host := strings.TrimPrefix(asciiHost(u.Hostname()), "www.")
 	if err := checkScrapeTarget("https://" + host); err != nil {
 		// Said as what it is for this list: "blocked scrape target" names
 		// the guard, not the reader's mistake.
@@ -69,6 +71,18 @@ func domainHost(entry string) (string, error) {
 	return host, nil
 }
 
+// asciiHost is host lower-cased and in its ASCII (punycode) form. Engines
+// return an international name as punycode (xn--bcher-kva.de), and a list
+// entry kept as typed (bücher.de) matched none of its pages: the preflight
+// said the site was not indexed, and every result was dropped as off it.
+func asciiHost(host string) string {
+	host = strings.ToLower(strings.Trim(host, "."))
+	if a, err := idna.Lookup.ToASCII(host); err == nil {
+		return a
+	}
+	return host
+}
+
 // InDomains reports whether rawURL is on one of domains or a subdomain of
 // one. A look-alike ("notexample.com" for "example.com") is not.
 func InDomains(rawURL string, domains []string) bool {
@@ -76,7 +90,7 @@ func InDomains(rawURL string, domains []string) bool {
 	if u, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
 		host = u.Hostname()
 	}
-	host = strings.ToLower(strings.Trim(host, "."))
+	host = asciiHost(host)
 	if host == "" {
 		return false
 	}

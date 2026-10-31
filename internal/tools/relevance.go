@@ -118,7 +118,11 @@ func relevance(terms []string, title, snippet string) float64 {
 	if len(terms) == 0 {
 		return 1 // nothing to judge against: keep the result
 	}
-	text := fold(title + " " + snippet)
+	return mentionedShare(terms, fold(title+" "+snippet))
+}
+
+// mentionedShare is the share of terms that folded text mentions.
+func mentionedShare(terms []string, text string) float64 {
 	matched := 0
 	for _, t := range terms {
 		if mentions(text, t) {
@@ -136,10 +140,28 @@ func foldAll(terms []string) []string {
 	return out
 }
 
-// PageRelevance is the share of query's words that page mentions, judged as
-// a search result is. queryWords folds them already.
-func PageRelevance(query, page string) float64 {
-	return relevance(queryWords(newFolder(), query), "", page)
+// PageScorer judges pages against one query as a search result is judged:
+// the share of the query's words a page mentions. The words are folded once
+// (queryWords), and every page with one transformer: asked page by page, a
+// run's fifty pages built fifty transformers on every search of them. It is
+// not safe for concurrent use.
+type PageScorer struct {
+	terms []string
+	t     transform.Transformer
+}
+
+// NewPageScorer is a PageScorer for query.
+func NewPageScorer(query string) *PageScorer {
+	t := newFolder()
+	return &PageScorer{terms: queryWords(t, query), t: t}
+}
+
+// Score is the share of the query's words that page mentions.
+func (s *PageScorer) Score(page string) float64 {
+	if len(s.terms) == 0 {
+		return 1
+	}
+	return mentionedShare(s.terms, foldWith(s.t, " "+page))
 }
 
 // mentions reports whether folded text contains the folded term. A phrase

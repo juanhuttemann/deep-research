@@ -570,7 +570,13 @@ func (l *pdfLayout) room(h float64) {
 	}
 }
 
+// pdfMaxIndent is the deepest a block is indented: past it, nested lists
+// and quotes stay at the same depth. Uncapped, about 28 levels left the
+// text no width, and it was set a character a line, past the page's edge.
+const pdfMaxIndent = 12
+
 func (l *pdfLayout) block(b pdfBlock) {
+	b.indent = min(b.indent, pdfMaxIndent)
 	left := pdfMargin + float64(b.indent)*pdfIndentStep
 	if l.indented && b.indent == 0 {
 		l.space(4) // a list ends with an item's tight gap; open it up

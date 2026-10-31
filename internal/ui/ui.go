@@ -121,7 +121,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	}
 
 	script := o.scriptInput()
-	plan, usable, err := o.scopedPlan(ctx, sink, o.asker(renderer, interactive, script))
+	plan, usable, err := o.scopedPlan(ctx, sink, o.asker(ctx, renderer, interactive, script))
 	if err != nil {
 		return endedBeforePlan(ctx, err)
 	}
@@ -295,12 +295,12 @@ func (o Options) plan(ctx context.Context, c Clarified) (*Plan, error) {
 
 // asker is who answers the clarifier's questions: the terminal, the scripted
 // keys, or nobody.
-func (o Options) asker(r *Renderer, interactive bool, script Input) askFunc {
+func (o Options) asker(ctx context.Context, r *Renderer, interactive bool, script Input) askFunc {
 	switch {
 	case script != nil && !o.JSONL:
 		return askScripted(script, r)
 	case interactive:
-		return o.askOnTerminal()
+		return o.askOnTerminal(ctx)
 	}
 	return nil
 }
@@ -308,6 +308,17 @@ func (o Options) asker(r *Renderer, interactive bool, script Input) askFunc {
 // buildPlan runs the planning phase for the reading c and applies the
 // configured source budget.
 func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
+	// One sub-topic is the question itself: a planner call to rephrase it
+	// would take longer than the search it plans. It returns before the
+	// spinner starts: started first, it was never stopped on this path and
+	// repainted stderr for the rest of the process.
+	instant := depthMode(o.DepthMode).IsInstant()
+	if instant && o.SubTopics == 1 {
+		plan := InstantPlan(o.Question, depthMode(o.DepthMode), o.SourcesPerTopic)
+		plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
+		plan.Questions, plan.Clarifications = c.Questions, c.Answers
+		return plan, nil
+	}
 	// Planning is one model call with nothing on screen behind it, so it is
 	// the whole of the dead air between launching the CLI and the brief.
 	stopStatus := func() {}
@@ -323,15 +334,6 @@ func (o Options) buildPlan(ctx context.Context, c Clarified) (*Plan, error) {
 		// that no longer exists, and the CLI's own stderr logger is what the
 		// non-interactive phases expect.
 		defer o.Assistant.SetProgress(func(msg string) { _, _ = fmt.Fprintf(o.Stderr, "%s\n", msg) })
-	}
-	// One sub-topic is the question itself: a planner call to rephrase it
-	// would take longer than the search it plans.
-	instant := depthMode(o.DepthMode).IsInstant()
-	if instant && o.SubTopics == 1 {
-		plan := InstantPlan(o.Question, depthMode(o.DepthMode), o.SourcesPerTopic)
-		plan.NoFollowUps, plan.Report = o.NoFollowUps, o.Report
-		plan.Questions, plan.Clarifications = c.Questions, c.Answers
-		return plan, nil
 	}
 	planner := NewPlanner(o.Assistant, depthMode(o.DepthMode))
 	planner.SubTopics, planner.Reading = o.SubTopics, c.Answers
@@ -385,7 +387,9 @@ func (o Options) confirmBrief(ctx context.Context, input Input, r *Renderer, pla
 	// drawn from the top of the screen, a cancelled brief brought the start
 	// screen back at the top, not where it had been. A launch clears it
 	// before the live frame takes the screen.
-	keys := &keptInput{Input: input}
+	// Bound by the run: a deadline that passed, or a cancel from the serve
+	// page, left the brief waiting for a key past both.
+	keys := &keptInput{Input: ctxInput{Input: input, ctx: ctx}}
 	if interactive {
 		defer r.Inline(keys)()
 	}

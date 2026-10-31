@@ -160,7 +160,7 @@ func BenchmarkPageRelevance(b *testing.B) {
 	b.SetBytes(int64(len(page)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if PageRelevance("how do range over func iterators work", page) < 0 {
+		if NewPageScorer("how do range over func iterators work").Score(page) < 0 {
 			b.Fatal("negative")
 		}
 	}

@@ -30,19 +30,39 @@ func runeWidth(r rune) int {
 // isWideRune reports whether r is East-Asian wide or emoji-presentation, both
 // of which occupy two columns.
 func isWideRune(r rune) bool {
-	switch {
-	case r >= 0x1100 && r <= 0x115f, // Hangul Jamo
-		r >= 0x2e80 && r <= 0xa4cf, // CJK radicals through Yi
-		r >= 0xac00 && r <= 0xd7a3, // Hangul syllables
-		r >= 0xf900 && r <= 0xfaff, // CJK compatibility ideographs
-		r >= 0xfe30 && r <= 0xfe6f, // CJK compatibility forms
-		r >= 0xff00 && r <= 0xff60, // fullwidth forms
-		r >= 0xffe0 && r <= 0xffe6,
-		r >= 0x1f300 && r <= 0x1f9ff, // emoji
-		r >= 0x20000 && r <= 0x3fffd:
-		return true
+	for _, rg := range wideRanges {
+		if r >= rg[0] && r <= rg[1] {
+			return true
+		}
 	}
 	return false
+}
+
+// wideRanges are the runes a terminal draws two columns wide. The emoji
+// stopped at the main block's edges once: 🈁, 🀄 and 🩰 measured one column,
+// and a row holding one wrapped and scrolled the frame. Below U+1F000 are
+// the symbols a terminal draws as an emoji with no selector after them (⌚,
+// ☕, ✅, ⭐).
+var wideRanges = [...][2]rune{
+	{0x1100, 0x115f}, // Hangul Jamo
+	{0x231a, 0x231b}, {0x23e9, 0x23ec}, {0x23f0, 0x23f0}, {0x23f3, 0x23f3}, {0x25fd, 0x25fe},
+	{0x2614, 0x2615}, {0x2648, 0x2653}, {0x267f, 0x267f}, {0x2693, 0x2693}, {0x26a1, 0x26a1},
+	{0x26aa, 0x26ab}, {0x26bd, 0x26be}, {0x26c4, 0x26c5}, {0x26ce, 0x26ce}, {0x26d4, 0x26d4},
+	{0x26ea, 0x26ea}, {0x26f2, 0x26f3}, {0x26f5, 0x26f5}, {0x26fa, 0x26fa}, {0x26fd, 0x26fd},
+	{0x2705, 0x2705}, {0x270a, 0x270b}, {0x2728, 0x2728}, {0x274c, 0x274c}, {0x274e, 0x274e},
+	{0x2753, 0x2755}, {0x2757, 0x2757}, {0x2795, 0x2797}, {0x27b0, 0x27b0}, {0x27bf, 0x27bf},
+	{0x2b1b, 0x2b1c}, {0x2b50, 0x2b50}, {0x2b55, 0x2b55},
+	{0x2e80, 0xa4cf}, // CJK radicals through Yi
+	{0xac00, 0xd7a3}, // Hangul syllables
+	{0xf900, 0xfaff}, // CJK compatibility ideographs
+	{0xfe30, 0xfe6f}, // CJK compatibility forms
+	{0xff00, 0xff60}, // fullwidth forms
+	{0xffe0, 0xffe6},
+	{0x1f004, 0x1f004}, {0x1f0cf, 0x1f0cf}, {0x1f18e, 0x1f18e}, {0x1f191, 0x1f19a}, // 🀄 🃏 🆎 🆑-🆚
+	{0x1f200, 0x1f2ff}, // enclosed ideographic supplement (🈁)
+	{0x1f300, 0x1f9ff}, // emoji
+	{0x1fa70, 0x1faff}, // symbols and pictographs extended-A (🩰)
+	{0x20000, 0x3fffd},
 }
 
 // dispWidth is the column count of s, ignoring ANSI escape sequences.
@@ -124,7 +144,13 @@ func forEachCell(s string, fn func(r rune, width int) bool) {
 			continue
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])
-		if !fn(r, runeWidth(r)) {
+		w := runeWidth(r)
+		// A selector asking for emoji presentation makes a narrow symbol
+		// (❤, ☀) the two columns a terminal draws it in.
+		if next, _ := utf8.DecodeRuneInString(s[i+size:]); next == 0xfe0f && w == 1 {
+			w = 2
+		}
+		if !fn(r, w) {
 			return
 		}
 		i += size
