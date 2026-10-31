@@ -464,9 +464,15 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   the history record: `status` is `complete`, `incomplete` (a late phase
   failed, or more searches gave nothing than gave something; the report was
   saved), `failed` or `cancelled`, `detail`
-  is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote.
-  Validation errors (an empty question, a bad `--mode`, no key) end on it
-  too. A stream that stops without one means the process was killed.
+  is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote,
+  and `checkpoint` is the file `--resume` continues from, when a cancelled,
+  failed or incomplete run left one (a run stopped before its plan has
+  none). Validation errors (an empty question, a bad `--mode`, no key) end
+  on it too. A stream that stops without one means the process was killed.
+- **SIGINT or SIGTERM ends a headless run as a cancellation**: it stops,
+  writes `done` with `status: cancelled` and its `checkpoint`, and exits.
+  A second signal ends it at once. (The terminal UI handles signals its
+  own way, and `serve` is stopped by them, not its runs.)
 - During streamed planning, analysis, fact-check and summarization calls,
   a `transient` `info` line arrives at least every five seconds — waiting
   for the model to start, thinking, the count so far, or "no new output for Ns". While a reasoning
@@ -496,6 +502,21 @@ The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
 `citation`, `token`, `report`, `thinking` and `error`; their fields are the
 `Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
 structured result: analysis, fact-check, sources and the whole timeline.
+
+`drsh settings` prints the run settings as JSON: each setting's `key`,
+`label`, `help`, current `value` (the config's, else the default), its
+`choices` (each with the exact `arg` that selects it, such as
+`--no-follow-ups=true` for follow-ups off, and what it `implies` for the
+others), and for a count its `flag` and `max`. It is the list the terminal
+and the serve page draw their controls from; a program offering the
+settings should draw from it too, rather than keep its own copy of the
+tiers and counts.
+
+For [Pi](https://pi.dev), [`integrations/pi`](../integrations/pi/README.md)
+is an extension built on this contract: a `deep_research` tool with live
+progress, clarifying questions and plan review in Pi's dialogs, every
+setting above as a parameter, and the model calls answered by Pi's own
+model.
 
 For a coding agent, [`skills/deep-research`](../skills/deep-research/SKILL.md)
 is an [Agent Skill](https://agentskills.io) that follows this contract: it
@@ -828,6 +849,17 @@ echo "" | drsh login --provider custom --base-url http://localhost:8000/v1 --mod
 
 Where the files go and how they rank against the environment:
 [configuration.md](configuration.md#stored-keys-drsh-login).
+
+## `settings`
+
+```bash
+drsh settings        # the run settings, their choices and flags, as JSON
+```
+
+Prints the settings a run takes, at the values a run started now would
+take, for a program that offers them (see
+[Driving it from another program](#driving-it-from-another-program)).
+It spends nothing and needs no key.
 
 ## `doctor`
 

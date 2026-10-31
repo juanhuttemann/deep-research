@@ -29,6 +29,13 @@ blocks, accepts and rejects (`EVAL_REPEAT=n` to measure variance; spends one
 request per fact-check call, two for most cases, per case and repeat; not
 part of the gate). Add a case there for
 each checker failure found in a real run.
+`make pi` typechecks and tests the Pi extension in `integrations/pi`
+(TypeScript; needs Node 22.19+ and npm or corepack, skipped when absent),
+including its bridge driving a drsh built from the tree. It is part of
+`make verify`. The extension knows drsh only through the CLI, the
+`--jsonl` events, the `.json` artifact and `drsh settings`: a change to
+any of those is a change to its contract, and its fixtures
+(`integrations/pi/test/fixtures`) must follow.
 `./drsh -p "question"` to exercise the CLI (needs an API key).
 `make diagram` redraws the README's run diagram (`docs/images/pipeline.svg`)
 from the tables in `scripts/pipeline-diagram/main.go`; edit those, never the

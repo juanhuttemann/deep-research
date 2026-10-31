@@ -1,0 +1,3 @@
+{"type":"plan","time":"2026-10-31T16:08:58Z","plan":{"question":"Which is faster?","sub_topics":[{"id":"1","name":"Benchmarks"}]}}
+{"type":"phase","time":"2026-10-31T16:08:58Z","phase":"Research","detail":"Running sub-agents"}
+{"type":"done","time":"2026-10-31T16:08:58Z","status":"cancelled","checkpoint":"REPORTS/run.abc.partial.json"}

@@ -239,9 +239,11 @@ again, and the model phases run once more (`doctor`'s budget line gives
 their count).
 
 `--resume` takes no `-p`, `--plan`, `--mode`, `--sources` or `--domains`;
-the checkpoint carries them. Look for `*.partial.json` in the reports
-directory after a `failed` or `cancelled` run. A run killed before its plan
-was confirmed has no checkpoint: run it again.
+the checkpoint carries them. The `done` line names it in `checkpoint`
+(drsh 0.30.0 and newer; with an older one, look for `*.partial.json` in the
+reports directory). A run stopped before its plan was confirmed has no
+checkpoint: run it again. Stopping a run with SIGINT (`kill -INT`) ends it
+as `cancelled` with its checkpoint kept.
 
 ## Other commands
 

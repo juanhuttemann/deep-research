@@ -61,6 +61,26 @@ jobs:
           sh -n scripts/install.sh
           pwsh -NoProfile -Command '$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$e); if ($e) { $e | ForEach-Object { Write-Error "install.ps1:$($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }'
 
+  # The Pi extension (integrations/pi): typecheck, unit tests, and its bridge
+  # driving a drsh built from this commit with a scripted model, offline.
+  pi:
+    name: Pi extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: integrations/pi/package-lock.json
+      - name: Typecheck and test
+        run: make pi
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -91,7 +111,7 @@ jobs:
 
   release:
     name: Draft Release
-    needs: [test, lint]
+    needs: [test, lint, pi]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 15

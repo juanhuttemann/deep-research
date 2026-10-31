@@ -1,0 +1,7 @@
+{
+  "question": "What is the latest Go release?",
+  "depth": "instant",
+  "confidence": "",
+  "analysis": {"answer": "Go 1.26"},
+  "citations": [{"title": "go.dev", "url": "https://go.dev/dl/", "cited": true}]
+}

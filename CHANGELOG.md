@@ -5,6 +5,34 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A [Pi](https://pi.dev) extension, `pi-deep-research` (`integrations/pi`).
+  - The `deep_research` tool shows a run's progress live in Pi. It asks the
+    clarifying questions in Pi's dialogs, offers a plan review, stops on Esc
+    keeping its checkpoint, and resumes from one.
+  - `research_ask` answers follow-up questions from a run's pages.
+  - The commands are `/research` (with a settings screen),
+    `/research-stop`, `/research-model` and `/research-doctor`.
+  - Model calls go to Pi's own model through a local OpenAI-compatible
+    endpoint, so drsh needs no model setup there, and the run's usage is
+    counted in Pi's session.
+- `drsh settings` prints the run settings as JSON, with each option's flag
+  (`arg`) and a count's `flag` and `max`. It is the list the terminal and
+  the serve page draw from, so another program can offer the same choices
+  without keeping a copy of them.
+- The `--jsonl` `done` line names the run's resumable `checkpoint` when it
+  left one. Before, a caller had to glob the reports directory for
+  `*.partial.json` and could not tell this run's from an older one.
+
+### Fixed
+
+- A headless run (`--jsonl`, `--silent`, a pipe) killed with SIGINT or
+  SIGTERM died with no `done` line, so a program driving it could not tell a
+  cancellation from a crash. It now stops as a cancellation, writes
+  `done: cancelled` with its checkpoint, and exits. A second signal still
+  ends it at once.
+
 ## [0.29.0] - 2026-10-30
 
 ### Security

@@ -1,0 +1,35 @@
+{
+  "question": "Which is faster for web servers, Go or Rust?",
+  "depth": "quick",
+  "confidence": "medium",
+  "analysis": {
+    "answer": "Rust is faster on raw throughput; Go is close enough for most services.",
+    "gaps": ["No benchmark covered tail latency under GC pressure"],
+    "claims": [
+      {"id": "c1", "claim": "Rust handles more requests per second in TechEmpower round 23.", "status": "supported"},
+      {"id": "c2", "claim": "Go uses twice the memory of Rust for the same service.", "status": "partial"},
+      {"id": "c3", "claim": "Go's GC pauses stay under 1ms.", "status": "insufficient"}
+    ],
+    "recommendations": [
+      {"choose": "Rust", "when": "throughput per core is the constraint", "claims": ["c1"]},
+      {"choose": "Go", "when": "memory is not a constraint", "claims": ["c2"], "blocked": "rests on a partial claim", "failed": ["c2"]}
+    ],
+    "conclusions": [
+      {"statement": "Go's latency is predictable under load", "claims": ["c3"], "blocked": "unsupported", "failed": ["c3"]}
+    ]
+  },
+  "fact_check": {
+    "verified": null,
+    "unverified": null,
+    "contradictions": null,
+    "verdicts": [
+      {"id": "c1", "claim": "Rust handles more requests per second in TechEmpower round 23.", "status": "supported"},
+      {"id": "c2", "status": "partial", "reason": "the source compares one service only"},
+      {"id": "c3", "claim": "Go's GC pauses stay under 1ms.", "status": "insufficient"}
+    ]
+  },
+  "citations": [
+    {"title": "TechEmpower", "url": "https://www.techempower.com/benchmarks/", "cited": true},
+    {"title": "Go GC guide", "url": "https://go.dev/doc/gc-guide", "cited": false}
+  ]
+}

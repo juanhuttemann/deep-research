@@ -1,0 +1,22 @@
+{"type":"source","time":"2026-10-31T16:08:58Z","check":{"domain":"go.dev","status":"ok","pages":3}}
+{"type":"plan","time":"2026-10-31T16:08:58Z","plan":{"question":"Which is faster?","depth":{"key":"quick","label":"Quick","max_sources":3,"sub_topics":3},"max_sources":3,"sub_topics":[{"id":"1","name":"Benchmarks"},{"id":"2","name":"Memory use"}]}}
+{"type":"phase","time":"2026-10-31T16:08:58Z","phase":"Plan","detail":"Planning research scope"}
+{"type":"thinking","time":"2026-10-31T16:08:58Z","status":"start","detail":"Weighing the"}
+{"type":"thinking","time":"2026-10-31T16:08:58Z","detail":" two sub-topics"}
+{"type":"phase","time":"2026-10-31T16:08:58Z","phase":"Research","detail":"Running sub-agents"}
+{"type":"subagent","time":"2026-10-31T16:08:58Z","phase":"Research","sub_id":"1","sub_name":"Benchmarks","sub_state":"queued","line":"queued"}
+{"type":"subagent","time":"2026-10-31T16:08:58Z","phase":"Research","sub_id":"2","sub_name":"Memory use","sub_state":"queued","line":"queued"}
+{"type":"subagent","time":"2026-10-31T16:08:58Z","phase":"Research","sub_id":"1","sub_name":"Benchmarks","sub_state":"running","line":"starting"}
+{"type":"search","time":"2026-10-31T16:08:58Z","phase":"Research","query":"go vs rust benchmarks","terms":["benchmark"],"sub_id":"1","sub_name":"Benchmarks","line":"Searching: go vs rust benchmarks"}
+{"type":"read","time":"2026-10-31T16:08:58Z","phase":"Research","url":"https://go.dev/a","domain":"go.dev","sub_id":"1","line":"read go.dev"}
+{"type":"verify","time":"2026-10-31T16:08:58Z","phase":"Research","url":"https://go.dev/a","status":"ok","code":"200","sub_id":"1","line":"ok go.dev"}
+{"type":"citation","time":"2026-10-31T16:08:58Z","phase":"Research","source_title":"Go benchmarks","source_url":"https://go.dev/a","sources":1,"sub_id":"1"}
+{"type":"token","time":"2026-10-31T16:08:58Z","phase":"Research","tokens":1200,"sources":1}
+{"type":"info","time":"2026-10-31T16:08:58Z","detail":"asking provider/model\nlatest reasoning","transient":true}
+{"type":"error","time":"2026-10-31T16:08:58Z","detail":"search failed: rate-limited","sub_id":"2"}
+{"type":"subagent","time":"2026-10-31T16:08:58Z","phase":"Research","sub_id":"1","sub_name":"Benchmarks","progress":50}
+{"type":"subagent","time":"2026-10-31T16:08:58Z","phase":"Research","sub_id":"1","sub_name":"Benchmarks","sub_state":"done","progress":100,"line":"complete"}
+{"type":"subagent","time":"2026-10-31T16:08:58Z","phase":"Research","sub_id":"2","sub_name":"Memory use","sub_state":"error","line":"rate-limited"}
+{"type":"phase","time":"2026-10-31T16:08:58Z","phase":"Fact-Check","detail":"Checking claims","part":"claims 1-7"}
+{"type":"report","time":"2026-10-31T16:08:58Z","phase":"Report","detail":"Research complete","sources":1}
+{"type":"done","time":"2026-10-31T16:08:58Z","status":"complete","artifacts":["REPORTS/run.md","REPORTS/run.pdf","REPORTS/run.json"]}

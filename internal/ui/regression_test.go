@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -3893,6 +3894,31 @@ func TestStartNoteKeepsItsLines(t *testing.T) {
 	for _, want := range []string{"\n  using openrouter · z-ai/glm-5\n", "\n  key stored in auth.json\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("start screen lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// The Pi extension (integrations/pi) reads the --jsonl stream through its own
+// copy of Event's field names, tested against hand-written fixtures. A field
+// renamed here would leave those fixtures, and the extension, reading
+// nothing; decoding them with unknown fields refused fails here first.
+func TestPiFixturesAreEvents(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", "integrations", "pi", "test", "fixtures", "*.jsonl"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no fixtures found: %v", err)
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			dec := json.NewDecoder(strings.NewReader(line))
+			dec.DisallowUnknownFields()
+			var e Event
+			if err := dec.Decode(&e); err != nil {
+				t.Errorf("%s:%d is not an Event: %v", filepath.Base(f), i+1, err)
+			}
 		}
 	}
 }

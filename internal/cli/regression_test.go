@@ -13,7 +13,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -783,5 +785,173 @@ func TestDepthAndSourcesTogetherAreRefused(t *testing.T) {
 	cmd.SetArgs([]string{"-p", "q", "--depth", "9", "--sources", "4"})
 	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "depth") {
 		t.Errorf("Execute = %v, want the two flags refused together", err)
+	}
+}
+
+// An integration outside Go (the Pi extension) builds its controls from
+// `drsh settings` and passes each option's arg as it is. An arg that does not
+// parse, or that reads back as another value, would be a control that runs
+// something other than what it shows.
+func TestSettingsCommandArgsSetTheirValue(t *testing.T) {
+	deps := Deps{Config: config.Config{SubTopics: 2}}
+	load := func() (Deps, error) { return deps, nil }
+	cmd := New(load)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"settings"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Settings []ui.Setting `json:"settings"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("settings is not JSON: %v\n%s", err, out.String())
+	}
+	if len(got.Settings) == 0 {
+		t.Fatal("no settings printed")
+	}
+	if s, _ := ui.SettingFor(got.Settings, ui.SettingTopics); s.Value != "2" {
+		t.Errorf("topics = %q, want the config's 2", s.Value)
+	}
+	readBack := func(key, arg string) string {
+		c := New(load)
+		if err := c.ParseFlags([]string{arg}); err != nil {
+			t.Fatalf("%s does not parse: %v", arg, err)
+		}
+		s, _ := ui.SettingFor(ui.Settings(runSettings(c, deps)), key)
+		return s.Value
+	}
+	for _, s := range got.Settings {
+		if s.CLIFlag == "" {
+			t.Errorf("%s has no flag", s.Key)
+		}
+		for _, o := range s.Opts {
+			if o.Arg == "" {
+				t.Errorf("%s %s has no arg", s.Key, o.Value)
+				continue
+			}
+			if v := readBack(s.Key, o.Arg); v != o.Value {
+				t.Errorf("%s reads back as %s = %q, want %q", o.Arg, s.Key, v, o.Value)
+			}
+		}
+		if s.Count && s.Max > 0 {
+			n := strconv.Itoa(s.Max)
+			if v := readBack(s.Key, "--"+s.CLIFlag+"="+n); v != n {
+				t.Errorf("--%s=%s reads back as %q", s.CLIFlag, n, v)
+			}
+		}
+	}
+}
+
+// blockAt is a stub that stops at the plan call (before a checkpoint can
+// exist) or at the first search (after it), until the run is cancelled.
+type blockAt struct {
+	stub
+	plan    bool
+	reached chan struct{}
+}
+
+func (b blockAt) Plan(ctx context.Context, q string, br agent.Breadth, c []agent.Clarification) (agent.Outline, error) {
+	if b.plan {
+		close(b.reached)
+		<-ctx.Done()
+		return agent.Outline{}, ctx.Err()
+	}
+	return b.stub.Plan(ctx, q, br, c)
+}
+
+func (b blockAt) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
+	if !b.plan {
+		select {
+		case <-b.reached:
+		default:
+			close(b.reached)
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return b.stub.ResearchDetail(ctx, query, terms)
+}
+
+// A headless run killed by SIGINT or SIGTERM died with no done line, so a
+// caller (the Pi extension cancelling on Esc) could not tell a cancellation
+// from a crash, nor find the checkpoint to resume from. It now ends on
+// done: cancelled, naming the checkpoint once a plan made one.
+func TestHeadlessSignalEndsOnCancelledDone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a process cannot send itself os.Interrupt on Windows")
+	}
+	for _, tc := range []struct {
+		name       string
+		plan       bool
+		checkpoint bool
+	}{
+		{"before the plan", true, false},
+		{"during research", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			b := blockAt{plan: tc.plan, reached: make(chan struct{})}
+			deps := Deps{Assistant: always(b), Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
+				Config: agent.Config{ModelCallTimeout: time.Minute}}}
+			cmd := New(func() (Deps, error) { return deps, nil })
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			cmd.SetIn(strings.NewReader(""))
+			cmd.SetArgs([]string{"-p", "q", "--jsonl", "--clarify=off", "--reports", dir})
+			ran := make(chan error, 1)
+			go func() { ran <- cmd.ExecuteContext(TopLevel(context.Background())) }()
+			select {
+			case <-b.reached:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the run never reached the call it blocks at")
+			}
+			p, _ := os.FindProcess(os.Getpid())
+			if err := p.Signal(os.Interrupt); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-ran:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the run did not stop on SIGINT")
+			}
+			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+			var done ui.Event
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &done); err != nil {
+				t.Fatalf("last line is not an event: %q", lines[len(lines)-1])
+			}
+			if done.Type != ui.Done || done.Status != "cancelled" {
+				t.Fatalf("last event = %+v, want done/cancelled", done)
+			}
+			if (done.Checkpoint != "") != tc.checkpoint {
+				t.Fatalf("checkpoint = %q, want one: %v", done.Checkpoint, tc.checkpoint)
+			}
+			if done.Checkpoint != "" {
+				if _, err := os.Stat(done.Checkpoint); err != nil {
+					t.Errorf("done names a checkpoint that is not there: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// serve runs research in-process; a signal handler there would turn a
+// Ctrl-C meant for the server into the cancellation of whichever run it
+// was serving. Only the process's own command takes signals.
+func TestOnlyTheTopLevelRunTakesSignals(t *testing.T) {
+	cmd := New(func() (Deps, error) { return Deps{}, nil })
+	cmd.SetContext(context.Background())
+	ctx, stop := stopOnSignal(cmd, false)
+	defer stop()
+	if ctx != cmd.Context() {
+		t.Error("an in-process run (serve's) registered for signals")
+	}
+	cmd.SetContext(TopLevel(context.Background()))
+	ctx, stop2 := stopOnSignal(cmd, true)
+	defer stop2()
+	if ctx != cmd.Context() {
+		t.Error("a run drawing the terminal UI registered for signals; its own handling re-raises them")
 	}
 }

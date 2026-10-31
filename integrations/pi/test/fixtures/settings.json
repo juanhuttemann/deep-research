@@ -1,0 +1,316 @@
+{
+  "settings": [
+    {
+      "key": "mode",
+      "label": "depth",
+      "help": "How wide and deep the research goes: the most sub-topics, and the pages each reads. Instant is one search and one answer from the pages it finds, not fact-checked, with the other settings at their least.",
+      "value": "standard",
+      "default": "standard",
+      "choices": [
+        {
+          "value": "quick",
+          "label": "quick",
+          "note": "≤3",
+          "arg": "--mode=quick"
+        },
+        {
+          "value": "standard",
+          "label": "standard",
+          "note": "≤4",
+          "arg": "--mode=standard"
+        },
+        {
+          "value": "deep",
+          "label": "deep",
+          "note": "≤6",
+          "arg": "--mode=deep"
+        },
+        {
+          "value": "instant",
+          "label": "instant",
+          "note": "not fact-checked",
+          "implies": {
+            "clarify": "off",
+            "follow-ups": "off",
+            "format": "brief",
+            "sources": "2",
+            "tables": "none",
+            "topics": "1",
+            "words": "0"
+          },
+          "arg": "--mode=instant"
+        }
+      ],
+      "start": true,
+      "review": true,
+      "flag": "mode"
+    },
+    {
+      "key": "topics",
+      "label": "sub-topics",
+      "help": "How many sub-topics the plan has. Auto lets the planner choose, up to the depth's count.",
+      "value": "0",
+      "default": "0",
+      "choices": [
+        {
+          "value": "0",
+          "label": "auto",
+          "arg": "--topics=0"
+        },
+        {
+          "value": "1",
+          "label": "1",
+          "arg": "--topics=1"
+        },
+        {
+          "value": "2",
+          "label": "2",
+          "arg": "--topics=2"
+        },
+        {
+          "value": "3",
+          "label": "3",
+          "arg": "--topics=3"
+        },
+        {
+          "value": "4",
+          "label": "4",
+          "arg": "--topics=4"
+        },
+        {
+          "value": "5",
+          "label": "5",
+          "arg": "--topics=5"
+        },
+        {
+          "value": "6",
+          "label": "6",
+          "arg": "--topics=6"
+        },
+        {
+          "value": "7",
+          "label": "7",
+          "arg": "--topics=7"
+        },
+        {
+          "value": "8",
+          "label": "8",
+          "arg": "--topics=8"
+        }
+      ],
+      "start": true,
+      "review": false,
+      "count": true,
+      "max": 8,
+      "flag": "topics"
+    },
+    {
+      "key": "sources",
+      "label": "pages per topic",
+      "help": "How many pages each sub-topic reads. Auto lets the depth decide.",
+      "value": "0",
+      "default": "0",
+      "choices": [
+        {
+          "value": "0",
+          "label": "auto",
+          "arg": "--sources=0"
+        },
+        {
+          "value": "2",
+          "label": "2",
+          "arg": "--sources=2"
+        },
+        {
+          "value": "3",
+          "label": "3",
+          "arg": "--sources=3"
+        },
+        {
+          "value": "4",
+          "label": "4",
+          "arg": "--sources=4"
+        },
+        {
+          "value": "5",
+          "label": "5",
+          "arg": "--sources=5"
+        },
+        {
+          "value": "6",
+          "label": "6",
+          "arg": "--sources=6"
+        },
+        {
+          "value": "8",
+          "label": "8",
+          "arg": "--sources=8"
+        },
+        {
+          "value": "10",
+          "label": "10",
+          "arg": "--sources=10"
+        }
+      ],
+      "start": true,
+      "review": false,
+      "count": true,
+      "flag": "sources"
+    },
+    {
+      "key": "follow-ups",
+      "label": "follow-ups",
+      "help": "After the planned searches, up to three more for what the findings leave open.",
+      "value": "on",
+      "default": "on",
+      "choices": [
+        {
+          "value": "on",
+          "label": "on",
+          "arg": "--no-follow-ups=false"
+        },
+        {
+          "value": "off",
+          "label": "off",
+          "arg": "--no-follow-ups=true"
+        }
+      ],
+      "start": true,
+      "review": true,
+      "flag": "no-follow-ups"
+    },
+    {
+      "key": "format",
+      "label": "format",
+      "help": "The report's shape. The answer, the fact-check and the citations are in every format.",
+      "value": "standard",
+      "default": "standard",
+      "choices": [
+        {
+          "value": "standard",
+          "label": "standard",
+          "arg": "--format=standard"
+        },
+        {
+          "value": "brief",
+          "label": "brief",
+          "note": "≈300 words",
+          "arg": "--format=brief"
+        },
+        {
+          "value": "detailed",
+          "label": "detailed",
+          "note": "≈1500 words",
+          "arg": "--format=detailed"
+        },
+        {
+          "value": "table",
+          "label": "table",
+          "note": "tables first",
+          "arg": "--format=table"
+        }
+      ],
+      "start": true,
+      "review": true,
+      "flag": "format"
+    },
+    {
+      "key": "words",
+      "label": "words",
+      "help": "How long the explanation is, in words. Auto lets the format decide.",
+      "value": "0",
+      "default": "0",
+      "choices": [
+        {
+          "value": "0",
+          "label": "auto",
+          "arg": "--words=0"
+        },
+        {
+          "value": "300",
+          "label": "300",
+          "arg": "--words=300"
+        },
+        {
+          "value": "600",
+          "label": "600",
+          "arg": "--words=600"
+        },
+        {
+          "value": "1000",
+          "label": "1000",
+          "arg": "--words=1000"
+        },
+        {
+          "value": "1500",
+          "label": "1500",
+          "arg": "--words=1500"
+        },
+        {
+          "value": "2500",
+          "label": "2500",
+          "arg": "--words=2500"
+        }
+      ],
+      "start": true,
+      "review": false,
+      "count": true,
+      "max": 6000,
+      "flag": "words"
+    },
+    {
+      "key": "tables",
+      "label": "tables",
+      "help": "How much of the report is in tables. Auto lets the format decide.",
+      "value": "auto",
+      "default": "auto",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "auto",
+          "arg": "--tables=auto"
+        },
+        {
+          "value": "none",
+          "label": "none",
+          "arg": "--tables=none"
+        },
+        {
+          "value": "some",
+          "label": "some",
+          "arg": "--tables=some"
+        },
+        {
+          "value": "many",
+          "label": "many",
+          "arg": "--tables=many"
+        }
+      ],
+      "start": true,
+      "review": false,
+      "flag": "tables"
+    },
+    {
+      "key": "clarify",
+      "label": "clarify",
+      "help": "Before planning, ask up to three questions when the question leaves open what to research. Auto asks only when it does.",
+      "value": "auto",
+      "default": "auto",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "auto",
+          "arg": "--clarify=auto"
+        },
+        {
+          "value": "off",
+          "label": "off",
+          "arg": "--clarify=off"
+        }
+      ],
+      "start": true,
+      "review": false,
+      "flag": "clarify"
+    }
+  ]
+}

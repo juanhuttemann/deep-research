@@ -1,4 +1,4 @@
-.PHONY: catalog diagram test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools
+.PHONY: catalog diagram test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools pi
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -115,4 +115,20 @@ ignored-go:
 
 lint: fmt-check vet cyclo ineffassign golangci deadcode
 
-verify: lint test ignored-go
+# The Pi extension (integrations/pi): typecheck and tests, the bridge's run
+# against a drsh built from this tree (a stale binary would test last
+# release's contract). Without Node it is reported and skipped, as a missing
+# lint binary is; corepack's npm stands in for a Node with no npm.
+PI_DIR = integrations/pi
+pi:
+	@if ! command -v node >/dev/null 2>&1; then \
+		echo "warning: node not installed — skipping the Pi extension (needs Node 22.19+)"; exit 0; fi; \
+	if command -v npm >/dev/null 2>&1; then npm=npm; \
+	elif command -v corepack >/dev/null 2>&1; then npm="corepack npm@10"; \
+	else echo "warning: neither npm nor corepack installed — skipping the Pi extension"; exit 0; fi; \
+	bin=$$(mktemp -d)/drsh && go build -o $$bin ./cmd/drsh && \
+	cd $(PI_DIR) && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm ci --ignore-scripts --no-audit --no-fund --silent && \
+	COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm run --silent typecheck && \
+	DRSH_BIN=$$bin COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm test --silent
+
+verify: lint test ignored-go pi

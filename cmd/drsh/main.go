@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"sync"
 
@@ -21,7 +22,9 @@ func main() {
 	load := sync.OnceValues(cli.LoadDeps)
 	root := cli.New(load)
 	root.Version = version
-	if err := root.Execute(); err != nil {
+	// Marked as the process's own command: a headless run it starts ends on
+	// SIGINT or SIGTERM with a done line (see cli.TopLevel).
+	if err := root.ExecuteContext(cli.TopLevel(context.Background())); err != nil {
 		os.Exit(1)
 	}
 }

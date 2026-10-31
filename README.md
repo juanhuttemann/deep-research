@@ -221,6 +221,18 @@ npx skills add juanhuttemann/deep-research
 
 Or copy `skills/deep-research/` into the agent's skills directory.
 
+[Pi](https://pi.dev) has a native extension instead: a `deep_research`
+tool with live progress, clarifying questions and plan review in Pi's
+dialogs, a `/research` command, and follow-up questions with
+`research_ask`. Its model calls go to the model you use in Pi, through
+Pi's own sign-in, so drsh needs no model setup of its own:
+
+```sh
+pi install npm:pi-deep-research
+```
+
+See [integrations/pi](integrations/pi/README.md).
+
 ## Configuration
 
 `drsh setup` saves everything in `~/.config/deep-research/`
