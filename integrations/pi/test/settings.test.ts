@@ -61,4 +61,6 @@ test("completion offers the options, then a named option's choices", () => {
 	assert.ok(completions(s, "--to").some((c) => c.label === "--topics"));
 	const modes = completions(s, "--mode ").map((c) => c.label);
 	assert.deepEqual(modes, get("mode").choices.map((o) => o.label));
+	const byFlag = completions(s, "--no-follow-ups ").map((c) => c.label);
+	assert.deepEqual(byFlag, get("follow-ups").choices.map((o) => o.label), "an option named by its CLI flag, as the parser takes it, completes its choices");
 });

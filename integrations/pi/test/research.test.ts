@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -93,6 +93,53 @@ test("Esc ends the run as a cancellation with a checkpoint to resume", async () 
 	assert.equal(r.details.outcome?.status, "cancelled");
 	assert.match(r.text, /Checkpoint: .*run\.abc\.partial\.json/);
 	assert.equal(r.isError, false);
+});
+
+// stopOnPhase is the hooks of a run stopped (Esc) once it reports its first
+// phase, which the fake writes after its checkpoint: no guess at timing.
+function stopOnPhase(abort: AbortController): Partial<Hooks> {
+	return {
+		ask: async () => [],
+		update: (d) => {
+			if (d.state?.phase) abort.abort();
+		},
+	};
+}
+
+// On Windows a stopped child is killed outright, so drsh never writes the
+// done line that names its checkpoint, and Esc left nothing to resume.
+test("a run stopped with no done line still offers the checkpoint it saved", async () => {
+	const abort = new AbortController();
+	const c = call(fresh(), stopOnPhase(abort), { FAKE_QUESTIONS: "none", FAKE_HANG: "kill" }, abort.signal);
+	const r = await c.run;
+	assert.equal(r.details.outcome?.status, "cancelled");
+	assert.equal(r.isError, false);
+	const cp = join(c.reports, "run.def.partial.json");
+	assert.equal(r.details.outcome?.checkpoint, cp);
+	assert.equal(r.record?.checkpoint, cp);
+	assert.match(r.text, /Checkpoint: .*run\.def\.partial\.json.*resume/);
+});
+
+test("a resumed run stopped with no done line offers the checkpoint it resumed", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-dr-cp-"));
+	const cp = join(dir, "old.abc.partial.json");
+	writeFileSync(cp, JSON.stringify({ question: "q", plan: [{ name: "Benchmarks" }] }));
+	const abort = new AbortController();
+	const c = call({ kind: "resume", checkpoint: cp }, stopOnPhase(abort), { FAKE_HANG: "kill" }, abort.signal);
+	const r = await c.run;
+	assert.equal(r.details.outcome?.status, "cancelled");
+	assert.equal(r.details.outcome?.checkpoint, cp);
+});
+
+test("a checkpoint cut off mid-write, or with no plan, is not offered", async () => {
+	for (const hang of ["torn", "empty"]) {
+		const abort = new AbortController();
+		const c = call(fresh(), stopOnPhase(abort), { FAKE_QUESTIONS: "none", FAKE_HANG: hang }, abort.signal);
+		const r = await c.run;
+		assert.equal(r.details.outcome?.status, "cancelled", hang);
+		assert.equal(r.details.outcome?.checkpoint, undefined, hang);
+		assert.doesNotMatch(r.text, /Checkpoint:/, hang);
+	}
 });
 
 test("a run killed with no done line is a failure that says so", async () => {

@@ -120,7 +120,10 @@ export default function deepResearch(pi: ExtensionAPI) {
 	let settings: Setting[] = [];
 	let loadError = "";
 	let choice: ModelChoice = { kind: "pi" };
-	let lastRun: RunRecord | undefined;
+	// lastReport is the last run that wrote a .json, what research_ask reads
+	// by default: a run stopped or failed after it leaves none, and must not
+	// hide the one before.
+	let lastReport: RunRecord | undefined;
 	let commandRun: AbortController | undefined;
 
 	async function loadSettings(): Promise<Setting[]> {
@@ -132,6 +135,10 @@ export default function deepResearch(pi: ExtensionAPI) {
 			}
 			settings = parseSettings(r.stdout);
 			loadError = "";
+			// Wherever drsh first answers (the session's start, /research,
+			// /research-doctor, the stand-in), the real tools replace the
+			// stand-in: drsh installed mid-session is usable from then on.
+			registerTools(settings);
 		} catch (err) {
 			const e = err as NodeJS.ErrnoException;
 			loadError = e.code === "ENOENT" ? `drsh was not found (${bin}).\n${installHelp}` : e.message;
@@ -189,7 +196,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 
 	function remember(rec: RunRecord | undefined): void {
 		if (!rec) return;
-		lastRun = rec;
+		if (rec.json) lastReport = rec;
 		pi.appendEntry(runEntry, rec);
 	}
 
@@ -388,9 +395,9 @@ export default function deepResearch(pi: ExtensionAPI) {
 				model: Type.Optional(Type.String({ description: "provider/id of a Pi model to answer with; default as for deep_research." })),
 			}),
 			async execute(_id, params, signal, _onUpdate, ctx) {
-				const runFile = params.run || lastRun?.json;
+				const runFile = params.run || lastReport?.json;
 				if (!runFile) {
-					throw new Error("no research run in this session yet: pass run with a run's .json path, or run deep_research first");
+					throw new Error("no research run in this session has written a report yet: pass run with a run's .json path, or run deep_research first");
 				}
 				const { model, label } = resolveModel(ctx, params.model);
 				const { value: r, bridge } = await withEndpoint(ctx, model, signal, (env) =>
@@ -422,8 +429,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 			description: "Fact-checked, cited web research with the deep-research CLI (drsh). Unavailable until drsh is installed.",
 			parameters: Type.Object({ question: Type.Optional(Type.String()) }),
 			async execute() {
-				const s = await loadSettings();
-				registerTools(s);
+				await loadSettings();
 				throw new Error("drsh is available now; call deep_research again");
 			},
 		});
@@ -431,14 +437,14 @@ export default function deepResearch(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		choice = { kind: "pi" };
-		lastRun = undefined;
+		lastReport = undefined;
 		for (const e of ctx.sessionManager.getBranch()) {
 			if (e.type !== "custom") continue;
 			if (e.customType === modelEntry && e.data) choice = e.data as ModelChoice;
-			if (e.customType === runEntry && e.data) lastRun = e.data as RunRecord;
+			if (e.customType === runEntry && (e.data as RunRecord | undefined)?.json) lastReport = e.data as RunRecord;
 		}
 		try {
-			registerTools(await loadSettings());
+			await loadSettings();
 		} catch {
 			registerStandIn();
 		}
@@ -581,6 +587,10 @@ export default function deepResearch(pi: ExtensionAPI) {
 				return;
 			}
 			ctx.ui.setStatus("deep-research", "checking drsh…");
+			// The check a user runs after installing drsh: loading its settings
+			// brings in the real tools. A drsh that cannot load them is
+			// reported by the doctor run below.
+			await ensureSettings().catch(() => undefined);
 			try {
 				const { value: r } = await withEndpoint(ctx, model, undefined, (env) => runPlain(bin, ["doctor"], { env }));
 				const verdict = r.code === 0 ? "drsh doctor: ready" : "drsh doctor: something is broken (✗ lines)";

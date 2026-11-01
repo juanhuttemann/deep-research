@@ -4,7 +4,7 @@
 // to ask (clarify off, instant), so this knows no setting by name.
 
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newRunArgs, planRunArgs, resumeArgs, type Answer, type NewRun } from "./args.ts";
 import { initialState, reduce, type Question } from "./events.ts";
@@ -150,14 +150,46 @@ async function readJSON(path: string | undefined): Promise<unknown> {
 	}
 }
 
+// checkpointLeft is the checkpoint a run that ended with no done line left
+// on disk. drsh saves it after each step, as <reports>/*.partial.json, and
+// names it only in the done line, which a killed run never writes: on
+// Windows, where stopping a child process kills it outright, that is every
+// stopped run. Each run has a reports directory of its own, so a checkpoint
+// there is this run's; a resumed run saves to the checkpoint it resumed. A
+// file that is not one drsh can resume from (no question or no plan, as
+// replay.Load refuses) is not offered.
+async function checkpointLeft(c: Call): Promise<string | undefined> {
+	let candidates: string[];
+	if (c.req.kind === "resume") {
+		candidates = [c.req.checkpoint];
+	} else {
+		const names = await readdir(c.reports).catch(() => [] as string[]);
+		candidates = names.filter((n) => n.endsWith(".partial.json")).map((n) => join(c.reports, n));
+	}
+	const valid: { path: string; mtime: number }[] = [];
+	for (const path of candidates) {
+		if (resumable(await readJSON(path))) {
+			valid.push({ path, mtime: (await stat(path)).mtimeMs });
+		}
+	}
+	return valid.sort((a, b) => b.mtime - a.mtime)[0]?.path;
+}
+
+function resumable(raw: unknown): boolean {
+	const t = raw as { question?: unknown; plan?: unknown } | null | undefined;
+	return typeof t?.question === "string" && t.question.trim() !== "" && Array.isArray(t.plan) && t.plan.length > 0;
+}
+
 // outcome reads what a run's done line says it wrote.
-async function outcome(r: JsonlResult, model?: string): Promise<{ o: Outcome; isError: boolean }> {
+async function outcome(c: Call, r: JsonlResult): Promise<{ o: Outcome; isError: boolean }> {
+	const model = c.model;
 	if (!r.done) {
 		const status = r.aborted ? "cancelled" : "failed";
 		const detail = r.aborted
 			? "the run was stopped before it could end cleanly"
 			: `drsh exited (code ${r.code}) without a done line, so it was killed or crashed${r.stderr ? `: ${r.stderr.trim().slice(-1500)}` : ""}`;
-		return { o: { status, detail, artifacts: [], model }, isError: !r.aborted };
+		const checkpoint = await checkpointLeft(c);
+		return { o: { status, detail, artifacts: [], model, checkpoint }, isError: !r.aborted };
 	}
 	const artifacts = r.done.artifacts ?? [];
 	const md = artifacts.find((p) => p.endsWith(".md"));
@@ -210,6 +242,6 @@ export async function research(c: Call): Promise<Result> {
 	details.state = initialState();
 	c.hooks.update(details);
 	const r = await stage(c, details, args);
-	const { o, isError } = await outcome(r, c.model);
+	const { o, isError } = await outcome(c, r);
 	return { text: content(o), isError, ...finish(details, o, details.question) };
 }
