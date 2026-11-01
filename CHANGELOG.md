@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-11-01
+
 ### Changed
 
 - The Pi extension (0.1.1) shows a screenshot of a run in progress in the
@@ -12,7 +14,7 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
-- Pi extension:
+- Pi extension (0.1.2):
   - On Windows, stopping a run (Esc, `/research-stop`) left nothing to
     resume. Windows kills a stopped process outright, so drsh never wrote
     the `done` line that names its checkpoint. The extension now finds the
@@ -1645,7 +1647,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.30.1...HEAD
+[0.30.1]: https://github.com/juanhuttemann/deep-research/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/juanhuttemann/deep-research/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/juanhuttemann/deep-research/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/juanhuttemann/deep-research/compare/v0.27.0...v0.28.0
