@@ -2,7 +2,12 @@
 // A stand-in for drsh in the tests: it logs its arguments, replays a fixture
 // event stream for the stage its flags name, and writes the artifacts the
 // done line names. FAKE_HANG makes the run wait for SIGINT and end as a
-// cancellation, as drsh does since headless runs take signals.
+// cancellation, as drsh does since headless runs take signals. FAKE_HANG=kill
+// is a stop on Windows, where the process dies with no done line: a new run
+// saves its checkpoint first, as drsh does after each step (a resumed one
+// saves to the checkpoint it resumed), then reports its phase, and exits on
+// SIGINT without a word. FAKE_HANG=torn leaves a checkpoint cut off
+// mid-write, FAKE_HANG=empty one with no plan.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +20,10 @@ const reports = flag("reports") ?? ".";
 
 if (args[0] === "settings") {
 	process.stdout.write(readFileSync(join(fixtures, "settings.json"), "utf8"));
+	process.exit(0);
+}
+if (args[0] === "doctor") {
+	process.stdout.write("✓ model\n✓ search\n");
 	process.exit(0);
 }
 if (args[0] === "ask") {
@@ -36,7 +45,13 @@ if (args.includes("--plan-only")) {
 	process.stdout.write(JSON.stringify({ type: "done", status: "complete" }) + "\n");
 	process.exit(0);
 }
-if (process.env.FAKE_HANG) {
+if (["kill", "torn", "empty"].includes(process.env.FAKE_HANG)) {
+	const saved = { kill: '{"question": "q", "plan": [{"name": "Benchmarks"}]}', torn: '{"question": "q", "plan": [', empty: '{"question": "q", "plan": []}' };
+	if (!flag("resume")) writeFileSync(join(reports, "run.def.partial.json"), saved[process.env.FAKE_HANG]);
+	process.stdout.write(JSON.stringify({ type: "phase", phase: "Research", detail: "Running sub-agents" }) + "\n");
+	process.on("SIGINT", () => process.exit(1));
+	setInterval(() => {}, 1000);
+} else if (process.env.FAKE_HANG) {
 	process.stdout.write(JSON.stringify({ type: "phase", phase: "Research", detail: "Running sub-agents" }) + "\n");
 	process.on("SIGINT", () => {
 		const cp = join(reports, "run.abc.partial.json");

@@ -144,7 +144,10 @@ export function parseCommandArgs(settings: Setting[], input: string): CommandArg
 			rest.push(w);
 			continue;
 		}
-		let [name, v] = w.slice(2).split("=", 2) as [string, string | undefined];
+		// Split at the first "=" only: a value may hold one.
+		const eq = w.indexOf("=");
+		const name = eq < 0 ? w.slice(2) : w.slice(2, eq);
+		let v: string | undefined = eq < 0 ? undefined : w.slice(eq + 1);
 		if (v === undefined) {
 			v = words[++i];
 			if (v === undefined) {
@@ -175,7 +178,8 @@ export interface Completion {
 	description?: string;
 }
 
-// completions offers the option names, then a named option's choices.
+// completions offers the option names, then a named option's choices; an
+// option is named by its key or its CLI flag, as parseCommandArgs reads it.
 export function completions(settings: Setting[], prefix: string): Completion[] {
 	const words = prefix.split(/\s+/);
 	const last = words[words.length - 1] ?? "";
@@ -183,7 +187,7 @@ export function completions(settings: Setting[], prefix: string): Completion[] {
 	const head = before ? `${before} ` : "";
 	const prev = words[words.length - 2] ?? "";
 	if (prev.startsWith("--")) {
-		const s = settings.find((x) => x.key === prev.slice(2));
+		const s = settings.find((x) => x.key === prev.slice(2) || x.flag === prev.slice(2));
 		if (s) {
 			return s.choices
 				.filter((o) => o.label.startsWith(last))

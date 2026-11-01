@@ -10,6 +10,26 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - The Pi extension (0.1.1) shows a screenshot of a run in progress in the
   [Pi package gallery](https://pi.dev/packages) and its README.
 
+### Fixed
+
+- Pi extension:
+  - On Windows, stopping a run (Esc, `/research-stop`) left nothing to
+    resume. Windows kills a stopped process outright, so drsh never wrote
+    the `done` line that names its checkpoint. The extension now finds the
+    checkpoint the run saved in its own reports directory, checks that it
+    holds a question and a plan to resume, and offers it. The same applies on any
+    platform when drsh is killed or crashes.
+  - `research_ask` with no `run` reads the last run that wrote a report. A
+    run stopped or failed after it no longer hides it behind "no research
+    run in this session yet".
+  - drsh installed after the session started is picked up as soon as
+    `/research` or `/research-doctor` finds it. Before, the agent kept the
+    placeholder `deep_research` tool until its first call failed with
+    "call again".
+  - `/research` completes an option's values when it is named by its CLI
+    flag (`--no-follow-ups`), as the command already accepted. An option's
+    value is now split at its first `=` only.
+
 ## [0.30.0] - 2026-10-31
 
 ### Added
