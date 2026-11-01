@@ -5,6 +5,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The Pi extension (0.1.1) shows a screenshot of a run in progress in the
+  [Pi package gallery](https://pi.dev/packages) and its README.
+
 ## [0.30.0] - 2026-10-31
 
 ### Added

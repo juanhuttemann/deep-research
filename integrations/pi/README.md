@@ -6,6 +6,8 @@ runs [deep-research](https://github.com/juanhuttemann/deep-research)
 evidence, and checks every claim against the text of the pages it fetched.
 Pi's own model answers the model calls, through Pi's sign-in.
 
+![A deep_research run in Pi: sub-agents searching, with the pages and sources so far](https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research.png)
+
 ## Install
 
 `drsh` must be installed (0.30.0 or newer):

@@ -1,6 +1,6 @@
 {
   "name": "@juanhuttemann/pi-deep-research",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fact-checked, cited web research inside Pi: runs the deep-research CLI (drsh) on Pi's own model, with live progress, clarifying questions and plan review",
   "keywords": [
     "pi-package",
@@ -26,7 +26,8 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research.png"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
