@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-11-03
+
 ### Fixed
 
 - Ctrl-C or SIGTERM sent to `drsh serve` while it served a run cancelled
@@ -14,14 +16,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   `done: cancelled` line, so `drsh -s -p q > r.md && next-step` went on as
   if it had finished. drsh now ends by the signal after the done line, and
   the exit status says the run was stopped.
-- Pi extension: `/research --no-follow-ups on` turned follow-ups on. A
+- Pi extension (0.1.3): `/research --no-follow-ups on` turned follow-ups on. A
   setting named by its drsh flag now means what the flag means:
   `--no-follow-ups` alone or `=true` turns them off, and `on`/`off` after it
   are refused with a pointer to `--follow-ups on|off`.
 - Since 0.30.0 a headless run caught SIGINT even when started with it
   ignored, so a script's background `drsh --jsonl -p … &` was cancelled by
   Ctrl-C at the script. An ignored signal now stays ignored.
-- Pi extension:
+- Pi extension (0.1.3):
   - A standard or deep run whose fact-check did not finish was described to
     the model as an instant run, one search and one answer, and its
     confidence, blocked recommendations and gaps were left out. It is now
@@ -1686,7 +1688,8 @@ sources (set `SEARXNG_URL=off` for the old behaviour).
   handful of settings most runs need. The reference material moved to
   `docs/usage.md`, `docs/configuration.md` and `docs/architecture.md`.
 
-[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.30.1...HEAD
+[Unreleased]: https://github.com/juanhuttemann/deep-research/compare/v0.30.2...HEAD
+[0.30.2]: https://github.com/juanhuttemann/deep-research/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/juanhuttemann/deep-research/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/juanhuttemann/deep-research/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/juanhuttemann/deep-research/compare/v0.28.0...v0.29.0
