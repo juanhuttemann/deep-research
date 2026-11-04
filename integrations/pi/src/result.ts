@@ -20,8 +20,10 @@ export interface Digest {
 	question: string;
 	depth: string;
 	confidence: string;
-	// factChecked is false for an instant run, which answers in one call
-	// with no fact-check at all.
+	// instant is a run that answers in one call with no fact-check at all.
+	instant: boolean;
+	// factChecked is false for an instant run, and for any run that ended
+	// before its fact-check did (a late phase failed: incomplete).
 	factChecked: boolean;
 	verdicts: Record<string, number>;
 	unconfirmed: Unconfirmed[];
@@ -87,6 +89,7 @@ export function digest(raw: unknown): Digest {
 		question: j.question ?? "",
 		depth: j.depth ?? "",
 		confidence: j.confidence ?? "",
+		instant: j.depth === "instant",
 		factChecked: j.depth !== "instant" && j.fact_check != null,
 		verdicts: counts,
 		unconfirmed,
@@ -122,12 +125,18 @@ const rules = [
 ];
 
 function digestLines(d: Digest): string[] {
-	if (!d.factChecked) {
+	if (d.instant) {
 		return ["NOT FACT-CHECKED: this was an instant run, one search and one answer with no fact-check. Tell the user so."];
 	}
 	const out = [`Confidence: ${d.confidence || "not stated"}.`];
-	const counts = Object.entries(d.verdicts).map(([k, n]) => `${n} ${k}`);
-	out.push(`Fact-check: ${counts.length ? counts.join(", ") : "no claims were checked"}.`);
+	if (d.factChecked) {
+		const counts = Object.entries(d.verdicts).map(([k, n]) => `${n} ${k}`);
+		out.push(`Fact-check: ${counts.length ? counts.join(", ") : "no claims were checked"}.`);
+	} else {
+		// A standard or deep run whose analysis or fact-check failed: it is
+		// not an instant lookup, and what it did find is still worth saying.
+		out.push(`NOT FACT-CHECKED: the run (${d.depth || "not instant"}) ended before its fact-check finished, so none of its claims were checked. Tell the user so.`);
+	}
 	for (const u of d.unconfirmed) {
 		out.push(`- ${u.id} ${u.status}: ${u.claim}${u.reason ? ` (${u.reason})` : ""}`);
 	}
@@ -153,7 +162,11 @@ function reportText(o: Outcome): string[] {
 
 function recovery(o: Outcome): string[] {
 	if (!o.checkpoint) {
-		return o.status === "cancelled" ? ["It stopped before its plan was made, so there is no checkpoint: run it again."] : [];
+		// No checkpoint is either a run stopped before its plan, or one whose
+		// checkpoint could not be saved or read back: which, drsh does not say.
+		return o.status === "cancelled"
+			? ["There is no checkpoint to resume from (the run stopped before its plan was made, or its checkpoint could not be saved): run it again."]
+			: [];
 	}
 	const limited = /rate.?limit|challenge/i.test(o.detail ?? "");
 	return [

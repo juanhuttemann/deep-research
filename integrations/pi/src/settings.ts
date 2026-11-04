@@ -148,6 +148,11 @@ export function parseCommandArgs(settings: Setting[], input: string): CommandArg
 		const eq = w.indexOf("=");
 		const name = eq < 0 ? w.slice(2) : w.slice(2, eq);
 		let v: string | undefined = eq < 0 ? undefined : w.slice(eq + 1);
+		const byFlag = settings.find((x) => x.flag === name && x.key !== name);
+		if (byFlag) {
+			out.values[byFlag.key] = flagValue(byFlag, v, words[i + 1]);
+			continue;
+		}
 		if (v === undefined) {
 			v = words[++i];
 			if (v === undefined) {
@@ -172,14 +177,38 @@ export function parseCommandArgs(settings: Setting[], input: string): CommandArg
 	return out;
 }
 
+// flagValue is the value a setting named by its CLI flag (--no-follow-ups,
+// where the setting is follow-ups) takes: the flag means what it means to
+// drsh, so --no-follow-ups=true is follow-ups off, and alone, like any bool
+// flag, it takes no value. The setting's own on and off after it read the
+// other way round from what they say, so they are refused, not guessed at.
+function flagValue(s: Setting, v: string | undefined, next: string | undefined): string {
+	const own = `use --${s.key} ${s.choices.map((c) => c.label).join("|")}`;
+	if (v === undefined && next !== undefined && s.choices.some((c) => c.label === next || c.value === next)) {
+		throw new Error(`--${s.flag} takes no value; ${own}`);
+	}
+	const b = v === undefined ? "true" : parseBool(v);
+	const o = b === undefined ? undefined : s.choices.find((c) => c.arg === `--${s.flag}=${b}`);
+	if (!o) {
+		throw new Error(`--${s.flag}: ${JSON.stringify(v)} is not true or false; ${own}`);
+	}
+	return o.value;
+}
+
+// parseBool reads a bool as drsh's flags do (Go's strconv.ParseBool).
+function parseBool(v: string): string | undefined {
+	if (["1", "t", "T", "true", "TRUE", "True"].includes(v)) return "true";
+	if (["0", "f", "F", "false", "FALSE", "False"].includes(v)) return "false";
+	return undefined;
+}
+
 export interface Completion {
 	value: string;
 	label: string;
 	description?: string;
 }
 
-// completions offers the option names, then a named option's choices; an
-// option is named by its key or its CLI flag, as parseCommandArgs reads it.
+// completions offers the option names, then a named option's choices.
 export function completions(settings: Setting[], prefix: string): Completion[] {
 	const words = prefix.split(/\s+/);
 	const last = words[words.length - 1] ?? "";
@@ -187,7 +216,9 @@ export function completions(settings: Setting[], prefix: string): Completion[] {
 	const head = before ? `${before} ` : "";
 	const prev = words[words.length - 2] ?? "";
 	if (prev.startsWith("--")) {
-		const s = settings.find((x) => x.key === prev.slice(2) || x.flag === prev.slice(2));
+		// Named by its flag, a setting takes no value to complete: its choices
+		// there would read inverted (see flagValue).
+		const s = settings.find((x) => x.key === prev.slice(2));
 		if (s) {
 			return s.choices
 				.filter((o) => o.label.startsWith(last))

@@ -393,7 +393,7 @@ func webRun(load func() (Deps, error), reports string, stderr io.Writer) web.Run
 		// parse) writes nothing, and the page would wait on a run that never
 		// began.
 		cmd.SilenceErrors = true
-		if err := cmd.ExecuteContext(ctx); err != nil && !out.wrote {
+		if err := cmd.ExecuteContext(inProcess(ctx)); err != nil && !out.wrote {
 			ui.JSONL{W: w}.Emit(doneEvent(ui.RunResult{}, err))
 		}
 	}

@@ -168,8 +168,11 @@ async function checkpointLeft(c: Call): Promise<string | undefined> {
 	}
 	const valid: { path: string; mtime: number }[] = [];
 	for (const path of candidates) {
-		if (resumable(await readJSON(path))) {
-			valid.push({ path, mtime: (await stat(path)).mtimeMs });
+		// A file can go between the read and the stat (a cleanup, an
+		// antivirus on Windows): it is then not one to offer.
+		const mtime = await stat(path).then((st) => st.mtimeMs, () => undefined);
+		if (mtime !== undefined && resumable(await readJSON(path))) {
+			valid.push({ path, mtime });
 		}
 	}
 	return valid.sort((a, b) => b.mtime - a.mtime)[0]?.path;

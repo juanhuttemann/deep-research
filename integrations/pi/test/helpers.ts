@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, SimpleStreamOptions, ToolCall, Usage } from "@earendil-works/pi-ai";
@@ -90,4 +91,18 @@ export function fakeStream(answer: (c: Call) => Answer, calls: Call[] = []) {
 		}
 		yield { type: "done", reason: a.toolCalls?.length ? "toolUse" : "stop", message: msg };
 	};
+}
+
+const made: string[] = [];
+process.on("exit", () => {
+	for (const d of made) rmSync(d, { recursive: true, force: true });
+});
+
+// tempDir is a fresh directory under the system's, removed when the test
+// file's process exits: every `make verify` runs these, and the reports,
+// configs and copied runs they write piled up in /tmp.
+export function tempDir(prefix: string): string {
+	const d = mkdtempSync(join(tmpdir(), prefix));
+	made.push(d);
+	return d;
 }

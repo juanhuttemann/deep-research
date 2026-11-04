@@ -117,17 +117,26 @@ lint: fmt-check vet cyclo ineffassign golangci deadcode
 
 # The Pi extension (integrations/pi): typecheck and tests, the bridge's run
 # against a drsh built from this tree (a stale binary would test last
-# release's contract). Without Node it is reported and skipped, as a missing
-# lint binary is; corepack's npm stands in for a Node with no npm.
+# release's contract). Without Node, or with one older than the extension's
+# engines field (22.19, whose test runner takes the glob below), it is
+# reported and skipped, as a missing lint binary is; corepack's npm stands in
+# for a Node with no npm. The dependencies are installed again only when the
+# lockfile is newer than the install (npm ci clears and refetches them all,
+# on every `make verify`, and fails offline), and the drsh built for the
+# tests is removed after them.
 PI_DIR = integrations/pi
 pi:
 	@if ! command -v node >/dev/null 2>&1; then \
 		echo "warning: node not installed — skipping the Pi extension (needs Node 22.19+)"; exit 0; fi; \
+	if ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 19) ? 0 : 1)'; then \
+		echo "warning: node $$(node --version) is older than 22.19 — skipping the Pi extension"; exit 0; fi; \
 	if command -v npm >/dev/null 2>&1; then npm=npm; \
 	elif command -v corepack >/dev/null 2>&1; then npm="corepack npm@10"; \
 	else echo "warning: neither npm nor corepack installed — skipping the Pi extension"; exit 0; fi; \
-	bin=$$(mktemp -d)/drsh && go build -o $$bin ./cmd/drsh && \
-	cd $(PI_DIR) && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm ci --ignore-scripts --no-audit --no-fund --silent && \
+	tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && bin=$$tmp/drsh && go build -o $$bin ./cmd/drsh && \
+	cd $(PI_DIR) && \
+	if [ ! node_modules/.package-lock.json -nt package-lock.json ]; then \
+		COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm ci --ignore-scripts --no-audit --no-fund --silent; fi && \
 	COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm run --silent typecheck && \
 	DRSH_BIN=$$bin COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm test --silent
 

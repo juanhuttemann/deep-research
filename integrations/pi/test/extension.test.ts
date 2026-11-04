@@ -112,3 +112,40 @@ test("research_ask still reads the last run with a report after a later run is s
 		rmSync(runs, { recursive: true, force: true });
 	}
 });
+
+// /research took its run slot only after its prompts, so a second /research
+// typed while the first waited on its question also passed the check; the
+// first to end freed the slot while the other went on, past /research-stop.
+test("a /research waiting on its prompts holds off a second one", async () => {
+	const f = await load(fakeDrsh);
+	let answer: (v: string | undefined) => void = () => {};
+	const ctx = {
+		...f.ctx,
+		hasUI: true,
+		ui: { ...f.ctx.ui, input: () => new Promise<string | undefined>((r) => (answer = r)) },
+	};
+	const research = f.commands.get("research")!.handler;
+	const stop = f.commands.get("research-stop")!.handler;
+	const first = research("", ctx);
+	await new Promise((r) => setImmediate(r));
+	await research("", ctx);
+	assert.ok(f.notes.some((n) => /already going/.test(n)), `second /research was not held off: ${JSON.stringify(f.notes)}`);
+	await stop("", ctx);
+	answer(undefined);
+	await first;
+	f.notes.length = 0;
+	await stop("", ctx);
+	assert.ok(f.notes.some((n) => /No \/research run is going/.test(n)), "the slot was not freed when the first ended");
+});
+
+// research_ask stopped with Esc read as a failure with no reason at all:
+// "drsh ask failed: ".
+test("a cancelled research_ask says it was cancelled", async () => {
+	const f = await load(fakeDrsh);
+	const abort = new AbortController();
+	abort.abort();
+	await assert.rejects(
+		f.tools.get("research_ask")!.execute("1", { question: "Which benchmark?", run: "/r/run.json" }, abort.signal, undefined, f.ctx),
+		/research_ask was cancelled/,
+	);
+});

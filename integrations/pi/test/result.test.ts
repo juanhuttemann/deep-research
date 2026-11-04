@@ -26,6 +26,22 @@ test("an instant run is said to be not fact-checked", () => {
 	assert.doesNotMatch(text, /Confidence:/);
 });
 
+// A standard run whose fact-check failed has no fact_check in its .json,
+// and the model was told it was an instant run, one search and one answer,
+// with its confidence and gaps dropped.
+test("a run whose fact-check did not finish is not called instant", () => {
+	const j = load("run.json");
+	delete j.fact_check;
+	const d = digest(j);
+	assert.equal(d.factChecked, false);
+	assert.equal(d.instant, false);
+	const text = content({ status: "incomplete", detail: "fact-check failed", artifacts: [], digest: d, report: "# Report" });
+	assert.match(text, /NOT FACT-CHECKED: the run \(quick\) ended before its fact-check/);
+	assert.doesNotMatch(text, /instant/);
+	assert.match(text, /Confidence: medium/);
+	assert.match(text, /BLOCKED recommendation/);
+});
+
 test("the model is told the rules, the unconfirmed claims and where the files are", () => {
 	const text = content({
 		status: "complete",
@@ -45,7 +61,12 @@ test("a stopped run says how to resume, or that it cannot", () => {
 	const limited = content({ status: "incomplete", detail: "3 searches rate-limited", artifacts: [], checkpoint: "/r/x.partial.json" });
 	assert.match(limited, /resume set to it/);
 	assert.match(limited, /about ten minutes/);
-	assert.match(content({ status: "cancelled", artifacts: [] }), /no checkpoint: run it again/);
+	// With no checkpoint the run may have searched and lost its progress
+	// (the save failed), so it is not said to have stopped before its plan.
+	const none = content({ status: "cancelled", artifacts: [] });
+	assert.match(none, /no checkpoint to resume from/);
+	assert.match(none, /or its checkpoint could not be saved/);
+	assert.match(none, /run it again/);
 });
 
 test("a long report is cut, and the model is told where the rest is", () => {

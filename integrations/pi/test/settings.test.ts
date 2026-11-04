@@ -62,5 +62,20 @@ test("completion offers the options, then a named option's choices", () => {
 	const modes = completions(s, "--mode ").map((c) => c.label);
 	assert.deepEqual(modes, get("mode").choices.map((o) => o.label));
 	const byFlag = completions(s, "--no-follow-ups ").map((c) => c.label);
-	assert.deepEqual(byFlag, get("follow-ups").choices.map((o) => o.label), "an option named by its CLI flag, as the parser takes it, completes its choices");
+	assert.ok(!byFlag.includes("on") && !byFlag.includes("off"), "a setting named by its flag offers no on/off, which would read inverted");
+});
+
+// `--no-follow-ups on` read the value as the follow-ups setting's own, so
+// it turned follow-ups on. Named by its CLI flag, a setting now means what
+// the flag means to drsh.
+test("/research reads a setting named by its CLI flag as drsh reads the flag", () => {
+	const fu = (input: string) => parseCommandArgs(s, input).values["follow-ups"];
+	assert.equal(fu("--no-follow-ups q"), "off", "alone, the flag is true");
+	assert.equal(parseCommandArgs(s, "--no-follow-ups Is Go fast?").question, "Is Go fast?", "alone, it takes no word of the question");
+	assert.equal(fu("--no-follow-ups=true q"), "off");
+	assert.equal(fu("--no-follow-ups=false q"), "on");
+	assert.equal(fu("--no-follow-ups=0 q"), "on", "bools are spelled as Go's flags take them");
+	assert.throws(() => parseCommandArgs(s, "--no-follow-ups on q"), /takes no value; use --follow-ups/);
+	assert.throws(() => parseCommandArgs(s, "--no-follow-ups=off q"), /not true or false/);
+	assert.equal(fu("--follow-ups on q"), "on", "the setting's own name keeps on/off");
 });

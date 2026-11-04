@@ -23,8 +23,12 @@ func main() {
 	root := cli.New(load)
 	root.Version = version
 	// Marked as the process's own command: a headless run it starts ends on
-	// SIGINT or SIGTERM with a done line (see cli.TopLevel).
-	if err := root.ExecuteContext(cli.TopLevel(context.Background())); err != nil {
+	// SIGINT or SIGTERM with a done line (see cli.TopLevel), and then the
+	// process ends by that signal, before an error could exit 1 instead.
+	ctx := cli.TopLevel(context.Background())
+	err := root.ExecuteContext(ctx)
+	cli.ExitBySignal(ctx)
+	if err != nil {
 		os.Exit(1)
 	}
 }
