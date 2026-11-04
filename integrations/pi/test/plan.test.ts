@@ -29,6 +29,20 @@ test("an unchanged line keeps its planned query; a new or changed one is a name 
 	assert.deepEqual(edited.depth, plan.depth);
 });
 
+// The list markers a reader may type were stripped from every line, so an
+// untouched "3.5 vs 4 throughput" came back as "5 vs 4 throughput" and lost
+// the planner's query.
+test("an unchanged name that starts like a list marker keeps its sub-topic", () => {
+	const p: Plan = {
+		sub_topics: [
+			{ name: "3.5 vs 4 throughput", query: "q1" },
+			{ name: "-O2 vs -O3 builds", query: "q2" },
+		],
+	};
+	const edited = withSubTopics(p, "3.5 vs 4 throughput\n-O2 vs -O3 builds\n1. New one");
+	assert.deepEqual(edited.sub_topics, [{ name: "3.5 vs 4 throughput", query: "q1" }, { name: "-O2 vs -O3 builds", query: "q2" }, { name: "New one" }]);
+});
+
 test("deleting every line leaves no sub-topics, which the review refuses", () => {
 	assert.equal(withSubTopics(plan, "\n  \n").sub_topics?.length, 0);
 });

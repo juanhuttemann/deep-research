@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ResearchDetails } from "../src/render.ts";
 import { research, type Hooks, type Request } from "../src/research.ts";
 import { runJsonl } from "../src/runner.ts";
-import { fakeDrsh, settings } from "./helpers.ts";
+import { fakeDrsh, settings, tempDir } from "./helpers.ts";
 
 function call(req: Request, hooks: Partial<Hooks>, env: Record<string, string> = {}, signal?: AbortSignal) {
-	const reports = mkdtempSync(join(tmpdir(), "pi-dr-"));
+	const reports = tempDir("pi-dr-");
 	const log = join(reports, "args.log");
 	const updates: ResearchDetails[] = [];
 	const run = research({
@@ -121,7 +120,7 @@ test("a run stopped with no done line still offers the checkpoint it saved", asy
 });
 
 test("a resumed run stopped with no done line offers the checkpoint it resumed", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "pi-dr-cp-"));
+	const dir = tempDir("pi-dr-cp-");
 	const cp = join(dir, "old.abc.partial.json");
 	writeFileSync(cp, JSON.stringify({ question: "q", plan: [{ name: "Benchmarks" }] }));
 	const abort = new AbortController();

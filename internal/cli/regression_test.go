@@ -10,13 +10,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -850,11 +854,17 @@ type blockAt struct {
 	stub
 	plan    bool
 	reached chan struct{}
+	// once closes reached for the first of the searches that run at once.
+	once *sync.Once
+}
+
+func newBlockAt(plan bool) blockAt {
+	return blockAt{plan: plan, reached: make(chan struct{}), once: &sync.Once{}}
 }
 
 func (b blockAt) Plan(ctx context.Context, q string, br agent.Breadth, c []agent.Clarification) (agent.Outline, error) {
 	if b.plan {
-		close(b.reached)
+		b.once.Do(func() { close(b.reached) })
 		<-ctx.Done()
 		return agent.Outline{}, ctx.Err()
 	}
@@ -863,11 +873,7 @@ func (b blockAt) Plan(ctx context.Context, q string, br agent.Breadth, c []agent
 
 func (b blockAt) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
 	if !b.plan {
-		select {
-		case <-b.reached:
-		default:
-			close(b.reached)
-		}
+		b.once.Do(func() { close(b.reached) })
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -892,7 +898,7 @@ func TestHeadlessSignalEndsOnCancelledDone(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			b := blockAt{plan: tc.plan, reached: make(chan struct{})}
+			b := newBlockAt(tc.plan)
 			deps := Deps{Assistant: always(b), Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
 				Config: agent.Config{ModelCallTimeout: time.Minute}}}
 			cmd := New(func() (Deps, error) { return deps, nil })
@@ -937,12 +943,15 @@ func TestHeadlessSignalEndsOnCancelledDone(t *testing.T) {
 	}
 }
 
-// serve runs research in-process; a signal handler there would turn a
-// Ctrl-C meant for the server into the cancellation of whichever run it
-// was serving. Only the process's own command takes signals.
+// serve runs research in-process; a signal handler there turned a Ctrl-C
+// meant for the server into the cancellation of whichever run it was
+// serving. serve's context is the top-level one and cobra hands it to each
+// run serve starts, so the mark reached them unless webRun takes it off.
 func TestOnlyTheTopLevelRunTakesSignals(t *testing.T) {
 	cmd := New(func() (Deps, error) { return Deps{}, nil })
-	cmd.SetContext(context.Background())
+	served, cancel := context.WithCancel(TopLevel(context.Background()))
+	defer cancel()
+	cmd.SetContext(inProcess(served))
 	ctx, stop := stopOnSignal(cmd, false)
 	defer stop()
 	if ctx != cmd.Context() {
@@ -954,4 +963,136 @@ func TestOnlyTheTopLevelRunTakesSignals(t *testing.T) {
 	if ctx != cmd.Context() {
 		t.Error("a run drawing the terminal UI registered for signals; its own handling re-raises them")
 	}
+	cmd.SetContext(context.Background())
+	ctx, stop3 := stopOnSignal(cmd, false)
+	defer stop3()
+	if ctx != cmd.Context() {
+		t.Error("an unmarked command registered for signals")
+	}
+}
+
+// A headless run cancelled by SIGINT returned nil from RunE, so drsh exited
+// 0 and `drsh -s -p q > r.md && publish r.md` went on as if it had finished.
+// It now writes its done line and then ends by the signal, as it did before
+// it caught signals at all.
+func TestSignalledRunEndsByTheSignal(t *testing.T) {
+	if os.Getenv("DRSH_SIGNAL_CHILD") != "" {
+		signalledChild()
+		return
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("a process cannot send another os.Interrupt on Windows")
+	}
+	child, out, exited := startSignalledChild(t)
+	if err := child.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	<-exited
+	if code := child.ProcessState.ExitCode(); code != -1 {
+		t.Errorf("exit code = %d, want the process ended by SIGINT (%s)", code, child.ProcessState)
+	}
+	if !strings.Contains(out.String(), `"status":"cancelled"`) {
+		t.Errorf("no done/cancelled line before the exit: %q", out.String())
+	}
+}
+
+// A shell starts a script's background jobs with SIGINT ignored, so that
+// Ctrl-C at the script leaves them running; registering for SIGINT took
+// that back, and `drsh --jsonl -p q > out &` was cancelled with the script.
+// SIGTERM still stops such a run.
+func TestAnIgnoredSignalStaysIgnored(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no shell to start a process with SIGINT ignored")
+	}
+	child, out, exited := startSignalledChild(t, "sh", "-c", `trap "" INT; exec "$0" "$@"`)
+	if err := child.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	// A run that took the SIGINT writes its done line at once; whether the
+	// process then ends is ExitBySignal's business, so the line is the test.
+	select {
+	case <-exited:
+		t.Fatalf("an ignored SIGINT stopped the run: %s, %q", child.ProcessState, out.String())
+	case <-time.After(500 * time.Millisecond):
+	}
+	if strings.Contains(out.String(), `"type":"done"`) {
+		t.Fatalf("an ignored SIGINT cancelled the run: %q", out.String())
+	}
+	if err := child.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	<-exited
+	if code := child.ProcessState.ExitCode(); code != -1 || !strings.Contains(out.String(), `"status":"cancelled"`) {
+		t.Errorf("SIGTERM: %s, output %q; want done/cancelled, then the process ended by it", child.ProcessState, out.String())
+	}
+}
+
+// startSignalledChild starts signalledChild, through the command in wrap
+// when one is given, and returns once its run blocks at its first search.
+// exited is closed when it has been waited for.
+func startSignalledChild(t *testing.T, wrap ...string) (*exec.Cmd, *lockedBuffer, chan struct{}) {
+	t.Helper()
+	argv := append(wrap, os.Args[0], "-test.run=^TestSignalledRunEndsByTheSignal$")
+	child := exec.Command(argv[0], argv[1:]...)
+	child.Env = append(os.Environ(), "DRSH_SIGNAL_CHILD="+t.TempDir())
+	out := &lockedBuffer{}
+	child.Stdout = out
+	ready, err := child.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Process.Kill() })
+	line := make([]byte, len("ready\n"))
+	if _, err := io.ReadFull(ready, line); err != nil || string(line) != "ready\n" {
+		t.Fatalf("child never reached the search it blocks at: %q, %v", line, err)
+	}
+	exited := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, ready)
+		_ = child.Wait()
+		close(exited)
+	}()
+	return child, out, exited
+}
+
+// lockedBuffer is a child's stdout, read while the child still writes it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// signalledChild is TestSignalledRunEndsByTheSignal's drsh: main's own
+// sequence, with a run that blocks at its first search.
+func signalledChild() {
+	dir := os.Getenv("DRSH_SIGNAL_CHILD")
+	b := newBlockAt(false)
+	deps := Deps{Assistant: always(b), Config: config.Config{DataFile: filepath.Join(dir, "r.jsonl"),
+		Config: agent.Config{ModelCallTimeout: time.Minute}}}
+	cmd := New(func() (Deps, error) { return deps, nil })
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"-p", "q", "--jsonl", "--clarify=off", "--reports", dir})
+	go func() {
+		<-b.reached
+		fmt.Fprint(os.Stderr, "ready\n")
+	}()
+	ctx := TopLevel(context.Background())
+	_ = cmd.ExecuteContext(ctx)
+	ExitBySignal(ctx)
+	os.Exit(0)
 }

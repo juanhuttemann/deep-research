@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { checkAnswers, maxAnswerChars, maxAnswers, type Answer } from "../src/args.ts";
 import { startBridge } from "../src/bridge.ts";
 import type { AssistantMessageEvent } from "@earendil-works/pi-ai";
-import { fakeStream, here, model, usage, type Call } from "./helpers.ts";
+import { fakeStream, here, model, tempDir, usage, type Call } from "./helpers.ts";
 
 // drsh must run asynchronously: the bridge answering it is in this process,
 // and a synchronous exec would block the very loop that serves it.
@@ -79,7 +79,7 @@ const drsh = process.env.DRSH_BIN || resolve(here, "../../../drsh");
 const haveDrsh = existsSync(drsh) && spawnSync(drsh, ["settings"], { env: isolated() }).status === 0;
 
 function isolated(): NodeJS.ProcessEnv {
-	const dir = mkdtempSync(join(tmpdir(), "drsh-cfg-"));
+	const dir = tempDir("drsh-cfg-");
 	return { ...process.env, DEEP_RESEARCH_CONFIG_DIR: dir, DEEP_RESEARCH_DATA_FILE: join(dir, "history.jsonl"), NO_COLOR: "1" };
 }
 
@@ -101,7 +101,7 @@ drshTest("drsh's clarify and plan calls run on the bridge", async () => {
 		}, calls),
 	});
 	try {
-		const reports = mkdtempSync(join(tmpdir(), "drsh-reports-"));
+		const reports = tempDir("drsh-reports-");
 		const env = { ...isolated(), ...b.env };
 		const clarify = await exec(drsh, ["--jsonl", `--reports=${reports}`, "--prompt=Is Go faster than Rust?", "--clarify-only"], env);
 		const asked = clarify.split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -121,7 +121,7 @@ drshTest("drsh's clarify and plan calls run on the bridge", async () => {
 });
 
 drshTest("drsh ask's tool calls run on the bridge", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "drsh-ask-"));
+	const dir = tempDir("drsh-ask-");
 	const run = join(dir, "run.json");
 	writeFileSync(
 		run,
@@ -172,6 +172,37 @@ test("a call that fails mid-stream ends on an error event, not a clean close", a
 		const events = (await r.text()).split("\n\n").filter(Boolean);
 		assert.notEqual(events.at(-1), "data: [DONE]");
 		assert.match(events.at(-1) ?? "", /"error":\{"message":"connection reset by provider"/);
+	} finally {
+		await b.close();
+	}
+});
+
+// The extension holds answers to drsh's --answers bounds (args.ts), so that
+// a long typed answer does not fail the next stage after the questions were
+// answered. This pins those bounds to what the drsh built here accepts.
+drshTest("drsh takes exactly the answers the extension lets through", async () => {
+	const b = await startBridge({
+		model,
+		stream: fakeStream(() => ({ text: JSON.stringify({ subtopics: [{ name: "Benchmarks", query: "go rust benchmarks", terms: ["benchmark"] }] }) })),
+	});
+	try {
+		const reports = tempDir("drsh-reports-");
+		const env = { ...isolated(), ...b.env };
+		const plan = async (answers: Answer[]) => {
+			const args = ["--jsonl", `--reports=${reports}`, "--prompt=q", "--plan-only", `--answers=${JSON.stringify({ questions: [], answers })}`];
+			const out = await promisify(execFile)(drsh, args, { env, timeout: 60_000 }).then((r) => r.stdout, (e) => e.stdout as string);
+			return JSON.parse(out.trim().split("\n").at(-1)!) as { status: string; detail?: string };
+		};
+		const one = (i: number, n: number) => ({ question: `Q${i}?`, answer: "a".repeat(n) });
+		const most = Array.from({ length: maxAnswers }, (_, i) => one(i, maxAnswerChars));
+		assert.doesNotThrow(() => checkAnswers(most));
+		assert.equal((await plan(most)).status, "complete", "the most the extension sends is taken");
+		const long = [one(0, maxAnswerChars + 1)];
+		assert.throws(() => checkAnswers(long));
+		assert.match((await plan(long)).detail ?? "", new RegExp(`over ${maxAnswerChars}`), "one character more is refused");
+		const many = Array.from({ length: maxAnswers + 1 }, (_, i) => one(i, 1));
+		assert.throws(() => checkAnswers(many));
+		assert.match((await plan(many)).detail ?? "", new RegExp(`at most ${maxAnswers}`), "one answer more is refused");
 	} finally {
 		await b.close();
 	}

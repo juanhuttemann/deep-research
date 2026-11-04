@@ -5,6 +5,45 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Ctrl-C or SIGTERM sent to `drsh serve` while it served a run cancelled
+  that run and left the server going. The runs serve starts no longer take
+  signals, so a signal stops the server, as documented.
+- A headless run stopped by SIGINT or SIGTERM exited 0 after its
+  `done: cancelled` line, so `drsh -s -p q > r.md && next-step` went on as
+  if it had finished. drsh now ends by the signal after the done line, and
+  the exit status says the run was stopped.
+- Pi extension: `/research --no-follow-ups on` turned follow-ups on. A
+  setting named by its drsh flag now means what the flag means:
+  `--no-follow-ups` alone or `=true` turns them off, and `on`/`off` after it
+  are refused with a pointer to `--follow-ups on|off`.
+- Since 0.30.0 a headless run caught SIGINT even when started with it
+  ignored, so a script's background `drsh --jsonl -p … &` was cancelled by
+  Ctrl-C at the script. An ignored signal now stays ignored.
+- Pi extension:
+  - A standard or deep run whose fact-check did not finish was described to
+    the model as an instant run, one search and one answer, and its
+    confidence, blocked recommendations and gaps were left out. It is now
+    said to be unchecked, with the rest of its digest.
+  - A second `/research` typed while the first still waited on its question
+    or settings started a run of its own, and `/research-stop` could then
+    lose track of it. The first holds the run from the start.
+  - Editing the plan turned an untouched sub-topic named like a list item
+    (`3.5 vs 4 throughput`, `-O2 vs -O3 builds`) into a new one, `5 vs 4
+    throughput`, without the planner's query.
+  - An answer typed under "Other…" past drsh's 300 characters, or more than
+    three answers from the model, failed the next stage after every question
+    was answered. A typed answer is cut to 300 characters, as the terminal
+    cuts one, and the tool refuses too many or too long answers up front.
+  - A cancelled `research_ask` read as a failure with no reason; it now says
+    it was cancelled.
+  - A stopped run with no checkpoint was said to have stopped before its
+    plan, even when its checkpoint could not be saved. It now says either may
+    be why.
+  - Looking for the checkpoint a killed run left no longer fails the call
+    when a file disappears while it looks.
+
 ## [0.30.1] - 2026-11-01
 
 ### Changed

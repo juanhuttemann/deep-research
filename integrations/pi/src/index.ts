@@ -12,7 +12,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
-import type { Answer } from "./args.ts";
+import { checkAnswers, clip, maxAnswerChars, maxAnswers, type Answer } from "./args.ts";
 import { startBridge, type Bridge } from "./bridge.ts";
 import type { Question } from "./events.ts";
 import { planLines, subTopicNames, withSubTopics, type Plan } from "./plan.ts";
@@ -213,7 +213,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 			if (pick === skip) continue;
 			const answer = pick === other ? await ctx.ui.input(q.text, "your answer", { signal }) : pick;
 			if (answer === undefined) return "stop";
-			if (answer.trim()) out.push({ question: q.text, answer: answer.trim() });
+			if (answer.trim()) out.push({ question: q.text, answer: clip(answer) });
 		}
 		return out;
 	}
@@ -274,8 +274,9 @@ export default function deepResearch(pi: ExtensionAPI) {
 				Type.String({ description: "A checkpoint path a cancelled, failed or incomplete run reported: continues that run without repeating finished searches. Takes no other parameter." }),
 			),
 			answers: Type.Optional(
-				Type.Array(Type.Object({ question: Type.String(), answer: Type.String() }), {
-					description: "The user's answers to the clarifying questions an earlier call returned. Given, no questions are asked.",
+				Type.Array(Type.Object({ question: Type.String(), answer: Type.String({ maxLength: maxAnswerChars }) }), {
+					maxItems: maxAnswers,
+					description: `The user's answers to the clarifying questions an earlier call returned, at most ${maxAnswers}, each at most ${maxAnswerChars} characters. Given, no questions are asked.`,
 				}),
 			),
 			domains: Type.Optional(
@@ -309,6 +310,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 			throw new Error("deep_research needs a question (or resume with a checkpoint path)");
 		}
 		const answers = Array.isArray(p.answers) ? (p.answers as Answer[]) : undefined;
+		if (answers) checkAnswers(answers);
 		return {
 			kind: "new",
 			run: {
@@ -403,8 +405,11 @@ export default function deepResearch(pi: ExtensionAPI) {
 				const { value: r, bridge } = await withEndpoint(ctx, model, signal, (env) =>
 					runPlain(bin, ["ask", runFile, "-p", params.question], { env, signal }),
 				);
+				if (r.aborted) {
+					throw new Error("research_ask was cancelled");
+				}
 				if (r.code !== 0) {
-					throw new Error(`drsh ask failed: ${(r.stderr || r.stdout).trim().slice(-2000)}`);
+					throw new Error(`drsh ask failed: ${(r.stderr || r.stdout).trim().slice(-2000) || `exit ${r.code}`}`);
 				}
 				return {
 					content: [
@@ -483,68 +488,82 @@ export default function deepResearch(pi: ExtensionAPI) {
 				ctx.ui.notify("A research run is already going; /research-stop ends it", "warning");
 				return;
 			}
-			let s: Setting[];
-			try {
-				s = await ensureSettings();
-			} catch (err) {
-				ctx.ui.notify((err as Error).message, "error");
-				return;
-			}
-			let parsed;
-			try {
-				parsed = parseCommandArgs(s, args);
-			} catch (err) {
-				ctx.ui.notify((err as Error).message, "error");
-				return;
-			}
-			if (!ctx.hasUI) {
-				ctx.ui.notify("/research needs the interactive UI; ask the agent to use deep_research instead", "error");
-				return;
-			}
-			const question = parsed.question || (await ctx.ui.input("Research question", "what should the run find out?"))?.trim();
-			if (!question) return;
-			let values = parsed.values;
-			if (Object.keys(values).length === 0 && parsed.domains.length === 0) {
-				const chosen = await settingsScreen(ctx, s, values);
-				if (!chosen) return;
-				values = chosen;
-			}
+			// Taken before the first await: the settings and the prompts wait
+			// on the user, and a second /research in that time passed the
+			// check above and started a run of its own; the first to end then
+			// cleared this while the other went on, past /research-stop.
 			const abort = new AbortController();
 			commandRun = abort;
-			const status = throttle(() => {
-				if (!latest) return;
-				const lines = progressLines(latest, ctx.ui.theme);
-				ctx.ui.setWidget("deep-research", lines);
-				ctx.ui.setStatus("deep-research", `research: ${latest.state?.phase || latest.stage}`);
-			}, 250);
-			let latest: ResearchDetails | undefined;
 			try {
-				const req: Request = { kind: "new", run: { question, values, domains: parsed.domains }, review: true };
-				const { result, bridge } = await run(ctx, req, undefined, abort.signal, {
-					update: (d) => {
-						latest = d;
-						status.call();
-					},
-					ask: (qs) => askQuestions(ctx, qs, abort.signal),
-					review: (plan) => reviewPlan(ctx, plan, abort.signal),
-				});
-				pi.sendMessage(
-					{ customType: "deep-research", content: result.text, display: true, details: result.details },
-					{ triggerTurn: result.details.outcome !== undefined && result.details.outcome.status !== "cancelled" },
-				);
-				if (bridge?.usage.totalTokens) {
-					ctx.ui.notify(`research used ${bridge.usage.totalTokens} tokens ($${bridge.usage.cost.total.toFixed(4)}) on ${bridge.modelName}`, "info");
-				}
-			} catch (err) {
-				ctx.ui.notify(`research failed: ${(err as Error).message}`, "error");
+				await researchCommand(args, ctx, abort);
 			} finally {
-				status.cancel();
 				commandRun = undefined;
-				ctx.ui.setWidget("deep-research", undefined);
-				ctx.ui.setStatus("deep-research", undefined);
 			}
 		},
 	});
+
+	// researchCommand is /research once it holds commandRun.
+	async function researchCommand(args: string, ctx: ExtensionContext, abort: AbortController): Promise<void> {
+		let s: Setting[];
+		try {
+			s = await ensureSettings();
+		} catch (err) {
+			ctx.ui.notify((err as Error).message, "error");
+			return;
+		}
+		let parsed;
+		try {
+			parsed = parseCommandArgs(s, args);
+		} catch (err) {
+			ctx.ui.notify((err as Error).message, "error");
+			return;
+		}
+		if (!ctx.hasUI) {
+			ctx.ui.notify("/research needs the interactive UI; ask the agent to use deep_research instead", "error");
+			return;
+		}
+		const question = parsed.question || (await ctx.ui.input("Research question", "what should the run find out?", { signal: abort.signal }))?.trim();
+		if (!question) return;
+		let values = parsed.values;
+		if (Object.keys(values).length === 0 && parsed.domains.length === 0) {
+			const chosen = await settingsScreen(ctx, s, values);
+			if (!chosen) return;
+			values = chosen;
+		}
+		// /research-stop while the prompts were open.
+		if (abort.signal.aborted) return;
+		const status = throttle(() => {
+			if (!latest) return;
+			const lines = progressLines(latest, ctx.ui.theme);
+			ctx.ui.setWidget("deep-research", lines);
+			ctx.ui.setStatus("deep-research", `research: ${latest.state?.phase || latest.stage}`);
+		}, 250);
+		let latest: ResearchDetails | undefined;
+		try {
+			const req: Request = { kind: "new", run: { question, values, domains: parsed.domains }, review: true };
+			const { result, bridge } = await run(ctx, req, undefined, abort.signal, {
+				update: (d) => {
+					latest = d;
+					status.call();
+				},
+				ask: (qs) => askQuestions(ctx, qs, abort.signal),
+				review: (plan) => reviewPlan(ctx, plan, abort.signal),
+			});
+			pi.sendMessage(
+				{ customType: "deep-research", content: result.text, display: true, details: result.details },
+				{ triggerTurn: result.details.outcome !== undefined && result.details.outcome.status !== "cancelled" },
+			);
+			if (bridge?.usage.totalTokens) {
+				ctx.ui.notify(`research used ${bridge.usage.totalTokens} tokens ($${bridge.usage.cost.total.toFixed(4)}) on ${bridge.modelName}`, "info");
+			}
+		} catch (err) {
+			ctx.ui.notify(`research failed: ${(err as Error).message}`, "error");
+		} finally {
+			status.cancel();
+			ctx.ui.setWidget("deep-research", undefined);
+			ctx.ui.setStatus("deep-research", undefined);
+		}
+	}
 
 	pi.registerCommand("research-stop", {
 		description: "Stop the research run /research started; it keeps a checkpoint to resume from",

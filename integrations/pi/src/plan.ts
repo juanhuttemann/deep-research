@@ -23,12 +23,15 @@ export function subTopicNames(plan: Plan): string[] {
 // each. An unchanged line keeps its sub-topic, the planner's query and
 // terms included; a changed or new one is a sub-topic of that name alone,
 // whose query the run derives, since the old query searched for something
-// else.
+// else. A list marker a reader typed (1., -, •) is dropped, but not from a
+// line that is a sub-topic's name as it stands: "3.5 vs 4 throughput" or
+// "-O2 vs -O3 builds" left alone is that sub-topic, not a new "5 vs 4".
 export function withSubTopics(plan: Plan, text: string): Plan {
 	const old = new Map((plan.sub_topics ?? []).map((t) => [t.name.trim(), t]));
 	const names = text
 		.split("\n")
-		.map((l) => l.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, "").trim())
+		.map((l) => l.trim())
+		.map((l) => (old.has(l) ? l : l.replace(/^(?:\d+[.)]|[-*•])\s*/, "").trim()))
 		.filter(Boolean);
 	return { ...plan, sub_topics: names.map((n) => old.get(n) ?? { name: n }) };
 }

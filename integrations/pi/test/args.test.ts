@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { newRunArgs, planRunArgs, resumeArgs } from "../src/args.ts";
+import { clip, maxAnswerChars, newRunArgs, planRunArgs, resumeArgs } from "../src/args.ts";
 import { settings } from "./helpers.ts";
 
 const s = settings();
@@ -24,4 +24,12 @@ test("a plan or a checkpoint carries its own settings", () => {
 
 test("a setting drsh does not know is refused, not dropped", () => {
 	assert.throws(() => newRunArgs(s, { question: "q", values: { colour: "red" } }, "/r", "run"), /unknown setting/);
+});
+
+// A typed answer over drsh's bound failed the next stage after every
+// question was answered; it is cut, as the terminal cuts one.
+test("a typed answer is cut to drsh's bound, by characters", () => {
+	assert.equal(clip("  web  "), "web");
+	const long = "é".repeat(maxAnswerChars + 20);
+	assert.equal([...clip(long)].length, maxAnswerChars);
 });

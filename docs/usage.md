@@ -470,9 +470,13 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   none). Validation errors (an empty question, a bad `--mode`, no key) end
   on it too. A stream that stops without one means the process was killed.
 - **SIGINT or SIGTERM ends a headless run as a cancellation**: it stops,
-  writes `done` with `status: cancelled` and its `checkpoint`, and exits.
-  A second signal ends it at once. (The terminal UI handles signals its
-  own way, and `serve` is stopped by them, not its runs.)
+  writes `done` with `status: cancelled` and its `checkpoint`, and then the
+  process ends by that signal, so its exit status (130, 143 in a shell)
+  says it was stopped. A second signal ends it at once. A signal drsh was
+  started with ignored stays ignored: a script's background
+  `drsh --jsonl -p … &` keeps running through Ctrl-C at the script, as
+  background jobs do. (The terminal UI handles signals its own way, and
+  `serve` is stopped by them, not its runs.)
 - During streamed planning, analysis, fact-check and summarization calls,
   a `transient` `info` line arrives at least every five seconds — waiting
   for the model to start, thinking, the count so far, or "no new output for Ns". While a reasoning

@@ -10,6 +10,31 @@ export interface Answer {
 	answer: string;
 }
 
+// maxAnswers and maxAnswerChars are drsh's bounds on --answers
+// (ui.Clarified.Checked: agent.MaxQuestions, ui.maxAnswer). Past them the
+// next stage fails after the questions were already answered, so they are
+// held here first; the bridge tests run them against a real drsh.
+export const maxAnswers = 3;
+export const maxAnswerChars = 300;
+
+// clip is a typed answer cut to maxAnswerChars, as the terminal cuts one.
+export function clip(answer: string): string {
+	const chars = [...answer.trim()];
+	return chars.length > maxAnswerChars ? chars.slice(0, maxAnswerChars).join("") : chars.join("");
+}
+
+// checkAnswers refuses answers drsh would refuse, with drsh's reasons.
+export function checkAnswers(answers: Answer[]): void {
+	if (answers.length > maxAnswers) {
+		throw new Error(`answers: at most ${maxAnswers}, one per clarifying question`);
+	}
+	for (const a of answers) {
+		if ([...a.answer.trim()].length > maxAnswerChars || [...a.question.trim()].length > maxAnswerChars) {
+			throw new Error(`answers: an answer is over ${maxAnswerChars} characters`);
+		}
+	}
+}
+
 // Clarified is the --answers JSON: the questions asked and the reader's
 // answers, as ui.ParseAnswers reads it.
 export interface Clarified {
