@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-08
+
 ### Changed
 
 - The live frame's activity tail no longer repeats a topic's name on every
@@ -53,7 +55,7 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   once.
 - `drsh history` held every run's full record in memory to print a few
   fields of each.
-- Pi extension: a slow reader of a streamed answer had it all queued in
+- Pi extension (0.1.4): a slow reader of a streamed answer had it all queued in
   memory, and a call arriving after the run was stopped still reached the
   provider.
 
