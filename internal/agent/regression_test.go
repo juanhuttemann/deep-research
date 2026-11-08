@@ -1235,7 +1235,9 @@ func TestSilentStreamIsADeadlineNotACancel(t *testing.T) {
 func TestPlannerFixesTyposButNotTheQuestion(t *testing.T) {
 	asked := "Best cloud storage provider for personal files\noveralll"
 	for _, c := range []struct{ proposed, want string }{
-		{"Best cloud storage provider for personal files overall", "Best cloud storage provider for personal files overall"},
+		// Fixed in the question's own lines: the fix is written as one, and
+		// taken as it is it flattened a question laid out over several.
+		{"Best cloud storage provider for personal files overall", "Best cloud storage provider for personal files\noverall"},
 		{"Best cloud storage provider for personal files overalll", ""},
 		{"Which cloud storage provider has the lowest price per terabyte for families?", ""},
 		{"", ""},
@@ -1263,7 +1265,10 @@ func TestPlannerFixesTyposButNotTheQuestion(t *testing.T) {
 	// Case, hyphens and the punctuation around words make a title, and
 	// counting them refused this whole fix over "Best-selling" and "etc.)".
 	title := "Best-selling modules for dev boards (Arduino, Raspberry Pi, ESP32, etc.)"
-	checkFix(t, "best selling modules for dev boards (arduino,\nraspberry pi, esp32, etc", title, title)
+	checkFix(t, "best selling modules for dev boards (arduino, raspberry pi, esp32, etc", title, title)
+	// Over two lines the same fix joins two words, so it has no place in the
+	// question's lines: the question is kept as typed.
+	checkFix(t, "best selling modules for dev boards (arduino,\nraspberry pi, esp32, etc", title, "")
 	checkFix(t, "Why is (-1000) smaller", "Why is -1000 smaller?", "Why is -1000 smaller?")
 }
 

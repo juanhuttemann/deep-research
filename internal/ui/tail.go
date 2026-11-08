@@ -22,8 +22,22 @@ type tailItem struct {
 
 // tailItems groups the retained rows: a row whose sub-agent the tree knows
 // joins its topic's group, any other stays a row of its own.
+//
+// The grouping is kept until an event changes the rows (Emit drops it):
+// the ticker repaints several times a second with nothing new, and grouped
+// again each time, a thousand rows made a fresh copy of the history per
+// paint. What changes between events (a spinner, the clock) is drawn from
+// the rows, not kept in them.
 func (r *Renderer) tailItems() []tailItem {
-	var items []tailItem
+	if r.grouped != nil {
+		return r.grouped
+	}
+	r.grouped = r.groupActs()
+	return r.grouped
+}
+
+func (r *Renderer) groupActs() []tailItem {
+	items := []tailItem{}
 	at := map[string]int{}
 	for _, a := range r.acts {
 		if a.sub == "" || r.nodes[a.sub] == nil {
@@ -49,7 +63,8 @@ func (r *Renderer) activityLines(n int) []string {
 	if n <= 0 {
 		return nil
 	}
-	items := fitItems(r.tailItems(), n)
+	all := r.tailItems()
+	items := fitItems(all, n, r.openWant(all))
 	shares := r.openShares(items, n-len(items))
 	col := r.topicCol()
 	out := make([]string, 0, n)
@@ -73,22 +88,39 @@ func (r *Renderer) activityLines(n int) []string {
 	return out
 }
 
-// fitItems keeps the items that fit in n rows, one row each. The topics
-// go last: a topic is where a click or its number opens it, and one that
-// started early but is still busy must not be pushed out by the phases that
-// started after it. Of the rest the newest stay, and only when the topics
-// alone overflow do the oldest of them give way.
-func fitItems(items []tailItem, n int) []tailItem {
-	if len(items) <= n {
-		return items
+// openWant is how many rows the open topics' groups would fill.
+func (r *Renderer) openWant(items []tailItem) (n int) {
+	for _, it := range items {
+		if it.sub != "" && r.opened[it.sub] {
+			n += len(it.rows)
+		}
 	}
-	groups := 0
+	return n
+}
+
+// fitItems keeps the items that fit in n rows, one row each, with room
+// left for open rows the open topics would fill. The topics go last: a
+// topic is where a click or its number opens it, and one that started early
+// but is still busy must not be pushed out by the phases that started after
+// it. A topic opened goes before the run's rows: once the phases and notes
+// filled the tail, a topic opened showed nothing of what it held. The
+// newest run row, the phase the run is in, stays while it fits. Of the
+// rest the newest stay, and only when the topics alone overflow do the
+// oldest of them give way.
+func fitItems(items []tailItem, n, open int) []tailItem {
+	groups, runCount := 0, 0
 	for _, it := range items {
 		if it.sub != "" {
 			groups++
+		} else {
+			runCount++
 		}
 	}
-	runs := max(n-groups, 0)       // run rows kept, the newest
+	if len(items)+open <= n {
+		return items
+	}
+	// run rows kept, the newest
+	runs := max(n-groups-open, min(runCount, 1, max(n-groups, 0)), 0)
 	dropGroups := max(groups-n, 0) // groups dropped, the oldest
 	keep := make([]bool, len(items))
 	for i := len(items) - 1; i >= 0; i-- {

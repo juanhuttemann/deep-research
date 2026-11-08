@@ -297,9 +297,11 @@ func NewPlanner(a agent.Assistant, depth DepthMode) *Planner {
 
 // Plan generates the plan for question, applying the configured depth tier.
 func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
-	// A question pasted over two lines kept its line break into the report's
-	// title.
-	question = strings.Join(strings.Fields(question), " ")
+	// Its lines are kept: a question typed or pasted over several (a list
+	// of options, a table, code) is laid out for the model to read. The
+	// titles that are one line (the report's heading, the history, the
+	// frame) fold them with OneLine where they draw it.
+	question = strings.TrimSpace(question)
 	b := pl.Breadth()
 	out, err := pl.Assistant.Plan(ctx, question, b, pl.Reading)
 	if err != nil {

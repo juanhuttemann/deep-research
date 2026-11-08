@@ -42,7 +42,8 @@ const defaultClarifierInstructions = `You check a research question before it is
 // not worth stopping a run for: the run goes on as it would without it.
 func (a *impl) Clarify(ctx context.Context, question string) ([]Question, error) {
 	a.log(fmt.Sprintf("%-10s  %s · %s", "clarify", a.model, a.effortLabel(a.effort.Clarify)))
-	out, err := a.clarify(ctx, "Question: "+strings.Join(strings.Fields(question), " "))
+	// The question as typed, its lines kept, as the planner gets it.
+	out, err := a.clarify(ctx, "Question: "+strings.TrimSpace(question))
 	if err != nil {
 		return nil, err
 	}

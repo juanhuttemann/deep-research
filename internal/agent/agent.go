@@ -1720,6 +1720,12 @@ func (a *impl) Plan(ctx context.Context, question string, b Breadth, reading []C
 		topics = topics[:b.Max]
 	}
 	proposed := parsePlanQuestion(out)
+	if strings.Contains(question, "\n") {
+		// A correction is written as one line: taken as it is, it would
+		// flatten a question laid out over several, which the model is
+		// meant to read as typed.
+		proposed = inLayoutOf(question, proposed)
+	}
 	fixed := fixedQuestion(question, proposed)
 	// A refused correction leaves the question as typed with nothing on
 	// screen to say a fix was offered: the reader saw only that it "did not
@@ -1728,6 +1734,30 @@ func (a *impl) Plan(ctx context.Context, question string, b Breadth, reading []C
 		a.log(fmt.Sprintf("kept the question as typed: the planner's %q changes a word, not only its spelling", proposed))
 	}
 	return Outline{Question: fixed, SubTopics: topics, Scope: parsePlanScope(out)}, nil
+}
+
+// inLayoutOf is the correction proposed laid out as asked is: each of its
+// words where asked has the word it corrects, between asked's own spaces
+// and line breaks. A correction that joins or splits words ("best selling"
+// for "Best-selling") has no such layout and is "", the question kept as
+// typed; so is one that changes nothing.
+func inLayoutOf(asked, proposed string) string {
+	was, now := strings.Fields(asked), strings.Fields(proposed)
+	if len(now) == 0 || len(was) != len(now) {
+		return ""
+	}
+	var b strings.Builder
+	rest := strings.TrimSpace(asked)
+	for i, w := range was {
+		at := strings.Index(rest, w)
+		b.WriteString(rest[:at]) // the spaces and breaks before it
+		b.WriteString(now[i])
+		rest = rest[at+len(w):]
+	}
+	if out := b.String(); out != strings.TrimSpace(asked) {
+		return out
+	}
+	return ""
 }
 
 // parsePlanScope is the scope the planner judged, or "" when it gave none

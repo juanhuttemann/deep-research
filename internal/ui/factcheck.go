@@ -66,6 +66,12 @@ func checkParts(a *agent.Analysis, findings []agent.Finding, retrieved bool) []c
 		return []checkPart{{prompt: factCheckPrompt(claimsToCheck(a), findings, retrieved, nil), claims: true}}
 	}
 	groups := claimGroups(a.Claims)
+	// Every page is excerpted by all the claims, as in one call: a passage
+	// another call's claim matched can contradict one of these, and an
+	// excerpt chosen by this call's claims alone left it out. The same for
+	// every call, so written once: each call made it again, scoring every
+	// page's passages against every claim, before any call could start.
+	evidence := evidenceBlock(findings, a.Claims)
 	var parts []checkPart
 	for _, g := range groups {
 		var sb strings.Builder
@@ -75,10 +81,7 @@ func checkParts(a *agent.Analysis, findings []agent.Finding, retrieved bool) []c
 		if len(groups) > 1 {
 			label = "claims " + g[0].ID + "-" + g[len(g)-1].ID
 		}
-		// Every page is excerpted by all the claims, as in one call: a passage
-		// another call's claim matched can contradict one of these, and an
-		// excerpt chosen by this call's claims alone left it out.
-		parts = append(parts, checkPart{label: label, prompt: factCheckPrompt(sb.String(), findings, retrieved, a.Claims),
+		parts = append(parts, checkPart{label: label, prompt: factCheckPromptWith(sb.String(), retrieved, evidence),
 			claims: true, ids: claimIDs(g)})
 	}
 	us := units(a)

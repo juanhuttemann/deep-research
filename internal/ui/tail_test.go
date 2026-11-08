@@ -360,3 +360,25 @@ func TestFrameTakesTheAlternateScreenAfterTheBrief(t *testing.T) {
 		t.Errorf("want the alternate screen cleared once entered, and left on close: %q", out)
 	}
 }
+
+// Once the phases and the run's notes filled the tail, the rows left for an
+// open topic were none: it showed open with nothing under it. An open
+// topic's rows go before the run's older rows; the newest run row stays.
+func TestOpenTopicOutranksRunNotes(t *testing.T) {
+	r, _ := groupedRun(t)
+	r.OpenTopic(2)
+	for _, p := range []string{"Analyze", "Fact-Check", "Summarize"} {
+		r.Emit(Event{Type: Phase, Phase: p, Detail: p + " step"})
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rows := r.activityLines(5)
+	joined := strings.Join(rows, "\n")
+	if !strings.Contains(joined, "star compass") || !strings.Contains(joined, "Land Signs") ||
+		!strings.Contains(joined, "Summarize step") {
+		t.Errorf("want topic 2's rows, both headers and the newest phase:\n%s", joined)
+	}
+	if strings.Contains(joined, "Analyze step") {
+		t.Errorf("an older phase kept a row topic 2 needed:\n%s", joined)
+	}
+}

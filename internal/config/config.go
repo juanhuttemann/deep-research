@@ -618,7 +618,8 @@ func runKeys(v *viper.Viper) (Config, error) {
 	return cfg, nil
 }
 
-// duration reads a duration key. A bare number is refused: viper reads it as
+// duration reads a duration key, refusing text that is not one. A bare
+// number is refused too: viper reads it as
 // nanoseconds, so run_timeout: 1800, meant as seconds, was 1.8µs, and every
 // run failed with a deadline that named no key.
 func duration(v *viper.Viper, key string) (time.Duration, error) {
@@ -627,7 +628,18 @@ func duration(v *viper.Viper, key string) (time.Duration, error) {
 		return 0, fmt.Errorf("config: %s %s: give a unit, as in 30m or 300s (%s in config.yaml, or %s_%s)",
 			key, raw, key, EnvPrefix, strings.ToUpper(key))
 	}
-	return v.GetDuration(key), nil
+	if raw == "" {
+		return 0, nil
+	}
+	// Parsed here, not by viper's GetDuration, which drops the error: text
+	// it could not read ("nonsense", "30 min") was 0, the default, and the
+	// deadline the reader set was ignored without a word.
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s %q: not a duration; give one as in 30m or 300s (%s in config.yaml, or %s_%s)",
+			key, raw, key, EnvPrefix, strings.ToUpper(key))
+	}
+	return d, nil
 }
 
 // sourcesPerTopic reads sources_per_topic, or its older max_depth spelling.

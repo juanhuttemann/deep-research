@@ -26,7 +26,36 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   spaces. The model gets the question as typed; the brief, the live frame,
   the report's heading, `drsh history`, `/resume` and the completion
   notification show it on one line, which also fixes a `-p` question with
-  line breaks breaking the frame.
+  line breaks breaking the frame. The planner's spelling fix of a question
+  over several lines is applied in its own lines, and not at all when it
+  joins or splits words.
+
+### Fixed
+
+- A run whose `.json` record could not be saved ended `complete` and
+  removed its checkpoint, leaving nothing to ask about or resume. It now
+  fails, saying so, and keeps the checkpoint (`drsh --resume`). A Markdown
+  or PDF that cannot be saved is still a warning.
+- The report, PDF and `.json` replaced the previous run's files in place,
+  so a failed write could leave them truncated. Each is now written beside
+  its file and renamed over it.
+- Two topics' searches fetching the same page at once both downloaded it.
+  A page being fetched is now shared with the searches that ask for it
+  meanwhile.
+- The topic that lost that race for a page was told to the analysis as
+  having found nothing.
+- A timeout that is not a duration (`model_call_timeout: 30 min`) was
+  silently the default; it is now refused, naming the key.
+- On the serve page, discarding a checkpoint could race with a run being
+  launched from it; and asking about a run read a `.json` symlinked from
+  outside the reports directory, which the page's other routes refuse.
+- Each fact-check call rebuilt the same evidence excerpts; they are built
+  once.
+- `drsh history` held every run's full record in memory to print a few
+  fields of each.
+- Pi extension: a slow reader of a streamed answer had it all queued in
+  memory, and a call arriving after the run was stopped still reached the
+  provider.
 
 ## [0.30.2] - 2026-11-03
 

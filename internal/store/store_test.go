@@ -28,7 +28,7 @@ func TestSaveAppendsAndCreatesDir(t *testing.T) {
 		}
 	}
 
-	got, _, err := s.List()
+	got, _, err := list(s)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestListSkipsCorruptLines(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, _, err := s.List()
+	got, _, err := list(s)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestListSkipsCorruptLines(t *testing.T) {
 
 // TestListMissingFileIsEmpty: `list` before the first run is not an error.
 func TestListMissingFileIsEmpty(t *testing.T) {
-	got, _, err := tempStore(t).List()
+	got, _, err := list(tempStore(t))
 	if err != nil {
 		t.Fatalf("List on a missing file: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestDomainsRoundTripBesideLegacyRecords(t *testing.T) {
 	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{Question: "q1", Domains: []string{"go.dev"}}}); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := st.List()
+	runs, skipped, err := list(st)
 	if err != nil || skipped != 0 || len(runs) != 2 {
 		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
 	}
@@ -136,7 +136,7 @@ func TestInstantRecordsLoadBesideOthers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runs, skipped, err := st.List()
+	runs, skipped, err := list(st)
 	if err != nil || skipped != 0 || len(runs) != 3 {
 		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
 	}
@@ -148,4 +148,10 @@ func TestInstantRecordsLoadBesideOthers(t *testing.T) {
 	if r := runs[2]; r.Analysis != nil || r.FactCheck != nil || r.Summary == nil || r.Summary.Confidence != "unchecked" {
 		t.Errorf("instant record = %+v", r)
 	}
+}
+
+// list is every record Each hands over, as the history held them.
+func list(s *Store) (results []ResearchResult, skipped int, err error) {
+	skipped, err = s.Each(func(r ResearchResult) { results = append(results, r) })
+	return results, skipped, err
 }

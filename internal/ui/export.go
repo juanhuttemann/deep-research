@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -332,6 +333,53 @@ func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult) {
 }
 
 // WriteMarkdown writes the Markdown report and returns the path written.
+// writeAtomic replaces path with data whole or not at all: written to a
+// file beside it and renamed over it. Written in place, the same question
+// asked again truncated the earlier run's file before the new one was
+// written, and a write that failed (a full disk, a kill) left neither; a
+// reader of the JSON (the page, ask) could read it half written.
+//
+// The file keeps the mode the write in place gave it: the earlier file's,
+// or for a new one 0644 less the umask, which the open applies. The mode is
+// set when the file beside it is created, before any of the report is in
+// it: created 0644 and narrowed after the write, a report kept 0600 was
+// readable by all while it was written, and left so by a crash.
+func writeAtomic(path string, data []byte) error {
+	perm := os.FileMode(0o644)
+	st, statErr := os.Stat(path)
+	if statErr == nil {
+		perm = st.Mode().Perm()
+	}
+	name := filepath.Join(filepath.Dir(path), fmt.Sprintf(".%s.%d.tmp", filepath.Base(path), rand.Int64()))
+	tmp, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if stagedHook != nil {
+		stagedHook(name)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	// The umask may have made it narrower than the file it replaces; never
+	// wider.
+	if err == nil && statErr == nil {
+		err = os.Chmod(name, perm)
+	}
+	if err == nil {
+		err = os.Rename(name, path)
+	}
+	if err != nil {
+		_ = os.Remove(name)
+	}
+	return err
+}
+
+// stagedHook, set only by tests, sees the file beside the report once the
+// report is written into it, before it is renamed over the report.
+var stagedHook func(name string)
+
 func WriteMarkdown(res *agent.ResearchResult, dir string) (string, error) {
 	body := MarkdownReport(res)
 	name := slug(res.Question) + ".md"
@@ -339,7 +387,7 @@ func WriteMarkdown(res *agent.ResearchResult, dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return path, err
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := writeAtomic(path, []byte(body)); err != nil {
 		return path, err
 	}
 	return path, nil
@@ -353,7 +401,7 @@ func WritePDF(res *agent.ResearchResult, dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return path, err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeAtomic(path, data); err != nil {
 		return path, err
 	}
 	// The question asked again writes over the earlier run's files, and the
@@ -585,7 +633,7 @@ func WriteMetadata(m Meta, dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return path, err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeAtomic(path, data); err != nil {
 		return path, err
 	}
 	// The question asked again writes over the earlier run's files, and the

@@ -22,7 +22,7 @@ func TestLegacyHistoryStillLoads(t *testing.T) {
 	if err := os.WriteFile(path, []byte(legacy+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runs, _, err := Open(path).List()
+	runs, _, err := list(Open(path))
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("old history unreadable: %+v, %v", runs, err)
 	}
@@ -52,7 +52,7 @@ func TestListReportsUnreadableRecords(t *testing.T) {
 	if err := os.WriteFile(path, []byte(good+"\n"+torn), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := Open(path).List()
+	runs, skipped, err := list(Open(path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestListDoesNotCountBlankLinesAsCorrupt(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"id":"a"}`+"\n\n"+`{"id":"b"}`+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := Open(path).List()
+	runs, skipped, err := list(Open(path))
 	if err != nil || len(runs) != 2 || skipped != 0 {
 		t.Fatalf("runs=%d skipped=%d err=%v, want 2/0/nil", len(runs), skipped, err)
 	}
@@ -95,7 +95,7 @@ func TestHistoryBoundsStoredSourceText(t *testing.T) {
 	if result.Findings[0].Content != long {
 		t.Error("Save truncated the caller's own findings")
 	}
-	runs, skipped, err := Open(path).List()
+	runs, skipped, err := list(Open(path))
 	if err != nil || skipped != 0 || len(runs) != 1 {
 		t.Fatalf("list: %v runs, %d skipped, %v", len(runs), skipped, err)
 	}
@@ -132,7 +132,7 @@ func TestHistoryKeepsShortSourcesAndCountsTornRecords(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := st.List()
+	runs, skipped, err := list(st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestModelAndErrorFieldsRoundTripBesideLegacyRecords(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := st.List()
+	runs, skipped, err := list(st)
 	if err != nil || skipped != 0 || len(runs) != 2 {
 		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
 	}
@@ -184,7 +184,7 @@ func TestClarificationsRoundTripBesideOlderRecords(t *testing.T) {
 	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{Question: "q2", Clarifications: cs}}); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := st.List()
+	runs, skipped, err := list(st)
 	if err != nil || skipped != 0 || len(runs) != 3 {
 		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
 	}
@@ -207,7 +207,7 @@ func TestSaveAfterATornTailKeepsTheNewRun(t *testing.T) {
 	if err := st.Save(&ResearchResult{ID: "2", ResearchResult: agent.ResearchResult{Question: "kept"}}); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := st.List()
+	runs, skipped, err := list(st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,11 +223,28 @@ func TestBlankHistoryLinesCountAsUnreadable(t *testing.T) {
 	if err := os.WriteFile(path, []byte("null\n{}\n"+`{"id":"a","question":"q"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runs, skipped, err := Open(path).List()
+	runs, skipped, err := list(Open(path))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runs) != 1 || skipped != 2 {
 		t.Fatalf("got %d runs and %d skipped, want 1 and 2", len(runs), skipped)
+	}
+}
+
+// Listing the history kept every run whole, its findings and report, to
+// print six fields of each. Each hands the records over one at a time, in
+// order, both schemas read, the unreadable counted.
+func TestEachStreamsBothSchemas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	legacy := `{"id":"old-run","question":"old question","analysis":"old answer","confidence":"low","findings":[{"title":"s","url":"https://example.com"}]}`
+	current := `{"id":"new-run","question":"new question","findings":[],"summary":{"confidence":"high"}}`
+	if err := os.WriteFile(path, []byte(legacy+"\nnot json\n"+current+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var questions []string
+	skipped, err := Open(path).Each(func(r ResearchResult) { questions = append(questions, r.Question) })
+	if err != nil || skipped != 1 || strings.Join(questions, "|") != "old question|new question" {
+		t.Errorf("Each = %q, skipped %d, %v; want both runs in order and one skipped", questions, skipped, err)
 	}
 }

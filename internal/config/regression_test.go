@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // chdirTemp points config discovery at fresh directories and returns the
@@ -328,6 +329,35 @@ func TestBareNumberDurationIsRefusedNamingItsKey(t *testing.T) {
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.key) {
 			t.Errorf("%q / env %q: Load = %v, want an error naming %s", tc.yaml, tc.env, err, tc.key)
 		}
+	}
+}
+
+// Text that is not a duration was 0 to viper's GetDuration, which drops the
+// error, and 0 is the default: model_call_timeout: nonsense ran with the
+// default deadline, the one set ignored without a word. It is refused,
+// naming its key; a duration and an explicit 0 still load.
+func TestUnreadableDurationIsRefusedNamingItsKey(t *testing.T) {
+	for _, tc := range []struct{ yaml, env, key string }{
+		{yaml: "model_call_timeout: nonsense\n", key: "model_call_timeout"},
+		{yaml: "run_timeout: 30 min\n", key: "run_timeout"},
+		{env: "soon", key: "run_timeout"},
+	} {
+		t.Run(tc.key+tc.env, func(t *testing.T) { // the env var is the case's only
+			cfgDir := chdirTemp(t)
+			writeFile(t, filepath.Join(cfgDir, "config.yaml"), tc.yaml+"model_call_retries: 2\n")
+			if tc.env != "" {
+				t.Setenv("DEEP_RESEARCH_RUN_TIMEOUT", tc.env)
+			}
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("%q / env %q: Load = %v, want an error naming %s", tc.yaml, tc.env, err, tc.key)
+			}
+		})
+	}
+	cfgDir := chdirTemp(t)
+	writeFile(t, filepath.Join(cfgDir, "config.yaml"), "model_call_timeout: 90s\nrun_timeout: 0\n")
+	cfg, err := Load()
+	if err != nil || cfg.ModelCallTimeout != 90*time.Second {
+		t.Errorf("Load = %+v, %v; want 90s and an explicit 0 accepted", cfg.ModelCallTimeout, err)
 	}
 }
 

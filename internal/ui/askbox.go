@@ -121,11 +121,13 @@ func (b *askBox) read(in Input) (string, bool) {
 	// What stays is the question under the upper rule, as the terminal's
 	// own line left it. A command or going back leaves nothing: the box is
 	// drawn again where it was when the command is done.
-	var keep []string
+	// It is written below the region, into the scrolling output, whole: a
+	// region holds no more rows than the screen has, and kept in it a tall
+	// question lost its last lines, the ones just read before sending it.
+	b.g.paint(nil)
 	if q != "" && !strings.HasPrefix(q, "/") {
-		keep = b.lines(q, 0, -1)[:2+len(b.prompt(q, -1))]
+		b.r.writeBlock(append([]string{"", b.r.rule()}, b.prompt(q, -1)...))
 	}
-	b.g.paint(keep)
 	return q, ok
 }
 
@@ -149,13 +151,22 @@ func (b *askBox) prompt(text string, cursor int) []string {
 // frame's width: each of the text's lines wrapped under its first column,
 // the label on the first row.
 func (r *Renderer) labelledRows(label, text string, cursor int) []string {
-	// One column short of the row: a frame row never writes the last.
-	rows, at := r.editRows(text, cursor, max(r.width-3-dispWidth(label), 8))
-	// At most half the screen, the rows up to the cursor's, and room left
-	// for the six rows around a box (blank, heading, rules, keys, blank): a
-	// taller box pushed the cursor and the keys under it off the screen,
-	// and the ask box's region cannot hold rows the screen does not have.
-	if limit := max(min(r.rows/2, r.rows-6), 1); len(rows) > limit {
+	// One column short of the row: a frame row never writes the last. On a
+	// screen too narrow to leave the text a few columns beside its label,
+	// the label goes: forcing those columns made the row wider than the
+	// screen, and the clip took the cursor with the row's end.
+	room := r.width - 3 - dispWidth(label)
+	if room < minTextCols {
+		label, room = "", max(r.width-3, 1)
+	}
+	rows, at := r.editRows(text, cursor, room)
+	// While it is edited, at most half the screen, the rows up to the
+	// cursor's, and room left for the six rows around a box (blank,
+	// heading, rules, keys, blank): a taller box pushed the cursor and the
+	// keys under it off the screen, and the ask box's region cannot hold
+	// rows the screen does not have. Without a cursor it is a question sent,
+	// written to the scrolling output whole.
+	if limit := max(min(r.rows/2, r.rows-6), 1); cursor >= 0 && len(rows) > limit {
 		from := min(max(at-limit+1, 0), len(rows)-limit)
 		rows = rows[from : from+limit]
 	}
@@ -168,6 +179,9 @@ func (r *Renderer) labelledRows(label, text string, cursor int) []string {
 	}
 	return rows
 }
+
+// minTextCols is the fewest columns a box gives its text beside the label.
+const minTextCols = 8
 
 // editRows lays out text being typed in rows of room columns: a row per
 // line it holds, each wrapped at any cell. The cursor, at byte offset

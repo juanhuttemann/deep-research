@@ -304,3 +304,31 @@ func TestNothingApprovedLowersConfidence(t *testing.T) {
 		t.Errorf("confidence %q with nothing approved; want low", res.Summary.Confidence)
 	}
 }
+
+// Each claims call's prompt rebuilt the same evidence, every page scored
+// against every claim, once per call. It is built once; each prompt is
+// still exactly what it was.
+func TestCheckPartsShareTheEvidence(t *testing.T) {
+	var claims []agent.Claim
+	for i := range 24 {
+		claims = append(claims, agent.Claim{ID: fmt.Sprintf("c%d", i+1), Text: fmt.Sprintf("widget %d costs %d", i, i*3)})
+	}
+	a := &agent.Analysis{Claims: claims}
+	findings := []agent.Finding{
+		{URL: "https://a.example/x", Title: "A", Content: strings.Repeat("Widget 3 costs 9. Unrelated text. ", 400), Status: "ok"},
+		{URL: "https://b.example/y", Title: "B", Content: "widget 7 costs 21", Status: "ok"},
+	}
+	parts := checkParts(a, findings, true)
+	groups := claimGroups(claims)
+	if len(groups) < 2 {
+		t.Fatalf("want several claims calls, got %d", len(groups))
+	}
+	for i, g := range groups {
+		var sb strings.Builder
+		sb.WriteString("Claims:\n")
+		writeClaims(&sb, g)
+		if want := factCheckPrompt(sb.String(), findings, true, claims); parts[i].prompt != want {
+			t.Errorf("part %d's prompt differs from the one built alone", i)
+		}
+	}
+}

@@ -836,6 +836,17 @@ func finish(cmd *cobra.Command, d Deps, rec *replay.Recorder, res ui.RunResult, 
 		}
 		return err
 	}
+	// The run's .json is its whole record: what ask, /resume and the page
+	// read, its sources in full, where the history keeps a cut. Its write
+	// failing was a warning, and the checkpoint, the one other copy, was
+	// removed after it: a paid run ended "complete" with nothing to ask
+	// about or resume. The Markdown and the PDF are made from the record.
+	if res.Report != nil && res.JSONPath == "" {
+		if p := rec.CheckpointPath(); p != "" {
+			return fmt.Errorf("the run's record (.json) could not be saved; its checkpoint is kept: drsh --resume %s", p)
+		}
+		return errors.New("the run's record (.json) could not be saved")
+	}
 	if err := rec.Discard(); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not remove the checkpoint: %v\n", err)
 	}
@@ -1216,8 +1227,27 @@ func callBudget(webSearch bool) string {
 	return "model requests per run: " + strings.Join(parts, ", ") + "; instant needs web search"
 }
 
+// listed is what drsh history prints of a run, all it keeps of one.
+type listed struct {
+	when                      time.Time
+	question, confidence      string
+	findings, fetched, tokens int
+}
+
 func runList(cmd *cobra.Command, d Deps) error {
-	results, skipped, err := store.Open(d.Config.DataFile).List()
+	var results []listed
+	skipped, err := store.Open(d.Config.DataFile).Each(func(r store.ResearchResult) {
+		l := listed{when: r.Timestamp, question: r.Question, confidence: "unknown", findings: len(r.Findings), tokens: r.Tokens}
+		if r.Summary != nil {
+			l.confidence = r.Summary.Confidence
+		}
+		for _, f := range r.Findings {
+			if f.Status == "ok" {
+				l.fetched++
+			}
+		}
+		results = append(results, l)
+	})
 	if err != nil {
 		return err
 	}
@@ -1234,19 +1264,9 @@ func runList(cmd *cobra.Command, d Deps) error {
 	}
 	for i := len(results) - 1; i >= 0; i-- {
 		r := results[i]
-		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", r.Timestamp.Format("2006-01-02"), ui.OneLine(r.Question))
-		confidence := "unknown"
-		if r.Summary != nil {
-			confidence = r.Summary.Confidence
-		}
-		fetched := 0
-		for _, f := range r.Findings {
-			if f.Status == "ok" {
-				fetched++
-			}
-		}
+		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", r.when.Format("2006-01-02"), ui.OneLine(r.question))
 		fmt.Fprintf(cmd.OutOrStdout(), "Confidence: %s | Findings: %d | Fetched: %d/%d | Tokens: %d\n",
-			confidence, len(r.Findings), fetched, len(r.Findings), r.Tokens)
+			r.confidence, r.findings, r.fetched, r.findings, r.tokens)
 	}
 	return nil
 }

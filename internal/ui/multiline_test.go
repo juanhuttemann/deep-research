@@ -2,7 +2,9 @@ package ui
 
 import (
 	"bytes"
+	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
@@ -115,5 +117,96 @@ func TestTallQuestionKeepsTheCursorOnScreen(t *testing.T) {
 	rows = r.labelledRows("ask ▸ ", text, strings.Index(text, "linej"))
 	if !strings.Contains(strings.Join(rows, "|"), "█linej") {
 		t.Errorf("cursor in the middle, no colour: %q", rows)
+	}
+}
+
+// questionRecorder records the question the planner was given and every
+// search query the run made.
+type questionRecorder struct {
+	*fakeAssistant
+	mu      sync.Mutex
+	planned string
+	queries []string
+}
+
+func (q *questionRecorder) Plan(ctx context.Context, question string, b agent.Breadth, r []agent.Clarification) (agent.Outline, error) {
+	q.planned = question
+	return q.fakeAssistant.Plan(ctx, question, b, r)
+}
+
+func (q *questionRecorder) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
+	q.mu.Lock()
+	q.queries = append(q.queries, query)
+	q.mu.Unlock()
+	return q.fakeAssistant.ResearchDetail(ctx, query, terms)
+}
+
+// The planner flattened the question before any model saw it, so a
+// question laid out over lines (options, a table, code) reached the plan,
+// the analysis and the saved run as one line. The model gets its lines; a
+// search query, which is one line, gets its words.
+func TestMultiLineQuestionReachesTheModelWithItsLines(t *testing.T) {
+	question := "Compare:\n  option A\n  option B"
+	a := &questionRecorder{fakeAssistant: &fakeAssistant{}}
+	var stdout, stderr bytes.Buffer
+	res, err := Run(context.Background(), Options{
+		Question: question, Assistant: a, DepthMode: "quick", OutDir: t.TempDir(),
+		JSONL: true, Stdout: &stdout, Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.planned != question || res.Plan.Question != question || res.Report.Question != question {
+		t.Errorf("planner got %q, plan %q, report %q; want %q", a.planned, res.Plan.Question, res.Report.Question, question)
+	}
+	if !strings.Contains(a.analyzed, question) {
+		t.Errorf("the analysis prompt lost the question's lines:\n%s", a.analyzed)
+	}
+	if len(a.queries) == 0 {
+		t.Fatal("no searches")
+	}
+	for _, q := range a.queries {
+		if strings.Contains(q, "\n") {
+			t.Errorf("a search query holds a line break: %q", q)
+		}
+	}
+}
+
+// While edited, a tall question is shown from the cursor's row up; sent,
+// it was redrawn with no cursor, which showed its first rows, and its last
+// lines, the ones just read before sending, were gone from the transcript.
+// Sent, it is written whole.
+func TestSentQuestionIsKeptWhole(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, Theme{})
+	r.width, r.rows = 40, 10
+	b := newAskBox(r, "back", nil)
+	q, ok := b.read(NewByteReader([]byte("first\nsecond\nthird\nfourth\nfifth\nLAST\r")))
+	if !ok || q != "first\nsecond\nthird\nfourth\nfifth\nLAST" {
+		t.Fatalf("read %q, %v", q, ok)
+	}
+	out := buf.String()
+	sent := out[strings.LastIndex(out, "ask ▸ first"):]
+	for _, l := range []string{"second", "fifth", "LAST"} {
+		if !strings.Contains(sent, l) {
+			t.Errorf("the sent question lost %q:\n%q", l, sent)
+		}
+	}
+}
+
+// On a screen too narrow for the label and a few columns of text, eight
+// were forced beside the label: the row was wider than the screen, and the
+// clip took the cursor with its end. The label goes; the cursor stays.
+func TestNarrowBoxKeepsTheCursor(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width = 20
+	rows := r.labelledRows("research ▸ ", "1234567", len("1234567"))
+	for _, row := range rows {
+		if dispWidth(row) > r.width-1 {
+			t.Errorf("row %q is wider than the frame writes", row)
+		}
+	}
+	if !strings.Contains(strings.Join(rows, ""), "█") {
+		t.Errorf("no cursor: %q", rows)
 	}
 }
