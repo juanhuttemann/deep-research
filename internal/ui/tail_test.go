@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 // groupedRun is a live renderer with two topics whose rows interleave, as
@@ -89,9 +90,9 @@ func TestClickOpensTheHeaderUnderIt(t *testing.T) {
 	r.mu.Lock()
 	r.paintLocked(true)
 	var at int
-	for row, sub := range r.tailHeads {
+	for row, sub := range r.tail.heads {
 		if sub == "2" {
-			at = r.tailTop + row + 1 // screen rows count from 1
+			at = r.tail.top + row + 1 // screen rows count from 1
 		}
 	}
 	r.mu.Unlock()
@@ -206,5 +207,156 @@ func TestOpenGroupWithOneRowShowsTheLatest(t *testing.T) {
 	rows = r.activityLines(3) // no spare: the header keeps it
 	if !strings.Contains(rows[2], "searxng   10 results") {
 		t.Errorf("want the header to keep the latest with no room under it:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+// An open topic grows a row with each page it reads, moving the headers
+// under it down one, while the frame repaints several times a second: a
+// click aimed at a header landed on the row that had just taken its place.
+// A header there a moment ago still takes the click; one there longer ago
+// does not, and a click on an open topic's rows shuts it.
+func TestClickFindsAHeaderThatJustMoved(t *testing.T) {
+	r, _ := groupedRun(t)
+	now := time.Now()
+	r.clock = func() time.Time { return now }
+	r.OpenTopic(1)
+	header2 := func() int {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		l := r.shown[len(r.shown)-1]
+		for row, sub := range l.heads {
+			if sub == "2" {
+				return l.top + row + 1
+			}
+		}
+		t.Fatal("no header for topic 2")
+		return 0
+	}
+	seen := header2()
+	now = now.Add(100 * time.Millisecond)
+	r.Emit(Event{Type: Info, SubID: "1", SubName: "Land Signs", Detail: "searxng   9 results"})
+	if header2() != seen+1 {
+		t.Fatalf("topic 1's new row did not move topic 2's header")
+	}
+	now = now.Add(200 * time.Millisecond)
+	r.Click(1, seen) // now topic 1's last row, a moment ago topic 2's header
+	if !r.opened["2"] || !r.opened["1"] {
+		t.Fatalf("the click did not open the header seen there: opened = %v", r.opened)
+	}
+
+	r.OpenTopic(2) // shut it again
+	seen = header2()
+	now = now.Add(time.Second)
+	r.Emit(Event{Type: Info, SubID: "1", SubName: "Land Signs", Detail: "searxng   8 results"})
+	now = now.Add(clickGrace + time.Millisecond)
+	r.Click(1, seen) // long since topic 1's row: it shuts topic 1
+	if r.opened["2"] || r.opened["1"] {
+		t.Errorf("want a click on topic 1's row to shut it, and nothing else: opened = %v", r.opened)
+	}
+}
+
+// The tail's rows no longer carry a name each, so a header shows its
+// topic's name whole where the row has room.
+func TestHeaderShowsTheWholeName(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 30, 130)
+	r.T.Enabled = false
+	name := "Reading Land Signs and the Voyaging Revival"
+	r.Emit(Event{Type: SubAgent, SubID: "1", SubName: name, SubState: "running"})
+	r.Emit(Event{Type: Search, SubID: "1", Line: "Searching: birds"})
+	r.ToggleActivity()
+	if rows := tail(r); !strings.Contains(strings.Join(rows, "\n"), name+" ") {
+		t.Errorf("the name is cut:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+// A tail just hidden, or squeezed out by a resize, still took a click on a
+// header it had shown a moment before.
+func TestNoClickWithoutATail(t *testing.T) {
+	r, _ := groupedRun(t)
+	r.mu.Lock()
+	r.paintLocked(true)
+	l := r.shown[len(r.shown)-1]
+	var at int
+	for row := range l.heads {
+		at = l.top + row + 1
+	}
+	r.rows = 8 // too short for a tail
+	r.paintLocked(true)
+	r.mu.Unlock()
+	r.Click(1, at)
+	if len(r.opened) != 0 && (r.opened["1"] || r.opened["2"]) {
+		t.Errorf("a click with no tail on screen opened a topic: %v", r.opened)
+	}
+}
+
+// On Warp's main screen a program's output is a block that grows, and a
+// click is reported by its row in that block: rows drawn by position and
+// the rows clicks named came apart. The live frame of a run that takes
+// clicks is on the alternate screen, left before the report and on close.
+func TestLiveFrameOnTheAlternateScreen(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 30, 100)
+	r.TrackClicks(true)
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
+	out := buf.String()
+	if !strings.Contains(out, altOn) || strings.Index(out, altOn) > strings.Index(out, eraseScreen) {
+		t.Fatalf("the live frame is not drawn on the alternate screen: %q", out)
+	}
+	r.RenderReport(nil, 0, 0)
+	out = buf.String()
+	if strings.Count(out, altOff) != 1 || strings.LastIndex(out, mouseOff) > strings.Index(out, altOff) {
+		t.Errorf("the report did not leave the alternate screen, clicks off first: %q", out)
+	}
+	r.Close()
+	if strings.Count(buf.String(), altOff) != 1 {
+		t.Errorf("left the alternate screen twice")
+	}
+
+	buf.Reset()
+	r = liveRenderer(&buf, 30, 100)
+	r.TrackClicks(true)
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
+	r.Close() // a cancel or an error
+	if !strings.Contains(buf.String(), altOff) {
+		t.Errorf("closing the frame left the terminal on the alternate screen")
+	}
+
+	buf.Reset()
+	r = liveRenderer(&buf, 30, 100) // no key reader: as before
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
+	r.Close()
+	if strings.Contains(buf.String(), altOn) {
+		t.Errorf("a run without clicks took the alternate screen")
+	}
+}
+
+// A run paints before its frame: the brief, and the plan's event once it is
+// confirmed. The frame took the alternate screen only on the screen's
+// first clear, which those had already done, so in a real run it never did
+// and clicks in Warp still landed rows off; a fresh renderer, as the tests
+// had, always did.
+func TestFrameTakesTheAlternateScreenAfterTheBrief(t *testing.T) {
+	var buf bytes.Buffer
+	r := liveRenderer(&buf, 30, 100)
+	plan := &Plan{Question: "q", SubTopics: []SubTopic{{ID: "1", Name: "A"}}}
+	r.RenderBrief(plan)
+	before := buf.Len()
+	r.Emit(Event{Type: PlanReady, Plan: plan})
+	if buf.Len() != before {
+		t.Errorf("the plan's event drew the brief again: %q", buf.String()[before:])
+	}
+	r.TrackClicks(true)
+	r.Emit(Event{Type: Phase, Phase: "Research", Detail: "Running sub-agents"})
+	r.mu.Lock()
+	r.paintLocked(true) // the ticker's, should the event's have been throttled
+	r.mu.Unlock()
+	r.Close()
+	out := buf.String()[before:]
+	if !strings.Contains(out, altOn) {
+		t.Fatalf("the run's frame is not on the alternate screen")
+	}
+	if i := strings.Index(out, altOn); !strings.Contains(out[i:], eraseScreen) || !strings.Contains(out, altOff) {
+		t.Errorf("want the alternate screen cleared once entered, and left on close: %q", out)
 	}
 }

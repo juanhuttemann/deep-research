@@ -13,7 +13,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   click the header. The search engine's line for each search now carries
   its topic (`sub_id` on the `info` event), so it is filed under that
   topic too. While the frame is up the terminal reports clicks, so
-  selecting text or opening a link in it takes Shift.
+  selecting text or opening a link in it takes Shift. The live frame is now
+  drawn on the terminal's alternate screen: on the main screen, Warp
+  reported clicks by their row in the program's growing output block, not
+  on the screen, and they landed rows away from what was drawn.
 
 ### Added
 

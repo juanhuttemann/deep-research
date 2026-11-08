@@ -123,10 +123,10 @@ type Renderer struct {
 	showActivity bool
 	// opened are the topics whose groups the tail shows open.
 	opened map[string]bool
-	// tailHeads maps a row of the last tail drawn to the topic it heads,
-	// and tailTop is the frame row the tail starts on: where a click lands.
-	tailHeads map[int]string
-	tailTop   int
+	// tail is where the topics are in the tail last laid out, and shown
+	// the layouts painted in the last moments: where a click lands.
+	tail  tailLayout
+	shown []tailLayout
 	// clicks is set when a key reader will take the terminal's click
 	// reports; mouse while the terminal is sending them.
 	clicks, mouse bool
@@ -170,6 +170,7 @@ type Renderer struct {
 
 	painted   int  // rows written by the previous frame
 	cleared   bool // viewport has been cleared for the live frame
+	alt       bool // the live frame is on the terminal's alternate screen
 	hidden    bool // cursor is currently hidden
 	closed    bool // Close has released the terminal; writes are ignored
 	lastPaint time.Time
@@ -235,7 +236,9 @@ func (r *Renderer) RenderReport(res *agent.ResearchResult, sources, tokens int) 
 	// The live frame owned the viewport; release it and let the completion
 	// card scroll normally so the report printed after it reads as one
 	// continuous transcript.
-	r.write(cursorHome + eraseToEnd)
+	if !r.leaveAltLocked() {
+		r.write(cursorHome + eraseToEnd)
+	}
 	r.writeBlock(r.reportLines())
 	r.showCursorLocked()
 	r.painted, r.cleared = 0, false
@@ -258,7 +261,11 @@ func (r *Renderer) Close() {
 	r.mouseLocked(false)
 	// A live frame still owns the viewport on the cancel and error paths, and
 	// the cursor sits at the end of its last row. Whatever the caller prints
-	// next would land on that row, so the frame is closed off first.
+	// next would land on that row, so the frame is closed off first. One on
+	// the alternate screen leaves no rows behind to close off.
+	if r.leaveAltLocked() {
+		r.painted = 0
+	}
 	if r.painted > 0 {
 		r.write(crlf)
 		r.painted = 0
@@ -278,9 +285,14 @@ func (r *Renderer) Emit(e Event) {
 		r.logEvent(e)
 		return
 	}
-	if r.mode == "tree" {
-		r.startTickerLocked()
+	// An event changes only the live frame. Before it is up the brief is
+	// drawn in place by its own calls; painted on an event (the plan's,
+	// once confirmed) it was drawn again at the top of the main screen, and
+	// stayed there under the report once the frame left the alternate one.
+	if r.mode != "tree" {
+		return
 	}
+	r.startTickerLocked()
 	r.paintLocked(false)
 }
 
@@ -289,6 +301,8 @@ func (r *Renderer) ToggleActivity() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.showActivity = !r.showActivity
+	// What a hidden tail showed is not there to click when it comes back.
+	r.shown = nil
 	if r.plain || r.mode != "tree" {
 		return
 	}
@@ -529,6 +543,42 @@ func (r *Renderer) node(id, name string) *Node {
 	return n
 }
 
+// prepareScreenLocked writes what goes before a frame's rows: the cursor
+// hidden, the alternate screen taken and the screen cleared when due.
+func (r *Renderer) prepareScreenLocked(sb *strings.Builder) {
+	if !r.hidden {
+		sb.WriteString(cursorHide)
+		r.hidden = true
+	}
+	if r.mode == "tree" && r.clicks && !r.alt {
+		// The live frame takes the alternate screen, as full-screen
+		// programs do. On the main screen Warp keeps a program's output in
+		// a block that grows, and reports a click by its row in that block,
+		// not on the screen: rows drawn by position and the rows clicks
+		// named came apart, by more the longer the run. Taken whenever the
+		// frame is drawn and not there yet, not on the screen's first
+		// clear: the brief and the plan's event paint before the frame, so
+		// in a run that clear had always been done already.
+		sb.WriteString(altOn)
+		r.alt, r.cleared, r.painted = true, false, 0
+	}
+	if !r.cleared {
+		sb.WriteString(eraseScreen)
+		r.cleared = true
+	}
+}
+
+// leaveAltLocked returns from the alternate screen the live frame took,
+// to the main screen as it was before, and reports whether it was on it.
+func (r *Renderer) leaveAltLocked() bool {
+	if !r.alt {
+		return false
+	}
+	r.write(altOff)
+	r.alt, r.cleared = false, false
+	return true
+}
+
 // ---- live painting --------------------------------------------------------
 
 // startTickerLocked launches the animation goroutine once per run.
@@ -591,28 +641,29 @@ func (r *Renderer) paintLocked(force bool) {
 
 	lines := r.frameLines()
 	r.mouseLocked(r.mode == "tree")
+	if r.mode == "tree" {
+		r.noteShownLocked(now)
+	}
 
 	var sb strings.Builder
-	if !r.hidden {
-		sb.WriteString(cursorHide)
-		r.hidden = true
-	}
-	if !r.cleared {
-		sb.WriteString(eraseScreen)
-		r.cleared = true
-	}
+	r.prepareScreenLocked(&sb)
 	sb.WriteString(cursorHome)
+	// Each row is put on its own screen row, cleared first, and kept out of
+	// the last column. Rows chained by CR LF, each written to the full
+	// width and then erased to its end, left the cursor in the last column
+	// with a wrap pending: a terminal that wrapped there (Windows Terminal
+	// over WSL can) put the next row one lower, the frame outgrew the
+	// screen and scrolled, and every click landed a row off the header it
+	// was aimed at; one that did not erased the row's last cell, its "…".
 	for i, l := range lines {
-		if i > 0 {
-			sb.WriteString(crlf)
-		}
-		sb.WriteString(l)
-		sb.WriteString(eraseLine)
+		fmt.Fprintf(&sb, rowAt, i+1)
+		sb.WriteString(eraseRow)
+		sb.WriteString(clip(l, r.width-1))
 	}
 	// Wipe rows the previous, taller frame left behind.
 	for i := len(lines); i < r.painted; i++ {
-		sb.WriteString(crlf)
-		sb.WriteString(eraseLine)
+		fmt.Fprintf(&sb, rowAt, i+1)
+		sb.WriteString(eraseRow)
 	}
 	r.painted = len(lines)
 	r.write(sb.String())
@@ -970,7 +1021,7 @@ func (r *Renderer) treeLines() []string {
 	// tree and footer never move.
 	budget := r.rows - 1 - len(head) - len(agents) - len(foot) - 1
 	var tail []string
-	r.tailHeads, r.tailTop = nil, len(head)+len(agents)+1
+	r.tail = tailLayout{top: len(head) + len(agents) + 1}
 	if r.showActivity && budget >= 2 {
 		tail = append(tail, r.rule())
 		tail = append(tail, r.activityLines(budget-1)...)
@@ -1270,8 +1321,10 @@ func (r *Renderer) heading(title, right string) string {
 	return left + strings.Repeat(" ", gap) + r.T.dim(right)
 }
 
+// rule spans the row but its last column, which a frame row never writes
+// (see paintLocked).
 func (r *Renderer) rule() string {
-	w := r.width - 2
+	w := r.width - 3
 	if w < 4 {
 		w = 4
 	}

@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,9 +28,15 @@ func paintedRows(out string) []string {
 	if i >= 0 {
 		out = out[i+len(cursorHome):]
 	}
-	out = strings.ReplaceAll(out, eraseLine, "")
-	return strings.Split(out, crlf)
+	// Each row is placed by its own CUP and cleared before it is written.
+	rows := rowStart.Split(out, -1)
+	if len(rows) > 0 && rows[0] == "" {
+		rows = rows[1:]
+	}
+	return rows
 }
+
+var rowStart = regexp.MustCompile(`\x1b\[\d+;1H\x1b\[2K`)
 
 func TestFrameNeverOverflowsTheViewport(t *testing.T) {
 	// A run wide enough and named long enough to overflow a small terminal:

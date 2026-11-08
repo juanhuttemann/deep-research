@@ -45,9 +45,12 @@ func (g *region) paint(lines []string) {
 	g.hold(len(lines))
 	var sb strings.Builder
 	for i, l := range lines {
+		// Cleared first and kept out of the last column, as the live frame
+		// is (see Renderer.paintLocked): a row written to the full width
+		// wraps on some terminals, and at the screen's foot scrolls it.
 		sb.WriteString(g.move(i))
-		sb.WriteString(clip(l, g.width))
-		sb.WriteString(eraseLine)
+		sb.WriteString(eraseRow)
+		sb.WriteString(clip(l, g.width-1))
 	}
 	if len(lines) < g.height {
 		sb.WriteString(g.move(len(lines)))

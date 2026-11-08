@@ -1,6 +1,10 @@
 package ui
 
-import "fmt"
+import (
+	"fmt"
+	"maps"
+	"time"
+)
 
 // The activity tail files each sub-agent's rows under one header per topic,
 // shut until the reader opens it. Every row used to carry its topic's name,
@@ -38,10 +42,10 @@ func (r *Renderer) tailItems() []tailItem {
 }
 
 // activityLines renders the tail in n rows, oldest first, and records which
-// of them are topic headers, for a click. Each item takes a row; what rows
-// are left go to the open groups' latest rows.
+// of them are topic headers, and rows of an open topic, for a click. Each
+// item takes a row; what rows are left go to the open groups' latest rows.
 func (r *Renderer) activityLines(n int) []string {
-	r.tailHeads = map[int]string{}
+	r.tail.heads, r.tail.body = map[int]string{}, map[int]string{}
 	if n <= 0 {
 		return nil
 	}
@@ -54,9 +58,12 @@ func (r *Renderer) activityLines(n int) []string {
 			out = append(out, r.runRow(it.act))
 			continue
 		}
-		r.tailHeads[len(out)] = it.sub
+		r.tail.heads[len(out)] = it.sub
 		out = append(out, r.topicHead(it, col, shares[i]))
-		out = append(out, r.topicRows(it.rows, shares[i])...)
+		for _, row := range r.topicRows(it.rows, shares[i]) {
+			r.tail.body[len(out)] = it.sub
+			out = append(out, row)
+		}
 	}
 	// Keep the section a constant height: without the blank filler the rows
 	// below it would march up the screen as the tail fills.
@@ -183,18 +190,21 @@ func (r *Renderer) topicRows(rows []activity, k int) []string {
 	return out
 }
 
-// topicCol is the width of a header's name: the longest name, cut to leave
-// the latest row room beside it.
+// topicCol is the width of a header's name: the longest name, whole, as
+// long as it leaves the latest row room beside it. The tail's rows no
+// longer carry a name each, so the header has the width a third of the
+// row cut names to.
 func (r *Renderer) topicCol() int {
 	w := 0
 	for _, id := range r.order {
 		w = max(w, dispWidth(r.nodes[id].Name))
 	}
-	return max(min(w, maxTopicCol, r.width/3), 1)
+	return max(min(w, r.width-latestRoom), 1)
 }
 
-// maxTopicCol bounds a header's name column.
-const maxTopicCol = 32
+// latestRoom is what a header keeps beside its name: the time, the number
+// and mark, the count, and a start of the latest row.
+const latestRoom = 40
 
 // topicNumber is sub's place in the tree, from 1: the digit that opens it.
 func (r *Renderer) topicNumber(sub string) int {
@@ -225,22 +235,74 @@ func (r *Renderer) OpenTopic(n int) {
 	r.repaintTreeLocked()
 }
 
-// Click opens or shuts the group whose header is at screen row y (from 1).
-// A click anywhere else does nothing.
+// tailLayout is where a laid-out tail's topics are: top is the frame row
+// the tail starts on, heads its rows that head a topic, body the rows of
+// an open topic's group. at is when it was painted.
+type tailLayout struct {
+	at    time.Time
+	top   int
+	heads map[int]string
+	body  map[int]string
+}
+
+func (l tailLayout) same(o tailLayout) bool {
+	return l.top == o.top && maps.Equal(l.heads, o.heads) && maps.Equal(l.body, o.body)
+}
+
+// clickGrace is how long a layout no longer on screen still takes a
+// click. An open topic grows a row with each page it reads, moving every
+// header under it down one, and the frame repaints several times a second:
+// a click aimed at a header landed on the row that had just taken its
+// place, a moment after the eye saw it.
+const clickGrace = 400 * time.Millisecond
+
+// noteShownLocked records the tail just painted, when it moved, and
+// forgets the layouts replaced longer than clickGrace ago.
+func (r *Renderer) noteShownLocked(now time.Time) {
+	if n := len(r.shown); n == 0 || !r.shown[n-1].same(r.tail) {
+		l := r.tail
+		l.at = now
+		r.shown = append(r.shown, l)
+	}
+	// Layout i was on screen until layout i+1 was painted.
+	for len(r.shown) > 1 && now.Sub(r.shown[1].at) > clickGrace {
+		r.shown = r.shown[1:]
+	}
+}
+
+// Click opens or shuts the topic whose header is at screen row y (from 1):
+// on screen now, or there a moment ago (see clickGrace). A click on a row
+// of an open topic shuts it. A click anywhere else does nothing.
 func (r *Renderer) Click(_, y int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// The live frame is drawn from the top of the screen, its row i on
 	// screen row i+1; nothing drawn in place has headers to click.
-	if r.mode != "tree" || r.inline != nil || !r.showActivity {
+	if r.mode != "tree" || r.inline != nil || !r.showActivity || len(r.shown) == 0 {
 		return
 	}
-	sub, ok := r.tailHeads[y-1-r.tailTop]
-	if !ok {
+	// No tail on screen (one too short for it) has nothing to click, not
+	// even what it showed a moment before.
+	if len(r.shown[len(r.shown)-1].heads) == 0 {
 		return
 	}
-	r.opened[sub] = !r.opened[sub]
-	r.repaintTreeLocked()
+	now := r.clock()
+	for i := len(r.shown) - 1; i >= 0; i-- {
+		l := r.shown[i]
+		if i < len(r.shown)-1 && now.Sub(r.shown[i+1].at) > clickGrace {
+			break
+		}
+		if sub, ok := l.heads[y-1-l.top]; ok {
+			r.opened[sub] = !r.opened[sub]
+			r.repaintTreeLocked()
+			return
+		}
+	}
+	cur := r.shown[len(r.shown)-1]
+	if sub, ok := cur.body[y-1-cur.top]; ok {
+		r.opened[sub] = false
+		r.repaintTreeLocked()
+	}
 }
 
 func (r *Renderer) repaintTreeLocked() {
