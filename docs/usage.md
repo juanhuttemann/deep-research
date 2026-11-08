@@ -92,11 +92,20 @@ cursor: Left and Right move it, Ctrl-Left and Ctrl-Right (Option-Left and
 Option-Right on macOS) by a word, Home and End or Ctrl-A and Ctrl-E to the
 ends; typing inserts at it, Backspace and Delete remove the character
 before and under it, Ctrl-W the word before it, Ctrl-U everything before
-it and Ctrl-K everything after. A paste goes in at the cursor as one line,
-its line breaks and tabs as spaces, and waits for Enter; where keys are
-read instead (the brief, the live run) a paste is ignored. This takes a
-terminal with bracketed paste, which the common ones have; in one without
-it, a pasted line break still presses Enter.
+it and Ctrl-K everything after. A paste goes in at the cursor and waits
+for Enter; where keys are read instead (the brief, the live run) a paste is
+ignored. This takes a terminal with bracketed paste, which the common ones
+have; in one without it, a pasted line break still presses Enter.
+
+The question boxes (the start screen's and `ask ▸`) take several lines.
+Ctrl-J starts a new line, as does Enter right after a `\`; Enter alone runs
+the question. Up and Down move between the lines, and a paste keeps its
+line breaks (tabs become spaces, and a break at its end is dropped). The
+other boxes, a sub-topic's name or a picker's filter, are one line: a paste
+goes in with its breaks as spaces. The model gets the question with its
+lines; titles (the brief, the live frame, the report's heading, the
+history, `/resume`) show it on one line. Shift-Enter is not a new line: most
+terminals send it as Enter.
 
 Each run is a session. Its questions and answers are kept beside its
 `.json`, as `<name>.chat.jsonl`, one JSON line per question. Either box

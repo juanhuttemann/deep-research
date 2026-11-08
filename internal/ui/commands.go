@@ -29,7 +29,7 @@ func CommandNames() []string {
 // one highlighted and the one Enter runs: /mode is the start of /model,
 // which is listed before it, and Enter on "/mode" opened the model picker.
 func completions(text string) []Choice {
-	if !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \t") {
+	if !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \t\n") {
 		return nil
 	}
 	typed := strings.ToLower(text)
@@ -68,8 +68,11 @@ func (e *commandEditor) read(in Input, wait bool) (string, bool) {
 		quit = &twice{show: e.quit}
 	}
 	q, ok := "", true
+	// Several lines only where keys come one at a time: a terminal that
+	// would not go raw maps Enter to LF, the new-line key here, and its
+	// question could never be sent.
 	for ok {
-		if q, ok = readPromptRaw(in, nil, e.tab, e.echo, e.arrow, quit); q != "" || !wait {
+		if q, ok = readPromptRaw(in, nil, e.echo, promptOpts{tab: e.tab, arrow: e.arrow, quit: quit, multi: in.Raw()}); q != "" || !wait {
 			break
 		}
 	}

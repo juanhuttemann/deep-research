@@ -766,7 +766,7 @@ func (r *Renderer) briefHead() []string {
 	head := []string{
 		r.heading("RESEARCH BRIEF", ""),
 		r.rule(),
-		"  " + r.T.bold(r.plan.Question),
+		"  " + r.T.bold(OneLine(r.plan.Question)),
 	}
 	// The reading the plan was made for, which the question as shown does
 	// not say.
@@ -952,7 +952,7 @@ func rest(s []string) []string {
 func (r *Renderer) treeLines() []string {
 	head := []string{
 		r.heading("DEEP RESEARCH", formatDuration(r.clock().Sub(r.startTime))),
-		"  " + r.T.dim(clip(r.question, r.width-2)),
+		"  " + r.T.dim(clip(OneLine(r.question), r.width-2)),
 	}
 	// What the run is researching the question as, all the way through,
 	// not only in the brief the run left.

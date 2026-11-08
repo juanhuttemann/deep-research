@@ -135,45 +135,89 @@ func (b *askBox) read(in Input) (string, bool) {
 func (b *askBox) lines(text string, at, cursor int) []string {
 	out := append([]string{"", b.r.rule()}, b.prompt(text, cursor)...)
 	out = append(out, b.r.rule())
-	return append(out, b.r.commandBlock(text, at, "[enter] ask   [empty enter] "+b.back, b.back)...)
+	return append(out, b.r.commandBlock(text, at, "[enter] ask   [ctrl+j] new line   [empty enter] "+b.back, b.back)...)
 }
 
 // prompt is the label and text, wrapped under the text's first column: a
 // question is often longer than a row, and the terminal's line wrapped it.
-// The cursor, at byte offset cursor (-1 for none), is drawn in its cell
-// after wrapping, so its colour codes are never cut by the wrap.
+// The cursor is at byte offset cursor, -1 for none.
 func (b *askBox) prompt(text string, cursor int) []string {
-	label := "ask ▸ "
-	room := max(b.r.width-2-dispWidth(label), 8)
-	at, end := -1, cursor >= len(text) // the cursor's rune index; the end is a cell of its own
-	switch {
-	case cursor >= 0 && !end && !b.r.T.Enabled:
-		// Without colour the block stands in front of the character, a
-		// column of its own: put in after the wrap, it made that row one
-		// column too wide and the region clipped its last character.
-		text = text[:cursor] + "█" + text[cursor:]
-	case cursor >= 0:
-		at = utf8.RuneCountInString(text[:min(cursor, len(text))])
-		if end {
-			text += " "
-		}
-	}
-	rows := wrapCells(text, room)
-	for i, row := range rows {
-		n := utf8.RuneCountInString(row)
-		if at >= 0 && at < n {
-			rows[i] = b.r.cursorAt(row, at, end)
-		}
-		at -= n
+	return b.r.labelledRows("ask ▸ ", text, cursor)
+}
+
+// labelledRows is a box's label and its text under it, in rows of the
+// frame's width: each of the text's lines wrapped under its first column,
+// the label on the first row.
+func (r *Renderer) labelledRows(label, text string, cursor int) []string {
+	rows, at := r.editRows(text, cursor, max(r.width-2-dispWidth(label), 8))
+	// At most half the screen, the rows up to the cursor's, and room left
+	// for the six rows around a box (blank, heading, rules, keys, blank): a
+	// taller box pushed the cursor and the keys under it off the screen,
+	// and the ask box's region cannot hold rows the screen does not have.
+	if limit := max(min(r.rows/2, r.rows-6), 1); len(rows) > limit {
+		from := min(max(at-limit+1, 0), len(rows)-limit)
+		rows = rows[from : from+limit]
 	}
 	for i := range rows {
 		lead := strings.Repeat(" ", 2+dispWidth(label))
 		if i == 0 {
-			lead = "  " + b.r.T.magenta(label)
+			lead = "  " + r.T.magenta(label)
 		}
 		rows[i] = lead + rows[i]
 	}
 	return rows
+}
+
+// editRows lays out text being typed in rows of room columns: a row per
+// line it holds, each wrapped at any cell. The cursor, at byte offset
+// cursor (-1 for none), is drawn in its cell after wrapping, so its colour
+// codes are never cut by the wrap; at a line's end it is a cell of its own.
+// at is the row the cursor is on, 0 with none.
+func (r *Renderer) editRows(text string, cursor, room int) (rows []string, at int) {
+	// drawn: without colour the block stands in front of the character, a
+	// column of its own. Put in after the wrap, it made that row one column
+	// too wide and the region clipped its last character; so it goes in
+	// first, and the cursor only says which row it is on.
+	drawn := cursor >= 0 && cursor < len(text) && text[cursor] != '\n' && !r.T.Enabled
+	if drawn {
+		text = text[:cursor] + "█" + text[cursor:]
+	}
+	off := 0 // the line's byte offset in text
+	for line := range strings.SplitSeq(text, "\n") {
+		lr, i := r.lineRows(line, cursor-off, room, drawn)
+		if i >= 0 {
+			at = len(rows) + i
+		}
+		rows = append(rows, lr...)
+		off += len(line) + 1
+	}
+	return rows, at
+}
+
+// lineRows is one line of editRows, the cursor at byte offset cursor in
+// it, or not in it when out of range; at is the cursor's row, -1 for none.
+// drawn says the cursor's block is in the line already.
+func (r *Renderer) lineRows(line string, cursor, room int, drawn bool) (rows []string, at int) {
+	idx, end := -1, cursor == len(line) // the cursor's rune index
+	if cursor >= 0 && cursor <= len(line) {
+		idx = utf8.RuneCountInString(line[:cursor])
+		if end {
+			line += " "
+		}
+	}
+	at = -1
+	rows = wrapCells(line, room)
+	for i, row := range rows {
+		n := utf8.RuneCountInString(row)
+		if idx >= 0 && idx < n {
+			at = i
+			if !drawn {
+				rows[i] = r.cursorAt(row, idx, end)
+			}
+		}
+		idx -= n
+	}
+	return rows, at
 }
 
 // wrapCells cuts s into rows of at most w columns, at any cell: the text

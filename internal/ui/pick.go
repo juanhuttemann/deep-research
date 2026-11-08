@@ -84,7 +84,7 @@ func pickWith(in Input, r *Renderer, sp pickSpec) picked {
 		paint()
 	}
 	for {
-		_, ok := readPromptRaw(keys, []byte(text), nil, echo, arrow, nil)
+		_, ok := readPromptRaw(keys, []byte(text), echo, promptOpts{arrow: arrow})
 		switch {
 		case !ok:
 			return picked{row: -1, back: true, stop: keys.last == byte(KeyCtrlC)}
