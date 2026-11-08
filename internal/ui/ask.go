@@ -244,7 +244,7 @@ func Sessions(dir string) ([]Session, error) {
 		if fi, err := os.Stat(ChatLog(path)); err == nil && fi.ModTime().After(s.Modified) {
 			s.Modified = fi.ModTime()
 		}
-		s.Title = cmp.Or(questionOf(path), strings.TrimSuffix(name, ".json"))
+		s.Title = cmp.Or(OneLine(questionOf(path)), strings.TrimSuffix(name, ".json"))
 		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b Session) int { return b.Modified.Compare(a.Modified) })

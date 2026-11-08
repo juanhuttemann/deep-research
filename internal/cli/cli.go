@@ -1234,7 +1234,7 @@ func runList(cmd *cobra.Command, d Deps) error {
 	}
 	for i := len(results) - 1; i >= 0; i-- {
 		r := results[i]
-		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", r.Timestamp.Format("2006-01-02"), r.Question)
+		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", r.Timestamp.Format("2006-01-02"), ui.OneLine(r.Question))
 		confidence := "unknown"
 		if r.Summary != nil {
 			confidence = r.Summary.Confidence

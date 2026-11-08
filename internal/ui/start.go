@@ -74,12 +74,14 @@ func (r *Renderer) RenderStart(s agent.Setup, settings []Setting, example, note 
 // top bar are: the title, and the page's model and search chips.
 func (r *Renderer) startLines() []string {
 	chips := "model " + r.setup.Model + " · search " + searchChip(r.setup)
-	out := []string{r.heading("DEEP RESEARCH", chips), r.rule(), r.promptRow(), r.rule()}
+	out := []string{r.heading("DEEP RESEARCH", chips), r.rule()}
+	out = append(out, r.questionRows()...)
+	out = append(out, r.rule())
 	if row := r.startSettingsRow(); row != "" && len(completions(r.promptText)) == 0 {
 		out = append(out, row)
 	}
 	out = append(out, r.commandBlock(r.promptText, r.commandAt,
-		"[enter] research   [/] settings", "quit")...)
+		"[enter] research   [ctrl+j] new line   [/] settings", "quit")...)
 	if r.briefNote != "" {
 		// Each line of the note wrapped on its own: a model switch says
 		// what it uses and where its key went, which run together as one.
@@ -91,6 +93,16 @@ func (r *Renderer) startLines() []string {
 		out = append(out, "")
 	}
 	return out
+}
+
+// questionRows is the start screen's box: the example after the cursor
+// while it is empty, as one row, and once typed the question in as many
+// rows as its lines and their wrapping take.
+func (r *Renderer) questionRows() []string {
+	if r.promptText == "" {
+		return []string{r.promptRow()}
+	}
+	return r.labelledRows(r.promptLabel+" ▸ ", r.promptText, r.promptCursor)
 }
 
 // startSettingsRow is the next run's start settings set away from their
@@ -121,6 +133,12 @@ func (r *Renderer) startSettingsRow() string {
 // page's for its box.
 func AskPrompt(noColor bool) string {
 	return "  " + Theme{Enabled: !noColor}.magenta("ask ▸ ")
+}
+
+// AskedText is a question printed after AskPrompt, its later lines under
+// its first, as the box showed them.
+func AskedText(q string) string {
+	return strings.ReplaceAll(q, "\n", "\n"+strings.Repeat(" ", 2+dispWidth("ask ▸ ")))
 }
 
 // AskHeading heads the questions about a report, as the page's card is

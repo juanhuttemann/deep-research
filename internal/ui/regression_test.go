@@ -3437,13 +3437,14 @@ func TestReadPlanKeepsTheReportShape(t *testing.T) {
 
 // A paste was typed into a box key by key: its line break was Enter, and
 // copied text ending in one started the run before it could be read, the
-// rest of it left for the brief to take as keys. Bracketed, it is one line
-// of text, its breaks and tabs spaces, until Enter is pressed.
+// rest of it left for the brief to take as keys. Bracketed, it is text,
+// its line breaks kept as the question's (the box takes several lines), the
+// trailing one dropped and tabs spaces, until Enter is pressed.
 func TestPasteIsTextNotKeys(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	keys := "why \x1b[200~line one\r\n\tline two\r\n\x1b[201~?\r"
 	got := askQuestion(NewByteReader([]byte(keys)), r, agent.Setup{}, nil, "an example?", "")
-	if want := "why line one line two?"; got != want {
+	if want := "why line one\n line two?"; got != want {
 		t.Errorf("pasted question = %q, want %q", got, want)
 	}
 }
@@ -3844,7 +3845,7 @@ func TestRenamedDuplicateClaimIDTakesNoOtherClaimsID(t *testing.T) {
 // held a lone lead byte, invalid UTF-8, until the rest arrived.
 func TestPromptEchoesOnlyWholeCharacters(t *testing.T) {
 	var echoes []string
-	got, ok := readPromptRaw(NewByteReader([]byte("añ€\n")), nil, nil, func(text string, _ int) { echoes = append(echoes, text) }, nil, nil)
+	got, ok := readPromptRaw(NewByteReader([]byte("añ€\n")), nil, func(text string, _ int) { echoes = append(echoes, text) }, promptOpts{})
 	if !ok || got != "añ€" {
 		t.Fatalf("read %q, %v", got, ok)
 	}

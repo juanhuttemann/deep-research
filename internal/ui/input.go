@@ -287,6 +287,33 @@ func pastedText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// pastedLines is a paste as the text of a box that takes several lines: its
+// line breaks kept, a CRLF or a lone CR as one, tabs as spaces, trailing
+// spaces and blank lines at its ends dropped (copied text often ends in a
+// line break, which is not part of the question), other control codes,
+// which would corrupt the frame, removed.
+func pastedLines(s string) string {
+	s = strings.ReplaceAll(strings.ToValidUTF8(s, ""), "\r\n", "\n")
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\r':
+			return '\n'
+		case r == '\t':
+			return ' '
+		case r == '\n':
+			return r
+		case r < 0x20 || r == 0x7f:
+			return -1
+		}
+		return r
+	}, s)
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " ")
+	}
+	return strings.Trim(strings.Join(lines, "\n"), "\n")
+}
+
 // escapeAfter reads what follows an Esc: lead is 0 for a bare Esc, '[' or
 // 'O' for a key sequence, whose remaining bytes it swallows and whose final
 // byte it returns ('A' up, 'B' down) with its parameters ("1;5" for a
@@ -537,7 +564,7 @@ func readPromptSeeded(in Input, seed string, echo func(text string, cursor int))
 		}
 		return line, line != ""
 	}
-	return readPromptRaw(in, nil, nil, echo, nil, nil)
+	return readPromptRaw(in, nil, echo, promptOpts{})
 }
 
 // readPromptEdit opens the prompt with current already in the buffer, so a
@@ -548,20 +575,32 @@ func readPromptEdit(in Input, current string, echo func(text string, cursor int)
 	if !in.Raw() {
 		return readPromptSeeded(in, "", echo)
 	}
-	return readPromptRaw(in, []byte(current), nil, echo, nil, nil)
+	return readPromptRaw(in, []byte(current), echo, promptOpts{})
+}
+
+// promptOpts are what a box adds to the plain line: see readPromptRaw.
+type promptOpts struct {
+	tab   func(string) string
+	arrow func(byte)
+	quit  *twice
+	// multi lets the text hold line breaks: Ctrl-J, or Enter after a
+	// backslash, starts a new line, and a paste keeps its own.
+	multi bool
 }
 
 // readPromptRaw runs the keystroke-at-a-time edit loop over buf, with a
 // cursor the arrows move: a typo early in a long question used to mean
-// deleting everything after it. tab, when set, turns the line into what Tab
+// deleting everything after it. echo is given the text and the cursor's
+// byte offset in it. Of o: tab, when set, turns the line into what Tab
 // makes of it: the start screen's takes its example, as the page's question
 // box does, or completes a command. arrow, when set, is handed the final
 // byte of each key sequence the line does not use (up and down, which move
-// a menu). echo is given the line and the cursor's byte offset in it.
-// quit, when set, makes Ctrl-C clear the line and leave only when pressed
-// on an empty one twice; without it Ctrl-C leaves at once, as Esc does.
-func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text string, cursor int), arrow func(byte), quit *twice) (string, bool) {
-	l := &lineEdit{buf: buf, cur: len(buf)}
+// a menu). quit, when set, makes Ctrl-C clear the line and leave only when
+// pressed on an empty one twice; without it Ctrl-C leaves at once, as Esc
+// does.
+func readPromptRaw(in Input, buf []byte, echo func(text string, cursor int), o promptOpts) (string, bool) {
+	tab, arrow, quit := o.tab, o.arrow, o.quit
+	l := &lineEdit{buf: buf, cur: len(buf), multi: o.multi}
 	show := func() {
 		if echo != nil {
 			echo(string(l.buf), l.cur)
@@ -578,7 +617,9 @@ func readPromptRaw(in Input, buf []byte, tab func(string) string, echo func(text
 		}
 		switch c {
 		case '\r', '\n':
-			return strings.TrimSpace(string(l.buf)), true
+			if l.enter(c) {
+				return strings.TrimSpace(string(l.buf)), true
+			}
 		case 0x1b:
 			if !l.afterEsc(in, arrow) {
 				return "", false
@@ -621,6 +662,8 @@ func (l *lineEdit) afterEsc(in Input, arrow func(byte)) bool {
 	lead, final, params := escapeAfter(in)
 	switch {
 	case lead != 0 && l.escape(lead, final, params):
+	case isPasteStart(lead, final, params) && l.multi:
+		l.insert(pastedLines(readPaste(in)))
 	case isPasteStart(lead, final, params):
 		l.insert(pastedText(readPaste(in)))
 	case lead == '[' || lead == 'O':
@@ -667,10 +710,31 @@ func (t *twice) disarm() {
 }
 
 // lineEdit is a line being typed and the cursor in it, a byte offset on a
-// rune boundary.
+// rune boundary. multi lets it hold line breaks (see promptOpts).
 type lineEdit struct {
-	buf []byte
-	cur int
+	buf   []byte
+	cur   int
+	multi bool
+}
+
+// enter handles a CR or an LF and reports whether it ends the text. Raw
+// mode leaves the terminal's CR-to-LF mapping off, so Enter is CR and
+// Ctrl-J is LF, which is how a box that takes several lines tells "new
+// line" from "done" in every terminal, as Go TUIs such as Crush do; and
+// Enter after a backslash is a new line too, for whoever reaches for it
+// first. A one-line box ends on either.
+func (l *lineEdit) enter(c byte) bool {
+	switch {
+	case !l.multi:
+		return true
+	case c == '\n':
+		l.insert("\n")
+	case l.cur > 0 && l.buf[l.cur-1] == '\\':
+		l.buf[l.cur-1] = '\n'
+	default:
+		return true
+	}
+	return false
 }
 
 // edit applies a key that edits the line rather than ends it.
@@ -751,6 +815,8 @@ func (l *lineEdit) sequence(final byte, params string) bool {
 		l.left()
 	case final == 'C':
 		l.right()
+	case (final == 'A' || final == 'B') && l.multi && bytes.IndexByte(l.buf, '\n') >= 0:
+		l.vertical(final == 'A')
 	case final == 'H':
 		l.cur = 0
 	case final == 'F':
@@ -803,13 +869,45 @@ func (l *lineEdit) cut(from, to int) {
 	l.cur = from
 }
 
+// vertical moves the cursor to the line above (up) or below, to the same
+// column or the line's end if it is shorter; past the first or last line,
+// to the text's start or end. Lines are the text's, not the rows a long
+// one wraps into.
+func (l *lineEdit) vertical(up bool) {
+	start := bytes.LastIndexByte(l.buf[:l.cur], '\n') + 1
+	col := utf8.RuneCount(l.buf[start:l.cur])
+	var from int
+	switch nl := bytes.IndexByte(l.buf[l.cur:], '\n'); {
+	case up && start == 0:
+		l.cur = 0
+		return
+	case up:
+		from = bytes.LastIndexByte(l.buf[:start-1], '\n') + 1
+	case nl < 0:
+		l.cur = len(l.buf)
+		return
+	default:
+		from = l.cur + nl + 1
+	}
+	i := from
+	for ; col > 0 && i < len(l.buf) && l.buf[i] != '\n'; col-- {
+		_, n := utf8.DecodeRune(l.buf[i:])
+		i += n
+	}
+	l.cur = i
+}
+
+// blank is what separates words: a space, or a line break, which a word
+// never runs across.
+func blank(b byte) bool { return b == ' ' || b == '\n' }
+
 // wordLeft is the start of the word before the cursor, past any spaces.
 func (l *lineEdit) wordLeft() int {
 	i := l.cur
-	for i > 0 && l.buf[i-1] == ' ' {
+	for i > 0 && blank(l.buf[i-1]) {
 		i--
 	}
-	for i > 0 && l.buf[i-1] != ' ' {
+	for i > 0 && !blank(l.buf[i-1]) {
 		i--
 	}
 	return i
@@ -818,10 +916,10 @@ func (l *lineEdit) wordLeft() int {
 // wordRight is the end of the word after the cursor, past any spaces.
 func (l *lineEdit) wordRight() int {
 	i := l.cur
-	for i < len(l.buf) && l.buf[i] == ' ' {
+	for i < len(l.buf) && blank(l.buf[i]) {
 		i++
 	}
-	for i < len(l.buf) && l.buf[i] != ' ' {
+	for i < len(l.buf) && !blank(l.buf[i]) {
 		i++
 	}
 	return i

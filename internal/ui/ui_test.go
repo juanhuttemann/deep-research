@@ -2265,7 +2265,7 @@ func TestStartScreenFrame(t *testing.T) {
 	r.RenderStart(agent.Setup{Model: "m1", Provider: "p1", Search: "searxng (localhost:8888)", Pages: "firecrawl (localhost:3002)"}, nil, "an example?", "research failed: no key")
 	frame := strings.Join(r.frameLines(), "\n")
 	for _, want := range []string{"DEEP RESEARCH", "model m1 · search searxng + firecrawl",
-		"research ▸ █an example?", "[enter] research   [/] settings",
+		"research ▸ █an example?", "[enter] research   [ctrl+j] new line   [/] settings",
 		// Why the last run ended is said on the screen, where it is read.
 		"research failed: no key"} {
 		if !strings.Contains(frame, want) {
@@ -2515,7 +2515,7 @@ func TestAskBoxLines(t *testing.T) {
 	b := newAskBox(NewRenderer(&bytes.Buffer{}, Theme{}), "new research", nil)
 	b.r.width = 40
 	plain := b.lines("", 0, 0)
-	if got := plain[len(plain)-2]; got != "  [enter] ask   [empty enter] new research" || plain[len(plain)-1] != "" {
+	if got := plain[len(plain)-2]; got != "  [enter] ask   [ctrl+j] new line   [empty enter] new research" || plain[len(plain)-1] != "" {
 		t.Errorf("keys = %q, want them without /resume and a blank row under them", plain[len(plain)-2:])
 	}
 	if frame := strings.Join(b.lines("/r", 0, 2), "\n"); !strings.Contains(frame, "▸ /resume  past runs") || strings.Contains(frame, "/model") {
@@ -2650,12 +2650,12 @@ func TestLineEditorMovesAndEditsAtTheCursor(t *testing.T) {
 		{"tab puts the cursor at the end", "\x1b[D\tx\r", "examplex"},
 	}
 	for _, c := range cases {
-		got, ok := readPromptRaw(NewByteReader([]byte(c.keys)), nil, func(s string) string {
+		got, ok := readPromptRaw(NewByteReader([]byte(c.keys)), nil, nil, promptOpts{tab: func(s string) string {
 			if s == "" {
 				return "example"
 			}
 			return s
-		}, nil, nil, nil)
+		}})
 		if !ok || got != c.want {
 			t.Errorf("%s: got %q (ok=%v), want %q", c.name, got, ok, c.want)
 		}

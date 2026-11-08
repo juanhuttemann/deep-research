@@ -134,7 +134,7 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	if sum == nil {
 		sum = &agent.Summary{}
 	}
-	fmt.Fprintf(&sb, "# %s\n\n", res.Question)
+	fmt.Fprintf(&sb, "# %s\n\n", OneLine(res.Question))
 	fmt.Fprintf(&sb, "**Confidence:** %s\n\n", sum.Confidence)
 	if res.Model != "" {
 		fmt.Fprintf(&sb, "**Model:** %s", res.Model)

@@ -514,7 +514,7 @@ func (o Options) announce(result *agent.ResearchResult, res RunResult) {
 		_, _ = fmt.Fprintf(o.Stdout, "%s\n", FormatMarkdown(o.Stdout, WithReading(result.Summary.Report, result.Clarifications), o.NoColor))
 	default:
 		if o.Bell != nil {
-			o.Bell(fmt.Sprintf("Research complete: %s", result.Question))
+			o.Bell(fmt.Sprintf("Research complete: %s", OneLine(result.Question)))
 		}
 		reportFiles(o.Stdout, o.OutDir, res)
 	}

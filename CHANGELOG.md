@@ -15,6 +15,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   topic too. While the frame is up the terminal reports clicks, so
   selecting text or opening a link in it takes Shift.
 
+### Added
+
+- The start screen's question box and the `ask ▸` box take several lines:
+  Ctrl-J, or Enter after a `\`, starts a new line, Up and Down move between
+  them, and a paste keeps its line breaks where they used to become
+  spaces. The model gets the question as typed; the brief, the live frame,
+  the report's heading, `drsh history`, `/resume` and the completion
+  notification show it on one line, which also fixes a `-p` question with
+  line breaks breaking the frame.
+
 ## [0.30.2] - 2026-11-03
 
 ### Fixed
