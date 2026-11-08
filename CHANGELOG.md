@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The live frame's activity tail no longer repeats a topic's name on every
+  row. Each topic has one header with its number, row count and latest row,
+  and its rows sit under it, shut until you press its number (`1`–`9`) or
+  click the header. The search engine's line for each search now carries
+  its topic (`sub_id` on the `info` event), so it is filed under that
+  topic too. While the frame is up the terminal reports clicks, so
+  selecting text or opening a link in it takes Shift.
+
 ## [0.30.2] - 2026-11-03
 
 ### Fixed

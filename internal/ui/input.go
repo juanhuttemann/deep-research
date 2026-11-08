@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,8 +33,19 @@ const (
 	// KeyCtrlC cancels. Raw mode clears ISIG, so the terminal never turns
 	// ^C into SIGINT and it has to be handled here or it does nothing —
 	// which is not what anyone who has used a shell expects it to do.
-	KeyCtrlC   Key = 3
+	KeyCtrlC Key = 3
+	// KeyClick is a mouse button press, at Keystroke.X and .Y. Only the
+	// live frame asks the terminal to report them (see mouseOn).
+	KeyClick   Key = 0xfe
 	KeyUnknown Key = 0xff
+)
+
+// Mouse reporting: button presses (1000), in SGR form (1006), which carries
+// any column where the older form stopped at 223. Only presses are
+// reported, not motion, so a terminal still scrolls and Shift still selects.
+const (
+	mouseOn  = "\x1b[?1000h\x1b[?1006h"
+	mouseOff = "\x1b[?1006l\x1b[?1000l"
 )
 
 // escapeWindow is how long a lone Esc waits for the rest of a sequence.
@@ -57,6 +69,8 @@ var errNoKeyPending = errors.New("no key pending")
 type Keystroke struct {
 	Key  Key
 	Rest string
+	// X and Y are a KeyClick's screen cell, from 1.
+	X, Y int
 }
 
 // timedInput is an Input that can report whether another byte is already
@@ -143,6 +157,10 @@ func keyFromByte(b byte) Key {
 	case KeyCtrlC:
 		return KeyCtrlC
 	default:
+		// 1-9 pick a topic of the live frame's activity tail.
+		if b >= '1' && b <= '9' {
+			return Key(b)
+		}
 		return KeyUnknown
 	}
 }
@@ -152,17 +170,48 @@ func keyFromByte(b byte) Key {
 // does nothing; a bare Esc, with no byte following it, is the cancel key.
 // ESC followed by something else (alt-<key>) is not a cancel, and not a
 // sequence we act on either.
-func readEscape(in Input) Key {
+func readEscape(in Input) Keystroke {
 	lead, final, params := escapeAfter(in)
 	if lead == 0 {
-		return KeyEsc
+		return Keystroke{Key: KeyEsc}
 	}
 	if isPasteStart(lead, final, params) {
 		// Text pasted where keys are read is not keys: its x, q and Enter
 		// deleted a sub-topic, cancelled or started the run.
 		readPaste(in)
 	}
-	return KeyUnknown
+	if x, y, ok := mouseClick(lead, final, params); ok {
+		return Keystroke{Key: KeyClick, X: x, Y: y}
+	}
+	return Keystroke{Key: KeyUnknown}
+}
+
+// mouseClick reads an SGR mouse report, ESC [ < button ; x ; y M, as a
+// press of the left button at x, y. A release (final m), another button, a
+// wheel turn or a drag is not a click.
+func mouseClick(lead, final byte, params string) (x, y int, ok bool) {
+	rest, isMouse := strings.CutPrefix(params, "<")
+	if lead != '[' || final != 'M' || !isMouse {
+		return 0, 0, false
+	}
+	f := strings.Split(rest, ";")
+	if len(f) != 3 {
+		return 0, 0, false
+	}
+	n := make([]int, 3)
+	for i, s := range f {
+		v, err := strconv.Atoi(s)
+		if err != nil || v < 0 {
+			return 0, 0, false
+		}
+		n[i] = v
+	}
+	// The low two bits are the button, 0 the left; 32 marks a drag and 64
+	// the wheel. Shift, Alt and Ctrl (4, 8, 16) still click.
+	if n[0]&(3|32|64) != 0 {
+		return 0, 0, false
+	}
+	return n[1], n[2], true
 }
 
 // Bracketed paste (enabled with raw mode, see pasteOn) wraps what is pasted
@@ -297,7 +346,7 @@ func readKey(in Input) (Keystroke, error) {
 		return Keystroke{}, err
 	}
 	if Key(b) == KeyEsc {
-		return Keystroke{Key: readEscape(in)}, nil
+		return readEscape(in), nil
 	}
 	return Keystroke{Key: keyOrLiteral(b)}, nil
 }

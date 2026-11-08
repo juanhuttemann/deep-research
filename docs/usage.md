@@ -17,11 +17,18 @@ On a terminal this draws a live UI: a research brief you confirm, then a
 frame showing the pipeline stage, one row per parallel sub-agent with its
 progress meter, a rolling activity tail, and running source/token counters.
 The activity tail is hidden until you press `a`, which shows it; `a` again
-hides it. Each row of the tail names the sub-agent it is about as the tree does, in
-the colour of its tree row, then what it did: a search's query, a page,
-or a note on the results. A phase starting heads the rows under it, and
-what the run reports of itself (the search engine, the model a phase
-uses) is gray. Each page in the tail is one row naming it, site and path: a spinner while
+hides it. The tail files each sub-agent's rows under one header for its
+topic, named as the tree names it, in the colour of its tree row, with
+the topic's number, how many rows it holds and its latest one. The groups
+start shut: press the topic's number (`1`–`9`) or click its header to
+open it and see what it did, a search's query, a page, or a note on the
+results; the same again shuts it. A number with the tail hidden shows it
+with that topic open. A phase starting is a row of its own, and what the
+run reports of itself (the search engine, the model a phase uses) is
+gray. While the live frame is up drsh asks the terminal for mouse clicks,
+so selecting text or opening a link in it takes Shift (Shift+drag,
+Shift+click) in most terminals; the brief and the report keep the
+terminal's own. Each page in the tail is one row naming it, site and path: a spinner while
 it is read, then a dot, green when read in full, yellow for snippet only,
 red when dropped (with `--no-color` or `NO_COLOR`, `✓`, `!` or `✗`). A
 page read in full or as a snippet is a link to it: in a terminal that
@@ -960,6 +967,7 @@ During a run:
 | Key | Action |
 | --- | ------ |
 | `a` | show or hide the activity tail (hidden at the start) |
+| `1`–`9` / click | open or shut that topic's group in the activity tail |
 | `Esc` / `Ctrl-C` | cancel the run |
 
 ## Output and exports

@@ -36,8 +36,10 @@ const (
 	// Analyze, fact-check and summarize are single model calls that emit
 	// nothing for a minute or more; without a tick the UI looks hung.
 	tickInterval = 120 * time.Millisecond
-	// activityKeep bounds the retained event tail.
-	activityKeep = 64
+	// activityKeep bounds the retained event tail. The tail shows each
+	// topic's rows only when the reader opens its group, so the bound is
+	// what a group can still show, not what fits on screen.
+	activityKeep = 1000
 	// minNameCol / maxNameCol bound the sub-agent name column so the tree
 	// stays aligned without crowding out the status text beside it.
 	minNameCol = 14
@@ -69,6 +71,9 @@ type activity struct {
 	// empty, then a dot coloured by the status its verify brought.
 	url    string
 	status string
+	// info marks what the run reports of itself (the engine's results, a
+	// filter's count), drawn gray under the rows that are the research.
+	info bool
 }
 
 // Renderer paints the live run. On a terminal it keeps one frame pinned to the
@@ -116,6 +121,15 @@ type Renderer struct {
 	// status row say where the run is, and the tail's stream of searches and
 	// pages is detail most runs never need, so it waits for a.
 	showActivity bool
+	// opened are the topics whose groups the tail shows open.
+	opened map[string]bool
+	// tailHeads maps a row of the last tail drawn to the topic it heads,
+	// and tailTop is the frame row the tail starts on: where a click lands.
+	tailHeads map[int]string
+	tailTop   int
+	// clicks is set when a key reader will take the terminal's click
+	// reports; mouse while the terminal is sending them.
+	clicks, mouse bool
 
 	// promptLabel is non-empty while the reader is typing a line; promptText
 	// is what they have typed so far. Raw mode echoes nothing, so the frame
@@ -172,6 +186,7 @@ func NewRenderer(w io.Writer, theme Theme) *Renderer {
 		rows:      24,
 		clock:     time.Now,
 		nodes:     map[string]*Node{},
+		opened:    map[string]bool{},
 		startTime: time.Now(),
 		plain:     true,
 	}
@@ -212,6 +227,7 @@ func (r *Renderer) RenderReport(res *agent.ResearchResult, sources, tokens int) 
 	r.result = res
 	r.mode = "report"
 	r.done = true
+	r.mouseLocked(false)
 	if r.plain {
 		r.writeBlock(r.reportLines())
 		return
@@ -239,6 +255,7 @@ func (r *Renderer) Close() {
 		return
 	}
 	r.stopTickerLocked()
+	r.mouseLocked(false)
 	// A live frame still owns the viewport on the cancel and error paths, and
 	// the cursor sits at the end of its last row. Whatever the caller prints
 	// next would land on that row, so the frame is closed off first.
@@ -356,11 +373,10 @@ func (r *Renderer) apply(e Event) {
 			r.status = e.Detail
 			return
 		}
-		// Progress, not failure: the same line without the error glyph.
-		if e.SubID != "" {
-			r.node(e.SubID, e.SubName).Line = e.Detail
-		}
-		r.pushActivity(e.SubID, e.Detail)
+		// A note on a search (the engine's results, the off-topic count)
+		// stays out of the tree: the row says what its topic is doing, which
+		// the reads after it are.
+		r.pushInfo(e.SubID, e.Detail)
 	case Error:
 		if e.SubID != "" {
 			r.node(e.SubID, e.SubName).Line = e.Detail
@@ -480,6 +496,15 @@ func (r *Renderer) pushActivity(sub, text string) {
 	}
 }
 
+// pushInfo adds a row of what the run reports of itself.
+func (r *Renderer) pushInfo(sub, text string) {
+	if text == "" {
+		return
+	}
+	r.pushActivity(sub, text)
+	r.acts[len(r.acts)-1].info = true
+}
+
 func (r *Renderer) node(id, name string) *Node {
 	if id == "" {
 		// The invented ID must not land on one a real sub-agent already uses:
@@ -565,6 +590,7 @@ func (r *Renderer) paintLocked(force bool) {
 	}
 
 	lines := r.frameLines()
+	r.mouseLocked(r.mode == "tree")
 
 	var sb strings.Builder
 	if !r.hidden {
@@ -944,6 +970,7 @@ func (r *Renderer) treeLines() []string {
 	// tree and footer never move.
 	budget := r.rows - 1 - len(head) - len(agents) - len(foot) - 1
 	var tail []string
+	r.tailHeads, r.tailTop = nil, len(head)+len(agents)+1
 	if r.showActivity && budget >= 2 {
 		tail = append(tail, r.rule())
 		tail = append(tail, r.activityLines(budget-1)...)
@@ -1099,63 +1126,6 @@ func (r *Renderer) phaseStrip() string {
 	return "  " + strings.Join(parts, r.T.dim("  ─  "))
 }
 
-// activityLines renders the last n entries of the event tail, oldest first.
-func (r *Renderer) activityLines(n int) []string {
-	if n <= 0 {
-		return nil
-	}
-	acts := r.acts
-	if len(acts) > n {
-		acts = acts[len(acts)-n:]
-	}
-	col := r.whoCol()
-	out := make([]string, 0, n)
-	for _, a := range acts {
-		at := r.T.dim(pad(formatDuration(a.at), 5))
-		// A phase heads the rows under it, from the column the names start.
-		if a.sub == "" && strings.HasPrefix(a.text, "▸ ") {
-			out = append(out, fmt.Sprintf("  %s  %s", at, r.activityText(a)))
-			continue
-		}
-		out = append(out, fmt.Sprintf("  %s  %s  %s", at, r.who(a.sub, col), r.activityText(a)))
-	}
-	// Keep the section a constant height: without the blank filler the rows
-	// below it would march up the screen as the tail fills.
-	for len(out) < n {
-		out = append(out, "")
-	}
-	return out
-}
-
-// whoCol is the width of the tail's column naming the sub-agent of each
-// row: its name as the tree above shows it, cut to fit, where it showed the
-// sub-agent's ID ("1", "f3"), which only someone who knew the IDs could
-// read.
-func (r *Renderer) whoCol() int {
-	w := 0
-	for _, id := range r.order {
-		w = max(w, dispWidth(r.nodes[id].Name))
-	}
-	return min(w, maxWhoCol, max(r.width/5, 8))
-}
-
-// maxWhoCol bounds the tail's sub-agent column: enough of a name to tell
-// it from the others, the row's own text the rest.
-const maxWhoCol = 24
-
-// who is the sub-agent column of a row: the sub-agent's name, in its colour
-// in the tree, or blank for the run's own rows.
-func (r *Renderer) who(sub string, col int) string {
-	if col == 0 {
-		return ""
-	}
-	n := r.nodes[sub]
-	if sub == "" || n == nil {
-		return strings.Repeat(" ", col)
-	}
-	return r.hue(sub, pad(clip(n.Name, col), col))
-}
-
 // agentHues tell the sub-agents apart, the same in the tree and the tail.
 // None is the green, yellow or red that a source's dot and a bar's state
 // are told by.
@@ -1198,7 +1168,7 @@ func (r *Renderer) styleRow(a activity) string {
 		return r.T.red("!") + " " + t[len("! "):]
 	case strings.HasPrefix(t, "Searching: "):
 		return r.T.gray("search") + "  " + t[len("Searching: "):]
-	case a.sub == "", strings.HasPrefix(t, "= "), strings.Contains(t, "results off-topic"):
+	case a.info, a.sub == "", strings.HasPrefix(t, "= "):
 		return r.T.gray(t)
 	default:
 		return t
@@ -1245,7 +1215,7 @@ func (r *Renderer) footerLines() []string {
 	case !r.done:
 		activity := "[a] show activity"
 		if r.showActivity {
-			activity = "[a] hide activity"
+			activity = "[a] hide activity   [1-9] or click a topic to open it"
 		}
 		out = append(out, "  "+r.T.hints(activity+"   [esc] cancel"))
 	}

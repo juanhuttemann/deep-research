@@ -325,6 +325,26 @@ func (s *SearchTools) log(msg string) {
 	}
 }
 
+// searchLogKey carries the function WithSearchLog gives a search.
+type searchLogKey struct{}
+
+// WithSearchLog has the searches made under ctx report their lines (what the
+// engine returned and from where) to logf instead of the tools' logger. The
+// tools' logger is shared by every sub-agent, so its lines named no topic, and
+// a caller that groups the run's lines by topic could not place them.
+func WithSearchLog(ctx context.Context, logf func(string)) context.Context {
+	return context.WithValue(ctx, searchLogKey{}, logf)
+}
+
+// logIn reports msg for the search running under ctx.
+func (s *SearchTools) logIn(ctx context.Context, msg string) {
+	if logf, ok := ctx.Value(searchLogKey{}).(func(string)); ok && logf != nil {
+		logf(msg)
+		return
+	}
+	s.log(msg)
+}
+
 // httpError is a non-2xx response from a service. The status travels on the
 // error itself rather than inside its message: re-mining a code out of the
 // text classified a 403 whose body happened to contain "404" as a 404, and any
@@ -525,7 +545,7 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 	// spent every slot on whatever they ranked first, which on a long
 	// technical question is routinely unrelated to it; the pages that answer
 	// the question are usually present but buried below them.
-	ranked, offTopic := rankByRelevance(s.inScope(dedupeResults(searchResults)), terms)
+	ranked, offTopic := rankByRelevance(s.inScope(ctx, dedupeResults(searchResults)), terms)
 	ranked, known := s.splitKnown(ranked)
 	if len(ranked) > s.MaxURLsPerQuery {
 		// Results past the budget were not rejected, only not reached, so they
@@ -542,7 +562,7 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 			URL: r.URL, Domain: DomainOf(r.URL), Title: r.Title, Score: r.Score,
 		})
 	}
-	s.logResults(searchResults)
+	s.logResults(ctx, searchResults)
 	if len(candidates) == 0 && len(known) == 0 && len(offTopic) > 0 {
 		// Nothing a page could answer from: an instance that does this was
 		// seen answering every query with results for its first word alone.
@@ -621,12 +641,12 @@ type offTopicRester interface {
 // instance, so a run's junk can be traced to where it came from. Off-topic
 // results are the run's to report, once per search; each used to get a
 // line here as well.
-func (s *SearchTools) logResults(res []SearchResult) {
+func (s *SearchTools) logResults(ctx context.Context, res []SearchResult) {
 	line := fmt.Sprintf("  %-9s %d results", s.Engine.Name(), len(res))
 	if len(res) > 0 && res[0].instance != "" {
 		line += " from " + DomainOf(res[0].instance)
 	}
-	s.log(line)
+	s.logIn(ctx, line)
 }
 
 // splitKnown separates the results Skip says the run already has, before the
