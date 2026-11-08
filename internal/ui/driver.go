@@ -26,9 +26,10 @@ type Driver struct {
 	Parallelism int
 
 	now func() time.Time
-	// toggleActivity is what a does: the live frame shows or hides its
-	// activity tail. nil when there is no frame.
-	toggleActivity func()
+	// frame is the live frame the keys act on: a shows or hides its
+	// activity tail, a digit or a click opens a topic in it. nil when there
+	// is no frame.
+	frame liveFrame
 
 	// keysDone is closed when the key reader ends; nil when none started.
 	keysDone  chan struct{}
@@ -191,13 +192,32 @@ func (d *Driver) startKeyReader() {
 				if d.cancel != nil {
 					d.cancel()
 				}
-			case KeyA:
-				if d.toggleActivity != nil {
-					d.toggleActivity()
+			default:
+				if d.frame != nil {
+					frameKey(d.frame, k)
 				}
 			}
 		}
 	}()
+}
+
+// liveFrame is what the keys change on the live frame: the Renderer.
+type liveFrame interface {
+	ToggleActivity()
+	OpenTopic(n int)
+	Click(x, y int)
+}
+
+// frameKey applies a key read during the run to the live frame.
+func frameKey(f liveFrame, k Keystroke) {
+	switch {
+	case k.Key == KeyA:
+		f.ToggleActivity()
+	case k.Key == KeyClick:
+		f.Click(k.X, k.Y)
+	case k.Key >= '1' && k.Key <= '9':
+		f.OpenTopic(int(k.Key - '0'))
+	}
 }
 
 // claimSource reserves a URL for the caller, reporting false when another
@@ -932,6 +952,11 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 	d.emit(Event{Type: SubAgent, SubID: id, SubName: sub.Name, SubState: "running", Line: "starting"})
 
 	sctx, read := d.announceReads(ctx, id)
+	// The engine's line for each search is this sub-agent's: untagged, the
+	// activity tail could not file it under its topic.
+	sctx = tools.WithSearchLog(sctx, func(msg string) {
+		d.emit(Event{Type: Info, Detail: strings.TrimSpace(msg), SubID: id, SubName: sub.Name})
+	})
 	queries := subQueries(question, sub)
 	for qi, q := range queries {
 		if ctx.Err() != nil {

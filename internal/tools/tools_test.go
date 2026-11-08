@@ -520,3 +520,30 @@ func TestSearchDeduplicatesResultsByURL(t *testing.T) {
 		t.Errorf("expected 2 scrapes, got %d", n)
 	}
 }
+
+// A search made under WithSearchLog reports its engine line there, not to
+// the tools' shared logger, so the caller can file it under its topic.
+func TestSearchLogGoesToTheContextsLogger(t *testing.T) {
+	searx := newSearXNGServer(t, []map[string]any{
+		{"url": "https://example.com/a", "title": "A", "content": "test query answer"},
+	})
+	st := newSearchTools(searx.URL, "", 0)
+	var shared, mine []string
+	st.SetLogger(func(m string) { shared = append(shared, m) })
+	ctx := WithSearchLog(context.Background(), func(m string) { mine = append(mine, m) })
+	if _, err := st.Search(ctx, "test query", nil); err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	if len(mine) != 1 || !strings.Contains(mine[0], "1 results") {
+		t.Errorf("context logger got %q, want the engine's one line", mine)
+	}
+	if len(shared) != 0 {
+		t.Errorf("shared logger got %q, want nothing", shared)
+	}
+	if _, err := st.Search(context.Background(), "test query", nil); err != nil {
+		t.Fatalf("Search() error: %v", err)
+	}
+	if len(shared) != 1 {
+		t.Errorf("without a context logger the shared one got %q, want the line", shared)
+	}
+}

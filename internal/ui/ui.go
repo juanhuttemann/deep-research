@@ -151,7 +151,9 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	driver := NewDriver(o.Assistant, sink, input, o.Parallelism)
 	driver.now = o.Now
 	driver.domains = usable
-	driver.toggleActivity = renderer.ToggleActivity
+	driver.frame = renderer
+	// Only an interactive run has a key reader to take the clicks' reports.
+	renderer.TrackClicks(interactive)
 	if interactive || o.JSONL {
 		// A retried model call is the assistant's own progress line. Without
 		// routing it into the events, a retry that takes minutes looks like a

@@ -179,8 +179,10 @@ func (t *ttyReader) Close() {
 		t.mu.Lock()
 		t.done = true
 		t.mu.Unlock()
-		// The shell's line editor would take the markers for keys.
-		_, _ = io.WriteString(t.f, pasteOff)
+		// The shell's line editor would take the markers for keys, and a
+		// click's report, should a run end with the frame still asking
+		// for them (see Renderer.mouseLocked), for typed text.
+		_, _ = io.WriteString(t.f, pasteOff+mouseOff)
 		if t.old != nil {
 			// Flushed: keys pressed during the run are not the shell's.
 			_ = setTermios(int(t.f.Fd()), tcSetFlush, t.old)

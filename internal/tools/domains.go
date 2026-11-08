@@ -137,7 +137,7 @@ func siteFilter(domains []string) string {
 // inScope keeps the results on s.Domains. The engines' own scoping is a
 // request, not a guarantee: a SearXNG engine that ignores site: answers with
 // the open web, and the reader asked for these sites only.
-func (s *SearchTools) inScope(res []SearchResult) []SearchResult {
+func (s *SearchTools) inScope(ctx context.Context, res []SearchResult) []SearchResult {
 	if len(s.Domains) == 0 {
 		return res
 	}
@@ -148,7 +148,7 @@ func (s *SearchTools) inScope(res []SearchResult) []SearchResult {
 		}
 	}
 	if out := len(res) - len(kept); out > 0 {
-		s.log(fmt.Sprintf("    %d outside the domain list", out))
+		s.logIn(ctx, fmt.Sprintf("    %d outside the domain list", out))
 	}
 	return kept
 }
