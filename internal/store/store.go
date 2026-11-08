@@ -141,18 +141,22 @@ func tornTail(f *os.File) bool {
 	return err == nil && last[0] != '\n'
 }
 
-// List reads the run history. It also reports how many lines were unreadable:
-// history is an append-only JSONL file, so a run killed part-way through Save
-// leaves a torn final line, and that record can never be parsed again.
-// Skipping it silently made the history under-report with nothing to say why,
-// so the count comes back for the caller to surface.
-func (s *Store) List() (results []ResearchResult, skipped int, err error) {
+// Each hands fn the history's records in order, one at a time, and returns
+// how many lines it could not read. A caller keeps only what it needs of
+// each: drsh history prints six fields of a run, and a list of every
+// record whole, findings and report, held the entire history in memory.
+//
+// The unreadable count is the caller's to surface: history is an
+// append-only JSONL file, so a run killed part-way through Save leaves a
+// torn final line that can never be parsed again, and skipping it silently
+// made the history under-report with nothing to say why.
+func (s *Store) Each(fn func(ResearchResult)) (skipped int, err error) {
 	f, err := os.Open(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, 0, nil
+		return 0, nil
 	}
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	defer func() { _ = f.Close() }()
 	// Read a record at a time rather than the whole file: history only grows,
@@ -168,14 +172,14 @@ func (s *Store) List() (results []ResearchResult, skipped int, err error) {
 			if err := json.Unmarshal([]byte(trimmed), &r); err != nil || (r.ID == "" && r.Question == "") {
 				skipped++
 			} else {
-				results = append(results, r)
+				fn(r)
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
-				return results, skipped, nil
+				return skipped, nil
 			}
-			return results, skipped, readErr
+			return skipped, readErr
 		}
 	}
 }

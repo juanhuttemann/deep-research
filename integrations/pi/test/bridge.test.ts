@@ -207,3 +207,49 @@ drshTest("drsh takes exactly the answers the extension lets through", async () =
 		await b.close();
 	}
 });
+
+test("a call that arrives after the run was stopped reaches the provider stopped", async () => {
+	// A signal does not replay its abort to a listener added after it.
+	const stopped = new AbortController();
+	stopped.abort();
+	const calls: Call[] = [];
+	const b = await startBridge({ model, stream: fakeStream(() => ({ text: "hi" }), calls), signal: stopped.signal });
+	try {
+		await (await post(b.baseURL, b.token, { messages: [{ role: "user", content: "q" }] })).text();
+		assert.equal(calls[0]?.options?.signal?.aborted, true);
+	} finally {
+		await b.close();
+	}
+});
+
+test("a client that stops reading holds the stream back instead of filling memory", async () => {
+	const big = "x".repeat(64 * 1024);
+	const total = 2000; // 128 MB, were it all queued
+	let produced = 0;
+	const stream = async function* (m: typeof model, _c: unknown, options?: { signal?: AbortSignal }): AsyncGenerator<AssistantMessageEvent> {
+		const msg = { role: "assistant", content: [{ type: "text", text: "" }], api: m.api, provider: m.provider, model: m.id, usage: usage(1, 1), stopReason: "stop", timestamp: Date.now() } as any;
+		yield { type: "start", partial: msg };
+		for (let i = 0; i < total && !options?.signal?.aborted; i++) {
+			produced++;
+			yield { type: "text_delta", contentIndex: 0, delta: big, partial: msg };
+		}
+		yield { type: "done", reason: "stop", message: msg };
+	};
+	const b = await startBridge({ model, stream: stream as any });
+	try {
+		const { request } = await import("node:http");
+		const url = new URL(`${b.baseURL}/chat/completions`);
+		const req = request(url, { method: "POST", headers: { authorization: `Bearer ${b.token}`, "content-type": "application/json" } });
+		const res = await new Promise<import("node:http").IncomingMessage>((ok) => {
+			req.on("response", ok);
+			req.end(JSON.stringify({ messages: [{ role: "user", content: "q" }], stream: true }));
+		});
+		res.pause(); // the client stops reading
+		await new Promise((r) => setTimeout(r, 500));
+		assert.ok(produced < total / 2, `the provider was read ${produced} of ${total} events ahead of a client that stopped reading`);
+		req.destroy();
+		res.destroy();
+	} finally {
+		await b.close();
+	}
+});

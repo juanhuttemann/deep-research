@@ -547,3 +547,94 @@ func TestSearchLogGoesToTheContextsLogger(t *testing.T) {
 		t.Errorf("without a context logger the shared one got %q, want the line", shared)
 	}
 }
+
+// heldScraper counts scrapes and holds each until release closes.
+type heldScraper struct {
+	n       atomic.Int32
+	started chan struct{}
+	release chan struct{}
+}
+
+func (h *heldScraper) Name() string { return "held" }
+
+func (h *heldScraper) ScrapeURL(ctx context.Context, url string) (*ScrapedContent, error) {
+	h.n.Add(1)
+	h.started <- struct{}{}
+	select {
+	case <-h.release:
+		return &ScrapedContent{URL: url, Content: "page text"}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// The run's searches run at once and are handed the same pages, and only
+// a page already read was skipped: two searches fetching one page both
+// downloaded it. The second waits for the first's scrape; one that is
+// stopped while it waits leaves the scrape to the other.
+func TestConcurrentSearchesShareAScrape(t *testing.T) {
+	searx := newSearXNGServer(t, []map[string]any{
+		{"url": "https://example.com/a", "title": "A", "content": "test query answer"},
+	})
+	sc := &heldScraper{started: make(chan struct{}, 4), release: make(chan struct{})}
+	st := newSearchTools(searx.URL, "", 0)
+	st.Scraper = sc
+
+	type result struct {
+		res *SearchResults
+		err error
+	}
+	first, second, stopped := make(chan result, 1), make(chan result, 1), make(chan result, 1)
+	go func() { r, err := st.Search(context.Background(), "test query", nil); first <- result{r, err} }()
+	<-sc.started // the first search is scraping the page
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { r, err := st.Search(ctx, "test query", nil); stopped <- result{r, err} }()
+	go func() { r, err := st.Search(context.Background(), "test query", nil); second <- result{r, err} }()
+	time.Sleep(50 * time.Millisecond) // both wait on the scrape in progress
+	cancel()
+	<-stopped // the stopped one stops waiting, the scrape goes on
+	close(sc.release)
+	for _, ch := range []chan result{first, second} {
+		r := <-ch
+		if r.err != nil || len(r.res.Findings) != 1 || r.res.Findings[0].Content != "page text" {
+			t.Fatalf("search = %+v, %v; want the page's text", r.res, r.err)
+		}
+	}
+	if n := sc.n.Load(); n != 1 {
+		t.Errorf("scrapes = %d, want the page scraped once", n)
+	}
+}
+
+// The search that began a scrape was stopped while two others waited on it:
+// each scraped the page itself, downloading it twice again. They elect one
+// to scrape it for both.
+func TestStoppedScrapeIsRetriedOnce(t *testing.T) {
+	searx := newSearXNGServer(t, []map[string]any{
+		{"url": "https://example.com/a", "title": "A", "content": "test query answer"},
+	})
+	sc := &heldScraper{started: make(chan struct{}, 4), release: make(chan struct{})}
+	st := newSearchTools(searx.URL, "", 0)
+	st.Scraper = sc
+
+	leader, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { _, _ = st.Search(leader, "test query", nil); close(stopped) }()
+	<-sc.started
+	done := make(chan error, 2)
+	for range 2 {
+		go func() { _, err := st.Search(context.Background(), "test query", nil); done <- err }()
+	}
+	time.Sleep(50 * time.Millisecond) // both wait on the leader's scrape
+	cancel()
+	<-stopped
+	<-sc.started // one of them scrapes it again
+	close(sc.release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := sc.n.Load(); n != 2 {
+		t.Errorf("scrapes = %d, want the stopped one and a single retry", n)
+	}
+}

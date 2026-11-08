@@ -270,13 +270,20 @@ func (d *Driver) noteKnown(id, query string, known []agent.SkippedSource) int {
 		}
 		key := tools.CanonicalURL(k.URL)
 		d.foundAgain[key] = append(d.foundAgain[key], query)
-		if d.refoundBy == nil {
-			d.refoundBy = map[string]int{}
-		}
-		d.refoundBy[id]++
 		d.mu.Unlock()
+		d.markRefound(id)
 	}
 	return len(known)
+}
+
+// markRefound records that sub-agent id found a page another had cited.
+func (d *Driver) markRefound(id string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.refoundBy == nil {
+		d.refoundBy = map[string]int{}
+	}
+	d.refoundBy[id]++
 }
 
 // refound reports whether sub-agent id found pages another had cited.
@@ -1041,6 +1048,12 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 				d.emit(Event{Type: Verify, URL: f.URL, Domain: signal.Domain,
 					Status: "duplicate", SubID: id, Line: "= " + signal.Domain + " already cited"})
 				found = append(found, f)
+				// Its evidence is this topic's too. Recorded only for the
+				// pages the search knew were cited, a page two searches
+				// fetched at once left the one that lost the race with no
+				// source of its own, and the analysis was told the topic
+				// found nothing.
+				d.markRefound(id)
 				continue
 			}
 			kept++
@@ -1306,7 +1319,8 @@ func subQueries(question string, sub agent.SubTopic) []string {
 // articles about the facet and nothing about what was asked. Only a question
 // too long to leave the facet minFacetCols gives up its own tail.
 func anchoredQuery(question, facet string) string {
-	q, facet := strings.TrimSpace(question), strings.TrimSpace(facet)
+	// A search query is one line: a question over several is its words.
+	q, facet := OneLine(question), strings.TrimSpace(facet)
 	switch {
 	case q == "" && facet == "":
 		return ""
@@ -1458,6 +1472,19 @@ func analyzePrompt(question string, findings []agent.Finding, uncovered []string
 // when there are any (see ExcerptFor), the searches that found the page
 // otherwise.
 func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool, excerptFor []agent.Claim) string {
+	return factCheckPromptWith(answer, retrieved, evidenceBlock(findings, excerptFor))
+}
+
+// evidenceBlock is the findings as a fact-check prompt gives them, each
+// page excerpted by the claims in excerptFor.
+func evidenceBlock(findings []agent.Finding, excerptFor []agent.Claim) string {
+	var sb strings.Builder
+	writeFindingsFor(&sb, findings, excerptFor)
+	return sb.String()
+}
+
+// factCheckPromptWith is factCheckPrompt with its evidence already written.
+func factCheckPromptWith(answer string, retrieved bool, evidence string) string {
 	var sb strings.Builder
 	if retrieved {
 		sb.WriteString("Verify these claims against the research findings below.\n\nClaims:\n")
@@ -1471,7 +1498,7 @@ func factCheckPrompt(answer string, findings []agent.Finding, retrieved bool, ex
 	}
 	sb.WriteString(answer)
 	sb.WriteString("\n\nResearch findings (title, URL, source material):\n")
-	writeFindingsFor(&sb, findings, excerptFor)
+	sb.WriteString(evidence)
 	return sb.String()
 }
 

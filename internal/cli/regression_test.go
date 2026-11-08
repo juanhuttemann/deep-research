@@ -1096,3 +1096,62 @@ func signalledChild() {
 	ExitBySignal(ctx)
 	os.Exit(0)
 }
+
+// The run's .json could fail to save (a full disk, a directory in its way)
+// with only a warning, and the checkpoint was removed after it: a paid run
+// ended "complete" with nothing to ask about or resume. It now fails, says
+// so, and keeps the checkpoint.
+func TestUnsavedRecordKeepsTheCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := runCLI(t, dir, stub{}, "-p", "q", "--silent", "--reports", dir); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	records, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+	var record string
+	for _, r := range records {
+		if !strings.HasSuffix(r, ".partial.json") {
+			record = r
+		}
+	}
+	if record == "" {
+		t.Fatalf("no record in %v", records)
+	}
+	_ = os.Remove(record)
+	if err := os.Mkdir(record, 0o755); err != nil { // the record's path, taken
+		t.Fatal(err)
+	}
+	out, err := runCLI(t, dir, stub{}, "-p", "q", "--jsonl", "--reports", dir)
+	if err == nil || !strings.Contains(err.Error(), "--resume") {
+		t.Fatalf("err = %v, want the run failed with its checkpoint named", err)
+	}
+	if cps, _ := filepath.Glob(filepath.Join(dir, "*.partial.json")); len(cps) != 1 {
+		t.Errorf("checkpoints = %v, want the run's kept", cps)
+	}
+	if !strings.Contains(out, `"status":"failed"`) || !strings.Contains(out, `"checkpoint"`) {
+		t.Errorf("done line does not say failed with a checkpoint:\n%s", out)
+	}
+}
+
+// The page's report and download routes read the reports directory through
+// an os.Root, which refuses a symlink out of it; its ask read the run by its
+// joined path, so a .json symlink in reports sent a file from elsewhere to
+// the model as the run. Ask reads through the root too.
+func TestPageAskStaysInTheReportsDirectory(t *testing.T) {
+	reports, outside := t.TempDir(), t.TempDir()
+	run := `{"question":"q","report":"r"}`
+	if err := os.WriteFile(filepath.Join(reports, "in.json"), []byte(run), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.json"), []byte(run), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret.json"), filepath.Join(reports, "out.json")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	if m, err := readInRoot(reports, "in.json"); err != nil || m.Question != "q" {
+		t.Errorf("a run in reports: %+v, %v", m, err)
+	}
+	if _, err := readInRoot(reports, "out.json"); err == nil {
+		t.Error("a symlink out of reports was read")
+	}
+}

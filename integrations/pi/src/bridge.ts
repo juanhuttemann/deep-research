@@ -100,6 +100,9 @@ export async function startBridge(o: { model: Model<Api>; stream: StreamFn; sign
 		});
 		const outer = () => abort.abort();
 		o.signal?.addEventListener("abort", outer, { once: true });
+		// A signal does not replay an abort to a listener added after it:
+		// a call that arrived once the run was stopped went to the provider.
+		if (o.signal?.aborted) abort.abort();
 		bridge.calls++;
 		const stream = o.stream(o.model, context, {
 			signal: abort.signal,
@@ -183,6 +186,23 @@ async function collect(stream: AsyncIterable<AssistantMessageEvent>): Promise<Fi
 	return final;
 }
 
+// send writes data and, when the socket's buffer is full, waits for it to
+// drain before the stream is read on. Written regardless, a client reading
+// slowly had the whole answer queued in memory as fast as the provider sent
+// it. A client that hangs up ends the wait too: drain would never come.
+async function send(res: ServerResponse, data: string): Promise<void> {
+	if (res.write(data) || res.destroyed) return;
+	await new Promise<void>((resolve) => {
+		const done = () => {
+			res.off("drain", done);
+			res.off("close", done);
+			resolve();
+		};
+		res.on("drain", done);
+		res.on("close", done);
+	});
+}
+
 // streamTo writes the answer as server-sent events. Headers wait for the
 // first event that is not a failure: a provider that refuses the call
 // (a bad key, a rate limit) does so before anything streams, and is then
@@ -198,7 +218,7 @@ async function streamTo(res: ServerResponse, stream: AsyncIterable<AssistantMess
 			res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
 		}
 		for (const c of streamChunks(s, e)) {
-			res.write(`data: ${JSON.stringify(c)}\n\n`);
+			await send(res, `data: ${JSON.stringify(c)}\n\n`);
 		}
 		if (e.type === "done") {
 			final = e;

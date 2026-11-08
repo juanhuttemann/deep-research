@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -48,6 +48,11 @@ func chatAbout(d Deps, path string) (*agent.Chat, error) {
 	if err != nil {
 		return nil, err
 	}
+	return chatWith(d, m)
+}
+
+// chatWith is chatAbout for a run already read.
+func chatWith(d Deps, m *ui.Meta) (*agent.Chat, error) {
 	chat, err := agent.NewChat(d.Config.Config, ui.RunOverview(m), ui.SourceTools(m))
 	if err != nil {
 		return nil, keyHint(d, err)
@@ -115,6 +120,24 @@ func answer(cmd *cobra.Command, chat *agent.Chat, q string) error {
 	return nil
 }
 
+// readInRoot reads the run named run within the reports directory, as the
+// page's report and download routes do: through an os.Root, which refuses a
+// symlink out of it. Read by its joined path, a .json symlink in reports
+// sent a file from anywhere the process could read to the model as the
+// run's.
+func readInRoot(reports, run string) (*ui.Meta, error) {
+	root, err := os.OpenRoot(reports)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	data, err := fs.ReadFile(root.FS(), run)
+	if err != nil {
+		return nil, err
+	}
+	return ui.DecodeMeta(data, run)
+}
+
 // webAsk answers a question from the page about a run in the reports
 // directory; web passes only a bare .json name there.
 func webAsk(load func() (Deps, error), reports string) web.AskFunc {
@@ -123,7 +146,11 @@ func webAsk(load func() (Deps, error), reports string) web.AskFunc {
 		if err != nil {
 			return "", err
 		}
-		chat, err := chatAbout(d, filepath.Join(reports, run))
+		m, err := readInRoot(reports, run)
+		if err != nil {
+			return "", err
+		}
+		chat, err := chatWith(d, m)
 		if err != nil {
 			return "", err
 		}

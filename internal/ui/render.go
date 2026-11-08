@@ -123,6 +123,9 @@ type Renderer struct {
 	showActivity bool
 	// opened are the topics whose groups the tail shows open.
 	opened map[string]bool
+	// grouped is the tail's rows grouped by topic, kept until an event
+	// changes them (see tailItems).
+	grouped []tailItem
 	// tail is where the topics are in the tail last laid out, and shown
 	// the layouts painted in the last moments: where a click lands.
 	tail  tailLayout
@@ -280,6 +283,9 @@ func (r *Renderer) Emit(e Event) {
 	defer r.mu.Unlock()
 
 	r.apply(e)
+	// Every change to the tail's rows and to the topics they are filed
+	// under is an event's: the grouping is made again on the next paint.
+	r.grouped = nil
 
 	if r.plain {
 		r.logEvent(e)

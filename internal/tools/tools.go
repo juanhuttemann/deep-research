@@ -311,6 +311,18 @@ type SearchTools struct {
 	// sites and anything the engine returns from elsewhere is dropped. It is
 	// set before the run's searches start and not changed during them.
 	Domains []string
+
+	// flights are the scrapes in progress, by canonical URL (see
+	// scrapeShared).
+	flightsMu sync.Mutex
+	flights   map[string]*flight
+}
+
+// flight is one scrape in progress that other searches can wait on.
+type flight struct {
+	done chan struct{}
+	page *ScrapedContent
+	err  error
 }
 
 // SetLogger wires the progress logger so each sub-step reports the source
@@ -478,8 +490,12 @@ func dedupeResults(in []SearchResult) []SearchResult {
 }
 
 // CanonicalURL is the identity a URL is deduplicated under: scheme and host
-// are case-insensitive and a bare trailing slash on the root path is not a
-// distinct page, so "https://go.dev" and "https://go.dev/" are one source.
+// are case-insensitive and a trailing slash, on any path, is not a distinct
+// page, so "https://go.dev" and "https://go.dev/", "/doc/x" and "/doc/x/" are
+// one source. A site could serve different pages at the two, but they
+// practically never do (one redirects to the other), while an engine's
+// result and the model's citation of it differ by that slash all the time:
+// told apart, the claim citing the page lost its source.
 //
 // It is exported because the same identity has to hold at two levels: within
 // one search, where SearXNG returns a page once per engine, and across the
@@ -671,7 +687,48 @@ func (s *SearchTools) body(ctx context.Context, r SearchResult) (*ScrapedContent
 	if strings.TrimSpace(r.Body) != "" {
 		return &ScrapedContent{URL: r.URL, Content: r.Body}, nil
 	}
-	return s.scrape(ctx, r.URL)
+	return s.scrapeShared(ctx, r.URL)
+}
+
+// scrapeShared scrapes url once for every search that asks for it while it
+// is being scraped. The run's searches run at once and are handed the same
+// pages; Skip names only pages already read, so two searches fetching one
+// page both downloaded it, spending the time and the scraper's credits
+// twice. A search that is stopped stops waiting, and leaves the scrape to
+// the others; one whose scrape was stopped by the search that began it,
+// while it still runs, scrapes the page itself. A failure is shared: the
+// page failed, and asked again at once it would fail again.
+func (s *SearchTools) scrapeShared(ctx context.Context, url string) (*ScrapedContent, error) {
+	key := CanonicalURL(url)
+	s.flightsMu.Lock()
+	if f, ok := s.flights[key]; ok {
+		s.flightsMu.Unlock()
+		select {
+		case <-f.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if f.err != nil && ctx.Err() == nil &&
+			(errors.Is(f.err, context.Canceled) || errors.Is(f.err, context.DeadlineExceeded)) {
+			// Again through the flights, not straight to the scraper:
+			// every search left waiting would download the page at once.
+			return s.scrapeShared(ctx, url)
+		}
+		return f.page, f.err
+	}
+	f := &flight{done: make(chan struct{})}
+	if s.flights == nil {
+		s.flights = map[string]*flight{}
+	}
+	s.flights[key] = f
+	s.flightsMu.Unlock()
+
+	f.page, f.err = s.scrape(ctx, url)
+	s.flightsMu.Lock()
+	delete(s.flights, key)
+	s.flightsMu.Unlock()
+	close(f.done)
+	return f.page, f.err
 }
 
 // fetch scrapes one search result and labels how its content was obtained.

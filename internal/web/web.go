@@ -381,10 +381,13 @@ func (s *Server) discard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only an interrupted run's checkpoint can be discarded", http.StatusBadRequest)
 		return
 	}
+	// Held across the removal, as begin takes it: checked and then removed
+	// with the lock let go between, a run launched in that gap, resuming
+	// this very checkpoint, lost it under its feet. Removing one local file
+	// holds it for no time.
 	s.mu.Lock()
-	active := s.cancel != nil
-	s.mu.Unlock()
-	if active {
+	defer s.mu.Unlock()
+	if s.cancel != nil {
 		http.Error(w, "a run is active", http.StatusConflict)
 		return
 	}

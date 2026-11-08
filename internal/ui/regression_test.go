@@ -534,16 +534,18 @@ func TestExportedNotesRecordBranchContribution(t *testing.T) {
 
 // The analysis can only report a facet that came back empty if it is told
 // which ones did: the findings list shows what was gathered, never what was
-// planned and missed.
+// planned and missed. A facet whose page another had just cited found it
+// too, and is not one: only the pages its search knew were cited counted,
+// so the one that lost a race for a page was named as finding nothing.
 func TestAnalysisIsToldWhichSubTopicsFoundNothing(t *testing.T) {
 	run := runContributionScenario(t)
-	for _, id := range []string{run.loser, "3"} {
-		if !strings.Contains(run.fa.analyzed, run.names[id]) {
-			t.Errorf("analyze prompt never names uncovered sub-topic %q:\n%s", run.names[id], run.fa.analyzed)
-		}
+	if !strings.Contains(run.fa.analyzed, "  - "+run.names["3"]) {
+		t.Errorf("analyze prompt never names uncovered sub-topic %q:\n%s", run.names["3"], run.fa.analyzed)
 	}
-	if strings.Contains(run.fa.analyzed, "  - "+run.names[run.winner]) {
-		t.Errorf("analyze prompt lists the contributing sub-topic as uncovered:\n%s", run.fa.analyzed)
+	for _, id := range []string{run.winner, run.loser} {
+		if strings.Contains(run.fa.analyzed, "  - "+run.names[id]) {
+			t.Errorf("analyze prompt lists %q, which found the shared page, as uncovered:\n%s", run.names[id], run.fa.analyzed)
+		}
 	}
 }
 
@@ -2913,8 +2915,8 @@ func TestFixedQuestionTitlesTheRun(t *testing.T) {
 	if res.Report.Question != a.fixed || strings.Contains(res.MDPath, "overalll") {
 		t.Errorf("report question %q at %s, want it titled %q", res.Report.Question, res.MDPath, a.fixed)
 	}
-	if res.Plan.Asked != "Best cloud storage overalll" {
-		t.Errorf("plan.Asked = %q, want the typed question on one line", res.Plan.Asked)
+	if res.Plan.Asked != "Best cloud storage\noveralll" {
+		t.Errorf("plan.Asked = %q, want the question as typed, its lines kept", res.Plan.Asked)
 	}
 	r := NewRenderer(discard{}, Theme{})
 	r.plan = res.Plan
@@ -3921,5 +3923,60 @@ func TestPiFixturesAreEvents(t *testing.T) {
 				t.Errorf("%s:%d is not an Event: %v", filepath.Base(f), i+1, err)
 			}
 		}
+	}
+}
+
+// The question asked again wrote over the earlier run's files in place: a
+// write that failed left the earlier report truncated, or nothing. The new
+// file replaces the old whole or not at all, and leaves no temporary file.
+func TestExportReplacesWholeOrNotAtAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "q.json")
+	if err := writeAtomic(path, []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(path, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "new" {
+		t.Fatalf("replaced = %q", b)
+	}
+	if os.Getuid() != 0 { // root writes through a read-only directory
+		_ = os.Chmod(dir, 0o500)
+		err := writeAtomic(path, []byte("newer"))
+		_ = os.Chmod(dir, 0o755)
+		if b, _ := os.ReadFile(path); err == nil || string(b) != "new" {
+			t.Errorf("failed write: err %v, file %q; want an error and the earlier file intact", err, b)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".*.tmp")); len(left) != 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+}
+
+// Written beside it and renamed over it, a report took a fixed mode: a file
+// kept private became readable by all. It keeps the earlier file's mode,
+// and from the start: the file beside it was created 0644 and narrowed only
+// after the report was in it, readable by all while it was written.
+func TestExportKeepsTheFilesMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.json")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var staged os.FileMode
+	stagedHook = func(name string) {
+		if st, err := os.Stat(name); err == nil {
+			staged = st.Mode().Perm()
+		}
+	}
+	defer func() { stagedHook = nil }()
+	if err := writeAtomic(path, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if staged&0o077 != 0 {
+		t.Errorf("the report was written into a file of mode %v, readable beyond its 0600", staged)
+	}
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, %v; want the earlier file's 0600", st.Mode().Perm(), err)
 	}
 }

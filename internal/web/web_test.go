@@ -669,3 +669,35 @@ func TestRemotePeerIsRefusedWhateverItsHost(t *testing.T) {
 		}
 	}
 }
+
+// Discard checked that no run was active, let the lock go, and removed the
+// checkpoint: a launch in that gap, resuming this very checkpoint, lost it
+// under its feet. A launch waits until the removal is done.
+func TestDiscardHoldsOffALaunch(t *testing.T) {
+	s := New(context.Background(), fstest.MapFS{}, func(context.Context, Request, io.Writer) {})
+	launched := make(chan bool, 1)
+	removing := make(chan struct{})
+	s.remove = func(string) error {
+		go func() { launched <- s.begin(Request{Question: "q"}) }()
+		close(removing)
+		select {
+		case <-launched:
+			t.Error("a run launched while the checkpoint was being removed")
+		case <-time.After(50 * time.Millisecond):
+		}
+		return nil
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/runs/q-1.ab12.partial.json", nil)
+	req.SetPathValue("name", "q-1.ab12.partial.json")
+	s.discard(rec, req)
+	<-removing
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("discard = %d, want 204", rec.Code)
+	}
+	select {
+	case <-launched: // after the removal, it goes ahead
+	case <-time.After(time.Second):
+		t.Error("the launch never went ahead after the removal")
+	}
+}

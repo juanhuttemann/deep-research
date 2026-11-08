@@ -30,9 +30,16 @@ func LoadMeta(path string) (*Meta, error) {
 	if err != nil {
 		return nil, err
 	}
+	return DecodeMeta(data, path)
+}
+
+// DecodeMeta reads a run's .json already read, name saying which in an
+// error. A caller that must read it within a directory (the page's ask,
+// through the reports root) reads it itself.
+func DecodeMeta(data []byte, name string) (*Meta, error) {
 	var m Meta
 	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("%s is not a run's .json: %w", path, err)
+		return nil, fmt.Errorf("%s is not a run's .json: %w", name, err)
 	}
 	return &m, nil
 }
