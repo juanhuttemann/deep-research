@@ -149,7 +149,8 @@ func (b *askBox) prompt(text string, cursor int) []string {
 // frame's width: each of the text's lines wrapped under its first column,
 // the label on the first row.
 func (r *Renderer) labelledRows(label, text string, cursor int) []string {
-	rows, at := r.editRows(text, cursor, max(r.width-2-dispWidth(label), 8))
+	// One column short of the row: a frame row never writes the last.
+	rows, at := r.editRows(text, cursor, max(r.width-3-dispWidth(label), 8))
 	// At most half the screen, the rows up to the cursor's, and room left
 	// for the six rows around a box (blank, heading, rules, keys, blank): a
 	// taller box pushed the cursor and the keys under it off the screen,

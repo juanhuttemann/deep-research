@@ -2470,7 +2470,7 @@ func TestAskBox(t *testing.T) {
 	var b bytes.Buffer
 	AskBox(&b, true, "new research")
 	// A blank row under the keys, as the start screen ends.
-	want := "\n  " + strings.Repeat("─", 78) + "\n  ask ▸ \n  " + strings.Repeat("─", 78) +
+	want := "\n  " + strings.Repeat("─", 77) + "\n  ask ▸ \n  " + strings.Repeat("─", 77) +
 		"\n  [enter] ask   [empty enter] new research   [/resume] past runs" + "\n\x1b[3A\r  ask ▸ "
 	if b.String() != want {
 		t.Errorf("AskBox = %q, want %q", b.String(), want)
@@ -2588,18 +2588,18 @@ func TestRegionDrawsWhereTheTerminalSays(t *testing.T) {
 	g := newRegion(func(s string) { out.WriteString(s) }, 24, 80, func() int { asked++; return at })
 
 	g.paint([]string{"a", "b", "c"})
-	if s := out.String(); asked != 1 || !strings.Contains(s, "\x1b[20;1Ha") || !strings.Contains(s, "\x1b[22;1Hc") {
+	if s := out.String(); asked != 1 || !strings.Contains(s, "\x1b[20;1H"+eraseRow+"a") || !strings.Contains(s, "\x1b[22;1H"+eraseRow+"c") {
 		t.Fatalf("asked %d times; first paint %q, want rows 20-22 drawn at their positions", asked, s)
 	}
 	out.Reset()
 	g.paint([]string{"a", "b", "c", "d"}) // row 23 is on the screen
-	if asked != 1 || !strings.Contains(out.String(), "\x1b[23;1Hd") {
+	if asked != 1 || !strings.Contains(out.String(), "\x1b[23;1H"+eraseRow+"d") {
 		t.Errorf("asked %d times for a row the screen had; paint %q", asked, out.String())
 	}
 	out.Reset()
 	at = 24 // two more rows scroll the screen by one
 	g.paint([]string{"a", "b", "c", "d", "e", "f"})
-	if asked != 2 || !strings.Contains(out.String(), "\x1b[19;1Ha") {
+	if asked != 2 || !strings.Contains(out.String(), "\x1b[19;1H"+eraseRow+"a") {
 		t.Errorf("asked %d times after scrolling; paint %q, want the region found again at 19", asked, out.String())
 	}
 	out.Reset()
@@ -2620,8 +2620,9 @@ func TestRegionWithoutAnAnswer(t *testing.T) {
 	if asked != 1 {
 		t.Errorf("asked %d times, want once", asked)
 	}
-	want := "\r\n\n" + "\r\x1b[2Aa" + eraseLine + "\r\x1b[1Bb" + eraseLine + "\r\x1b[1Bc" + eraseLine +
-		"\r\n" + "\r\x1b[3Aa" + eraseLine + "\r\x1b[1Bb" + eraseLine + "\r\x1b[1Bc" + eraseLine + "\r\x1b[1Bd" + eraseLine
+	e := eraseRow
+	want := "\r\n\n" + "\r\x1b[2A" + e + "a" + "\r\x1b[1B" + e + "b" + "\r\x1b[1B" + e + "c" +
+		"\r\n" + "\r\x1b[3A" + e + "a" + "\r\x1b[1B" + e + "b" + "\r\x1b[1B" + e + "c" + "\r\x1b[1B" + e + "d"
 	if out.String() != want {
 		t.Errorf("relative paint = %q\nwant %q", out.String(), want)
 	}

@@ -22,13 +22,18 @@ topic, named as the tree names it, in the colour of its tree row, with
 the topic's number, how many rows it holds and its latest one. The groups
 start shut: press the topic's number (`1`–`9`) or click its header to
 open it and see what it did, a search's query, a page, or a note on the
-results; the same again shuts it. A number with the tail hidden shows it
+results; the same again shuts it, as does a click on its rows. A topic
+open in the tail grows as it reads, moving the headers under it, so a click
+on a header that moved a moment before still opens it. A number with the
+tail hidden shows it
 with that topic open. A phase starting is a row of its own, and what the
 run reports of itself (the search engine, the model a phase uses) is
 gray. While the live frame is up drsh asks the terminal for mouse clicks,
 so selecting text or opening a link in it takes Shift (Shift+drag,
 Shift+click) in most terminals; the brief and the report keep the
-terminal's own. Each page in the tail is one row naming it, site and path: a spinner while
+terminal's own. The live frame is drawn on the terminal's alternate
+screen, as full-screen programs are, so it is gone once the run ends and
+the report prints where the brief was. Each page in the tail is one row naming it, site and path: a spinner while
 it is read, then a dot, green when read in full, yellow for snippet only,
 red when dropped (with `--no-color` or `NO_COLOR`, `✓`, `!` or `✗`). A
 page read in full or as a snippet is a link to it: in a terminal that

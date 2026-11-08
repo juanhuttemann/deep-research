@@ -40,7 +40,7 @@ func TestBoxDrawsEachLine(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	r.width = 30
 	rows := r.labelledRows("ask ▸ ", "first\n"+strings.Repeat("x", 30), len("first"))
-	want := []string{"  ask ▸ first█", "        " + strings.Repeat("x", 22), "        " + strings.Repeat("x", 8)}
+	want := []string{"  ask ▸ first█", "        " + strings.Repeat("x", 21), "        " + strings.Repeat("x", 9)}
 	if strings.Join(rows, "|") != strings.Join(want, "|") {
 		t.Errorf("rows =\n%q\nwant\n%q", rows, want)
 	}

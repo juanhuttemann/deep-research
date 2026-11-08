@@ -23,6 +23,14 @@ const (
 	eraseToEnd = "\x1b[0J"
 	// eraseLine erases from the cursor to the end of the current row.
 	eraseLine = "\x1b[0K"
+	// altOn and altOff enter and leave the alternate screen, saving and
+	// restoring the main one and the cursor on it.
+	altOn  = "\x1b[?1049h"
+	altOff = "\x1b[?1049l"
+	// eraseRow erases the whole row the cursor is on.
+	eraseRow = "\x1b[2K"
+	// rowAt moves the cursor to the start of a screen row, from 1.
+	rowAt = "\x1b[%d;1H"
 	// eraseScreen clears the whole viewport.
 	eraseScreen = "\x1b[2J"
 	// crlf ends a row. The carriage return is explicit because raw mode may
