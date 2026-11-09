@@ -20,6 +20,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - A picker whose input ended (a cancelled run, or keys piped in) with text
   that picked nothing read the end again forever, repainting in a busy
   loop. It now leaves the picker, as Esc does.
+- When the search that began a page's scrape was stopped, a search that
+  had waited on it and woke after the retry had finished downloaded the
+  page again. A stopped scrape now keeps its retry, and every search that
+  waited on it shares that one.
 
 ## [0.31.0] - 2026-11-08
 

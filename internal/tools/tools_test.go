@@ -590,7 +590,7 @@ func TestConcurrentSearchesShareAScrape(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { r, err := st.Search(ctx, "test query", nil); stopped <- result{r, err} }()
 	go func() { r, err := st.Search(context.Background(), "test query", nil); second <- result{r, err} }()
-	time.Sleep(50 * time.Millisecond) // both wait on the scrape in progress
+	waitForWaiters(t, st, "https://example.com/a", 2) // both wait on the scrape in progress
 	cancel()
 	<-stopped // the stopped one stops waiting, the scrape goes on
 	close(sc.release)
@@ -602,6 +602,30 @@ func TestConcurrentSearchesShareAScrape(t *testing.T) {
 	}
 	if n := sc.n.Load(); n != 1 {
 		t.Errorf("scrapes = %d, want the page scraped once", n)
+	}
+}
+
+// waitForWaiters returns once n searches wait on url's scrape. A fixed
+// sleep stood in for it, and under -race on a slow runner a search arrived
+// after the scrape it was meant to share had finished, and scraped again.
+func waitForWaiters(t *testing.T, st *SearchTools, url string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st.flightsMu.Lock()
+		f := st.flights[CanonicalURL(url)]
+		got := 0
+		if f != nil {
+			got = f.waiters
+		}
+		st.flightsMu.Unlock()
+		if got >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d searches wait on the scrape, want %d", got, n)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -624,7 +648,7 @@ func TestStoppedScrapeIsRetriedOnce(t *testing.T) {
 	for range 2 {
 		go func() { _, err := st.Search(context.Background(), "test query", nil); done <- err }()
 	}
-	time.Sleep(50 * time.Millisecond) // both wait on the leader's scrape
+	waitForWaiters(t, st, "https://example.com/a", 2) // both wait on the leader's scrape
 	cancel()
 	<-stopped
 	<-sc.started // one of them scrapes it again
