@@ -323,6 +323,12 @@ type flight struct {
 	done chan struct{}
 	page *ScrapedContent
 	err  error
+	// waiters counts the searches that joined the scrape, under flightsMu:
+	// the tests wait on it, where a sleep raced a slow runner.
+	waiters int
+	// retry is the scrape made again for those who waited on this one when
+	// its own search stopped it (scrapeShared), under flightsMu.
+	retry *flight
 }
 
 // SetLogger wires the progress logger so each sub-step reports the source
@@ -696,39 +702,84 @@ func (s *SearchTools) body(ctx context.Context, r SearchResult) (*ScrapedContent
 // page both downloaded it, spending the time and the scraper's credits
 // twice. A search that is stopped stops waiting, and leaves the scrape to
 // the others; one whose scrape was stopped by the search that began it,
-// while it still runs, scrapes the page itself. A failure is shared: the
-// page failed, and asked again at once it would fail again.
+// while it still runs, joins the scrape's retry (see retryOf). A failure is
+// shared: the page failed, and asked again at once it would fail again.
 func (s *SearchTools) scrapeShared(ctx context.Context, url string) (*ScrapedContent, error) {
 	key := CanonicalURL(url)
 	s.flightsMu.Lock()
-	if f, ok := s.flights[key]; ok {
-		s.flightsMu.Unlock()
+	f, joined := s.flights[key]
+	if joined {
+		f.waiters++
+	} else {
+		f = s.startFlightLocked(key)
+	}
+	s.flightsMu.Unlock()
+	lead := !joined
+	for {
+		if lead {
+			return s.fly(ctx, url, key, f)
+		}
 		select {
 		case <-f.done:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		if f.err != nil && ctx.Err() == nil &&
-			(errors.Is(f.err, context.Canceled) || errors.Is(f.err, context.DeadlineExceeded)) {
-			// Again through the flights, not straight to the scraper:
-			// every search left waiting would download the page at once.
-			return s.scrapeShared(ctx, url)
+		if ctx.Err() != nil || !stoppedErr(f.err) {
+			return f.page, f.err
 		}
-		return f.page, f.err
+		f, lead = s.retryOf(key, f)
 	}
+}
+
+// retryOf is the flight that scrapes again for those who waited on f, a
+// scrape its own search stopped, and whether the caller is to fly it. The
+// first of them to wake starts it, or joins a scrape begun meanwhile; the
+// rest join it, even once it is over. Each used to look for a scrape in
+// progress, and one that woke after the retry had ended found none and
+// downloaded the page again.
+func (s *SearchTools) retryOf(key string, f *flight) (*flight, bool) {
+	s.flightsMu.Lock()
+	defer s.flightsMu.Unlock()
+	if f.retry != nil {
+		f.retry.waiters++
+		return f.retry, false
+	}
+	if cur, ok := s.flights[key]; ok {
+		cur.waiters++
+		f.retry = cur
+		return cur, false
+	}
+	f.retry = s.startFlightLocked(key)
+	return f.retry, true
+}
+
+// startFlightLocked registers a scrape of key; flightsMu is held.
+func (s *SearchTools) startFlightLocked(key string) *flight {
 	f := &flight{done: make(chan struct{})}
 	if s.flights == nil {
 		s.flights = map[string]*flight{}
 	}
 	s.flights[key] = f
-	s.flightsMu.Unlock()
+	return f
+}
 
-	f.page, f.err = s.scrape(ctx, url)
+// fly scrapes url for f and hands the result to those waiting on it.
+func (s *SearchTools) fly(ctx context.Context, url, key string, f *flight) (*ScrapedContent, error) {
+	page, err := s.scrape(ctx, url)
 	s.flightsMu.Lock()
-	delete(s.flights, key)
+	f.page, f.err = page, err
+	if s.flights[key] == f {
+		delete(s.flights, key)
+	}
 	s.flightsMu.Unlock()
 	close(f.done)
-	return f.page, f.err
+	return page, err
+}
+
+// stoppedErr is a scrape ended by its search's cancel or deadline, not by
+// the page: the page may still be read.
+func stoppedErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // fetch scrapes one search result and labels how its content was obtained.
