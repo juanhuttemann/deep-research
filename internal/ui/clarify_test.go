@@ -56,7 +56,7 @@ func TestClarifyingAnswersReachThePlanner(t *testing.T) {
 // before it could ask.
 func TestSkippedQuestionsHaveNoAnswer(t *testing.T) {
 	for name, keys := range map[string]string{
-		"skip the first, Esc the rest": "\x1b[B\x1b[B\r\x1b\r",
+		"skip the first, Esc the rest": "\x1b[B\x1b[B\x1b[B\r\x1b\r",
 		"Esc at the first":             "\x1b\r",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -235,6 +235,44 @@ func TestParseAnswers(t *testing.T) {
 	}
 }
 
+// A reading of one's own is a row after the readings and before skip, and
+// it is typed in that row: there is no filter box, so typing never hides a
+// reading. Typing moves to the row; Enter on it empty waits for the answer;
+// arrowing off it to a reading picks that reading.
+func TestOwnAnswerIsARowTypedIn(t *testing.T) {
+	cases := map[string]struct{ keys, want string }{
+		"down to it, Enter waits, then typed": {"\x1b[B\x1b[B\rUnion\r", "Union"},
+		"typed from the first reading":        {"Canada\r", "Canada"},
+		"typed, then up to a reading":         {"Canada\x1b[A\r", "European Union"},
+		"spaces, then the input ends":         {"\x1b[B\x1b[B   ", ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			fa := &fakeAssistant{questions: twoQuestions[:1]}
+			res := clarifyRun(t, fa, c.keys, nil)
+			var want []Clarification
+			if c.want != "" {
+				want = []Clarification{{Question: "Which market?", Answer: c.want}}
+			}
+			if !slices.Equal(res.Plan.Clarifications, want) {
+				t.Errorf("clarifications = %+v, want %+v", res.Plan.Clarifications, want)
+			}
+		})
+	}
+
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 40, false
+	rows := []Choice{{Title: "United States"}, {Title: "European Union"}, ownChoice, skipChoice}
+	sp := pickSpec{title: "Q", label: "answer", rows: rows}
+	r.RenderPick(sp, "Canada", 6, pickRows(rows, "Canada"), 2)
+	got := strings.Join(r.pickLines(), "\n")
+	us, eu := strings.Index(got, "United States"), strings.Index(got, "European Union")
+	own, skip := strings.Index(got, "your own answer: Canada"), strings.Index(got, "skip")
+	if us < 0 || eu < us || own < eu || skip < own || strings.Contains(got, "answer ▸") {
+		t.Errorf("want every reading, then the own row with its text, then skip, and no filter box:\n%s", got)
+	}
+}
+
 // The picker opens on the answer given before: an option, a reading of
 // one's own in the box, or skip for a question left unanswered.
 func TestPriorAnswerOpensThePicker(t *testing.T) {
@@ -247,7 +285,7 @@ func TestPriorAnswerOpensThePicker(t *testing.T) {
 		{nil, 0, ""},
 		{[]Clarification{{Question: q.Text, Answer: "European Union"}}, 1, ""},
 		{[]Clarification{{Question: q.Text, Answer: "Canada"}}, 0, "Canada"},
-		{[]Clarification{}, 2, ""},
+		{[]Clarification{}, 3, ""},
 	}
 	for _, c := range cases {
 		if at, text := priorAnswer(q, c.prior); at != c.at || text != c.typedOwn {
@@ -280,9 +318,9 @@ func TestReplanProgressStaysInTheBrief(t *testing.T) {
 	plan := PlanFor("q", DepthModes[1], []SubTopic{{Name: "A"}}, 0)
 	plan.Questions = twoQuestions[:1]
 	o := Options{Question: "q", Assistant: fa, Stderr: &stderr}
-	// Unanswered, the question reopens on skip; up from it is an answer,
-	// so a new plan.
-	np, _ := o.reclarify(context.Background(), NewByteReader([]byte("\x1b[A\r")), r, plan)
+	// Unanswered, the question reopens on skip; up past the own row is an
+	// answer, so a new plan.
+	np, _ := o.reclarify(context.Background(), NewByteReader([]byte("\x1b[A\x1b[A\r")), r, plan)
 	if np == plan || stderr.Len() != 0 {
 		t.Errorf("replanned=%v, stderr %q: the progress belongs in the brief", np != plan, stderr.String())
 	}

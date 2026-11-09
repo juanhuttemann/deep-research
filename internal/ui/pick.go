@@ -3,11 +3,16 @@ package ui
 import (
 	"cmp"
 	"io"
+	"slices"
 	"strings"
 )
 
-// Choice is one row of a picker.
-type Choice struct{ Title, Note string }
+// Choice is one row of a picker. own marks the row that answers with the
+// text typed in the box, not with its title.
+type Choice struct {
+	Title, Note string
+	own         bool
+}
 
 // Pick shows rows under a filter box, drawn and read as the start screen is:
 // typing keeps the rows holding every word typed, the arrows move, Enter
@@ -36,15 +41,17 @@ func pick(in Input, r *Renderer, title, label string, rows []Choice) int {
 }
 
 // pickSpec is what a picker shows: its rows, the row it opens on, the text
-// already typed and its key hints ("" for the default). free lets Enter take
-// the typed text as the answer when no row holds it.
+// already typed and its key hints ("" for the default).
+//
+// A picker with an own row is answered, not searched: it has no filter box,
+// every row stays in view, and what is typed is written in the own row,
+// which the highlight moves to. Text typed before opens on that row.
 type pickSpec struct {
 	// right is shown at the heading's end, lead under it.
 	title, right, lead, label string
 	rows                      []Choice
 	at                        int
 	text, hints               string
-	free                      bool
 }
 
 // picked is how a picker ended: a row, typed text (row -1), or back. Ctrl-C
@@ -61,15 +68,16 @@ func pickWith(in Input, r *Renderer, sp pickSpec) picked {
 	if !ok {
 		keys = &keptInput{Input: in}
 	}
-	text, shown, cursor := sp.text, matching(sp.rows, sp.text), len(sp.text)
-	at := 0
-	if sp.text == "" {
-		at = max(min(sp.at, len(shown)-1), 0)
+	own := slices.IndexFunc(sp.rows, func(c Choice) bool { return c.own })
+	text, shown, cursor := sp.text, pickRows(sp.rows, sp.text), len(sp.text)
+	at := max(min(sp.at, len(shown)-1), 0)
+	if sp.text != "" {
+		at = max(own, 0)
 	}
 	paint := func() { r.RenderPick(sp, text, cursor, shown, at) }
 	echo := func(t string, c int) {
 		if t != text {
-			text, shown, at = t, matching(sp.rows, t), 0
+			text, shown, at = t, pickRows(sp.rows, t), max(own, 0)
 		}
 		cursor = c
 		paint()
@@ -88,12 +96,32 @@ func pickWith(in Input, r *Renderer, sp pickSpec) picked {
 		switch {
 		case !ok:
 			return picked{row: -1, back: true, stop: keys.last == byte(KeyCtrlC)}
-		case len(shown) > 0:
+		case len(shown) == 0:
+		case !sp.rows[shown[at]].own:
 			return picked{row: shown[at]}
-		case sp.free && strings.TrimSpace(text) != "":
+		case strings.TrimSpace(text) != "":
 			return picked{row: -1, text: strings.TrimSpace(text)}
 		}
+		// Enter on the own row with nothing typed, or on a filter that
+		// matches nothing, waits. The end of input waits for nothing: read
+		// again, it ended the same way, forever.
+		if keys.ended {
+			return picked{row: -1, back: true}
+		}
 	}
+}
+
+// pickRows is the rows a picker shows for what is typed: all of them when
+// the text is the own row's answer, else the ones it filters to.
+func pickRows(rows []Choice, text string) []int {
+	if !slices.ContainsFunc(rows, func(c Choice) bool { return c.own }) {
+		return matching(rows, text)
+	}
+	out := make([]int, len(rows))
+	for i := range out {
+		out[i] = i
+	}
+	return out
 }
 
 // matching is the rows holding every word of filter, in their order.
@@ -119,12 +147,8 @@ func (r *Renderer) RenderPick(sp pickSpec, text string, cursor int, shown []int,
 	defer r.mu.Unlock()
 	r.mode, r.pickTitle, r.pickRows, r.pickShown, r.pickAt = "pick", sp.title, sp.rows, shown, at
 	r.pickRight, r.pickLead = sp.right, sp.lead
-	r.pickHints, r.pickFree = cmp.Or(sp.hints, "[enter] open   [↑↓] move   [esc] back"), sp.free
-	example := "type to filter"
-	if sp.free {
-		example = "type to filter, or your own answer"
-	}
-	r.promptLabel, r.promptText, r.promptCursor, r.example = sp.label, text, cursor, example
+	r.pickHints = cmp.Or(sp.hints, "[enter] open   [↑↓] move   [esc] back")
+	r.promptLabel, r.promptText, r.promptCursor, r.example = sp.label, text, cursor, "type to filter"
 	if !r.plain {
 		r.paintLocked(true)
 	}
@@ -140,28 +164,43 @@ func (r *Renderer) pickLines() []string {
 			out = append(out, "  "+r.T.bold(l))
 		}
 	}
-	out = append(out, r.rule(), r.promptRow(), r.rule())
+	out = append(out, r.rule())
+	// The own row is where the typing shows: a filter box over it would read
+	// as a search.
+	if !slices.ContainsFunc(r.pickRows, func(c Choice) bool { return c.own }) {
+		out = append(out, r.promptRow(), r.rule())
+	}
 	// The rule, the keys and the blank row under them, as the start screen
 	// ends, are kept below the rows.
 	room := max(r.rows-1-len(out)-3, 1)
 	from := max(r.pickAt-room+1, 0)
 	for i := from; i < len(r.pickShown) && i < from+room; i++ {
-		c := r.pickRows[r.pickShown[i]]
-		row := "    " + c.Title
-		if i == r.pickAt {
-			row = "  " + r.T.magenta("▸ ") + r.T.bold(c.Title)
-		}
-		if c.Note != "" {
-			row += "  " + r.T.gray(c.Note)
-		}
-		out = append(out, row)
+		out = append(out, r.pickRow(r.pickRows[r.pickShown[i]], i == r.pickAt))
 	}
-	switch {
-	case len(r.pickShown) > 0:
-	case r.pickFree && strings.TrimSpace(r.promptText) != "":
-		out = append(out, "  "+r.T.magenta("▸ ")+"answer: "+r.T.bold(strings.TrimSpace(r.promptText)))
-	default:
+	if len(r.pickShown) == 0 {
 		out = append(out, "  "+r.T.dim("nothing matches"))
 	}
 	return append(out, r.rule(), "  "+r.T.hints(r.pickHints), "")
+}
+
+// pickRow is one row, highlighted when at. The own row shows the text typed
+// in it, and the cursor while it is highlighted.
+func (r *Renderer) pickRow(c Choice, at bool) string {
+	switch {
+	case c.own && at:
+		return "  " + r.T.magenta("▸ ") + r.T.bold(c.Title+": ") + r.withCursor(r.promptText, r.promptCursor)
+	case c.own && r.promptText != "":
+		return "    " + c.Title + ": " + r.promptText
+	case at:
+		row := "  " + r.T.magenta("▸ ") + r.T.bold(c.Title)
+		if c.Note != "" {
+			row += "  " + r.T.gray(c.Note)
+		}
+		return row
+	}
+	row := "    " + c.Title
+	if c.Note != "" {
+		row += "  " + r.T.gray(c.Note)
+	}
+	return row
 }

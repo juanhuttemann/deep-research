@@ -5,6 +5,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- A clarifying question in the terminal now lists `your own answer` after
+  its readings and before `skip`, and you type the answer in that row.
+  The question no longer has a filter box: typing used to filter the
+  readings like a search bar, and a typed answer showed up only once it
+  matched none of them.
+
+### Fixed
+
+- A picker whose input ended (a cancelled run, or keys piped in) with text
+  that picked nothing read the end again forever, repainting in a busy
+  loop. It now leaves the picker, as Esc does.
+
 ## [0.31.0] - 2026-11-08
 
 ### Changed
