@@ -56,6 +56,9 @@ type keptInput struct {
 	Input
 	kept []byte
 	last byte
+	// ended is set once the input has no more keys: a reader that loops
+	// until a key gives it something must stop.
+	ended bool
 }
 
 func (k *keptInput) Next() (byte, error) {
@@ -67,6 +70,7 @@ func (k *keptInput) Next() (byte, error) {
 	if err == nil {
 		k.last = c
 	}
+	k.ended = err != nil
 	return c, err
 }
 

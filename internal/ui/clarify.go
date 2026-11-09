@@ -134,6 +134,10 @@ func (o Options) askClarifier(ctx context.Context) ([]Question, error) {
 	return nil, nil
 }
 
+// ownChoice comes after a question's readings: an answer of one's own,
+// typed in the row itself.
+var ownChoice = Choice{Title: "your own answer", Note: "type to write it", own: true}
+
 // skipChoice ends a question's rows: no answer for it.
 var skipChoice = Choice{Title: "skip", Note: "leave it to the research"}
 
@@ -144,13 +148,13 @@ const questionHints = "[enter] choose   [↑↓] move   [esc] skip the rest"
 // with the answers given before it; stop is Ctrl-C.
 func answerQuestions(in Input, r *Renderer, qs []Question, prior []Clarification) (out []Clarification, back, stop bool) {
 	for i, q := range qs {
-		rows := make([]Choice, 0, len(q.Options)+1)
+		rows := make([]Choice, 0, len(q.Options)+2)
 		for _, o := range q.Options {
 			rows = append(rows, Choice{Title: o})
 		}
-		rows = append(rows, skipChoice)
+		rows = append(rows, ownChoice, skipChoice)
 		sp := pickSpec{title: "A FEW QUESTIONS FIRST", right: fmt.Sprintf("%d of %d", i+1, len(qs)), lead: q.Text,
-			label: "answer", rows: rows, hints: questionHints, free: true}
+			label: "answer", rows: rows, hints: questionHints}
 		sp.at, sp.text = priorAnswer(q, prior)
 		got := pickWith(in, r, sp)
 		switch {
@@ -167,8 +171,8 @@ func answerQuestions(in Input, r *Renderer, qs []Question, prior []Clarification
 	return out, false, false
 }
 
-// priorAnswer is where q's picker opens: on the option answered before, in
-// its text box for an answer typed before, on skip for one skipped, else on
+// priorAnswer is where q's picker opens: on the option answered before, on
+// the own row with its text for an answer typed before, on skip for one skipped, else on
 // the likeliest reading.
 func priorAnswer(q Question, prior []Clarification) (at int, text string) {
 	if prior == nil {
@@ -176,7 +180,7 @@ func priorAnswer(q Question, prior []Clarification) (at int, text string) {
 	}
 	i := slices.IndexFunc(prior, func(c Clarification) bool { return c.Question == q.Text })
 	if i < 0 {
-		return len(q.Options), ""
+		return len(q.Options) + 1, ""
 	}
 	if j := slices.Index(q.Options, prior[i].Answer); j >= 0 {
 		return j, ""

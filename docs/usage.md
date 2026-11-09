@@ -260,9 +260,10 @@ market, which kind, which climate. Before planning, one low-effort call
 asks up to three questions, each with two to four readings, the likeliest
 first. A clear question gets none, and the run goes straight to its plan.
 
-In the terminal each question opens in the picker: arrows and Enter pick a
-reading, typing filters them, and Enter on text that matches none takes it
-as your own answer. `skip` leaves one to the research, Esc leaves the rest,
+In the terminal each question lists its readings, then `your own answer`,
+then `skip`: arrows and Enter pick one. Typing writes your own answer in
+its row (and moves there), and Enter takes it; typing filters nothing.
+`skip` leaves one to the research, Esc leaves the rest,
 and Ctrl-C ends the run. The answers go to the planner, the analysis, the
 follow-up round and the report as the reading to research and answer in;
 the fact-check never sees them, and they never rewrite the question, which

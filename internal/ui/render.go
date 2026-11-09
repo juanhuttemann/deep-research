@@ -164,7 +164,6 @@ type Renderer struct {
 	pickHints string
 	pickRight string
 	pickLead  string
-	pickFree  bool
 
 	startTime time.Time
 	done      bool
