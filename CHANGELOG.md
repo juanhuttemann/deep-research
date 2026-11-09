@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-09
+
 ### Changed
 
 - A clarifying question in the terminal now lists `your own answer` after
