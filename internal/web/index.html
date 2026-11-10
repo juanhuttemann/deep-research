@@ -387,6 +387,15 @@ mark { background: var(--yellow); color: var(--bg); }
 .ask .composer { margin-top: 14px; }
 .ask .composer textarea { min-height: 1.6em; }
 .ask .composer-bar { padding-top: 4px; }
+/* a report edit: its diff, what happened, and the buttons that keep it */
+.edit { margin: 8px 0 0; }
+.diff { margin: 0; padding: 8px 2ch; background: var(--bg-2); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.55; }
+.diff .del { color: var(--red); text-decoration: line-through; }
+.diff .add { color: var(--green); }
+.diff .keep { color: var(--dim); }
+.edit .note { color: var(--dim); margin: 6px 0; }
+.edit .acts { display: flex; gap: 1ch; flex-wrap: wrap; }
+.revised { color: var(--dim); margin: 0 0 8px; }
 
 @media (max-width: 900px) { .setup { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
@@ -555,6 +564,7 @@ mark { background: var(--yellow); color: var(--bg); }
         </div>
         <button id="copy" class="btn sm ghost" type="button">copy report</button>
       </div>
+      <p id="revised" class="revised" hidden><span id="revised-msg"></span> <button id="undo" class="btn sm ghost" type="button">undo last edit</button></p>
       <article id="report" class="card prose"></article>
       <div id="audit-body">
         <div id="stats" class="summary-stats"></div>
@@ -575,7 +585,8 @@ mark { background: var(--yellow); color: var(--bg); }
       </div>
       <section class="card ask" aria-labelledby="ask-title">
         <h2 id="ask-title" class="heading">Ask about this report</h2>
-        <p class="hint">Answered from this run's saved sources, without searching again. Answers are not fact-checked.</p>
+        <p class="hint">Answered from this run's saved sources, without searching again. Answers are not fact-checked.
+Ask for a change ("cut the background section") to get an edit to review; it is saved only when you say so or press apply.</p>
         <ol id="chat" class="chat" aria-live="polite"></ol>
         <form id="ask-form" class="composer">
           <div class="prompt">
@@ -1083,13 +1094,20 @@ function done(e) {
 // on one opened later alike: below the live frame they sat out of sight, and
 // a run opened from Recent runs had none. Only files that exist are offered:
 // the PDF is skipped when it could not be typeset.
-async function exports(name, hasMd) {
+//
+// A saved edit has its own files: its .md and .pdf are offered, never the
+// original's in their place, and one that could not be written is not
+// offered at all. The .json is the original run's audit either way.
+async function exports(name, hasMd, rev, seq) {
   const stem = name.replace(/\.json$/, "");
-  const url = ext => "/reports/" + encodeURIComponent(stem + "." + ext);
-  const pdf = await fetch(url("pdf"), { method: "HEAD" }).then(r => r.ok, () => false);
-  const links = [["md", hasMd], ["pdf", pdf], ["json", true]].filter(([, ok]) => ok).map(([ext]) => {
-    const a = el("a", "btn sm", ext); a.href = url(ext);
-    if (ext !== "json") a.download = stem + "." + ext;
+  const edited = rev && rev.revision > 0;
+  const files = { md: edited ? rev.md : hasMd && stem + ".md", pdf: edited ? rev.pdf : stem + ".pdf", json: name };
+  const url = f => "/reports/" + encodeURIComponent(f);
+  const pdf = !!files.pdf && await fetch(url(files.pdf), { method: "HEAD" }).then(r => r.ok, () => false);
+  if (seq !== loadSeq) return;
+  const links = [["md", !!files.md], ["pdf", pdf], ["json", true]].filter(([, ok]) => ok).map(([ext]) => {
+    const a = el("a", "btn sm", ext); a.href = url(files[ext]);
+    if (ext !== "json") a.download = files[ext];
     return a;
   });
   $("exports").replaceChildren(el("span", "k", "download"), ...links);
@@ -1517,6 +1535,10 @@ function stoppedRuns(list) {
 // ---- audit: the sidecar's decision, claims, verdicts and pages --------------
 
 let meta = null, selected = null, reportMd = null;
+// loadSeq numbers the report loads: a load answered after another run was
+// opened, or after the report was edited, is dropped rather than shown over
+// it.
+let loadSeq = 0;
 // get fetches one file as text: its body, or null and the status that says
 // why not, 0 for a connection that dropped. It never rejects, so each of the
 // two loads below fails alone and says so.
@@ -1525,11 +1547,13 @@ async function get(url) {
   catch { return { status: 0, body: null }; }
 }
 async function loadAudit(name) {
+  const seq = ++loadSeq;
   const url = "/reports/" + encodeURIComponent(name);
   // The .md beside the .json is the report as a file: title, answer and
   // citations. Fetched now, so Copy writes to the clipboard within the click.
-  const [audit, report, md] = await Promise.all([get(url), get("/api/report/" + encodeURIComponent(name)),
-    get("/reports/" + encodeURIComponent(name.replace(/\.json$/, ".md")))]);
+  const [audit, report, md, rev] = await Promise.all([get(url), get("/api/report/" + encodeURIComponent(name)),
+    get("/reports/" + encodeURIComponent(name.replace(/\.json$/, ".md"))), revisionOf(name)]);
+  if (seq !== loadSeq) return;
   try { meta = JSON.parse(audit.body); } catch { meta = null; }
   reportMd = md.body ?? (meta && meta.report);
   resetAsk(name);
@@ -1540,12 +1564,46 @@ async function loadAudit(name) {
     $("outcome-msg").textContent = "Could not load " + url + (audit.status && audit.body === null ? " (" + audit.status + ")" : "") + ".";
     return;
   }
-  exports(name, md.body !== null);
+  askRun.hasMd = md.body !== null; askRun.revision = rev ? rev.revision || 0 : 0;
+  await showRevision(name, rev, seq);
+  if (seq !== loadSeq) return;
+  exports(name, md.body !== null, rev, seq);
   // 404 is a complete run whose summarizer wrote nothing. Any other failure
   // is said in the report's place, not passed off as that.
   if (report.body !== null) renderReport(report.body);
   else renderReport("", report.status === 404 ? "" : "Could not load the report" + (report.status ? " (" + report.status + ")" : "") + ". Audit still shows what the fact-check decided.");
   renderAudit();
+}
+// revisionOf is which revision of the run's report is in effect, null when
+// the server cannot say (the original's files are offered then).
+async function revisionOf(name) {
+  const r = await get("/api/revision/" + encodeURIComponent(name));
+  try { return r.body === null ? null : JSON.parse(r.body); } catch { return null; }
+}
+// showRevision says when the report shown is a saved edit, with the undo,
+// and points Copy at the edit's own Markdown.
+async function showRevision(name, rev, seq) {
+  const n = rev ? rev.revision || 0 : 0;
+  $("revised").hidden = !n;
+  if (!n) return;
+  $("revised-msg").textContent = "Revision " + n + ", edited in conversation" + (rev.saved ? " " + ago(rev.saved) : "") +
+    ". The audit is the original run's fact-check; the edits were not checked.";
+  // Copy is the revision's, never the report before it: its .md, or its
+  // text when that could not be read.
+  const md = rev.md ? await get("/reports/" + encodeURIComponent(rev.md)) : { body: null };
+  if (seq === loadSeq) reportMd = md.body ?? rev.report ?? "";
+}
+// reloadReport shows the report in effect again after an edit was saved or
+// undone, keeping the conversation.
+async function reloadReport(name) {
+  const seq = ++loadSeq;
+  const [report, rev] = await Promise.all([get("/api/report/" + encodeURIComponent(name)), revisionOf(name)]);
+  if (seq !== loadSeq) return;
+  if (!rev || !rev.revision) reportMd = (await get("/reports/" + encodeURIComponent(name.replace(/\.json$/, ".md")))).body ?? reportMd;
+  await showRevision(name, rev, seq);
+  if (seq !== loadSeq) return;
+  exports(name, askRun && askRun.hasMd, rev, seq);
+  if (report.body !== null) renderReport(report.body);
 }
 // The server renders the report's and the answers' Markdown; it is still
 // model and web text, so it is parsed inert, images go (a remote one is a
@@ -1839,7 +1897,9 @@ $("ask-form").onsubmit = async ev => {
     if (askRun !== run) return;
     a.className = "prose";
     a.replaceChildren(inert(got.html));
-    turns.push({ question: q, answer: got.answer });
+    if (got.error) a.append(el("p", "form-msg", got.error));
+    if (got.edit) li.append(editView(run, got.edit));
+    if (!got.error) turns.push({ question: q, answer: got.answer, edit: (got.edit && got.edit.note) || "" });
   } catch (err) {
     li.remove();
     if (askRun !== run) return;
@@ -1848,6 +1908,70 @@ $("ask-form").onsubmit = async ev => {
   } finally {
     if (askRun === run) $("ask-go").disabled = false;
   }
+};
+// editView shows what a turn did to the report: the diff, the note, and
+// with an edit pending, the buttons that keep or drop it. They do what
+// "save it" and "discard that" ask the model for, through the same editor.
+function editView(run, o) {
+  const box = el("div", "edit");
+  if (o.diff && o.diff.length) {
+    const pre = el("pre", "diff");
+    for (const d of o.diff) pre.append(el("div", d.op === "-" ? "del" : d.op === "+" ? "add" : "keep", d.op + " " + d.text));
+    box.append(pre);
+  }
+  if (o.note) box.append(el("p", "note", o.note.charAt(0).toUpperCase() + o.note.slice(1) + "."));
+  // Every turn that changed the revision in effect shows it on the report.
+  if (o.revision !== undefined && askRun === run && o.revision !== run.revision) {
+    run.revision = o.revision;
+    reloadReport(run.name);
+  }
+  if (!o.pending) return box;
+  const acts = el("div", "acts"), keep = el("button", "btn sm primary", "apply"), drop = el("button", "btn sm ghost", "discard");
+  keep.type = drop.type = "button";
+  const press = async action => {
+    keep.disabled = drop.disabled = true;
+    try {
+      const got = await editAction(run, action, o.proposal);
+      if (askRun !== run) return;
+      // The edit's box becomes what the button did: the saved diff and its
+      // note, or the note that it was discarded.
+      box.replaceWith(editView(run, got));
+    } catch (err) {
+      if (askRun !== run) return;
+      keep.disabled = drop.disabled = false;
+      $("ask-msg").textContent = err.message;
+    }
+  };
+  keep.onclick = () => press("save");
+  drop.onclick = () => press("discard");
+  acts.append(keep, drop);
+  box.append(acts);
+  return box;
+}
+async function editAction(run, action, proposal) {
+  const r = await fetch("/api/edit", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run: run.name, action, proposal: proposal || "" }) });
+  if (!r.ok) throw new Error((await r.text()).trim() || "status " + r.status);
+  const got = (await r.json()).edit || {};
+  // The conversation is told what the button did, as it is told what a turn
+  // did, so "undo that" after Apply means the save; not when another run was
+  // opened meanwhile, whose conversation this is not.
+  if (askRun === run && got.note && turns.length) turns[turns.length - 1].edit = [turns[turns.length - 1].edit, got.note].filter(Boolean).join("; ");
+  return got;
+}
+$("undo").onclick = async () => {
+  const run = askRun;
+  if (!run) return;
+  $("undo").disabled = true;
+  try {
+    const got = await editAction(run, "undo");
+    if (askRun !== run) return;
+    const li = el("li");
+    li.append(editView(run, got));
+    $("chat").append(li);
+  } catch (err) {
+    if (askRun === run) $("ask-msg").textContent = err.message;
+  } finally { $("undo").disabled = false; }
 };
 $("ask-q").addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("ask-form").requestSubmit(); }

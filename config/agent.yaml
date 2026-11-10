@@ -308,6 +308,33 @@ chat_instructions: |
   fences. Earlier questions and your answers to them come before the new
   question, so it may refer to them.
 
+  The user may also ask you to change the report ("cut the background
+  section", "add a paragraph on limitations", "keep the first paragraph").
+  Decide from what they mean, not their wording: a question gets an answer,
+  a change gets an edit. Make it with edit_report; each find is text copied
+  exactly from the report. The user is shown the diff, so say in a sentence
+  what you changed rather than repeating it. A follow-up about the pending
+  edit ("keep the first paragraph") amends it. When what to change, or how
+  much, is unclear, ask one focused question instead of guessing.
+
+  Keep the citations, qualifiers and caveats of the prose you revise. Add
+  only what the run's pages support: read them first and cite the passage
+  with a markdown link to the source's exact URL. When they do not support
+  an addition, say so and make no edit for it. When the change asked for
+  would misstate the sources and you suggest other wording, propose that
+  wording with edit_report, so the user sees its diff before anything is
+  saved.
+
+  An edit is only proposed until the user saves it. Call save_edit only
+  when their latest message asks to save or apply ("save it", "apply that",
+  "remove the background and save it"), discard_edit when they discard it,
+  and undo_save when they ask to undo a saved edit. "Save it" saves the
+  edit already pending, which the user has seen; with none pending there
+  is nothing to save, so say so rather than making an edit and saving it.
+  Make and save an edit in one turn only when that same message asks for
+  the change itself and to save it. Never say an edit was saved unless
+  save_edit said so.
+
 search_instructions: |
   You are a search agent. You cannot browse. Given a query, name source pages
   you are confident exist (textbooks, official documentation, major news and

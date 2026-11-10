@@ -652,8 +652,13 @@ in the reports directory, and `/?run=<name>.json` opens any of them.
 It needs no terminal, so it is also the live view where the terminal UI is
 not available (Windows). Copy report, beside the views, copies the run's
 `.md` report to the clipboard. Below them, Ask about this report takes
-follow-up questions, answered as `ask` answers them; the conversation lives
-in the tab and starts again when another run is opened.
+follow-up questions, answered as `ask` answers them, and edits of the
+report ([Editing the report](#editing-the-report)): a proposed edit's diff
+shows in the conversation with apply and discard buttons, and once one is
+saved the report and its downloads are that revision's, with an undo above
+it. The conversation lives in the tab and starts again when another run is
+opened; a proposed edit waits on the server until it is applied or
+discarded.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -715,6 +720,34 @@ Asking needs a model that supports tool calls; with one that does not, the
 first question fails at once and says to set `OPENAI_MODEL` to one that does.
 With `provider: claude` it needs `ANTHROPIC_API_KEY`, even when Claude Code is
 signed in: `claude -p` cannot call the two tools.
+
+### Editing the report
+
+The same conversation edits the report. Ask for a change in your own words
+("cut the background section", "add a paragraph on the limitations") and
+the model proposes an edit instead of answering: you are shown its diff,
+removed lines red and added green, and nothing is saved. Reply to change
+it ("keep the first paragraph"), or say "save it", "discard that" or "undo
+the last edit". An instruction that says to save ("remove the background
+and save it") saves in the same turn. Where the change or its extent is
+unclear, the model asks first. Whether a message asks to save is the
+model's judgement, so a save is always said as `saved revision N` under
+the answer, and undo takes it back.
+
+An edit keeps the citations and caveats of the prose it revises, and an
+addition is written from the run's saved pages, cited by their URLs; a
+link to a page the run did not read is refused, and the model says when
+the pages do not support what was asked. Edits are not fact-checked.
+
+Each save is a revision, kept beside the run as `<name>.edits` with its
+own exports, `<name>.r<N>.md` and `<name>.r<N>.pdf`, which open with a note
+that they were edited and that the confidence, fact-check and sources below
+are the original run's. The run's own `.md`, `.pdf` and `.json` are never
+changed. Later questions and edits are about the revision in effect, and
+`/resume` and the serve page show it. An unsaved edit lasts as long as the
+conversation; one made before another session saved an edit of the same
+report is dropped rather than saved over it. Running the same question
+again replaces the run, and its revisions and conversation go with it.
 
 A run watched in the terminal UI takes questions under "Ask about this
 report" once its report is printed, in an `ask ▸` box with its keys under

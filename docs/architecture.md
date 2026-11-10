@@ -261,6 +261,33 @@ back the conversation it shows; the server keeps none. Answers are not
 fact-checked: the prompt tells the model to state as fact only supported
 claims, and nothing checks that it did.
 
+The same conversation edits the report. `ui.Editor` holds one
+conversation's edit of one run: the proposal not yet saved, made at the
+history's head, and the saves and undos it asks for. Its tools
+(`edit_report`, `discard_edit`, `save_edit`, `undo_save`) are the only
+chat tools that change anything, and they change it through the editor:
+the model never names a file. `edit_report` applies find-and-replace edits
+to the pending proposal or the report in effect and refuses a link to a
+page the run did not read. A save is written by `ui.SaveRevision` under a
+lock file beside the run (the terminal and `serve` are separate processes
+on one reports directory): the revision's `.md` and `.pdf` first, under
+names no other revision has, then `<name>.edits`, whose `head` counts the
+saves and undos so a proposal made at another head is refused as stale. A
+proposal's digest makes a repeated save one save. The run's own files are
+never rewritten; `ui.WriteMetadata` removes the edits with the chat log
+when the same question writes over the run.
+
+What a turn did is the editor's to say (`ui.Outcome`: the diff, the note,
+the revision in effect), not the model's, whose answer is written before
+the save it describes. Each turn begins by reading the edits again, so a
+save in another session drops a stale proposal, and the conversation is
+reconnected whenever the revision in effect changes, since the report is
+in the model's instructions. `agent.Chat.State` puts the pending edit's
+diff ahead of each question. The terminal session, `ask` and the page drive
+one lifecycle (`cli.talk`); the page's apply and discard buttons call the
+same editor methods the tools do, and the server keeps one editor per run
+(`cli.webTalks`), read again when the run's `.json` changes.
+
 In the terminal a run is a session (`cli/session.go`): the questions asked
 about it after the run, or after `/resume` reopens it, are appended to
 `<name>.chat.jsonl` beside its `.json` (`ui.AppendTurn`), and handed back
