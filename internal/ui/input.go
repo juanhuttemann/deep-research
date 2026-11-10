@@ -38,6 +38,14 @@ const (
 	// live frame asks the terminal to report them (see mouseOn).
 	KeyClick   Key = 0xfe
 	KeyUnknown Key = 0xff
+	// The keys that scroll a phase's view on the live frame: the arrows,
+	// the page keys and the mouse wheel, which turns three rows a notch.
+	KeyUp        Key = 0xf0
+	KeyDown      Key = 0xf1
+	KeyPageUp    Key = 0xf2
+	KeyPageDown  Key = 0xf3
+	KeyWheelUp   Key = 0xf4
+	KeyWheelDown Key = 0xf5
 )
 
 // Mouse reporting: button presses (1000), in SGR form (1006), which carries
@@ -183,7 +191,36 @@ func readEscape(in Input) Keystroke {
 	if x, y, ok := mouseClick(lead, final, params); ok {
 		return Keystroke{Key: KeyClick, X: x, Y: y}
 	}
-	return Keystroke{Key: KeyUnknown}
+	return Keystroke{Key: scrollKey(lead, final, params)}
+}
+
+// scrollKey is the scrolling key an escape sequence is, or KeyUnknown: an
+// arrow (ESC [ A, or ESC O A in application mode), a page key (ESC [ 5 ~),
+// or a notch of the wheel, which mouse reporting sends as a press of button
+// 64 (up) or 65 (down).
+func scrollKey(lead, final byte, params string) Key {
+	if lead == 'O' && params == "" {
+		lead = '['
+	}
+	if lead != '[' {
+		return KeyUnknown
+	}
+	seq := params + string(final)
+	// A mouse report is keyed by its button alone, wherever the pointer is.
+	if final == 'M' && strings.HasPrefix(params, "<") {
+		seq, _, _ = strings.Cut(params, ";")
+	}
+	if k, ok := scrollSeqs[seq]; ok {
+		return k
+	}
+	return KeyUnknown
+}
+
+// scrollSeqs are the scrolling keys by their sequence's parameters and
+// final byte, after ESC [.
+var scrollSeqs = map[string]Key{
+	"A": KeyUp, "B": KeyDown, "5~": KeyPageUp, "6~": KeyPageDown,
+	"<64": KeyWheelUp, "<65": KeyWheelDown,
 }
 
 // mouseClick reads an SGR mouse report, ESC [ < button ; x ; y M, as a

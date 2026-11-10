@@ -27,8 +27,8 @@ type Driver struct {
 
 	now func() time.Time
 	// frame is the live frame the keys act on: a shows or hides its
-	// activity tail, a digit or a click opens a topic in it. nil when there
-	// is no frame.
+	// activity tail, a digit or a click opens a topic in it, a click on a
+	// phase opens what that phase did. nil when there is no frame.
 	frame liveFrame
 
 	// keysDone is closed when the key reader ends; nil when none started.
@@ -187,6 +187,11 @@ func (d *Driver) startKeyReader() {
 			if err != nil {
 				return
 			}
+			// Esc first closes a phase's view the reader opened: pressed to
+			// go back from it, it must not cancel the run behind it.
+			if k.Key == KeyEsc && d.frame != nil && d.frame.ClosePhase() {
+				continue
+			}
 			switch k.Key {
 			case KeyEsc, KeyCtrlC:
 				if d.cancel != nil {
@@ -206,6 +211,9 @@ type liveFrame interface {
 	ToggleActivity()
 	OpenTopic(n int)
 	Click(x, y int)
+	ClosePhase() bool
+	Scroll(rows int)
+	ScrollPage(dir int)
 }
 
 // frameKey applies a key read during the run to the live frame.
@@ -217,6 +225,26 @@ func frameKey(f liveFrame, k Keystroke) {
 		f.Click(k.X, k.Y)
 	case k.Key >= '1' && k.Key <= '9':
 		f.OpenTopic(int(k.Key - '0'))
+	default:
+		scrollFrame(f, k.Key)
+	}
+}
+
+// scrollFrame scrolls an open phase's view by the key's rows.
+func scrollFrame(f liveFrame, k Key) {
+	switch k {
+	case KeyUp:
+		f.Scroll(-1)
+	case KeyDown:
+		f.Scroll(1)
+	case KeyWheelUp:
+		f.Scroll(-3)
+	case KeyWheelDown:
+		f.Scroll(3)
+	case KeyPageUp:
+		f.ScrollPage(-1)
+	case KeyPageDown:
+		f.ScrollPage(1)
 	}
 }
 
@@ -380,6 +408,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 		return d.partial(ctx, plan, findings, nil, nil, nil, "analysis failed", err)
 	}
 	checkAnalysis(analysis, findings)
+	d.emit(Event{Type: Info, Phase: "Analyze", Detail: analysisOutcome(analysis)})
 
 	// What this phase can honestly claim depends on where the "sources" came
 	// from. With no search backend configured the model supplied the findings,
@@ -584,6 +613,21 @@ func (d *Driver) repair(ctx context.Context, question string, a *agent.Analysis,
 		ok += btoi(u.r != nil && u.r.Blocked == "")
 	}
 	d.emit(Event{Type: Info, Phase: "Fact-Check", Detail: fmt.Sprintf("%d of %d revisions approved", ok, len(added))})
+}
+
+// analysisOutcome says what the analysis came to, the row its phase's view
+// ends on: a provider that streams no reasoning left that view the model's
+// name and nothing it concluded.
+func analysisOutcome(a *agent.Analysis) string {
+	s := fmt.Sprintf("%d claims, %d recommendations, %d conclusions",
+		len(a.Claims), len(a.Recommendations), len(a.Conclusions))
+	if a.Confidence != "" {
+		s += ", confidence " + a.Confidence
+	}
+	if n := len(a.Gaps); n > 0 {
+		s += fmt.Sprintf("; %d %s left open", n, plural(n, "gap", "gaps"))
+	}
+	return s
 }
 
 func btoi(b bool) int {

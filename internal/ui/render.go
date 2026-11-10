@@ -37,9 +37,11 @@ const (
 	// nothing for a minute or more; without a tick the UI looks hung.
 	tickInterval = 120 * time.Millisecond
 	// activityKeep bounds the retained event tail. The tail shows each
-	// topic's rows only when the reader opens its group, so the bound is
-	// what a group can still show, not what fits on screen.
-	activityKeep = 1000
+	// topic's rows only when the reader opens its group, and the research
+	// phase's view every topic's rows, so the bound is what those can still
+	// show, not what fits on screen: at 1000 a long run's first topics had
+	// lost their searches by the time the research was over.
+	activityKeep = 5000
 	// minNameCol / maxNameCol bound the sub-agent name column so the tree
 	// stays aligned without crowding out the status text beside it.
 	minNameCol = 14
@@ -74,6 +76,8 @@ type activity struct {
 	// info marks what the run reports of itself (the engine's results, a
 	// filter's count), drawn gray under the rows that are the research.
 	info bool
+	// phase is the phase the run was in, whose view lists the row.
+	phase string
 }
 
 // Renderer paints the live run. On a terminal it keeps one frame pinned to the
@@ -133,6 +137,12 @@ type Renderer struct {
 	// clicks is set when a key reader will take the terminal's click
 	// reports; mouse while the terminal is sending them.
 	clicks, mouse bool
+	// phases is what the frame keeps of each phase for its view (see
+	// phaseview.go), and view the one open.
+	phases map[string]*phaseLog
+	view   phaseView
+	// strip is where the phase strip's phases were drawn, for a click.
+	strip stripLayout
 
 	// promptLabel is non-empty while the reader is typing a line; promptText
 	// is what they have typed so far. Raw mode echoes nothing, so the frame
@@ -190,6 +200,7 @@ func NewRenderer(w io.Writer, theme Theme) *Renderer {
 		clock:     time.Now,
 		nodes:     map[string]*Node{},
 		opened:    map[string]bool{},
+		phases:    map[string]*phaseLog{},
 		startTime: time.Now(),
 		plain:     true,
 	}
@@ -308,6 +319,8 @@ func (r *Renderer) ToggleActivity() {
 	r.showActivity = !r.showActivity
 	// What a hidden tail showed is not there to click when it comes back.
 	r.shown = nil
+	// a asks for the tail, which a phase's view stands in place of.
+	r.view = phaseView{}
 	if r.plain || r.mode != "tree" {
 		return
 	}
@@ -371,9 +384,10 @@ func (r *Renderer) withCursor(text string, cursor int) string {
 func (r *Renderer) apply(e Event) {
 	switch e.Type {
 	case PlanReady:
-		r.instant = e.Plan != nil && e.Plan.Instant
+		r.planReady(e.Plan)
 	case Phase:
 		r.phase, r.detail, r.status = e.Phase, e.Detail, ""
+		r.phaseLog(e.Phase)
 		if r.mode == "brief" || r.mode == "" {
 			r.mode = "tree"
 		}
@@ -401,8 +415,19 @@ func (r *Renderer) apply(e Event) {
 			r.node(e.SubID, e.SubName).Line = e.Detail
 		}
 		r.pushActivity(e.SubID, "! "+e.Detail)
+	case Thinking:
+		r.think(e)
 	case Report:
 		r.done = true
+	}
+}
+
+// planReady keeps the plan the run follows. The plan view shows it, which a
+// run given a plan file or confirmed on the page had no brief to set.
+func (r *Renderer) planReady(p *Plan) {
+	r.instant = p != nil && p.Instant
+	if p != nil {
+		r.plan = p
 	}
 }
 
@@ -509,7 +534,7 @@ func (r *Renderer) pushActivity(sub, text string) {
 	if text == "" {
 		return
 	}
-	r.acts = append(r.acts, activity{at: r.clock().Sub(r.startTime), sub: sub, text: text})
+	r.acts = append(r.acts, activity{at: r.clock().Sub(r.startTime), sub: sub, text: text, phase: r.phase})
 	if len(r.acts) > activityKeep {
 		r.acts = r.acts[len(r.acts)-activityKeep:]
 	}
@@ -1015,11 +1040,17 @@ func (r *Renderer) treeLines() []string {
 	if r.plan != nil && len(r.plan.Clarifications) > 0 {
 		head = append(head, "  "+r.T.dim("read as  ")+clip(clarifiedLine(r.plan.Clarifications), r.width-11))
 	}
+	r.strip.row = len(head) + 1
 	head = append(head, r.rule(), r.phaseStrip(), r.rule())
-	agents := r.agentLines()
 	// A blank row under the keys, as the start screen ends: counted in the
 	// footer so the tail gives it up rather than the frame overflowing.
 	foot := append(r.footerLines(), "")
+	if r.view.phase != "" {
+		r.tail = tailLayout{}
+		out := append(head, r.viewLines(r.rows-1-len(head)-len(foot)-1)...)
+		return append(append(out, r.rule()), foot...)
+	}
+	agents := r.agentLines()
 
 	// The activity tail is the elastic section: it takes whatever rows the
 	// fixed sections leave, so the frame height is constant and the header,
@@ -1169,15 +1200,29 @@ func (r *Renderer) phaseStrip() string {
 		}
 	}
 	parts := make([]string, 0, len(pipeline))
+	r.strip.spots = r.strip.spots[:0]
+	x := 3 // the strip's first column, from 1, after its two-space indent
 	for i, p := range pipeline {
+		var part string
 		switch {
 		case r.done, i < cur:
-			parts = append(parts, r.T.green("✓ "+p))
+			part = r.T.green("✓ " + p)
 		case i == cur:
-			parts = append(parts, r.T.bold(r.T.cyan("▸ "+p)))
+			part = r.T.bold(r.T.cyan("▸ " + p))
 		default:
-			parts = append(parts, r.T.dim("· "+p))
+			part = r.T.dim("· " + p)
 		}
+		w := dispWidth("✓ " + p)
+		// A phase reached can be opened: it is underlined while its view
+		// is up, which is what says the rows under the strip are its.
+		if i <= cur || r.done {
+			r.strip.spots = append(r.strip.spots, stripSpot{phase: p, from: x, to: x + w - 1})
+			if strings.EqualFold(r.view.phase, p) {
+				part = r.T.paint(cUnderline, part)
+			}
+		}
+		parts = append(parts, part)
+		x += w + dispWidth("  ─  ")
 	}
 	return "  " + strings.Join(parts, r.T.dim("  ─  "))
 }
@@ -1268,12 +1313,18 @@ func (r *Renderer) footerLines() []string {
 	switch {
 	case r.promptLabel != "":
 		out = append(out, r.promptRow(), "  "+r.T.hints("[enter] send   [esc] cancel"))
+	case r.view.phase != "":
+		out = append(out, r.hintRows(r.viewHints())...)
 	case !r.done:
 		activity := "[a] show activity"
 		if r.showActivity {
 			activity = "[a] hide activity   [1-9] or click a topic to open it"
 		}
-		out = append(out, "  "+r.T.hints(activity+"   [esc] cancel"))
+		hints := activity + "   [click] a phase to see what it did   [esc] cancel"
+		if !r.clicks {
+			hints = activity + "   [esc] cancel"
+		}
+		out = append(out, r.hintRows(hints)...)
 	}
 	return out
 }

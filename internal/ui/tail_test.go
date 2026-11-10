@@ -162,7 +162,7 @@ func TestReadKeyDecodesClicksAndDigits(t *testing.T) {
 		{"\x1b[<4;3;250M", Keystroke{Key: KeyClick, X: 3, Y: 250}}, // shift-click
 		{"\x1b[<0;12;7m", Keystroke{Key: KeyUnknown}},              // release
 		{"\x1b[<2;12;7M", Keystroke{Key: KeyUnknown}},              // right button
-		{"\x1b[<64;12;7M", Keystroke{Key: KeyUnknown}},             // wheel
+		{"\x1b[<64;12;7M", Keystroke{Key: KeyWheelUp}},             // wheel: scrolls, not a click
 		{"\x1b[<32;12;7M", Keystroke{Key: KeyUnknown}},             // drag
 		{"3", Keystroke{Key: '3'}},
 		{"0", Keystroke{Key: KeyUnknown}},
