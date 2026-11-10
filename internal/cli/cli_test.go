@@ -721,7 +721,7 @@ func TestWebAskCarriesTheConversation(t *testing.T) {
 	}
 	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: url,
 		OpenAIModel: "test", ModelCallTimeout: 5 * time.Second}}}
-	got, err := webAsk(func() (Deps, error) { return deps, nil }, dir)(context.Background(),
+	got, _, err := newWebTalks(func() (Deps, error) { return deps, nil }, dir).ask(context.Background(),
 		filepath.Base(path), []web.Turn{{Question: "How much?", Answer: "12 euros"}}, "And in dollars?")
 	if err != nil || got != "In dollars, 13." {
 		t.Fatalf("webAsk = %q, %v", got, err)
@@ -1060,5 +1060,95 @@ func TestTraceCarriesInstant(t *testing.T) {
 	}
 	if !tracedSettings(plan).Instant {
 		t.Error("the traced settings lost the plan's instant bit")
+	}
+}
+
+// toolProvider is fakeProvider for a model that calls tools: each step is
+// either the answer's text or a tool call, {name, arguments}.
+func toolProvider(t *testing.T, steps ...[2]string) (url string, bodies *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	bodies = &[]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		*bodies = append(*bodies, string(b))
+		n := len(*bodies)
+		mu.Unlock()
+		step := steps[min(n, len(steps))-1]
+		msg := map[string]any{"role": "assistant", "content": step[1]}
+		reason := "stop"
+		if step[0] != "" {
+			msg = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
+				"id": "call_" + strconv.Itoa(n), "type": "function",
+				"function": map[string]any{"name": step[0], "arguments": step[1]}}}}
+			reason = "tool_calls"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": reason, "message": msg}}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, bodies
+}
+
+// "Cut the first sentence and save it" edits the report and saves it in one
+// turn: the diff and the save are shown in the application's words, and the
+// revision is written beside the run, which is left as it was.
+func TestAskEditsAndSavesTheReport(t *testing.T) {
+	url, _ := toolProvider(t,
+		[2]string{"edit_report", `{"edits":[{"find":"Acme is fast.","with":"Acme is quick."}],"note":"reword"}`},
+		[2]string{"save_edit", `{}`},
+		[2]string{"", "Done: it now says quick."})
+	out, err := askRun(t, url, "", "-p", "Say quick instead of fast and save it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"- Acme is fast.", "+ Acme is quick.", "proposed an edit; saved revision 1.", "Done: it now says quick."} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out.String(), "Not saved") {
+		t.Errorf("a saved edit is said to be pending:\n%s", out)
+	}
+}
+
+// The page's conversation keeps its proposal on the server between
+// questions, and Apply saves it; the report served is then the revision.
+func TestWebEditIsAppliedByTheButton(t *testing.T) {
+	url, bodies := toolProvider(t,
+		[2]string{"edit_report", `{"edits":[{"find":"Acme is fast.","with":"Acme is quick."}]}`},
+		[2]string{"", "Here is the edit."})
+	dir := t.TempDir()
+	path, err := ui.WriteMetadata(ui.Meta{Question: "Is Acme worth it?", Report: "Acme is fast."}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: url,
+		OpenAIModel: "test", ModelCallTimeout: 5 * time.Second}}}
+	talks := newWebTalks(func() (Deps, error) { return deps, nil }, dir)
+	run := filepath.Base(path)
+	_, got, err := talks.ask(context.Background(), run, nil, "Say quick instead")
+	o, ok := got.(ui.Outcome)
+	if err != nil || !ok || !o.Pending || o.Proposal == "" {
+		t.Fatalf("ask = %+v, %v; want a pending edit\n%s", got, err, (*bodies)[len(*bodies)-1])
+	}
+	// A button shown with another edit than the one pending saves nothing.
+	if _, err := talks.edit(run, "save", "an older edit"); !errors.Is(err, ui.ErrNotShown) {
+		t.Errorf("apply of an edit no longer pending = %v, want ErrNotShown", err)
+	}
+	if md, _, _ := talks.active(run); md != "Acme is fast." {
+		t.Errorf("a proposal changed the report served: %q", md)
+	}
+	if _, err := talks.edit(run, "save", o.Proposal); err != nil {
+		t.Fatal(err)
+	}
+	md, info, err := talks.active(run)
+	if rv, _ := info.(revisionView); err != nil || md != "Acme is quick." || rv.Revision != 1 || rv.MD == "" {
+		t.Errorf("after apply: %q %+v %v", md, info, err)
+	}
+	if _, err := talks.edit(run, "save", o.Proposal); err == nil {
+		t.Error("apply with nothing pending succeeded")
 	}
 }

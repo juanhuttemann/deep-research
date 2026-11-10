@@ -77,8 +77,12 @@ invariants:
   at once (the fact-check's parts, see `ui/factcheck.go`), never as calls
   that feed each other. `agent.Chat` (`ask`, the page's follow-up questions) is not a
   phase: it comes after the run, and the framework's tool loop runs its
-  calls to tools that only read the run's saved `.json`. Keep its tools
-  read-only and local; a question that needs new evidence is a new run.
+  calls to tools that read the run's saved `.json`. Keep them local; a
+  question that needs new evidence is a new run. The one exception that
+  writes is the report editor's (`ui.Editor`, see the architecture doc's
+  "Asking about a finished run"): its tools change the report only through
+  the editor, which owns the file names, the history and the stale check,
+  and never rewrites the run's own files.
 - Layering: `cli` → {agent, config, replay, store, ui}; `replay` → `agent`;
   `agent` → `tools`; `tools` is standalone HTTP clients. Don't import upward.
 - Config precedence is env > the config dir's `config.yaml` > embedded

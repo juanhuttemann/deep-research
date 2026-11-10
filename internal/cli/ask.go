@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -42,23 +45,76 @@ func askCmd(load func() (Deps, error)) *cobra.Command {
 	return cmd
 }
 
+// talk is a conversation about one run, with the edits of its report it
+// makes: the terminal session, ask and the page each hold one per run.
+type talk struct {
+	d    Deps
+	m    *ui.Meta
+	ed   *ui.Editor
+	chat *agent.Chat
+}
+
 // chatAbout starts a conversation about the run whose .json is at path.
-func chatAbout(d Deps, path string) (*agent.Chat, error) {
+func chatAbout(d Deps, path string) (*talk, error) {
 	m, err := ui.LoadMeta(path)
 	if err != nil {
 		return nil, err
 	}
-	return chatWith(d, m)
+	return chatWith(d, path, m, nil)
 }
 
-// chatWith is chatAbout for a run already read.
-func chatWith(d Deps, m *ui.Meta) (*agent.Chat, error) {
-	chat, err := agent.NewChat(d.Config.Config, ui.RunOverview(m), ui.SourceTools(m))
+// chatWith is chatAbout for a run already read, under the conversation so
+// far.
+func chatWith(d Deps, path string, m *ui.Meta, turns []agent.Turn) (*talk, error) {
+	ed, err := ui.NewEditor(path, m)
 	if err != nil {
-		return nil, keyHint(d, err)
+		return nil, err
 	}
-	return chat, nil
+	t := &talk{d: d, m: m, ed: ed}
+	if err := t.connect(turns); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
+
+// connect starts the conversation's model on the report in effect. It is
+// done again whenever that changes: the report is in the model's
+// instructions, and a model still holding the one an edit replaced answered
+// about, and edited, the text before it.
+func (t *talk) connect(turns []agent.Turn) error {
+	chat, err := agent.NewChat(t.d.Config.Config, t.ed.Overview(), append(ui.SourceTools(t.m), t.ed.Tools()...))
+	if err != nil {
+		return keyHint(t.d, err)
+	}
+	chat.Turns, chat.State = turns, t.ed.State
+	t.chat = chat
+	return nil
+}
+
+// ask answers q and says what the turn did to the report. The outcome is
+// the editor's, so it is given even when the answer failed: a save made
+// before the call failed is still saved.
+func (t *talk) ask(ctx context.Context, q string) (string, ui.Outcome, error) {
+	if t.ed.Begin() {
+		if err := t.connect(t.chat.Turns); err != nil {
+			return "", t.ed.End(), err
+		}
+	}
+	a, err := t.chat.Ask(ctx, q)
+	o := t.ed.End()
+	if err == nil {
+		t.chat.Turns[len(t.chat.Turns)-1].Edit = o.Note
+	}
+	if o.Changed {
+		if cerr := t.connect(t.chat.Turns); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+	return a, o, err
+}
+
+// lastTurn is the turn just asked, for the chat log.
+func (t *talk) lastTurn() agent.Turn { return t.chat.Turns[len(t.chat.Turns)-1] }
 
 // askAfter offers a conversation about the -p run that just finished, in
 // the terminal that watched it: a session with no research box, which an
@@ -85,7 +141,7 @@ func askAfter(cmd *cobra.Command, d Deps, path string, interactive bool) error {
 // converse answers one question per line of input until an empty line or the
 // input ends. A question that fails is reported and the conversation goes
 // on: a provider that refused once may answer the next.
-func converse(cmd *cobra.Command, chat *agent.Chat) error {
+func converse(cmd *cobra.Command, chat *talk) error {
 	f, ok := cmd.InOrStdin().(*os.File)
 	tty := ok && ui.IsTTYFile(f)
 	in := bufio.NewScanner(cmd.InOrStdin())
@@ -107,17 +163,19 @@ func converse(cmd *cobra.Command, chat *agent.Chat) error {
 	}
 }
 
-// answer asks one question and prints the answer.
-func answer(cmd *cobra.Command, chat *agent.Chat, q string) error {
+// answer asks one question and prints the answer, and what it did to the
+// report: the diff of the edit proposed or saved, and the note.
+func answer(cmd *cobra.Command, chat *talk, q string) error {
 	_, stop := ui.StatusSpinner(cmd.ErrOrStderr(), "Reading the run's sources")
-	a, err := chat.Ask(cmd.Context(), q)
+	a, o, err := chat.ask(cmd.Context(), q)
 	stop()
-	if err != nil {
-		return err
-	}
 	noColor, _ := cmd.Flags().GetBool("no-color")
-	fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", ui.FormatMarkdown(cmd.OutOrStdout(), a, noColor))
-	return nil
+	out := cmd.OutOrStdout()
+	if err == nil {
+		fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, a, noColor))
+	}
+	ui.PrintOutcome(out, o, noColor)
+	return err
 }
 
 // readInRoot reads the run named run within the reports directory, as the
@@ -138,25 +196,149 @@ func readInRoot(reports, run string) (*ui.Meta, error) {
 	return ui.DecodeMeta(data, run)
 }
 
-// webAsk answers a question from the page about a run in the reports
-// directory; web passes only a bare .json name there.
-func webAsk(load func() (Deps, error), reports string) web.AskFunc {
-	return func(ctx context.Context, run string, turns []web.Turn, q string) (string, error) {
-		d, err := load()
-		if err != nil {
-			return "", err
-		}
-		m, err := readInRoot(reports, run)
-		if err != nil {
-			return "", err
-		}
-		chat, err := chatWith(d, m)
-		if err != nil {
-			return "", err
-		}
-		for _, t := range turns {
-			chat.Turns = append(chat.Turns, agent.Turn(t))
-		}
-		return chat.Ask(ctx, q)
+// webTalks are the page's conversations' edits, one editor per run: the
+// page keeps the conversation and hands it back with each question, but the
+// proposal it is shown must still be there when it says "save it" or
+// presses Apply, so the server keeps that much.
+type webTalks struct {
+	load    func() (Deps, error)
+	reports string
+
+	mu   sync.Mutex
+	runs map[string]*webTalk
+}
+
+// webTalk is one run's editor, and the .json's modification time it was
+// read at: a rerun of the question writes a new run over it, and the edit
+// of the old report must not be saved onto the new.
+type webTalk struct {
+	mu  sync.Mutex // one question or button at a time per run
+	m   *ui.Meta
+	ed  *ui.Editor
+	mod time.Time
+}
+
+func newWebTalks(load func() (Deps, error), reports string) *webTalks {
+	return &webTalks{load: load, reports: reports, runs: map[string]*webTalk{}}
+}
+
+// talk is the run's editor, read again when the run was written over. It is
+// returned locked.
+func (w *webTalks) talk(run string) (*webTalk, error) {
+	path := filepath.Join(w.reports, run)
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
 	}
+	w.mu.Lock()
+	t := w.runs[run]
+	if t == nil {
+		t = &webTalk{}
+		w.runs[run] = t
+	}
+	w.mu.Unlock()
+	t.mu.Lock()
+	if t.ed == nil || !fi.ModTime().Equal(t.mod) {
+		m, err := readInRoot(w.reports, run)
+		if err == nil {
+			t.ed, err = ui.NewEditor(path, m)
+		}
+		if err != nil {
+			t.ed = nil
+			t.mu.Unlock()
+			return nil, err
+		}
+		t.m, t.mod = m, fi.ModTime()
+	}
+	return t, nil
+}
+
+// ask answers a question from the page about a run in the reports
+// directory; web passes only a bare .json name there.
+func (w *webTalks) ask(ctx context.Context, run string, turns []web.Turn, q string) (string, any, error) {
+	d, err := w.load()
+	if err != nil {
+		return "", nil, err
+	}
+	t, err := w.talk(run)
+	if err != nil {
+		return "", nil, err
+	}
+	defer t.mu.Unlock()
+	var ts []agent.Turn
+	for _, turn := range turns {
+		ts = append(ts, agent.Turn(turn))
+	}
+	chat := &talk{d: d, m: t.m, ed: t.ed}
+	if err := chat.connect(ts); err != nil {
+		return "", nil, err
+	}
+	a, o, err := chat.ask(ctx, q)
+	return a, outcomeView(o), err
+}
+
+// edit is the page's Apply, Discard and Undo: the same actions the model's
+// tools take, pressed instead of asked for.
+func (w *webTalks) edit(run, action, proposal string) (any, error) {
+	t, err := w.talk(run)
+	if err != nil {
+		return nil, err
+	}
+	defer t.mu.Unlock()
+	t.ed.Begin()
+	switch {
+	case action != "undo" && !t.ed.Holds(proposal):
+		err = ui.ErrNotShown
+	case action == "save":
+		_, err = t.ed.Save()
+	case action == "discard":
+		err = t.ed.Discard()
+	case action == "undo":
+		_, err = t.ed.Undo()
+	default:
+		err = fmt.Errorf("unknown edit action %q", action)
+	}
+	o := t.ed.End()
+	if err != nil {
+		return nil, err
+	}
+	return outcomeView(o), nil
+}
+
+// active is the report in effect for the page: its Markdown, and the
+// revision and its downloads.
+func (w *webTalks) active(run string) (string, any, error) {
+	t, err := w.talk(run)
+	if err != nil {
+		return "", nil, err
+	}
+	defer t.mu.Unlock()
+	t.ed.Begin()
+	r := t.ed.Active()
+	t.ed.End()
+	if r == nil {
+		return t.m.Report, revisionView{}, nil
+	}
+	return r.Report, revisionView{Revision: r.N, Saved: r.Time, MD: r.MD, PDF: r.PDF, Report: r.Report}, nil
+}
+
+// revisionView is the revision in effect as the page shows it: none is
+// the original, whose downloads are the run's own.
+type revisionView struct {
+	Revision int       `json:"revision"`
+	Saved    time.Time `json:"saved,omitzero"`
+	MD       string    `json:"md,omitempty"`
+	PDF      string    `json:"pdf,omitempty"`
+	// Report is the revision's text, which Copy falls back to when its .md
+	// could not be written or read.
+	Report string `json:"report,omitempty"`
+}
+
+// outcomeView is an outcome for the page, nil when the turn left the report
+// alone.
+func outcomeView(o ui.Outcome) any {
+	if o.Note == "" && !o.Pending && len(o.Diff) == 0 {
+		return nil
+	}
+	return o
 }

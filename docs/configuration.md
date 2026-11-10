@@ -335,7 +335,9 @@ blocks you change, copied from this release's
 [`config/agent.yaml`](../config/agent.yaml): a block left out falls back to
 the built-in prompt, so the others keep following releases.
 `chat_instructions` is not a phase: it steers `ask` and the page's follow-up
-questions. `answerer_instructions` steers an instant run's one call, which
+questions, and the report edits asked for there; a copy from before editing
+existed lacks the editing guidance, and the tools' own descriptions are then
+all the model has to go on. `answerer_instructions` steers an instant run's one call, which
 writes the answer from the findings in place of the analysis, the
 fact-check and the report; a file from before it existed keeps the
 built-in one. `clarifier_instructions` steers the clarifying questions asked

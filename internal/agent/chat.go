@@ -14,6 +14,10 @@ import (
 type Turn struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
+	// Edit says what the turn did to the report, in the application's words
+	// ("proposed an edit", "saved revision 2"), not the model's: the answer
+	// is written before the save happens and cannot be trusted to say it did.
+	Edit string `json:"edit,omitempty"`
 }
 
 // Chat is a conversation about a finished run. It is not a pipeline phase:
@@ -27,6 +31,10 @@ type Chat struct {
 	impl  *impl
 	ag    *agent.Agent
 	Turns []Turn
+	// State, when set, is said ahead of each question and kept out of the
+	// turn: the report's edit as it stands now (a pending proposal, the
+	// revision in effect), which an earlier turn's text may no longer tell.
+	State func() string
 }
 
 // NewChat starts a conversation whose model knows the run from overview and
@@ -58,7 +66,17 @@ func (c *Chat) Ask(ctx context.Context, q string) (string, error) {
 		turns = turns[n:]
 	}
 	for _, t := range turns {
-		fmt.Fprintf(&sb, "Earlier question: %s\nYour answer: %s\n\n", clip(t.Question, chatAnswerRunes), clip(t.Answer, chatAnswerRunes))
+		fmt.Fprintf(&sb, "Earlier question: %s\nYour answer: %s\n", clip(t.Question, chatAnswerRunes), clip(t.Answer, chatAnswerRunes))
+		if t.Edit != "" {
+			fmt.Fprintf(&sb, "What it did to the report: %s\n", t.Edit)
+		}
+		sb.WriteString("\n")
+	}
+	if c.State != nil {
+		if st := c.State(); st != "" {
+			sb.WriteString(st)
+			sb.WriteString("\n\n")
+		}
 	}
 	sb.WriteString(q)
 	answer, err := c.impl.call(ctx, c.ag, sb.String(), c.impl.effort.Chat)
@@ -67,6 +85,6 @@ func (c *Chat) Ask(ctx context.Context, q string) (string, error) {
 	if err != nil && !errors.Is(err, errCutOff) {
 		return "", err
 	}
-	c.Turns = append(c.Turns, Turn{q, answer})
+	c.Turns = append(c.Turns, Turn{Question: q, Answer: answer})
 	return answer, nil
 }

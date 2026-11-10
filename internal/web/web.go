@@ -85,11 +85,38 @@ type RunFunc func(ctx context.Context, r Request, w io.Writer)
 type Turn struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
+	// Edit is what the turn did to the report, in the application's words.
+	Edit string `json:"edit,omitempty"`
 }
 
 // AskFunc answers question about the run whose .json is named run in the
-// reports directory, after the conversation so far. It returns Markdown.
-type AskFunc func(ctx context.Context, run string, turns []Turn, question string) (string, error)
+// reports directory, after the conversation so far. It returns Markdown,
+// and what the question did to the report (the edit proposed or saved, any
+// JSON value), nil when it left the report alone.
+type AskFunc func(ctx context.Context, run string, turns []Turn, question string) (string, any, error)
+
+// EditFunc does what the page's Apply, Discard or Undo asks of the run's
+// report edit, action "save", "discard" or "undo", and returns its outcome
+// as AskFunc does.
+//
+// proposal names the edit the button was shown with, the outcome's
+// "proposal"; a save or discard of any other is refused.
+type EditFunc func(run, action, proposal string) (any, error)
+
+// ActiveFunc is the report in effect for the run, an edit of it once one is
+// saved: its Markdown, and what the page shows of the revision (its number
+// and downloads), any JSON value.
+type ActiveFunc func(run string) (string, any, error)
+
+// Hooks are the functions the cli gives the server beside the run. A nil
+// one refuses what it would serve.
+type Hooks struct {
+	Ask    AskFunc
+	Info   InfoFunc
+	Plan   PlanFunc
+	Edit   EditFunc
+	Active ActiveFunc
+}
 
 // InfoFunc says what a run launched from the page uses: model, provider,
 // search engine and page source. Any JSON-encodable value; nil serves an
@@ -120,6 +147,10 @@ type Server struct {
 	Info InfoFunc
 	// Plan re-derives an edited plan; nil refuses.
 	Plan PlanFunc
+	// Edit applies the page's edit buttons; nil refuses them.
+	Edit EditFunc
+	// Active is the report in effect; nil serves the run's own.
+	Active ActiveFunc
 	// remove deletes a file in the reports directory: a discarded
 	// checkpoint. Nil refuses every discard.
 	remove func(name string) error
@@ -165,6 +196,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/cancel", s.stop)
 	mux.HandleFunc("GET /api/report/{name}", s.report)
 	mux.HandleFunc("POST /api/ask", s.ask)
+	mux.HandleFunc("POST /api/edit", s.edit)
+	mux.HandleFunc("GET /api/revision/{name}", s.revision)
 	mux.HandleFunc("POST /api/plan", s.plan)
 	mux.Handle("GET /reports/", http.StripPrefix("/reports/", http.FileServerFS(s.reports)))
 	// Cross-origin protection refuses another site's POST (a cancel is a
@@ -177,8 +210,7 @@ func (s *Server) Handler() http.Handler {
 // returns only when the listener fails: ctx bounds the runs, not the server,
 // which stops with the process. ready, when set, is given the page's URL
 // once the listener is bound, so a browser opened on it finds the server.
-func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, info InfoFunc, plan PlanFunc,
-	log io.Writer, ready func(url string)) error {
+func Serve(ctx context.Context, addr, reports string, run RunFunc, h Hooks, log io.Writer, ready func(url string)) error {
 	if err := os.MkdirAll(reports, 0o755); err != nil {
 		return err
 	}
@@ -197,9 +229,7 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, ask AskFunc, 
 	_, _ = fmt.Fprintf(log, "serving on %s\n", url)
 	s := New(ctx, root.FS(), run)
 	s.remove = root.Remove
-	s.Ask = ask
-	s.Info = info
-	s.Plan = plan
+	s.Ask, s.Info, s.Plan, s.Edit, s.Active = h.Ask, h.Info, h.Plan, h.Edit, h.Active
 	// No ReadTimeout or WriteTimeout: a question and the event stream run
 	// for minutes, and either one cancels a request that outlives it. Bodies
 	// are read under a deadline of their own (decodeBody), the stream writes
@@ -450,28 +480,104 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "report takes a run's .json name from the reports directory", http.StatusBadRequest)
 		return
 	}
-	data, err := fs.ReadFile(s.reports, name)
+	report, err := s.reportOf(name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	var sidecar struct {
-		Report string `json:"report"`
-	}
 	// A summarizer that wrote nothing leaves a complete run with an empty
 	// report; the page then shows the audit alone. (A failed run writes no
 	// sidecar, and a partial one writes a placeholder report.)
-	if json.Unmarshal(data, &sidecar) != nil || strings.TrimSpace(sidecar.Report) == "" {
+	if strings.TrimSpace(report) == "" {
 		http.Error(w, "this run has no report", http.StatusNotFound)
 		return
 	}
 	var out bytes.Buffer
-	if err := markdown.Convert([]byte(sidecar.Report), &out); err != nil {
+	if err := markdown.Convert([]byte(report), &out); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, uncite(out.String()))
+}
+
+// reportOf is the report in effect for the run: the saved edit's, or the
+// .json's own.
+func (s *Server) reportOf(name string) (string, error) {
+	if s.Active != nil {
+		md, _, err := s.Active(name)
+		return md, err
+	}
+	data, err := fs.ReadFile(s.reports, name)
+	if err != nil {
+		return "", err
+	}
+	var sidecar struct {
+		Report string `json:"report"`
+	}
+	if err := json.Unmarshal(data, &sidecar); err != nil {
+		return "", fmt.Errorf("%s is not a run's .json", name)
+	}
+	return sidecar.Report, nil
+}
+
+// revision says which revision of the run's report is in effect and its
+// downloads; the original's are the run's own files.
+func (s *Server) revision(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !isRunName(name) {
+		http.Error(w, "revision takes a run's .json name from the reports directory", http.StatusBadRequest)
+		return
+	}
+	var info any = struct{}{}
+	if s.Active != nil {
+		_, got, err := s.Active(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		info = got
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
+
+// edit is the page's Apply, Discard and Undo on a run's report edit. It
+// writes the report's revisions, so it takes JSON only, as a launch does.
+func (s *Server) edit(w http.ResponseWriter, r *http.Request) {
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		http.Error(w, "edit takes application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	var req struct {
+		Run      string `json:"run"`
+		Action   string `json:"action"`
+		Proposal string `json:"proposal"`
+	}
+	if err := decodeBody(w, r, 4<<10, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	switch {
+	case !isRunName(req.Run):
+		http.Error(w, "edit takes a run's .json name from the reports directory", http.StatusBadRequest)
+		return
+	case req.Action != "save" && req.Action != "discard" && req.Action != "undo":
+		http.Error(w, "edit takes the action save, discard or undo", http.StatusBadRequest)
+		return
+	case s.Edit == nil:
+		http.Error(w, "editing is not available", http.StatusNotImplemented)
+		return
+	}
+	got, err := s.Edit(req.Run, req.Action, req.Proposal)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Edit any `json:"edit"`
+	}{got})
 }
 
 // maxAskBody bounds a question with the conversation before it, which the
@@ -511,10 +617,16 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	answer, err := s.Ask(r.Context(), req.Run, req.Turns, strings.TrimSpace(req.Question))
-	if err != nil {
+	answer, edit, err := s.Ask(r.Context(), req.Run, req.Turns, strings.TrimSpace(req.Question))
+	if err != nil && edit == nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
+	}
+	// A question that saved an edit and then failed still saved it: the
+	// page is told both.
+	var failed string
+	if err != nil {
+		failed = err.Error()
 	}
 	var out bytes.Buffer
 	if err := markdown.Convert([]byte(answer), &out); err != nil {
@@ -527,7 +639,9 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(struct {
 		Answer string `json:"answer"`
 		HTML   string `json:"html"`
-	}{answer, out.String()})
+		Edit   any    `json:"edit,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}{answer, out.String(), edit, failed})
 }
 
 // plan answers the review's edits with the plan as the run would take it.

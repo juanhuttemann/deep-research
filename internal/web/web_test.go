@@ -550,7 +550,7 @@ func TestAskGuards(t *testing.T) {
 	reports := fstest.MapFS{"r.json": {Data: []byte(`{}`)}, "r.partial.json": {Data: []byte(`{}`)}, "r.trace.json": {Data: []byte(`{}`)}}
 	s := New(context.Background(), reports, nil)
 	asked := 0
-	s.Ask = func(context.Context, string, []Turn, string) (string, error) { asked++; return "ok", nil }
+	s.Ask = func(context.Context, string, []Turn, string) (string, any, error) { asked++; return "ok", nil, nil }
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
@@ -577,9 +577,9 @@ func TestAskRendersTheAnswer(t *testing.T) {
 	s := New(context.Background(), fstest.MapFS{"r.json": {Data: []byte(`{}`)}}, nil)
 	var gotRun, gotQ string
 	var gotTurns []Turn
-	s.Ask = func(_ context.Context, run string, turns []Turn, q string) (string, error) {
+	s.Ask = func(_ context.Context, run string, turns []Turn, q string) (string, any, error) {
 		gotRun, gotTurns, gotQ = run, turns, q
-		return "It costs **12 euros** ([docs](https://a.example/acme)).\n\n<script>alert(1)</script>", nil
+		return "It costs **12 euros** ([docs](https://a.example/acme)).\n\n<script>alert(1)</script>", nil, nil
 	}
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
@@ -596,7 +596,7 @@ func TestAskRendersTheAnswer(t *testing.T) {
 		t.Fatalf("ask returned %q (%v), want JSON with the Markdown answer", body, err)
 	}
 	body = got.HTML
-	if gotRun != "r.json" || gotQ != "And in dollars?" || len(gotTurns) != 1 || gotTurns[0] != (Turn{"How much?", "12 euros"}) {
+	if gotRun != "r.json" || gotQ != "And in dollars?" || len(gotTurns) != 1 || gotTurns[0] != (Turn{Question: "How much?", Answer: "12 euros"}) {
 		t.Errorf("asked run=%q q=%q turns=%+v", gotRun, gotQ, gotTurns)
 	}
 	for _, want := range []string{"<strong>12 euros</strong>", `<a href="https://a.example/acme">docs</a>`} {
@@ -699,5 +699,65 @@ func TestDiscardHoldsOffALaunch(t *testing.T) {
 	case <-launched: // after the removal, it goes ahead
 	case <-time.After(time.Second):
 		t.Error("the launch never went ahead after the removal")
+	}
+}
+
+// The page's edit buttons write the report's revisions, so they are
+// guarded as a launch is: JSON only, a run's .json by bare name, and one of
+// the three actions.
+func TestEditGuards(t *testing.T) {
+	s := New(context.Background(), fstest.MapFS{"r.json": {Data: []byte(`{}`)}}, nil)
+	var got []string
+	s.Edit = func(run, action, _ string) (any, error) {
+		got = append(got, run+" "+action)
+		return map[string]int{"revision": 1}, nil
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	post := func(ct, body string) int {
+		t.Helper()
+		r, err := http.Post(srv.URL+"/api/edit", ct, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		return r.StatusCode
+	}
+	if code := post("text/plain", `{"run":"r.json","action":"save"}`); code != http.StatusUnsupportedMediaType {
+		t.Errorf("text/plain edit = %d, want 415", code)
+	}
+	for _, body := range []string{`{"run":"../r.json","action":"save"}`, `{"run":"r.partial.json","action":"save"}`, `{"run":"r.json","action":"delete"}`} {
+		if code := post("application/json", body); code != http.StatusBadRequest {
+			t.Errorf("edit %s = %d, want 400", body, code)
+		}
+	}
+	if code := post("application/json", `{"run":"r.json","action":"undo"}`); code != http.StatusOK || len(got) != 1 || got[0] != "r.json undo" {
+		t.Errorf("edit = %d, calls %v", code, got)
+	}
+}
+
+// With an edit saved, the report read is the revision's, not the .json's.
+func TestReportIsTheRevisionInEffect(t *testing.T) {
+	s := New(context.Background(), fstest.MapFS{"r.json": {Data: []byte(`{"report":"the original"}`)}}, nil)
+	s.Active = func(string) (string, any, error) { return "the **edit**", map[string]int{"revision": 2}, nil }
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	r, err := http.Get(srv.URL + "/api/report/r.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if !strings.Contains(string(b), "<strong>edit</strong>") || strings.Contains(string(b), "original") {
+		t.Errorf("report = %s", b)
+	}
+	r, err = http.Get(srv.URL + "/api/revision/r.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if strings.TrimSpace(string(b)) != `{"revision":2}` {
+		t.Errorf("revision = %s", b)
 	}
 }

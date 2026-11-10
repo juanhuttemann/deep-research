@@ -641,6 +641,10 @@ func WriteMetadata(m Meta, dir string) (string, error) {
 	if err := os.Remove(ChatLog(path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return path, err
 	}
+	// Nor are the edits of its report.
+	if err := removeEdits(path); err != nil {
+		return path, err
+	}
 	return path, nil
 }
 

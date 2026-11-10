@@ -27,7 +27,7 @@ type session struct {
 	// none, and an empty line ends it.
 	home bool
 	run  string // the .json asked about; "" at the research box
-	chat *agent.Chat
+	chat *talk
 	note string // for the start screen: why the last step ended
 	in   *bufio.Scanner
 	// implied holds, while an option that implies others is chosen (instant
@@ -174,17 +174,17 @@ func (s *session) after(res ui.RunResult, err error) {
 // open takes questions about the run at path, under the conversation so
 // far. A chat that cannot start costs the questions, not the run.
 func (s *session) open(path string, m *ui.Meta, turns []agent.Turn) bool {
-	chat, err := agent.NewChat(s.d.Config.Config, ui.RunOverview(m), ui.SourceTools(m))
+	chat, err := chatWith(s.d, path, m, turns)
 	if err != nil {
-		s.say(fmt.Sprintf("Questions about this report are unavailable: %v", keyHint(s.d, err)))
+		s.say(fmt.Sprintf("Questions about this report are unavailable: %v", err))
 		return false
 	}
-	chat.Turns = turns
 	s.run, s.chat = path, chat
 	fmt.Fprintln(s.cmd.ErrOrStderr(), ui.AskHeading(s.noColor()))
 	out := s.cmd.OutOrStdout()
 	for _, t := range turns {
 		fmt.Fprintf(out, "%s%s\n%s\n", ui.AskPrompt(s.noColor()), ui.AskedText(t.Question), ui.FormatMarkdown(out, t.Answer, s.noColor()))
+		ui.PrintOutcome(out, ui.Outcome{Note: t.Edit}, s.noColor())
 	}
 	return true
 }
@@ -195,7 +195,7 @@ func (s *session) ask(q string) {
 		fmt.Fprintf(s.cmd.ErrOrStderr(), "error: %v\n", err)
 		return
 	}
-	if err := ui.AppendTurn(s.run, s.chat.Turns[len(s.chat.Turns)-1]); err != nil {
+	if err := ui.AppendTurn(s.run, s.chat.lastTurn()); err != nil {
 		fmt.Fprintf(s.cmd.ErrOrStderr(), "warning: could not save the question: %v\n", err)
 	}
 }
@@ -368,7 +368,15 @@ func (s *session) reopen(path string) {
 		fmt.Fprintf(s.cmd.ErrOrStderr(), "warning: the earlier questions could not be read: %v\n", err)
 	}
 	out := s.cmd.OutOrStdout()
-	fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, ui.WithReading("# "+ui.OneLine(m.Question)+"\n\n"+m.Report, m.Clarifications), s.noColor()))
+	// The report in effect is the one shown: a saved edit, said to be one.
+	report := m.Report
+	if e, err := ui.LoadEdits(path); err == nil {
+		if r := e.Active(); r != nil {
+			report = fmt.Sprintf("_Revision %d, edited in conversation on %s; the fact-check covers the original._\n\n%s",
+				r.N, r.Time.Format("2006-01-02"), r.Report)
+		}
+	}
+	fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, ui.WithReading("# "+ui.OneLine(m.Question)+"\n\n"+report, m.Clarifications), s.noColor()))
 	s.open(path, m, turns)
 }
 
@@ -395,7 +403,7 @@ func (s *session) switchModel() {
 	if s.chat == nil {
 		return
 	}
-	path, turns := s.run, s.chat.Turns
+	path, turns := s.run, s.chat.chat.Turns
 	s.run, s.chat = "", nil
 	if m, err := ui.LoadMeta(path); err != nil {
 		s.say(err.Error())

@@ -313,7 +313,9 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 			if noOpen, _ := cmd.Flags().GetBool("no-open"); !noOpen {
 				ready = func(url string) { openPage(url, cmd.ErrOrStderr()) }
 			}
-			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()), webAsk(load, reports), webInfo(load), webPlan,
+			talks := newWebTalks(load, reports)
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()),
+				web.Hooks{Ask: talks.ask, Info: webInfo(load), Plan: webPlan, Edit: talks.edit, Active: talks.active},
 				cmd.ErrOrStderr(), ready)
 		},
 	}
