@@ -258,6 +258,8 @@ func (r *Renderer) OpenTopic(n int) {
 		return
 	}
 	sub := r.order[n-1]
+	// A topic asked for is shown in the tail, which a phase's view hides.
+	r.view = phaseView{}
 	if !r.showActivity {
 		r.showActivity = true
 		r.opened[sub] = true
@@ -302,15 +304,23 @@ func (r *Renderer) noteShownLocked(now time.Time) {
 	}
 }
 
-// Click opens or shuts the topic whose header is at screen row y (from 1):
+// Click opens the phase clicked on the strip (see clickStripLocked), or
+// opens or shuts the topic whose header is at screen row y (from 1):
 // on screen now, or there a moment ago (see clickGrace). A click on a row
 // of an open topic shuts it. A click anywhere else does nothing.
-func (r *Renderer) Click(_, y int) {
+func (r *Renderer) Click(x, y int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// The live frame is drawn from the top of the screen, its row i on
 	// screen row i+1; nothing drawn in place has headers to click.
-	if r.mode != "tree" || r.inline != nil || !r.showActivity || len(r.shown) == 0 {
+	if r.mode != "tree" || r.inline != nil {
+		return
+	}
+	if y-1 == r.strip.row {
+		r.clickStripLocked(x)
+		return
+	}
+	if r.view.phase != "" || !r.showActivity || len(r.shown) == 0 {
 		return
 	}
 	// No tail on screen (one too short for it) has nothing to click, not

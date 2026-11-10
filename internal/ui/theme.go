@@ -17,6 +17,8 @@ const (
 	cDim   = "\x1b[2m"
 	// cInverse swaps foreground and background: the cursor over a character.
 	cInverse = "\x1b[7m"
+	// cUnderline marks the phase whose view is open on the strip.
+	cUnderline = "\x1b[4m"
 
 	cRed     = "\x1b[31m"
 	cGreen   = "\x1b[32m"

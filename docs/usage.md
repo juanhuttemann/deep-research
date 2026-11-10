@@ -40,6 +40,19 @@ page read in full or as a snippet is a link to it: in a terminal that
 supports OSC 8 hyperlinks, ctrl-click (cmd-click on macOS, plain click in
 some) opens it. Only `http`/`https` addresses are linked.
 
+Click a phase on the strip the run has reached (Plan, Research, Analyze,
+Fact-Check, and on an instant run Research and Answer) to see what it did,
+in place of the tree and the tail: the plan with each sub-topic's notes,
+search and terms; every row of each topic's research, not only the latest
+that fit in the tail; and for the other phases the rows the run logged
+during them (the model asked, retries, the analysis's outcome, the
+fact-check's counts) and the reasoning the model streamed, whole, each of
+the fact-check's parallel calls under its own name. The phase open is
+underlined; the arrows, Page Up/Down and the mouse wheel scroll it, and the
+phase still running follows its newest rows until you scroll up. `Esc` or
+a second click on the phase goes back to the run: with a view open, `Esc`
+closes it rather than cancelling. The views last as long as the live frame.
+
 The planner fixes misspelled words, capitalization, hyphenation, punctuation
 and unclosed brackets in the question ("best selling modules (arduino, etc"
 becomes "Best selling modules (Arduino, etc.)", "overalll" becomes
@@ -983,7 +996,9 @@ During a run:
 | --- | ------ |
 | `a` | show or hide the activity tail (hidden at the start) |
 | `1`–`9` / click | open or shut that topic's group in the activity tail |
-| `Esc` / `Ctrl-C` | cancel the run |
+| click a phase | show what that phase did; again (or `Esc`) goes back |
+| `↑` `↓` / `PgUp` `PgDn` / wheel | scroll an open phase's view |
+| `Esc` / `Ctrl-C` | cancel the run (`Esc` first closes an open phase's view) |
 
 ## Output and exports
 

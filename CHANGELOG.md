@@ -5,6 +5,18 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Click a phase on the live frame's strip (Plan, Research, Analyze,
+  Fact-Check) to see what it did: the plan with each sub-topic's notes,
+  search and terms; every row of each topic's research; and for the later
+  phases their logged rows and the model's streamed reasoning, whole, which
+  the frame showed only the first line of. The view scrolls with the
+  arrows, Page Up/Down and the wheel; `Esc` or a second click goes back,
+  and with a view open `Esc` closes it instead of cancelling the run.
+- The run logs what the analysis came to (its claims, recommendations,
+  conclusions, confidence and gaps) as a row of its own.
+
 ## [0.32.0] - 2026-11-09
 
 ### Changed
