@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -109,25 +110,88 @@ func DiffText(d []DiffLine) string {
 // the two read as one column; the marker sits in it.
 const diffGutter = "  "
 
-// PrintDiff writes a diff for the terminal: removed lines red, added green,
-// kept lines dim. On a terminal an added line is wrapped to its width and a
-// removed or kept one cut to a row: the user has the old text in front of
-// them, and a report's lines are whole paragraphs, so unwrapped they ran off
-// the screen and a replaced section buried the text replacing it.
+// PrintDiff writes a diff for the terminal. In colour on a terminal it reads
+// as the report does: added text rendered as Markdown, its links and
+// headings like the report's, under a green bar; a removed paragraph one
+// struck-out row under a red one, the user having just read it; kept lines
+// one dim row. Raw Markdown in red and green, a line per paragraph, read as
+// a patch to review rather than a report to read. Elsewhere (a pipe, a file,
+// --no-color) it is the plain line diff, every word kept.
 func PrintDiff(w io.Writer, d []DiffLine, noColor bool) {
 	width := 0
 	if f, ok := w.(*os.File); ok {
 		_, width = termSize(f)
 	}
-	for _, l := range d {
-		for _, row := range diffRows(l, width) {
-			if !noColor {
-				row = diffColor[l.Op] + row + cReset
+	if noColor || width < 30 || os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		for _, l := range d {
+			for _, row := range diffRows(l, width) {
+				if !noColor {
+					row = diffColor[l.Op] + row + cReset
+				}
+				_, _ = fmt.Fprintln(w, row)
 			}
-			_, _ = fmt.Fprintln(w, row)
 		}
+		return
+	}
+	for _, row := range styledDiff(d, width) {
+		_, _ = fmt.Fprintln(w, row)
 	}
 }
+
+const (
+	barAdd  = "\x1b[32m▌\x1b[0m"
+	barDel  = "\x1b[31m▌\x1b[0m"
+	barKeep = " "
+)
+
+// styledDiff lays a diff out in width columns: each run of added lines is
+// rendered as one Markdown block, so a list or a paragraph with links
+// renders whole.
+func styledDiff(d []DiffLine, width int) []string {
+	var rows, added []string
+	flush := func() {
+		if len(added) == 0 {
+			return
+		}
+		for _, r := range strings.Split(renderMarkdown(strings.Join(added, "\n\n"), width-1), "\n") {
+			if strings.TrimSpace(stripANSI(r)) != "" {
+				rows = append(rows, barAdd+r)
+			}
+		}
+		added = nil
+	}
+	for _, l := range d {
+		if l.Op == "+" {
+			added = append(added, l.Text)
+			continue
+		}
+		flush()
+		text := clip(plainMarkdown(l.Text), width-1-len(diffGutter))
+		if l.Op == "-" {
+			rows = append(rows, barDel+diffGutter+"\x1b[2;9m"+text+cReset)
+		} else {
+			rows = append(rows, barKeep+diffGutter+"\x1b[2m"+text+cReset)
+		}
+	}
+	flush()
+	return rows
+}
+
+var (
+	mdLinkText = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	mdMarks    = regexp.MustCompile(`^\s*(#+|[-*]|\d+\.)\s+|\*\*|__|\x60`)
+	ansiSeq    = regexp.MustCompile(`\x1b(\[[0-9;?]*[a-zA-Z]|\]8;[^\x1b\x07]*(\x1b\\|\x07))`)
+)
+
+// plainMarkdown is a Markdown line as the words it shows: link text without
+// its URL, no emphasis or list marks. A removed line is one row, and its
+// URLs filled it.
+func plainMarkdown(s string) string {
+	s = mdLinkText.ReplaceAllString(strings.TrimSpace(s), "$1")
+	return strings.TrimSpace(mdMarks.ReplaceAllString(s, ""))
+}
+
+func stripANSI(s string) string { return ansiSeq.ReplaceAllString(s, "") }
 
 var diffColor = map[string]string{"-": "\x1b[31m", "+": "\x1b[32m", " ": "\x1b[2m"}
 

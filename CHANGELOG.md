@@ -11,8 +11,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   in the terminal, `drsh ask` and the serve page alike: "cut the
   background section", "add a paragraph on the limitations". The model
   proposes an edit straight away, on the likelier reading when a request
-  could mean two things, and you see its diff above the reply, wrapped to
-  the terminal; reply to adjust it, or say "save it", "discard that" or "undo the last edit" (the page also has apply,
+  could mean two things, and you see the change above the reply, the new
+  text rendered as the report is and marked in the margin; reply to adjust it, or say "save it", "discard that" or "undo the last edit" (the page also has apply,
   discard and undo buttons). Additions are written from the run's saved
   pages and cite them, and a link to a page the run did not read is
   refused. Each save is a revision with its own `.md` and `.pdf`, labelled

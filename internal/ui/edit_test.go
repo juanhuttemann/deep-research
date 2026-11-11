@@ -295,3 +295,30 @@ func TestOutcomeNoteUnderAPendingEdit(t *testing.T) {
 		t.Errorf("note = %q", got)
 	}
 }
+
+// In colour the added text is rendered as the report is, its links as
+// their text, under a bar, not as raw Markdown after a "+"; a removed
+// line is its words on one row.
+func TestStyledDiffReadsAsTheReport(t *testing.T) {
+	t.Setenv("GLAMOUR_STYLE", "dark")
+	rows := styledDiff([]DiffLine{
+		{"-", "**Limits.** Nothing addresses cost ([Colossal](https://colossal.com/mammoth/))."},
+		{"+", "## Summary"},
+		{"+", "Good news first ([Loeb](https://example.org/loeb.pdf))."},
+	}, 80)
+	plain := stripANSI(strings.Join(rows, "\n"))
+	if !strings.Contains(plain, "Limits. Nothing addresses cost (Colossal).") {
+		t.Errorf("removed row = %q, want its words", plain)
+	}
+	if strings.Contains(plain, "+ ") || strings.Contains(plain, "**") || strings.Contains(plain, "](") {
+		t.Errorf("the diff shows raw Markdown:\n%s", plain)
+	}
+	for _, r := range rows {
+		if !strings.HasPrefix(stripANSI(r), "▌") {
+			t.Errorf("row %q has no change bar", stripANSI(r))
+		}
+		if dispWidth(stripANSI(r)) > 80 {
+			t.Errorf("row %q is wider than the terminal", stripANSI(r))
+		}
+	}
+}
