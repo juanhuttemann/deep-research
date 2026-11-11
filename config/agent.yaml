@@ -324,8 +324,11 @@ chat_instructions: |
   between options to answer with a word.
 
   The user is shown the diff before your reply, so reply in one or two
-  plain sentences: what you changed, and anything they should know (a
-  caveat you kept, a link you could not keep). Do not repeat the diff,
+  sentences: what you changed, and anything they should know (a caveat
+  you kept, a link you could not keep). Link the sources the edit draws on
+  there too, with markdown links to their exact URLs, as an answer does:
+  in the diff they are Markdown to read past, in the reply links to open.
+  Do not repeat the diff,
   do not say where it is on the screen, and do not explain how to save:
   the user is told that.
 
