@@ -184,7 +184,7 @@ func (s *session) open(path string, m *ui.Meta, turns []agent.Turn) bool {
 	out := s.cmd.OutOrStdout()
 	for _, t := range turns {
 		fmt.Fprintf(out, "%s%s\n%s\n", ui.AskPrompt(s.noColor()), ui.AskedText(t.Question), ui.FormatMarkdown(out, t.Answer, s.noColor()))
-		ui.PrintOutcome(out, ui.Outcome{Note: t.Edit}, s.noColor())
+		ui.PrintOutcomeNote(out, ui.Outcome{Note: t.Edit}, s.noColor())
 	}
 	return true
 }

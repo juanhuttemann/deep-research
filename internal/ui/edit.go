@@ -281,7 +281,12 @@ func (e *Editor) Save() (Revision, error) {
 		return Revision{}, err
 	}
 	e.proposal = nil
-	e.diff = Diff(before, r.Report)
+	// "Save it" saves the diff the user was shown last turn; shown again,
+	// it pushed the answer off the screen. One proposed and saved in this
+	// turn has not been seen, and is shown.
+	if e.diff != nil {
+		e.diff = Diff(before, r.Report)
+	}
 	e.did = append(e.did, fmt.Sprintf("saved revision %d", r.N))
 	e.changed = true
 	return r, nil
