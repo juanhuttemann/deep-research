@@ -726,8 +726,10 @@ signed in: `claude -p` cannot call the two tools.
 The same conversation edits the report. Ask for a change in your own words
 ("cut the background section", "add a paragraph on the limitations") and
 the model proposes an edit instead of answering: you are shown its diff
-above its reply, removed lines red and cut to a row, added lines green and
-wrapped, and nothing is saved. Reply to change it ("keep the first
+above its reply, and nothing is saved. On a terminal the added text is
+rendered as the report is, under a green bar in the margin, and a removed
+paragraph is one struck-out row under a red one; piped or with
+`--no-color` it is a plain `+`/`-` line diff. Reply to change it ("keep the first
 paragraph"), or say "save it", "discard that" or "undo the last edit". An
 instruction that says to save ("remove the background and save it") saves
 in the same turn. A request that can be read more than one way is proposed
