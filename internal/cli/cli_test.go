@@ -1134,10 +1134,12 @@ func TestWebEditIsAppliedByTheButton(t *testing.T) {
 	talks := newWebTalks(func() (Deps, error) { return deps, nil }, dir)
 	run := filepath.Base(path)
 	_, got, err := talks.ask(context.Background(), run, nil, "Say quick instead")
-	o, ok := got.(ui.Outcome)
+	page, ok := got.(outcomePage)
+	o := page.Outcome
 	if err != nil || !ok || !o.Pending || o.Proposal == "" {
 		t.Fatalf("ask = %+v, %v; want a pending edit\n%s", got, err, (*bodies)[len(*bodies)-1])
 	}
+	checkRenderedBlocks(t, page.Blocks)
 	// A button shown with another edit than the one pending saves nothing.
 	if _, err := talks.edit(run, "save", "an older edit"); !errors.Is(err, ui.ErrNotShown) {
 		t.Errorf("apply of an edit no longer pending = %v, want ErrNotShown", err)
@@ -1154,5 +1156,14 @@ func TestWebEditIsAppliedByTheButton(t *testing.T) {
 	}
 	if _, err := talks.edit(run, "save", o.Proposal); err == nil {
 		t.Error("apply with nothing pending succeeded")
+	}
+}
+
+// The page shows a removed line as its words and the added text rendered,
+// as the report is.
+func checkRenderedBlocks(t *testing.T, b []diffBlock) {
+	t.Helper()
+	if len(b) != 2 || b[0].Op != "-" || b[0].Text != "Acme is fast." || b[1].HTML != "<p>Acme is quick.</p>\n" {
+		t.Errorf("blocks = %+v, want the removed line and the added one rendered", b)
 	}
 }

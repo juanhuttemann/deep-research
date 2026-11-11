@@ -729,7 +729,8 @@ the model proposes an edit instead of answering: you are shown its diff
 above its reply, and nothing is saved. On a terminal the added text is
 rendered as the report is, under a green bar in the margin, and a removed
 paragraph is one struck-out row under a red one; piped or with
-`--no-color` it is a plain `+`/`-` line diff. Reply to change it ("keep the first
+`--no-color` it is a plain `+`/`-` line diff. The serve page shows it the
+same way, above the reply, with apply and discard under it. Reply to change it ("keep the first
 paragraph"), or say "save it", "discard that" or "undo the last edit". An
 instruction that says to save ("remove the background and save it") saves
 in the same turn. A request that can be read more than one way is proposed

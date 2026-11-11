@@ -452,6 +452,14 @@ var (
 	markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
 )
 
+// Markdown is md rendered as the report and the answers are, for the page
+// to parse inert as it does them.
+func Markdown(md string) (string, error) {
+	var out bytes.Buffer
+	err := markdown.Convert([]byte(md), &out)
+	return out.String(), err
+}
+
 // uncite drops the citations from rendered report HTML: the source groups
 // wherever they are, the claim IDs only in text outside code.
 func uncite(html string) string {
