@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -104,47 +105,103 @@ func DiffText(d []DiffLine) string {
 	return sb.String()
 }
 
+// diffGutter is the left margin the diff shares with the rendered reply, so
+// the two read as one column; the marker sits in it.
+const diffGutter = "  "
+
 // PrintDiff writes a diff for the terminal: removed lines red, added green,
-// kept lines dim.
+// kept lines dim. On a terminal an added line is wrapped to its width and a
+// removed or kept one cut to a row: the user has the old text in front of
+// them, and a report's lines are whole paragraphs, so unwrapped they ran off
+// the screen and a replaced section buried the text replacing it.
 func PrintDiff(w io.Writer, d []DiffLine, noColor bool) {
+	width := 0
+	if f, ok := w.(*os.File); ok {
+		_, width = termSize(f)
+	}
 	for _, l := range d {
-		text := l.Op + " " + l.Text
-		if !noColor {
-			switch l.Op {
-			case "-":
-				text = "\x1b[31m" + text + "\x1b[0m"
-			case "+":
-				text = "\x1b[32m" + text + "\x1b[0m"
-			default:
-				text = "\x1b[2m" + text + "\x1b[0m"
+		for _, row := range diffRows(l, width) {
+			if !noColor {
+				row = diffColor[l.Op] + row + cReset
 			}
+			_, _ = fmt.Fprintln(w, row)
 		}
-		_, _ = fmt.Fprintln(w, text)
 	}
 }
 
-// PrintOutcome shows what a turn did to the report: the diff of the edit
-// proposed or saved, what happened, and with an edit pending, how to keep
-// or drop it.
+var diffColor = map[string]string{"-": "\x1b[31m", "+": "\x1b[32m", " ": "\x1b[2m"}
+
+// diffRows lays out one diff line in width columns, or as one line when the
+// width is unknown (a pipe or a file, which keep every word).
+func diffRows(l DiffLine, width int) []string {
+	lead := diffGutter + l.Op + " "
+	text := strings.TrimSpace(l.Text)
+	room := width - dispWidth(lead)
+	if width <= 0 || room < 20 {
+		return []string{lead + text}
+	}
+	if l.Op != "+" {
+		return []string{lead + clip(text, room)}
+	}
+	var rows []string
+	for i, row := range wrapWords(text, room) {
+		if i > 0 {
+			lead = strings.Repeat(" ", dispWidth(lead))
+		}
+		rows = append(rows, lead+row)
+	}
+	return rows
+}
+
+// PrintOutcome shows the diff of what a turn did to the report. It comes
+// ahead of the reply, which says what was changed, and PrintOutcomeNote
+// after it.
 func PrintOutcome(w io.Writer, o Outcome, noColor bool) {
 	if len(o.Diff) > 0 {
 		_, _ = fmt.Fprintln(w)
 		PrintDiff(w, o.Diff, noColor)
 	}
-	var lines []string
-	if o.Note != "" {
-		lines = append(lines, o.Note+".")
+}
+
+// PrintOutcomeNote says what a turn did and, with an edit pending, how to
+// keep or drop it: one dim line under the reply. "Proposed an edit" is
+// left out under a pending edit, which the line already says.
+func PrintOutcomeNote(w io.Writer, o Outcome, noColor bool) {
+	var parts []string
+	for p := range strings.SplitSeq(o.Note, "; ") {
+		said := o.Pending && (p == "proposed an edit" || p == "revised the proposed edit")
+		if p != "" && !said {
+			parts = append(parts, p)
+		}
+	}
+	line := strings.Join(parts, "; ")
+	if line != "" {
+		line = strings.ToUpper(line[:1]) + line[1:] + "."
 	}
 	if o.Pending {
-		lines = append(lines, `Not saved: say "save it" to keep it, "discard that" to drop it, or what to change.`)
+		line = strings.TrimSpace(line + ` Not saved yet: "save it" keeps it, "discard that" drops it, or say what to change.`)
 	}
-	for _, l := range lines {
+	if line == "" {
+		return
+	}
+	for _, row := range diffWrap(line, w) {
 		if !noColor {
-			l = "\x1b[2m" + l + "\x1b[0m"
+			row = "\x1b[2m" + row + cReset
 		}
-		_, _ = fmt.Fprintln(w, l)
+		_, _ = fmt.Fprintln(w, row)
 	}
-	if len(lines) > 0 {
-		_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
+}
+
+func diffWrap(s string, w io.Writer) []string {
+	if f, ok := w.(*os.File); ok {
+		if _, width := termSize(f); width > 20 {
+			rows := wrapWords(s, width-len(diffGutter))
+			for i := range rows {
+				rows[i] = diffGutter + rows[i]
+			}
+			return rows
+		}
 	}
+	return []string{diffGutter + s}
 }

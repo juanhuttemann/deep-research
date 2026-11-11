@@ -1933,9 +1933,10 @@ function editView(run, o) {
     try {
       const got = await editAction(run, action, o.proposal);
       if (askRun !== run) return;
-      // The edit's box becomes what the button did: the saved diff and its
-      // note, or the note that it was discarded.
-      box.replaceWith(editView(run, got));
+      // The edit's box becomes what the button did: the saved diff (the one
+      // shown, which the save no longer repeats) and its note, or the note
+      // that it was discarded.
+      box.replaceWith(editView(run, { ...got, diff: got.diff || (action === "save" ? o.diff : null) }));
     } catch (err) {
       if (askRun !== run) return;
       keep.disabled = drop.disabled = false;

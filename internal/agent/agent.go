@@ -26,6 +26,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/kaptinlin/jsonrepair"
 	"github.com/microsoft/agent-framework-go/agent"
+	"github.com/microsoft/agent-framework-go/message"
 	"github.com/microsoft/agent-framework-go/provider/openaiprovider"
 	"github.com/microsoft/agent-framework-go/tool"
 	"github.com/openai/openai-go/v3"
@@ -717,13 +718,13 @@ func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, pro
 				// A retry would stop at the same limit, so this is not retried.
 				// The text goes back with the error for a caller that can use
 				// a cut-off answer.
-				return out.String(), fmt.Errorf("%s: %w", ag.Name(), errCutOff)
+				return responseText(ctx, out), fmt.Errorf("%s: %w", ag.Name(), errCutOff)
 			case "content_filter":
 				// A declined request comes back as an answer with no text; a
 				// retry is declined the same way.
 				return "", fmt.Errorf("%s: %w", ag.Name(), errDeclined)
 			}
-			return out.String(), nil
+			return responseText(ctx, out), nil
 		}
 		err = endpointError(a.baseURL, callErr)
 		if final := a.finalError(err); final != nil {
@@ -1205,6 +1206,40 @@ func collectResponse(stream agent.ResponseStream, progress func(string)) (*agent
 	}
 	resp.Coalesce()
 	return &resp, nil
+}
+
+// replyKey marks a call whose answer is the model's reply after its tool
+// calls, not every word it wrote on the way.
+type replyKey struct{}
+
+// replyOnly is ctx for a call answered by its final reply (see finalReply).
+func replyOnly(ctx context.Context) context.Context { return context.WithValue(ctx, replyKey{}, true) }
+
+func responseText(ctx context.Context, r *agent.Response) string {
+	if ctx.Value(replyKey{}) != nil {
+		return finalReply(r)
+	}
+	return r.String()
+}
+
+// finalReply is the text after the last tool result. A model that says what
+// it is about to do, calls a tool and then says what it did wrote the same
+// thing twice, and the user read both ("I'll condense the report… I've cut
+// the report…"). With nothing written after the tools, the text before them
+// is the reply.
+func finalReply(r *agent.Response) string {
+	start := 0
+	for i, m := range r.Messages {
+		for _, c := range m.Contents {
+			if _, ok := c.(*message.FunctionResultContent); ok {
+				start = i + 1
+			}
+		}
+	}
+	if t := (&agent.Response{Messages: r.Messages[start:]}).String(); strings.TrimSpace(t) != "" {
+		return t
+	}
+	return r.String()
 }
 
 // partialText is a streamed response's text so far, kept as it arrives.

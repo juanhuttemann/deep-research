@@ -1104,10 +1104,14 @@ func TestAskEditsAndSavesTheReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"- Acme is fast.", "+ Acme is quick.", "proposed an edit; saved revision 1.", "Done: it now says quick."} {
+	for _, want := range []string{"- Acme is fast.", "+ Acme is quick.", "Proposed an edit; saved revision 1.", "Done: it now says quick."} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
+	}
+	// The diff comes ahead of the reply, which says what it changed.
+	if strings.Index(out.String(), "+ Acme is quick.") > strings.Index(out.String(), "Done:") {
+		t.Errorf("the diff is under the reply:\n%s", out)
 	}
 	if strings.Contains(out.String(), "Not saved") {
 		t.Errorf("a saved edit is said to be pending:\n%s", out)

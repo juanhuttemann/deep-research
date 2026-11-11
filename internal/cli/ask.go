@@ -171,10 +171,14 @@ func answer(cmd *cobra.Command, chat *talk, q string) error {
 	stop()
 	noColor, _ := cmd.Flags().GetBool("no-color")
 	out := cmd.OutOrStdout()
-	if err == nil {
-		fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, a, noColor))
-	}
+	// The diff comes first and the reply under it, which says what was
+	// changed and what to know about it; under the diff, a reply read as
+	// pointing up to it.
 	ui.PrintOutcome(out, o, noColor)
+	if err == nil {
+		fmt.Fprintf(out, "\n%s\n\n", ui.FormatMarkdown(out, a, noColor))
+	}
+	ui.PrintOutcomeNote(out, o, noColor)
 	return err
 }
 

@@ -262,3 +262,36 @@ func TestRerunRemovesOnlyRevisionExports(t *testing.T) {
 		t.Errorf("the run's own .json was removed: %v", err)
 	}
 }
+
+// On a terminal an added paragraph wraps under its marker and a removed one
+// is cut to a row: unwrapped, a replaced section ran off the screen and
+// buried the text replacing it.
+func TestDiffFitsTheTerminal(t *testing.T) {
+	long := strings.Repeat("word ", 30)
+	del := diffRows(DiffLine{"-", long}, 40)
+	if len(del) != 1 || dispWidth(del[0]) > 40 || !strings.HasSuffix(del[0], "…") {
+		t.Errorf("removed line = %q, want one clipped row", del)
+	}
+	add := diffRows(DiffLine{"+", long}, 40)
+	if len(add) < 2 || !strings.HasPrefix(add[0], "  + ") || !strings.HasPrefix(add[1], "    word") {
+		t.Errorf("added line = %q, want wrapped under its marker", add)
+	}
+	for _, r := range add {
+		if dispWidth(r) > 40 {
+			t.Errorf("row %q is wider than the terminal", r)
+		}
+	}
+	if got := diffRows(DiffLine{"+", long}, 0); len(got) != 1 || !strings.Contains(got[0], strings.TrimSpace(long)) {
+		t.Errorf("piped line = %q, want every word on one line", got)
+	}
+}
+
+// Under a pending edit the note says only how to keep or drop it, not
+// "proposed an edit" again.
+func TestOutcomeNoteUnderAPendingEdit(t *testing.T) {
+	var sb strings.Builder
+	PrintOutcomeNote(&sb, Outcome{Note: "proposed an edit; revised the proposed edit", Pending: true}, true)
+	if got := sb.String(); strings.Contains(got, "roposed an edit") || !strings.Contains(got, `"save it" keeps it`) {
+		t.Errorf("note = %q", got)
+	}
+}

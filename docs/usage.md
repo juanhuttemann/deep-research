@@ -725,14 +725,17 @@ signed in: `claude -p` cannot call the two tools.
 
 The same conversation edits the report. Ask for a change in your own words
 ("cut the background section", "add a paragraph on the limitations") and
-the model proposes an edit instead of answering: you are shown its diff,
-removed lines red and added green, and nothing is saved. Reply to change
-it ("keep the first paragraph"), or say "save it", "discard that" or "undo
-the last edit". An instruction that says to save ("remove the background
-and save it") saves in the same turn. Where the change or its extent is
-unclear, the model asks first. Whether a message asks to save is the
-model's judgement, so a save is always said as `saved revision N` under
-the answer, and undo takes it back.
+the model proposes an edit instead of answering: you are shown its diff
+above its reply, removed lines red and cut to a row, added lines green and
+wrapped, and nothing is saved. Reply to change it ("keep the first
+paragraph"), or say "save it", "discard that" or "undo the last edit". An
+instruction that says to save ("remove the background and save it") saves
+in the same turn. A request that can be read more than one way is proposed
+on its likelier reading ("summarize in one sentence" adds a summary at the
+top), with the other said in the reply, rather than asked about: amending
+the diff is quicker than answering a question. Whether a message asks to
+save is the model's judgement, so a save is always said as `Saved revision
+N` under the answer, and undo takes it back.
 
 An edit keeps the citations and caveats of the prose it revises, and an
 addition is written from the run's saved pages, cited by their URLs; a

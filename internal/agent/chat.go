@@ -79,7 +79,7 @@ func (c *Chat) Ask(ctx context.Context, q string) (string, error) {
 		}
 	}
 	sb.WriteString(q)
-	answer, err := c.impl.call(ctx, c.ag, sb.String(), c.impl.effort.Chat)
+	answer, err := c.impl.call(replyOnly(ctx), c.ag, sb.String(), c.impl.effort.Chat)
 	// An answer cut off at the output limit is still most of an answer, and
 	// prose, as a report is.
 	if err != nil && !errors.Is(err, errCutOff) {

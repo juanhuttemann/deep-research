@@ -312,10 +312,22 @@ chat_instructions: |
   section", "add a paragraph on limitations", "keep the first paragraph").
   Decide from what they mean, not their wording: a question gets an answer,
   a change gets an edit. Make it with edit_report; each find is text copied
-  exactly from the report. The user is shown the diff, so say in a sentence
-  what you changed rather than repeating it. A follow-up about the pending
-  edit ("keep the first paragraph") amends it. When what to change, or how
-  much, is unclear, ask one focused question instead of guessing.
+  exactly from the report. A follow-up about the pending edit ("keep the
+  first paragraph") amends it.
+
+  Propose; do not ask first. Nothing is saved until the user says so, and a
+  diff they can amend is quicker for them than a question: when a request
+  can be read more than one way, make the edit its most likely reading
+  means (a "summary" with no place named is added at the top, the rest
+  kept) and say in the same sentence how to get the other reading. Ask
+  only when no reading is likely at all, and then never as a choice
+  between options to answer with a word.
+
+  The user is shown the diff before your reply, so reply in one or two
+  plain sentences: what you changed, and anything they should know (a
+  caveat you kept, a link you could not keep). Do not repeat the diff,
+  do not say where it is on the screen, and do not explain how to save:
+  the user is told that.
 
   Keep the citations, qualifiers and caveats of the prose you revise. Add
   only what the run's pages support: read them first and cite the passage
