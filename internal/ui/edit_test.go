@@ -301,6 +301,9 @@ func TestOutcomeNoteUnderAPendingEdit(t *testing.T) {
 // line is its words on one row.
 func TestStyledDiffReadsAsTheReport(t *testing.T) {
 	t.Setenv("GLAMOUR_STYLE", "dark")
+	if got := PlainMarkdown("_Instant answer, not fact-checked._"); got != "Instant answer, not fact-checked." {
+		t.Errorf("italic line = %q", got)
+	}
 	rows := styledDiff([]DiffLine{
 		{"-", "**Limits.** Nothing addresses cost ([Colossal](https://colossal.com/mammoth/))."},
 		{"+", "## Summary"},

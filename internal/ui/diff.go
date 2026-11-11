@@ -144,36 +144,42 @@ const (
 	barKeep = " "
 )
 
-// styledDiff lays a diff out in width columns: each run of added lines is
-// rendered as one Markdown block, so a list or a paragraph with links
-// renders whole.
-func styledDiff(d []DiffLine, width int) []string {
-	var rows, added []string
-	flush := func() {
-		if len(added) == 0 {
-			return
-		}
-		for _, r := range strings.Split(renderMarkdown(strings.Join(added, "\n\n"), width-1), "\n") {
-			if strings.TrimSpace(stripANSI(r)) != "" {
-				rows = append(rows, barAdd+r)
-			}
-		}
-		added = nil
-	}
+// DiffBlocks is a diff as it is shown: each run of added lines one block
+// of Markdown, to render whole (a list, a paragraph with links), and each
+// removed or kept line its words alone (PlainMarkdown), shown as one row.
+// The terminal and the serve page both lay a diff out from it.
+func DiffBlocks(d []DiffLine) []DiffLine {
+	var out []DiffLine
 	for _, l := range d {
-		if l.Op == "+" {
-			added = append(added, l.Text)
-			continue
-		}
-		flush()
-		text := clip(plainMarkdown(l.Text), width-1-len(diffGutter))
-		if l.Op == "-" {
-			rows = append(rows, barDel+diffGutter+"\x1b[2;9m"+text+cReset)
-		} else {
-			rows = append(rows, barKeep+diffGutter+"\x1b[2m"+text+cReset)
+		switch {
+		case l.Op != "+":
+			out = append(out, DiffLine{l.Op, PlainMarkdown(l.Text)})
+		case len(out) > 0 && out[len(out)-1].Op == "+":
+			out[len(out)-1].Text += "\n\n" + l.Text
+		default:
+			out = append(out, l)
 		}
 	}
-	flush()
+	return out
+}
+
+// styledDiff lays a diff out in width columns.
+func styledDiff(d []DiffLine, width int) []string {
+	var rows []string
+	for _, b := range DiffBlocks(d) {
+		switch b.Op {
+		case "+":
+			for _, r := range strings.Split(renderMarkdown(b.Text, width-1), "\n") {
+				if strings.TrimSpace(stripANSI(r)) != "" {
+					rows = append(rows, barAdd+r)
+				}
+			}
+		case "-":
+			rows = append(rows, barDel+diffGutter+"\x1b[2;9m"+clip(b.Text, width-1-len(diffGutter))+cReset)
+		default:
+			rows = append(rows, barKeep+diffGutter+"\x1b[2m"+clip(b.Text, width-1-len(diffGutter))+cReset)
+		}
+	}
 	return rows
 }
 
@@ -183,12 +189,19 @@ var (
 	ansiSeq    = regexp.MustCompile(`\x1b(\[[0-9;?]*[a-zA-Z]|\]8;[^\x1b\x07]*(\x1b\\|\x07))`)
 )
 
-// plainMarkdown is a Markdown line as the words it shows: link text without
+// PlainMarkdown is a Markdown line as the words it shows: link text without
 // its URL, no emphasis or list marks. A removed line is one row, and its
 // URLs filled it.
-func plainMarkdown(s string) string {
+func PlainMarkdown(s string) string {
 	s = mdLinkText.ReplaceAllString(strings.TrimSpace(s), "$1")
-	return strings.TrimSpace(mdMarks.ReplaceAllString(s, ""))
+	s = strings.TrimSpace(mdMarks.ReplaceAllString(s, ""))
+	// A line in italics, "_Instant answer…_", without its underscores.
+	for _, m := range []string{"_", "*"} {
+		if len(s) > 2 && strings.HasPrefix(s, m) && strings.HasSuffix(s, m) {
+			s = s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 func stripANSI(s string) string { return ansiSeq.ReplaceAllString(s, "") }

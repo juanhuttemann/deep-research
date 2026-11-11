@@ -338,11 +338,37 @@ type revisionView struct {
 	Report string `json:"report,omitempty"`
 }
 
+// outcomePage is an outcome as the page shows it.
+type outcomePage struct {
+	ui.Outcome
+	Blocks []diffBlock `json:"blocks,omitempty"`
+}
+
+// diffBlock is one of ui.DiffBlocks, an added one with its HTML.
+type diffBlock struct {
+	Op   string `json:"op"`
+	Text string `json:"text,omitempty"`
+	HTML string `json:"html,omitempty"`
+}
+
 // outcomeView is an outcome for the page, nil when the turn left the report
-// alone.
+// alone. Its blocks are the diff as the terminal shows it, the added text
+// rendered as the report is: raw Markdown in red and green read as a patch.
 func outcomeView(o ui.Outcome) any {
 	if o.Note == "" && !o.Pending && len(o.Diff) == 0 {
 		return nil
 	}
-	return o
+	v := outcomePage{Outcome: o}
+	for _, b := range ui.DiffBlocks(o.Diff) {
+		if b.Op != "+" {
+			v.Blocks = append(v.Blocks, diffBlock{Op: b.Op, Text: b.Text})
+			continue
+		}
+		html, err := web.Markdown(b.Text)
+		if err != nil {
+			html = ""
+		}
+		v.Blocks = append(v.Blocks, diffBlock{Op: b.Op, Text: b.Text, HTML: html})
+	}
+	return v
 }

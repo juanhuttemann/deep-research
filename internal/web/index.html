@@ -389,10 +389,16 @@ mark { background: var(--yellow); color: var(--bg); }
 .ask .composer-bar { padding-top: 4px; }
 /* a report edit: its diff, what happened, and the buttons that keep it */
 .edit { margin: 8px 0 0; }
-.diff { margin: 0; padding: 8px 2ch; background: var(--bg-2); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.55; }
-.diff .del { color: var(--red); text-decoration: line-through; }
-.diff .add { color: var(--green); }
-.diff .keep { color: var(--dim); }
+/* the change reads as the report does, marked in the margin as in the
+   terminal: added text rendered under a green bar, a removed paragraph one
+   struck-out row under a red one, kept lines one dim row */
+.diff { margin: 0 0 10px; padding: 8px 0; background: var(--bg-2); }
+/* .chat .diff: the added block is also .prose, whose chat padding is none */
+.chat .diff > div { padding: 0 2ch 0 calc(2ch - 3px); border-left: 3px solid transparent; }
+.chat .diff .add { border-left-color: var(--green); padding-top: 2px; padding-bottom: 2px; }
+.diff .add > :last-child { margin-bottom: 0; }
+.diff .del, .diff .keep { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.diff .del { border-left-color: var(--red); text-decoration: line-through; }
 .edit .note { color: var(--dim); margin: 6px 0; }
 .edit .acts { display: flex; gap: 1ch; flex-wrap: wrap; }
 .revised { color: var(--dim); margin: 0 0 8px; }
@@ -1898,7 +1904,11 @@ $("ask-form").onsubmit = async ev => {
     a.className = "prose";
     a.replaceChildren(inert(got.html));
     if (got.error) a.append(el("p", "form-msg", got.error));
-    if (got.edit) li.append(editView(run, got.edit));
+    if (got.edit) {
+      const d = diffView(got.edit);
+      if (d) a.before(d);
+      li.append(editView(run, got.edit));
+    }
     if (!got.error) turns.push({ question: q, answer: got.answer, edit: (got.edit && got.edit.note) || "" });
   } catch (err) {
     li.remove();
@@ -1909,17 +1919,31 @@ $("ask-form").onsubmit = async ev => {
     if (askRun === run) $("ask-go").disabled = false;
   }
 };
-// editView shows what a turn did to the report: the diff, the note, and
-// with an edit pending, the buttons that keep or drop it. They do what
+// diffView is an edit's change as the report reads, above the reply that
+// says what it changed, as in the terminal.
+function diffView(o) {
+  const blocks = o.blocks && o.blocks.length ? o.blocks : (o.diff || []).map(d => ({ op: d.op, text: d.text }));
+  if (!blocks.length) return null;
+  const box = el("div", "diff");
+  for (const b of blocks) {
+    if (b.op === "+") {
+      const add = el("div", "add prose");
+      if (b.html) add.append(inert(b.html)); else add.textContent = b.text;
+      box.append(add);
+    } else box.append(el("div", b.op === "-" ? "del" : "keep", b.text));
+  }
+  return box;
+}
+// editView shows what a turn did to the report under the reply: the note,
+// and with an edit pending, the buttons that keep or drop it. They do what
 // "save it" and "discard that" ask the model for, through the same editor.
 function editView(run, o) {
   const box = el("div", "edit");
-  if (o.diff && o.diff.length) {
-    const pre = el("pre", "diff");
-    for (const d of o.diff) pre.append(el("div", d.op === "-" ? "del" : d.op === "+" ? "add" : "keep", d.op + " " + d.text));
-    box.append(pre);
-  }
-  if (o.note) box.append(el("p", "note", o.note.charAt(0).toUpperCase() + o.note.slice(1) + "."));
+  // Under a pending edit, "proposed an edit" says what the buttons do.
+  let note = (o.note || "").split("; ").filter(p => p && !(o.pending && /^(proposed an edit|revised the proposed edit)$/.test(p))).join("; ");
+  if (note) note = note.charAt(0).toUpperCase() + note.slice(1) + ".";
+  if (o.pending) note = (note + " Not saved yet: apply it, discard it, or say what to change.").trim();
+  if (note) box.append(el("p", "note", note));
   // Every turn that changed the revision in effect shows it on the report.
   if (o.revision !== undefined && askRun === run && o.revision !== run.revision) {
     run.revision = o.revision;
@@ -1933,10 +1957,8 @@ function editView(run, o) {
     try {
       const got = await editAction(run, action, o.proposal);
       if (askRun !== run) return;
-      // The edit's box becomes what the button did: the saved diff (the one
-      // shown, which the save no longer repeats) and its note, or the note
-      // that it was discarded.
-      box.replaceWith(editView(run, { ...got, diff: got.diff || (action === "save" ? o.diff : null) }));
+      // The note becomes what the button did; the change shown above stays.
+      box.replaceWith(editView(run, got));
     } catch (err) {
       if (askRun !== run) return;
       keep.disabled = drop.disabled = false;
