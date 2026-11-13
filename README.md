@@ -171,7 +171,7 @@ for a local vLLM, llama.cpp or LM Studio server.
 
 The default, `openrouter/free`, costs nothing and picks a free model per
 request, so every report records what served it. Free models are capped per
-minute and per day; a run with web search takes 4 to 13 model requests, and
+minute and per day; a run with web search takes 4 to 14 model requests, and
 `drsh doctor` shows how many free requests an OpenRouter key has left today. On Claude: [docs/configuration.md](docs/configuration.md#claude).
 
 ## Common commands

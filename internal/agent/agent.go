@@ -485,11 +485,13 @@ func New(cfg Config) (Assistant, error) {
 	// broken.
 	impl.analyzer = newRunStreaming(newAgent("analyzer", cfg.AnalyzerInstructions, nil), cfg.Effort.Analyze,
 		"analyzing", analysisUnit)
+	// The follow-up call has no effort key of its own: it reads the findings
+	// as the analysis does, and takes the analysis's level.
+	impl.followUps = newRunStreaming(newAgent("follow_up", cfg.FollowUpInstructions, nil), cfg.Effort.Analyze,
+		"choosing follow-up searches", entriesUnit("search", "searches", "query"))
 	// A verdict opens with its status and an inference with follows. Counting
 	// "claim", which only a verdict split out of prose carries, read "0 claims
 	// checked" through a whole check that ended with 22 verdicts.
-	impl.followUps = newRunStreaming(newAgent("follow_up", cfg.FollowUpInstructions, nil), cfg.Effort.Analyze,
-		"choosing follow-up searches", entriesUnit("search", "searches", "query"))
 	impl.factCheck = newRunStreaming(newAgent("fact_checker", cfg.FactCheckerInstructions, nil), cfg.Effort.FactCheck,
 		"fact-checking", entriesUnit("judged", "judged", "status", "follows"))
 	if cfg.ClarifierInstructions == "" {
@@ -1484,8 +1486,7 @@ func (s *modelSniffer) Read(p []byte) (int, error) {
 // TokensUsed reports the running provider-reported token total.
 func (a *impl) TokensUsed() int { return int(a.tokens.Load()) }
 
-// SetProgress wires the progress logger for every model call and, when real
-// search+scrape is available, for each search/scrape sub-step.
+// SetSourceBudget sets how many pages one search may fetch.
 func (a *impl) SetSourceBudget(perQuery int) {
 	if a.searchTools != nil && perQuery > 0 {
 		a.searchTools.MaxURLsPerQuery = perQuery
@@ -1517,6 +1518,9 @@ func (a *impl) SkipSources(skip func(url string) bool) {
 	}
 }
 
+// SetProgress wires the progress logger for every model call and, when real
+// search+scrape is available, for each search/scrape sub-step. Lines logged
+// before it was wired are handed to it first.
 func (a *impl) SetProgress(logf func(string)) {
 	a.logf = logf
 	if logf != nil {

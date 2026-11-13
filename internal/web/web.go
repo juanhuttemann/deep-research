@@ -241,10 +241,6 @@ func Serve(ctx context.Context, addr, reports string, run RunFunc, h Hooks, log 
 	return srv.Serve(ln)
 }
 
-// localOnly answers a request only from this machine and addressed to it.
-// The Host header alone was the guard, and any client can send Host:
-// localhost: with --addr off loopback, another machine could launch runs on
-// these credentials and read every report. The peer is checked as well.
 // bodyTimeout bounds reading a request's body: a client that sent its
 // headers and stalled on the body held the handler for good.
 const bodyTimeout = 30 * time.Second
@@ -267,6 +263,10 @@ const (
 	ssePing         = 30 * time.Second
 )
 
+// localOnly answers a request only from this machine and addressed to it.
+// The Host header alone was the guard, and any client can send Host:
+// localhost: with --addr off loopback, another machine could launch runs on
+// these credentials and read every report. The peer is checked as well.
 func localOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)

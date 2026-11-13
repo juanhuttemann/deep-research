@@ -506,7 +506,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("read config.yaml: %w", err)
 	}
 	// Every config.yaml key can also be set as DEEP_RESEARCH_<KEY>, e.g.
-	// DEEP_RESEARCH_SOURCES_PER_TOPIC=9. This is documented in the README's environment table and in config.yaml:
+	// DEEP_RESEARCH_SOURCES_PER_TOPIC=9. This is documented in docs/configuration.md and in config.yaml:
 	// an override channel nobody has written down is indistinguishable from
 	// the tool ignoring its own config file.
 	v.SetEnvPrefix(EnvPrefix)
@@ -581,8 +581,6 @@ func expandHome(path string) (string, error) {
 	return filepath.Join(home, path[1:]), nil
 }
 
-// loadModelCalls reads what every model call is given: its deadline, its
-// retries and each phase's reasoning effort.
 // runKeys are the keys that shape a run: where it is saved, its deadline,
 // its breadth and budget, and its report.
 func runKeys(v *viper.Viper) (Config, error) {
@@ -657,6 +655,8 @@ func sourcesPerTopic(v *viper.Viper) int {
 	return v.GetInt("sources_per_topic")
 }
 
+// loadModelCalls reads what every model call is given: its deadline, its
+// retries and each phase's reasoning effort.
 func loadModelCalls(cfg *Config, v *viper.Viper) (err error) {
 	if cfg.ModelCallTimeout, err = duration(v, "model_call_timeout"); err != nil {
 		return err

@@ -274,7 +274,7 @@ func TestDoctorReportsProblemsAndBudget(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1 problem") {
 		t.Errorf("err = %v, want one problem (the missing key)", err)
 	}
-	for _, want := range []string{"config", "embedded defaults", "✗ model", "openrouter.ai/keys", "✓ search", "budget", "quick 25", "deep 31"} {
+	for _, want := range []string{"config", "embedded defaults", "✗ model", "openrouter.ai/keys", "✓ search", "budget", "quick 26", "deep 32"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("doctor output lacks %q:\n%s", want, out.String())
 		}
@@ -436,7 +436,7 @@ func TestDoctorSaysWhatToDoNext(t *testing.T) {
 	if strings.Contains(out.String(), "ready to run") {
 		t.Errorf("a doctor with a problem said ready:\n%s", out.String())
 	}
-	if got := callBudget(true); !strings.Contains(got, "at most 13 in quick, standard and deep") || !strings.Contains(got, "1 in instant") {
+	if got := callBudget(true); !strings.Contains(got, "at most 14 in quick, standard and deep") || !strings.Contains(got, "1 in instant") {
 		t.Errorf("web-search budget = %q", got)
 	}
 	if got := configSource(); !strings.Contains(got, "drsh init") {

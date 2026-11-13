@@ -272,8 +272,6 @@ func (r *Recorder) Checkpoint(path string, warn func(error)) {
 	r.saveMu.Unlock()
 }
 
-// Discard removes the checkpoint of a run that finished, and stops saving.
-// A run that records nothing has a nil recorder and nothing to remove.
 // CheckpointPath is where the checkpoint is kept, or "" when there is none.
 func (r *Recorder) CheckpointPath() string {
 	if r == nil {
@@ -284,6 +282,8 @@ func (r *Recorder) CheckpointPath() string {
 	return r.checkpoint
 }
 
+// Discard removes the checkpoint of a run that finished, and stops saving.
+// A run that records nothing has a nil recorder and nothing to remove.
 func (r *Recorder) Discard() error {
 	if r == nil {
 		return nil

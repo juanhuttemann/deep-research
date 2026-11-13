@@ -161,14 +161,17 @@ when OpenRouter retires it. Two consequences:
   response's `model` field.
 - Free models are capped per minute and per UTC day, and the daily ceiling
   depends on credits bought. A run is a handful of requests, not tokens:
-  plan, follow-ups, analyze, fact-check and summarize — 4–13 with web
-  search, including optional repair and revision checking. The fact-check
+  the clarifying check, plan, follow-ups, analyze, fact-check and
+  summarize — 4–14 with web search, including optional repair and revision
+  checking. The clarifying check runs only where someone can answer it (the
+  terminal, the serve page) or `--clarify-only` asks for it, and not with
+  `clarify: off`. The fact-check
   runs as parallel calls: one per share of six or more claims, at most four,
   and one per four recommendations and conclusions, at most three, so a run
   with many of both spends up to seven requests on it at once. LLM search
   adds up to 2 queries per sub-topic and per follow-up. Worst-case totals are
-  quick 25, standard 27 and deep 31 before retries.
-  `drsh doctor` prints these worst-case budgets (13 with web
+  quick 26, standard 28 and deep 32 before retries.
+  `drsh doctor` prints these worst-case budgets (14 with web
   search) and, for an OpenRouter key, its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
   it names; the daily cap (`free-models-per-day`) fails at once with a
   message instead of burning the retries on a limit that clears only at
@@ -294,7 +297,7 @@ reasoning_effort:
   plan: low          # writes the search queries
   clarify: low       # asks what the question leaves open, before the plan
   search: default    # only runs with no search engine, and then it writes the findings
-  analyze: default   # the claims and conclusions the answer rests on
+  analyze: default   # the claims and conclusions the answer rests on; also the follow-up searches' choice
   fact_check: default
   summarize: default # the report's prose below the Answer section
   answer: default    # an instant run's one call: the answer, from the findings
@@ -308,8 +311,10 @@ not set to one level for every provider. Each phase is its own key, so a
 `config.yaml` that names one phase keeps the others' defaults, and
 `DEEP_RESEARCH_REASONING_EFFORT_<PHASE>` (`PLAN`, `CLARIFY`, `SEARCH`, `ANALYZE`,
 `FACT_CHECK`, `SUMMARIZE`, `ANSWER`, `CHAT`) overrides one from the environment. An
-empty variable changes nothing; write `default`. The repair pass uses the
-analyze and fact-check levels.
+empty variable changes nothing; write `default`. The call that chooses the
+follow-up searches has no key of its own and uses the analyze level, so
+raising `analyze` slows it too. The repair pass uses the analyze and
+fact-check levels.
 
 What a provider does with a level is its own: an OpenAI-compatible endpoint
 is sent `reasoning_effort`, Claude `output_config.effort` (and `claude -p

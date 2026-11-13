@@ -143,7 +143,7 @@ func tornTail(f *os.File) bool {
 
 // Each hands fn the history's records in order, one at a time, and returns
 // how many lines it could not read. A caller keeps only what it needs of
-// each: drsh history prints six fields of a run, and a list of every
+// each: drsh list prints six fields of a run, and a list of every
 // record whole, findings and report, held the entire history in memory.
 //
 // The unreadable count is the caller's to surface: history is an
