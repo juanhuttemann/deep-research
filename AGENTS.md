@@ -84,7 +84,8 @@ invariants:
   the editor, which owns the file names, the history and the stale check,
   and never rewrites the run's own files.
 - Layering: `cli` → {agent, config, replay, store, ui}; `replay` → `agent`;
-  `agent` → `tools`; `tools` is standalone HTTP clients. Don't import upward.
+  `store` → `agent`; `ui` → {`agent`, `tools`}; `agent` → `tools`; `tools`
+  is standalone HTTP clients. Don't import upward.
 - Config precedence is env > the config dir's `config.yaml` > embedded
   defaults (the config dir is `$DEEP_RESEARCH_CONFIG_DIR` or the user
   config dir, never the working directory; repo `config/` is only the

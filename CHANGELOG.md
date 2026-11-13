@@ -5,6 +5,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- `drsh doctor` and the docs now count the clarifying check in a run's
+  model requests: at most 14 with web search (quick 26, standard 28, deep 32
+  without), not 13. The check runs by default wherever someone can answer
+  it, and the budget was one request short of what a terminal run spends.
+- The configuration docs say that the call choosing the follow-up searches
+  uses the `analyze` reasoning level, so raising it slows that call too.
+
 ## [0.33.0] - 2026-11-11
 
 ### Added

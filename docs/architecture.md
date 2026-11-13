@@ -393,6 +393,8 @@ cli → { agent, auth, catalog, config, replay, setup, store, ui, update, web }
 config → { agent, auth }
 setup → { auth, catalog }
 replay → agent
+store → agent
+ui → { agent, tools }
 agent → tools
 tools → (standalone HTTP clients)
 update → (nothing in this module)

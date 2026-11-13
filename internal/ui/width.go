@@ -184,10 +184,6 @@ func escapeEnd(s string, i int) int {
 	return j
 }
 
-// wrapWords breaks plain text onto lines of at most width display columns,
-// splitting on spaces. A word too long for any line is hard-broken so it can
-// never overflow the frame. Input is assumed free of ANSI escapes: colour is
-// applied to the returned lines, not carried through the wrap.
 // OneLine is a question as a title: its line breaks and runs of spaces as
 // one space. A question typed over several lines keeps them for the model,
 // but a heading, a frame row, a list or a notification is one line, and a
@@ -196,6 +192,10 @@ func OneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// wrapWords breaks plain text onto lines of at most width display columns,
+// splitting on spaces. A word too long for any line is hard-broken so it can
+// never overflow the frame. Input is assumed free of ANSI escapes: colour is
+// applied to the returned lines, not carried through the wrap.
 func wrapWords(s string, width int) []string {
 	if width <= 0 {
 		return nil

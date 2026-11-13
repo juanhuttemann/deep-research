@@ -1200,12 +1200,20 @@ func configSource() string {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
+// checkedRunCalls is the most model requests a checked run with web search
+// makes before retries: clarify, plan, follow-ups, analyze, summarize, the
+// repair pass's analyze and fact-check, and the fact-check's own calls.
+const checkedRunCalls = 7 + ui.MaxCheckCalls
+
 // callBudget is how many model requests one run spends per --mode tier, which
 // is what a free model's per-day cap is counted in. With web search a run is
-// plan, follow-ups, analyze, fact-check (up to ui.MaxCheckCalls calls at
-// once) and summarize, plus an analyze and a fact-check when the repair pass
-// revises a blocked recommendation; LLM search adds up to two calls per
-// sub-topic and per follow-up.
+// the clarifying check, plan, follow-ups, analyze, fact-check (up to
+// ui.MaxCheckCalls calls at once) and summarize, plus an analyze and a
+// fact-check when the repair pass revises a blocked recommendation; LLM
+// search adds up to two calls per sub-topic and per follow-up. The clarifying
+// check is on by default and runs wherever someone can answer it (the
+// terminal, the serve page): left out, the budget was one short of what a
+// terminal run spends.
 func callBudget(webSearch bool) string {
 	var parts []string
 	for _, m := range ui.DepthModes {
@@ -1213,7 +1221,7 @@ func callBudget(webSearch bool) string {
 		if m.IsInstant() {
 			continue
 		}
-		n := 6 + ui.MaxCheckCalls
+		n := checkedRunCalls
 		if !webSearch {
 			n += 2 * (m.SubTopics + ui.MaxFollowUps)
 		}
@@ -1224,12 +1232,12 @@ func callBudget(webSearch bool) string {
 	// bug, so a uniform budget is said once. Instant is its one answer call.
 	if webSearch {
 		return fmt.Sprintf("model requests per run: at most %d in quick, standard and deep (they differ in searches); 1 in instant",
-			6+ui.MaxCheckCalls)
+			checkedRunCalls)
 	}
 	return "model requests per run: " + strings.Join(parts, ", ") + "; instant needs web search"
 }
 
-// listed is what drsh history prints of a run, all it keeps of one.
+// listed is what drsh list prints of a run, all it keeps of one.
 type listed struct {
 	when                      time.Time
 	question, confidence      string
