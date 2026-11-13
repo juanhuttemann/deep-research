@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-11-13
+
 ### Fixed
 
 - `drsh doctor` and the docs now count the clarifying check in a run's
