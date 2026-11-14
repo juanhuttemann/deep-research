@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-11-14
+
 ### Fixed
 
 - Source excerpts can select matching rows from long multi-line blocks
