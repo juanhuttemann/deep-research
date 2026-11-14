@@ -13,6 +13,7 @@ package ui
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"slices"
@@ -45,13 +46,27 @@ func (s evalScore) String() string {
 }
 
 func TestEvalChecker(t *testing.T) {
-	cases := loadCheckerCases(t)
-	repeat, _ := strconv.Atoi(os.Getenv("EVAL_REPEAT"))
-	repeat = max(repeat, 1)
+	cases := selectedCheckerCases(t)
+	report := newEvalReport(t, cases)
+	repeat := 1
+	if value := os.Getenv("EVAL_REPEAT"); value != "" {
+		var err error
+		repeat, err = strconv.Atoi(value)
+		if err != nil || repeat < 1 {
+			t.Fatal("EVAL_REPEAT must be a positive integer")
+		}
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
+	report.Provider = cfg.Provider
+	report.Model = cfg.OpenAIModel
+	if cfg.Provider == "claude" {
+		report.Model = cfg.ClaudeModel
+	}
+	report.Effort = cfg.Effort.FactCheck
+	report.PromptSHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(cfg.FactCheckerInstructions)))
 	asst, err := agent.New(cfg.Config)
 	if err != nil {
 		t.Fatal(err)
@@ -61,17 +76,15 @@ func TestEvalChecker(t *testing.T) {
 	var total evalScore
 	var flips []string
 	for _, c := range cases {
-		// EVAL_CASE runs the cases whose name contains it, to measure one
-		// failure without paying for the rest.
-		if only := os.Getenv("EVAL_CASE"); only != "" && !strings.Contains(c.Name, only) {
-			continue
-		}
 		runs := map[string][]string{}
 		for run := range repeat {
 			// The check's wall time, to compare how a change to it costs.
 			start := time.Now()
-			s, detail, got := evalCase(t.Context(), asst, c)
+			tokens := asst.TokensUsed()
+			trace := &evalTrace{}
+			s, detail, got := evalCase(t.Context(), asst, c, trace)
 			total = addScore(total, s)
+			report.add(c, run+1, got, s, detail, time.Since(start), asst.TokensUsed()-tokens, trace)
 			for id, o := range got {
 				runs[id] = append(runs[id], o)
 			}
@@ -79,6 +92,7 @@ func TestEvalChecker(t *testing.T) {
 		}
 		flips = append(flips, flipped(c.Name, runs)...)
 	}
+	report.finish(t)
 	t.Logf("TOTAL over %d cases x %d: %s", len(cases), repeat, total)
 	// The totals of several repeats hide a checker that is right on a claim
 	// one run in two: summed, it reads as two errors anywhere. A judgement that
@@ -108,12 +122,15 @@ func flipped(name string, runs map[string][]string) []string {
 // evalCase runs the fact-check and governance on one case and scores them.
 // It also returns each claim's status and each unit's outcome by ID, for
 // telling apart a judgement that changed between repeats.
-func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase) (evalScore, string, map[string]string) {
+func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase, trace *evalTrace) (evalScore, string, map[string]string) {
 	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations),
 		Conclusions: slices.Clone(c.Conclusions)}
 	checkAnalysis(a, c.Findings)
 	// The check as a run makes it: split into parallel calls (see checkParts).
-	fc, err := checkAll(ctx, checkParts(a, c.Findings, true), asst.FactCheck)
+	parts := checkParts(a, c.Findings, true)
+	trace.recordParts(parts)
+	fc, err := checkAll(ctx, parts, trace.capture(asst.FactCheck))
+	trace.Governed = a
 	if err != nil {
 		// Every judgement of the case is an error in this repeat: under a key
 		// of its own, an errored repeat never differed from the others by
@@ -237,4 +254,20 @@ func addScore(a, b evalScore) evalScore {
 		falseApprovals: a.falseApprovals + b.falseApprovals, falseBlocks: a.falseBlocks + b.falseBlocks,
 		rawWrong: a.rawWrong + b.rawWrong, errors: a.errors + b.errors,
 	}
+}
+
+func selectedCheckerCases(t *testing.T) []checkerCase {
+	t.Helper()
+	cases := loadCheckerCases(t)
+	selected := cases[:0]
+	for _, c := range cases {
+		if only := os.Getenv("EVAL_CASE"); only == "" || strings.Contains(c.Name, only) {
+			selected = append(selected, c)
+		}
+	}
+	cases = selected
+	if len(cases) == 0 {
+		t.Fatal("EVAL_CASE matched no cases")
+	}
+	return cases
 }

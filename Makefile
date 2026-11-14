@@ -1,4 +1,4 @@
-.PHONY: catalog diagram test e2e eval-replay build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools pi
+.PHONY: catalog diagram test e2e eval-replay eval-test build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools pi
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -20,8 +20,14 @@ e2e:
 # per claim share and per inference share), times EVAL_REPEAT (default 1), so
 # it is not part of verify. Needs the model configured as for a run.
 # EVAL_CASE=name runs only the cases whose name contains it.
+# EVAL_OUTPUT=/absolute/path.json saves judgments; EVAL_BASELINE compares one.
+# EVAL_STRICT=1 fails on any wrong judgment or provider error. See docs/evaluation.md.
 eval-replay:
 	go test -tags eval -count=1 -timeout 30m -run TestEvalChecker -v ./internal/ui/
+
+# Every TestEval helper is offline except the explicit live entrypoint above.
+eval-test:
+	go test -race -tags eval -run '^TestEval' -skip '^TestEvalChecker$$' ./internal/ui/
 
 # The provider/model list `drsh login` shows offline: Catwalk's
 # catalog (MIT), kept to the provider types deep-research has a client for and
@@ -140,4 +146,4 @@ pi:
 	COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm run --silent typecheck && \
 	DRSH_BIN=$$bin COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm test --silent
 
-verify: lint test ignored-go pi
+verify: lint test eval-test ignored-go pi

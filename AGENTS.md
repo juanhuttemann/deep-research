@@ -48,6 +48,15 @@ platform-split file: `GOOS=darwin GOARCH=arm64 go build -o /dev/null ./...`.
 every macOS build while the local build stays green — that has already
 happened once.
 
+## Research-quality evaluation
+
+Read [docs/evaluation.md](docs/evaluation.md) before investigating research
+quality: it documents commands, traces, label review, failure triage and the
+fix/verification procedure, including finished-report replay comparisons.
+Checker-only scores do not establish research-quality gains.
+Use public reproducible cases; do not put private
+run material or personal examples in project instructions or fixtures.
+
 ## Code style
 
 - Standard library `testing` only. No testify, no external test frameworks.
