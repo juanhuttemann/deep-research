@@ -251,15 +251,58 @@ func (r *Renderer) planView() []string {
 	if len(p.Domains) > 0 {
 		out = append(out, "  "+r.T.dim("only from  ")+strings.Join(p.Domains, ", "))
 	}
-	out = append(out, "", "  "+r.T.dim(fmt.Sprintf("%d sub-topics", len(p.SubTopics)))+r.scopeNote())
+	out = append(out, "", "  "+r.T.cyan(fmt.Sprintf("%d sub-topics", len(p.SubTopics)))+r.scopeNote())
 	w := max(r.width-10, minNoteCol)
 	for i, s := range p.SubTopics {
-		out = append(out, fmt.Sprintf("  %s %s", r.T.dim(fmt.Sprintf("%2d", i+1)), r.T.bold(s.Name)))
+		// Each topic in the hue its sub-agent gets in the tree and the tail,
+		// so a name read here is found by colour once the research runs; a
+		// blank row between them, or four topics ran into one block.
+		hue := agentHues[i%len(agentHues)]
+		out = append(out, "", fmt.Sprintf("  %s %s",
+			r.T.paint(hue, fmt.Sprintf("%2d", i+1)), r.T.paint(cBold+hue, s.Name)))
 		for _, l := range wrapWords(s.Notes, w) {
 			out = append(out, "       "+l)
 		}
 		out = append(out, r.labelled("search", s.Query, w)...)
-		out = append(out, r.labelled("terms", strings.Join(s.Terms, ", "), w)...)
+		out = append(out, r.labelledItems("terms", s.Terms, w)...)
+	}
+	return out
+}
+
+// labelledItems is labelled for a list, its items apart by a dim dot and
+// wrapped between them: joined by commas, a term with a comma in it read
+// as two, and a wrap could split one term across rows.
+func (r *Renderer) labelledItems(label string, items []string, w int) []string {
+	sep := r.T.dim(" · ")
+	var rows []string
+	line, lineW := "", 0
+	for _, it := range items {
+		itW := dispWidth(it)
+		if lineW > 0 && lineW+3+itW > w-8 {
+			rows, line, lineW = append(rows, line), "", 0
+		}
+		if itW > w-8 {
+			// A term wider than the column is wrapped on its own rows, or
+			// it ran past the frame.
+			parts := wrapWords(it, w-8)
+			rows = append(rows, parts[:len(parts)-1]...)
+			it, itW = parts[len(parts)-1], dispWidth(parts[len(parts)-1])
+		}
+		if lineW > 0 {
+			line, lineW = line+sep, lineW+3
+		}
+		line, lineW = line+it, lineW+itW
+	}
+	if line != "" {
+		rows = append(rows, line)
+	}
+	out := make([]string, len(rows))
+	for i, l := range rows {
+		lead := "        "
+		if i == 0 {
+			lead = r.T.dim(pad(label, 8))
+		}
+		out[i] = "       " + lead + l
 	}
 	return out
 }

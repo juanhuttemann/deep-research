@@ -177,3 +177,35 @@ func TestScrollKeys(t *testing.T) {
 		}
 	}
 }
+
+// The plan view's terms are apart by a dot and wrap between terms: joined
+// by commas and wrapped as words, "critical temperature" was split across
+// rows and a term with a comma in it read as two.
+func TestPlanTermsWrapBetweenTerms(t *testing.T) {
+	r := &Renderer{}
+	terms := []string{"room-temperature superconductor", "ambient pressure", "critical temperature", "cuprates, doped", "nickelates"}
+	rows := r.labelledItems("terms", terms, 50)
+	if len(rows) < 2 {
+		t.Fatalf("want the terms over several rows at width 50, got %q", rows)
+	}
+	for _, row := range rows {
+		if dispWidth(row) > 7+50 {
+			t.Errorf("row past the column: %q", row)
+		}
+		if strings.HasSuffix(row, "critical") || strings.Contains(row, " · temperature") {
+			t.Errorf("a term split across rows: %q", rows)
+		}
+	}
+	all := strings.Join(rows, "\n")
+	for _, term := range terms {
+		if !strings.Contains(all, term) {
+			t.Errorf("term %q missing from %q", term, rows)
+		}
+	}
+	long := r.labelledItems("terms", []string{strings.Repeat("x", 80)}, 50)
+	for _, row := range long {
+		if dispWidth(row) > 7+50 {
+			t.Errorf("a term wider than the column ran past it: %q", row)
+		}
+	}
+}

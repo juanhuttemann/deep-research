@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Choice is one key a prompt answers to, and what it does.
@@ -59,9 +60,12 @@ func (m PromptModel) View() tea.View {
 	}
 	help := make([]string, len(m.choices))
 	for i, c := range m.choices {
-		help[i] = c.Help
+		// The key in the text's own colour, what it does dim: all dim, the
+		// keys were lost among the words around them.
+		key, action, _ := strings.Cut(c.Help, " ")
+		help[i] = key + " " + m.st.dim.Render(action)
 	}
-	return tea.NewView(strings.TrimRight(m.body, "\n") + "\n\n" + m.st.dim.Render(strings.Join(help, " · ")) + "\n")
+	return tea.NewView(strings.TrimRight(m.body, "\n") + "\n\n" + strings.Join(help, m.st.dim.Render("  ·  ")) + "\n")
 }
 
 // Title styles a prompt body's first line as the picker's titles are.
@@ -69,6 +73,50 @@ func Title(s string) string { return newStyles().title.Render("deep-research · 
 
 // Dim styles a line as the pickers' hints are.
 func Dim(s string) string { return newStyles().dim.Render(s) }
+
+// Bold styles a check's name.
+func Bold(s string) string { return newStyles().selected.Render(s) }
+
+// Failed styles what says a check failed.
+func Failed(s string) string { return newStyles().err.Render(s) }
+
+// Mark colours a check's mark: ✓ green, ! yellow, ✗ red.
+func Mark(m string) string {
+	st := newStyles()
+	switch m {
+	case "✓":
+		return st.ok.Render(m)
+	case "!":
+		return lipgloss.NewStyle().Foreground(lipgloss.Yellow).Render(m)
+	default:
+		return st.err.Render(m)
+	}
+}
+
+// Hang wraps plain text to width columns for a row that starts indent
+// columns in, every row after the first indented to line up under it.
+// Words are never split: a link broken across rows is no longer one the
+// terminal opens. The terminal's own wrap broke words and went back to
+// the first column, which read as noise under a check's name.
+func Hang(text string, width, indent int) string {
+	room := max(width-indent, 20)
+	var rows []string
+	line, lineW := "", 0
+	for _, w := range strings.Fields(text) {
+		ww := lipgloss.Width(w)
+		if lineW > 0 && lineW+1+ww > room {
+			rows, line, lineW = append(rows, line), "", 0
+		}
+		if lineW > 0 {
+			line, lineW = line+" ", lineW+1
+		}
+		line, lineW = line+w, lineW+ww
+	}
+	if line != "" {
+		rows = append(rows, line)
+	}
+	return strings.Join(rows, "\n"+strings.Repeat(" ", indent))
+}
 
 // Ask shows the prompt on the terminal and returns the key pressed, or ""
 // when it was quit.

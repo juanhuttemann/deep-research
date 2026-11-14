@@ -304,19 +304,24 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A config that does not load fails here, not as every launch's
 			// done line.
-			if _, err := load(); err != nil {
+			d, err := load()
+			if err != nil {
 				return err
 			}
 			addr, _ := cmd.Flags().GetString("addr")
 			reports, _ := cmd.Flags().GetString("reports")
-			var ready func(string)
-			if noOpen, _ := cmd.Flags().GetBool("no-open"); !noOpen {
-				ready = func(url string) { openPage(url, cmd.ErrOrStderr()) }
+			noOpen, _ := cmd.Flags().GetBool("no-open")
+			log := cmd.ErrOrStderr()
+			ready := func(url string) {
+				serveBanner(log, url, reports, d.Config.Describe(), serveColor(log))
+				if !noOpen {
+					openPage(url, log)
+				}
 			}
 			talks := newWebTalks(load, reports)
-			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, cmd.ErrOrStderr()),
+			return web.Serve(cmd.Context(), addr, reports, webRun(load, reports, log),
 				web.Hooks{Ask: talks.ask, Info: webInfo(load), Plan: webPlan, Edit: talks.edit, Active: talks.active},
-				cmd.ErrOrStderr(), ready)
+				ready)
 		},
 	}
 	cmd.Flags().String("addr", "127.0.0.1:7777", "address to listen on")
@@ -326,12 +331,13 @@ func serveCmd(load func() (Deps, error)) *cobra.Command {
 }
 
 // openPage opens the page in the browser. Failing to is not serve failing:
-// the URL is on the line above, for the reader to open by hand.
+// the URL is named again, for the reader to open by hand: the banner may
+// have scrolled off, or gone to a log the reader is not looking at.
 func openPage(url string, log io.Writer) {
 	if opened, err := openBrowser(url); err != nil {
-		_, _ = fmt.Fprintf(log, "could not open a browser (%v); open %s\n", err, url)
+		_, _ = fmt.Fprintf(log, "  could not open a browser (%v); open %s\n", err, url)
 	} else if !opened {
-		_, _ = fmt.Fprintf(log, "no display to open a browser on; open %s\n", url)
+		_, _ = fmt.Fprintf(log, "  no display to open a browser on; open %s\n", url)
 	}
 }
 
