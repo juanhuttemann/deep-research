@@ -5,6 +5,28 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The Plan phase view is easier to scan: each sub-topic's number and name
+  are in the colour its sub-agent has in the research tree, a blank row
+  separates the sub-topics, and the search terms are separated by dots and
+  wrap between terms instead of splitting one across rows.
+- The install script reads as a checklist: a mark for each step, the
+  version installed (or the version it replaced, on an upgrade), the line
+  that puts the install folder on your `PATH` when it is missing, and the
+  first commands to run. It is in colour on a terminal, and plain when piped
+  or when `NO_COLOR` is set.
+- `drsh setup`'s service check is easier to read: a green, yellow or red
+  mark per check, the detail and its fix wrapped under their own column
+  instead of the terminal breaking words (and links) back at the first
+  column, the failure in red, and each key in the hints set apart from what
+  it does.
+- `drsh serve` starts with a short banner instead of a bare "serving on"
+  line: the page's link (clickable in terminals that support it), the
+  model and search the page's runs will use, the reports folder, and how to
+  stop the server. It is in colour on a terminal, and plain when the log is
+  redirected or `NO_COLOR` is set.
+
 ## [0.33.1] - 2026-11-13
 
 ### Fixed

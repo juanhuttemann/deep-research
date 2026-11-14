@@ -954,8 +954,8 @@ func TestOpenPageFailureNamesTheURL(t *testing.T) {
 		want   string
 	}{
 		{true, nil, ""},
-		{false, nil, "no display to open a browser on; open http://localhost:1\n"},
-		{false, errors.New("exec: \"xdg-open\": not found"), "could not open a browser (exec: \"xdg-open\": not found); open http://localhost:1\n"},
+		{false, nil, "  no display to open a browser on; open http://localhost:1\n"},
+		{false, errors.New("exec: \"xdg-open\": not found"), "  could not open a browser (exec: \"xdg-open\": not found); open http://localhost:1\n"},
 	} {
 		openBrowser = func(string) (bool, error) { return tc.opened, tc.err }
 		var log strings.Builder

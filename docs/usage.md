@@ -579,7 +579,8 @@ in the default browser once it is listening (`$BROWSER` if set, a program or
 a command line such as `firefox --new-window` or `firefox %s`; `wslview` or
 Windows' browser under WSL; nothing on a Linux session with no display, such
 as SSH, where the URL it prints is the way in); `--no-open` leaves that to
-you. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
+you. On start it prints the page's link, the model and search the page's
+runs will use, and the reports folder, to stderr. It follows the system's light or dark setting until the toggle in its top bar picks one, which the browser keeps. The form takes the
 question and the same settings the terminal's start screen shows: `--mode`,
 `--topics` (as "Sub-topics", auto by default), `--sources` (as "Pages per
 topic"), `--no-follow-ups` (as "Follow-ups"), `--format`, `--words`,

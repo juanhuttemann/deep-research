@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
@@ -134,9 +135,10 @@ func runSetup(cmd *cobra.Command, sec sections) error {
 	}
 	if sec.model && sec.search {
 		fmt.Fprintln(out, setup.Title("setup"))
-		fmt.Fprintln(out, "Three steps: the model that does the research, where it searches the web, and")
-		fmt.Fprintln(out, "what reads each result's page. Nothing is saved until you confirm the review.")
-		fmt.Fprintln(out, setup.Dim("Saved in "+st.dir+"; run one part again with drsh setup model, search or scraper."))
+		w := min(outWidth(out), 80)
+		fmt.Fprintln(out, setup.Hang("Three steps: the model that does the research, where it searches the web, "+
+			"and what reads each result's page. Nothing is saved until you confirm the review.", w, 0))
+		fmt.Fprintln(out, setup.Dim(setup.Hang("Saved in "+st.dir+"; run one part again with drsh setup model, search or scraper.", w, 0)))
 		fmt.Fprintln(out)
 	}
 	return setupLoop(ctx, out, st, setupDraft{asked: sec})
@@ -295,7 +297,7 @@ func reviewAndCheck(ctx context.Context, out io.Writer, st loginState, d setupDr
 		if checkServices(ctx, out, st, d) {
 			return "save"
 		}
-		pick, err := setup.Ask(ctx, "The check failed. A setting that fails now usually fails in a run too.",
+		pick, err := setup.Ask(ctx, setup.Failed("The check failed.")+" A setting that fails now usually fails in a run too.",
 			[]setup.Choice{{Key: "r", Help: "r check again"}, {Key: "e", Help: "e edit"},
 				{Key: "s", Help: "s save anyway"}, {Key: "q", Help: "q quit"}})
 		switch {
@@ -426,15 +428,17 @@ func checkServices(ctx context.Context, out io.Writer, st loginState, d setupDra
 	full, _ := settings(d.services)
 	cfg, err := st.env.WithSearch(full, d.services.Keys, st.store)
 	if err != nil {
-		fmt.Fprintf(out, "✗ %v\n", err)
+		fmt.Fprintf(out, "  %s %s\n", setup.Mark("✗"), setup.Hang(err.Error(), outWidth(out), 4))
 		return false
 	}
 	if !cfg.SearchEnabled() {
 		// Nothing searches, so nothing reads pages: there is nothing to ask.
 		return true
 	}
-	fmt.Fprintln(out, "checking: one search query and one page read…")
+	fmt.Fprintln(out, setup.Dim("checking: one search query and one page read…"))
+	fmt.Fprintln(out)
 	ok := true
+	w := outWidth(out)
 	for _, c := range []agent.Check{agent.CheckSearch(ctx, cfg.Config), agent.CheckScraper(ctx, cfg.Config)} {
 		mark := "✓"
 		switch {
@@ -443,12 +447,29 @@ func checkServices(ctx context.Context, out io.Writer, st loginState, d setupDra
 		case c.Warn:
 			mark = "!"
 		}
-		fmt.Fprintf(out, "%s %-8s %s\n", mark, c.Name, c.Detail)
+		// Detail and fix wrap under the detail's column, not the screen's
+		// first, so the name and mark stay the left edge of each check.
+		fmt.Fprintf(out, "  %s %s %s\n", setup.Mark(mark), setup.Bold(c.Name)+strings.Repeat(" ", max(8-len(c.Name), 0)), setup.Hang(c.Detail, w, checkIndent))
 		if c.Fix != "" && (!c.OK || c.Warn) {
-			fmt.Fprintf(out, "  %-8s → %s\n", "", c.Fix)
+			fmt.Fprintf(out, "%s%s %s\n", strings.Repeat(" ", checkIndent), setup.Dim("→"), setup.Hang(c.Fix, w, checkIndent+2))
 		}
 	}
+	fmt.Fprintln(out)
 	return ok
+}
+
+// checkIndent is where a check's detail starts: "  ✓ search   ".
+const checkIndent = 13
+
+// outWidth is the terminal's width less one when out is one, else 80: a row
+// that fills the last column wraps early on some terminals.
+func outWidth(out io.Writer) int {
+	if f, ok := out.(*os.File); ok {
+		if w, _, err := term.GetSize(f.Fd()); err == nil && w > 1 {
+			return w - 1
+		}
+	}
+	return 80
 }
 
 // localDocker reports whether this setup chose a local SearXNG in Docker,
