@@ -151,7 +151,12 @@ second source; any other port does. Each phase's prompt caps a source at
 queries (`tools.ExcerptFor`), not its opening, which on a documentation site is
 navigation and a cookie dialog. Each passage carries its section context,
 the heading above it and the section's opening sentence, inside the same
-budget, so its scope survives the cut.
+budget, so its scope survives the cut. Oversized multi-line blocks also
+compete by their best matching line, using the same page-level term weights.
+Equal-tier ties favor the passage answering more queries, so metadata cannot
+exclude an entire table needed by several claims. Their compact matching lines are budgeted
+beside other passages before spare space is filled, retaining headers and
+section context. A single overlong line still uses a conservative prefix.
 
 The analysis is a decision, not only prose: its reading of the question,
 atomic claims (each with the option and criterion it is about, its scope and
@@ -189,7 +194,7 @@ r2, ...) are governed alike; "recommendation" below means either. The Driver hol
   contradiction on a page a claim does not cite reaches the check; and each
   recommendation followed by the text of the claims it names, judged first
   and against those alone. `make eval-replay` measures both on frozen
-  analyses (`internal/ui/testdata/checker`).
+  analyses (`internal/ui/testdata/checker`); see [evaluation](evaluation.md).
 
 What this guarantees, and what it does not: the report's answer section is
 written by the program from what passed, so no statement the check blocked

@@ -3,6 +3,7 @@ package tools
 import (
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -267,10 +268,41 @@ func ExcerptFor(content string, first, second []string, limit int) string {
 	for i, b := range blocks {
 		kinds[i] = headingKind(b)
 	}
-	keep := pickBlocks(blocks, kinds, bestScores(blocks, first, second), limit)
+	scores := bestScores(blocks, first, second, limit)
+	visible := slices.Clone(blocks)
+	for i, b := range blocks {
+		if len(b) > limit {
+			visible[i] = lineExcerpt(b, first, second, limit, true)
+		}
+	}
+	keep := pickBlocks(blocks, kinds, scores, limit, visible)
 	if keep == nil {
+		if len(blocks) == 1 {
+			return excerptLines(content, first, second, limit)
+		}
 		return truncateUTF8Bare(content, limit)
 	}
+	rendered := selectedText(visible, keep)
+	if len(rendered) > limit {
+		primary := 0
+		for i, v := range scores {
+			if v > scores[primary] {
+				primary = i
+			}
+		}
+		// Context stays verbatim. Trim within the selected passage only, so
+		// overflow cannot silently remove a scope qualifier above it.
+		available := limit - (len(rendered) - len(visible[primary]))
+		if available > 0 {
+			visible[primary] = excerptLines(blocks[primary], first, second, available)
+			rendered = selectedText(visible, keep)
+		}
+	}
+	rendered = expandSelectedLines(blocks, visible, keep, first, second, rendered, limit)
+	return truncateUTF8Bare(rendered, limit)
+}
+
+func selectedText(blocks []string, keep []bool) string {
 	var sb strings.Builder
 	last := -1
 	for i, b := range blocks {
@@ -286,7 +318,69 @@ func ExcerptFor(content string, first, second []string, limit int) string {
 		sb.WriteString(b)
 		last = i
 	}
-	return truncateUTF8Bare(sb.String(), limit)
+	return sb.String()
+}
+
+// excerptLines retains a block's opening line (table columns, for example)
+// and selects matching whole lines in the remaining space. A single long
+// line still uses the conservative prefix; no words are stitched together.
+func excerptLines(content string, first, second []string, limit int) string {
+	return lineExcerpt(content, first, second, limit, false)
+}
+
+func lineExcerpt(content string, first, second []string, limit int, core bool) string {
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if len(lines) < 2 || len(lines[0])+1 >= limit {
+		return truncateUTF8Bare(content, limit)
+	}
+	prefix := lines[0] + "\n"
+	kinds := make([]int, len(lines))
+	for i, line := range lines {
+		kinds[i] = headingKind(line)
+	}
+	scores := bestScores(lines, first, second, limit-len(prefix))
+	if core {
+		for i, v := range scores {
+			if v <= 1 {
+				scores[i] = 0
+			}
+		}
+	}
+	keep := pickBlocks(lines, kinds, scores, limit-len(prefix), lines)
+	if keep == nil {
+		return truncateUTF8Bare(content, limit)
+	}
+	// The opening line is already reserved; retain any other selected scope.
+	return truncateUTF8Bare(prefix+selectedText(lines[1:], keep[1:]), limit)
+}
+
+// First reserve each query's best lines so one large block cannot crowd out
+// another claim's passage. Fill spare space only without losing that core.
+func expandSelectedLines(blocks, visible []string, keep []bool, first, second []string, rendered string, limit int) string {
+	for i, b := range blocks {
+		if !keep[i] || len(b) <= limit || len(rendered) >= limit {
+			continue
+		}
+		available := limit - (len(rendered) - len(visible[i]))
+		expanded := excerptLines(b, first, second, available)
+		if len(expanded) > len(visible[i]) && keepsCoreLines(expanded, visible[i]) {
+			visible[i] = expanded
+			rendered = selectedText(visible, keep)
+		}
+	}
+	return rendered
+}
+
+func keepsCoreLines(expanded, core string) bool {
+	for _, line := range strings.Split(core, "\n") {
+		if strings.TrimSpace(line) == "" || strings.TrimSpace(line) == "[…]" {
+			continue
+		}
+		if !strings.Contains(expanded, line) {
+			return false
+		}
+	}
+	return true
 }
 
 // blockBreak separates passages: a blank line, which in scraped Markdown often
@@ -323,7 +417,7 @@ func queryWords(f transform.Transformer, query string) []string {
 // outscored every paragraph that answered the query. folded is blocks
 // already folded: folding is the costly part, and the same page is scored
 // against every claim of a fact-check.
-func blockScores(blocks, folded, words []string) []float64 {
+func blockScores(blocks, folded, words []string, limit int) []float64 {
 	total := 0
 	for _, b := range blocks {
 		total += len(b)
@@ -331,7 +425,8 @@ func blockScores(blocks, folded, words []string) []float64 {
 	avg := float64(total) / float64(max(len(blocks), 1))
 	scores := make([]float64, len(blocks))
 	in := make([]int, 0, len(blocks))
-	for _, w := range words {
+	weights := make([]float64, len(words))
+	for wordIndex, w := range words {
 		in = in[:0]
 		for i, b := range folded {
 			if strings.Contains(b, w) {
@@ -339,14 +434,36 @@ func blockScores(blocks, folded, words []string) []float64 {
 			}
 		}
 		idf := math.Log(float64(len(blocks)+1) / float64(len(in)+1))
+		weights[wordIndex] = idf
 		for _, i := range in {
 			scores[i] += idf
 		}
 	}
 	for i, b := range blocks {
 		scores[i] /= 0.25 + 0.75*max(float64(len(b)), avg)/max(avg, 1)
+		if len(b) > limit && strings.Contains(b, "\n") {
+			scores[i] = max(scores[i], bestLineScore(folded[i], words, weights, avg))
+		}
 	}
 	return scores
+}
+
+// A matching row must compete on its own evidence, not the total size of an
+// unsendable table. Keep the original page-level term weights and average so
+// rows do not change document frequencies or penalize unrelated paragraphs.
+func bestLineScore(content string, words []string, weights []float64, avg float64) float64 {
+	best := 0.0
+	for _, line := range strings.Split(content, "\n") {
+		score := 0.0
+		for i, w := range words {
+			if strings.Contains(line, w) {
+				score += weights[i]
+			}
+		}
+		score /= 0.25 + 0.75*max(float64(len(line)), avg)/max(avg, 1)
+		best = max(best, score)
+	}
+	return best
 }
 
 // bestScores is each block's best score against any one query, each query's
@@ -354,21 +471,24 @@ func blockScores(blocks, folded, words []string) []float64 {
 // first, on a tie) raised above every other, a first-tier query's highest:
 // on a page of near-identical paragraphs thirty blocks tied at the top for
 // one query and filled the budget before another query's best block was
-// reached. With one query the order is blockScores's own.
+// reached. Equal-tier winners favor the passage answering more queries in
+// that tier; second-tier matches cannot change first-tier priorities.
+// With one query the order is blockScores's own.
 //
 // The blocks are folded once here, not once per query: a fact-check scores
 // each page against all of its claims, and folding every block again for
 // each of thirty-six claims made one prompt cost twelve seconds of CPU.
-func bestScores(blocks, first, second []string) []float64 {
+func bestScores(blocks, first, second []string, limit int) []float64 {
 	folded, f := make([]string, len(blocks)), newFolder()
 	for i, b := range blocks {
 		folded[i] = foldWith(f, b)
 	}
 	best := make([]float64, len(blocks))
+	wins := make([]int, len(blocks))
 	for tier, queries := range [][]string{first, second} {
 		lift := 3.0 - float64(tier) // 3 for the first tier, 2 for the second
 		for _, q := range queries {
-			s := blockScores(blocks, folded, queryWords(f, q))
+			s := blockScores(blocks, folded, queryWords(f, q), limit)
 			top, at := 0.0, -1
 			for i, v := range s {
 				if v > top {
@@ -381,7 +501,19 @@ func bestScores(blocks, first, second []string) []float64 {
 			for i, v := range s {
 				best[i] = max(best[i], v/top)
 			}
+			if best[at] < lift {
+				wins[at] = 1
+			} else if best[at] == lift {
+				wins[at]++
+			}
 			best[at] = max(best[at], lift)
+		}
+	}
+	// Break equal-tier ties by how many queries a passage answers. A table
+	// answering many claims must not lose to an earlier metadata paragraph.
+	for i := range best {
+		if best[i] > 1 {
+			best[i] += float64(wins[i]) / float64(len(first)+len(second)+1) / 2
 		}
 	}
 	return best
@@ -389,9 +521,10 @@ func bestScores(blocks, first, second []string) []float64 {
 
 // pickBlocks takes the best-scoring blocks that fit in limit, best first,
 // each with its section context (see sectionContext), which counts against
-// the limit like the block itself. A best block too long to fit is still
-// taken, and clipped by the caller. It returns nil when no block scores.
-func pickBlocks(blocks []string, kinds []int, scores []float64, limit int) []bool {
+// the limit like the block itself, charged at its rendered size in visible.
+// The first selected block may exceed the budget and is clipped by the caller.
+// It returns nil when no block scores.
+func pickBlocks(blocks []string, kinds []int, scores []float64, limit int, visible []string) []bool {
 	order := make([]int, len(blocks))
 	for i := range order {
 		order[i] = i
@@ -410,7 +543,7 @@ func pickBlocks(blocks []string, kinds []int, scores []float64, limit int) []boo
 		n := 0
 		for _, j := range add {
 			if !keep[j] {
-				n += len(blocks[j]) + len(elision)
+				n += len(visible[j]) + len(elision)
 			}
 		}
 		if used > 0 && used+n > limit {

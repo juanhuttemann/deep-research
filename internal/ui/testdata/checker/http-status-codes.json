@@ -1,0 +1,35 @@
+{
+  "about": "Public IANA HTTP status registry. The requested row is beyond the first 1500 bytes of a dense source block. Correct and incorrect descriptions test support after excerpt selection.",
+  "findings": [
+    {
+      "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes-1.csv",
+      "title": "IANA HTTP Status Code Registry",
+      "query": "HTTP 429 Too Many Requests",
+      "content": "Value,Description,Reference\r\n100,Continue,\"[RFC 9110, Section 15.2.1]\"\r\n101,Switching Protocols,\"[RFC 9110, Section 15.2.2]\"\r\n102,Processing,[RFC 2518]\r\n103,Early Hints,[RFC 8297]\r\n104,\"Upload Resumption Supported (TEMPORARY - registered 2024-11-13, extension registered 2025-09-15, expires 2026-11-13)\",[draft-ietf-httpbis-resumable-upload-05]\r\n105-199,Unassigned,\r\n200,OK,\"[RFC 9110, Section 15.3.1]\"\r\n201,Created,\"[RFC 9110, Section 15.3.2]\"\r\n202,Accepted,\"[RFC 9110, Section 15.3.3]\"\r\n203,Non-Authoritative Information,\"[RFC 9110, Section 15.3.4]\"\r\n204,No Content,\"[RFC 9110, Section 15.3.5]\"\r\n205,Reset Content,\"[RFC 9110, Section 15.3.6]\"\r\n206,Partial Content,\"[RFC 9110, Section 15.3.7]\"\r\n207,Multi-Status,[RFC 4918]\r\n208,Already Reported,[RFC 5842]\r\n209-225,Unassigned,\r\n226,IM Used,[RFC 3229]\r\n227-299,Unassigned,\r\n300,Multiple Choices,\"[RFC 9110, Section 15.4.1]\"\r\n301,Moved Permanently,\"[RFC 9110, Section 15.4.2]\"\r\n302,Found,\"[RFC 9110, Section 15.4.3]\"\r\n303,See Other,\"[RFC 9110, Section 15.4.4]\"\r\n304,Not Modified,\"[RFC 9110, Section 15.4.5]\"\r\n305,Use Proxy,\"[RFC 9110, Section 15.4.6]\"\r\n306,(Unused),\"[RFC 9110, Section 15.4.7]\"\r\n307,Temporary Redirect,\"[RFC 9110, Section 15.4.8]\"\r\n308,Permanent Redirect,\"[RFC 9110, Section 15.4.9]\"\r\n309-399,Unassigned,\r\n400,Bad Request,\"[RFC 9110, Section 15.5.1]\"\r\n401,Unauthorized,\"[RFC 9110, Section 15.5.2]\"\r\n402,Payment Required,\"[RFC 9110, Section 15.5.3]\"\r\n403,Forbidden,\"[RFC 9110, Section 15.5.4]\"\r\n404,Not Found,\"[RFC 9110, Section 15.5.5]\"\r\n405,Method Not Allowed,\"[RFC 9110, Section 15.5.6]\"\r\n406,Not Acceptable,\"[RFC 9110, Section 15.5.7]\"\r\n407,Proxy Authentication Required,\"[RFC 9110, Section 15.5.8]\"\r\n408,Request Timeout,\"[RFC 9110, Section 15.5.9]\"\r\n409,Conflict,\"[RFC 9110, Section 15.5.10]\"\r\n410,Gone,\"[RFC 9110, Section 15.5.11]\"\r\n411,Length Required,\"[RFC 9110, Section 15.5.12]\"\r\n412,Precondition Failed,\"[RFC 9110, Section 15.5.13]\"\r\n413,Content Too Large,\"[RFC 9110, Section 15.5.14]\"\r\n414,URI Too Long,\"[RFC 9110, Section 15.5.15]\"\r\n415,Unsupported Media Type,\"[RFC 9110, Section 15.5.16]\"\r\n416,Range Not Satisfiable,\"[RFC 9110, Section 15.5.17]\"\r\n417,Expectation Failed,\"[RFC 9110, Section 15.5.18]\"\r\n418,(Unused),\"[RFC 9110, Section 15.5.19]\"\r\n419-420,Unassigned,\r\n421,Misdirected Request,\"[RFC 9110, Section 15.5.20]\"\r\n422,Unprocessable Content,\"[RFC 9110, Section 15.5.21]\"\r\n423,Locked,[RFC 4918]\r\n424,Failed Dependency,[RFC 4918]\r\n425,Too Early,[RFC 8470]\r\n426,Upgrade Required,\"[RFC 9110, Section 15.5.22]\"\r\n427,Unassigned,\r\n428,Precondition Required,[RFC 6585]\r\n429,Too Many Requests,[RFC 6585]\r\n430,Unassigned,\r\n431,Request Header Fields Too Large,[RFC 6585]\r\n432-450,Unassigned,\r\n451,Unavailable For Legal Reasons,[RFC 7725]\r\n452-499,Unassigned,\r\n500,Internal Server Error,\"[RFC 9110, Section 15.6.1]\"\r\n501,Not Implemented,\"[RFC 9110, Section 15.6.2]\"\r\n502,Bad Gateway,\"[RFC 9110, Section 15.6.3]\"\r\n503,Service Unavailable,\"[RFC 9110, Section 15.6.4]\"\r\n504,Gateway Timeout,\"[RFC 9110, Section 15.6.5]\"\r\n505,HTTP Version Not Supported,\"[RFC 9110, Section 15.6.6]\"\r\n506,Variant Also Negotiates,[RFC 2295]\r\n507,Insufficient Storage,[RFC 4918]\r\n508,Loop Detected,[RFC 5842]\r\n509,Unassigned,\r\n510,Not Extended (OBSOLETED),[RFC 2774]; [Status change of HTTP experiments to Historic]\r\n511,Network Authentication Required,[RFC 6585]\r\n512-599,Unassigned,\r\n"
+    }
+  ],
+  "claims": [
+    {
+      "id": "c1",
+      "claim": "HTTP status code 429 means Too Many Requests.",
+      "sources": [
+        "https://www.iana.org/assignments/http-status-codes/http-status-codes-1.csv"
+      ]
+    },
+    {
+      "id": "c2",
+      "claim": "HTTP status code 429 means Not Found.",
+      "sources": [
+        "https://www.iana.org/assignments/http-status-codes/http-status-codes-1.csv"
+      ]
+    }
+  ],
+  "expect": {
+    "supported": [
+      "c1"
+    ],
+    "not_supported": [
+      "c2"
+    ]
+  }
+}

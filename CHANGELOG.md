@@ -5,6 +5,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Source excerpts can select matching rows from long multi-line blocks
+  that previously lost to short metadata passages. Compact evidence is
+  budgeted beside other claims' passages before filling spare space, keeping
+  section context and column headers within the same source limit.
+
+### Added
+
+- The maintainer checker evaluation can save exact prompts, parsed responses
+  and governed outcomes, fail strictly on incorrect judgments, and compare
+  per-ID results across repeated runs. The evaluation guide documents how
+  to investigate and verify a correction without conversation context.
+
 ## [0.34.0] - 2026-11-14
 
 ### Changed

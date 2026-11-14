@@ -6,13 +6,16 @@ package tools
 // read as unfinished work.
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -1076,5 +1079,223 @@ func TestPageScorerJudgesAsASearchResult(t *testing.T) {
 		if got, want := sc.Score(page), relevance(queryWords(newFolder(), "énergie nucléaire coûts"), "", page); got != want {
 			t.Errorf("Score(%q) = %v, want %v", page, got, want)
 		}
+	}
+}
+
+// The selected passage fits the budget, but its section lead previously
+// consumed the space first and the final prefix cut removed the target row.
+func TestExcerptKeepsSelectedRegistryRowsWithinBudget(t *testing.T) {
+	data, err := os.ReadFile("testdata/http-status-codes.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table strings.Builder
+	for _, r := range records {
+		if r[0] >= "400" && r[0] <= "429" && len(r[0]) == 3 {
+			table.WriteString(strings.Join(r, ","))
+			table.WriteByte('\n')
+		}
+	}
+	lead := "1xx: Informational - Request received, continuing process\n" +
+		"2xx: Success - The action was successfully received, understood, and accepted\n" +
+		"3xx: Redirection - Further action must be taken in order to complete the request\n" +
+		"4xx: Client Error - The request contains bad syntax or cannot be fulfilled"
+	page := "## HTTP Status Codes\n\n" + lead + "\n\n" + table.String()
+	if len(table.String())+len(elision) > 1500 || len(page) <= 1500 || len(lead) > maxLeadBytes {
+		t.Fatal("fixture must have a fitting table but overflowing context")
+	}
+	got := ExcerptFor(page, []string{"429 Too Many Requests"}, nil, 1500)
+	if !strings.Contains(got, lead) {
+		t.Error("lost the registry classification notes")
+	}
+	if !strings.Contains(got, "429,Too Many Requests") {
+		t.Error("selected table lost its requested status-code row")
+	}
+	if !strings.Contains(got, "## HTTP Status Codes") {
+		t.Error("lost the section heading")
+	}
+	if len(got) > 1500 {
+		t.Fatalf("excerpt grew to %d bytes", len(got))
+	}
+}
+
+func TestExcerptKeepsRequestedRowsInTheFullPublicRegistry(t *testing.T) {
+	data, err := os.ReadFile("testdata/http-status-codes.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []string{"429,Too Many Requests", "503,Service Unavailable"} {
+		t.Run(entry, func(t *testing.T) {
+			got := ExcerptFor(string(data), []string{strings.ReplaceAll(entry, ",", " ")}, nil, 1500)
+			if !strings.Contains(got, entry) {
+				t.Errorf("lost requested public registry row %q", entry)
+			}
+			if !strings.HasPrefix(got, "Value,Description,Reference") {
+				t.Error("lost the column header")
+			}
+			if len(got) > 1500 {
+				t.Fatalf("excerpt grew to %d bytes", len(got))
+			}
+		})
+	}
+}
+
+// A single long line still uses a conservative prefix; preserving its scope
+// takes priority over recovering evidence at the end of that line.
+func TestExcerptKeepsScopeWhenSingleLineEvidenceCannotFit(t *testing.T) {
+	heading := "## Retry behavior"
+	qualifier := "These rules apply only to authenticated requests."
+	body := strings.Repeat("Request metadata is described here; ", 40) + "HTTP 429 means Too Many Requests."
+	page := heading + "\n\n" + qualifier + "\n\n" + body + "\n\n" + strings.Repeat("Appendix.\n\n", 50)
+	if len(body) > 1500 || len(heading)+len(qualifier)+len(body) <= 1500 {
+		t.Fatal("fixture must fit the passage but overflow with scope")
+	}
+	got := ExcerptFor(page, []string{"429"}, nil, 1500)
+	if !strings.Contains(got, qualifier) {
+		t.Fatal("lost the qualifying scope to preserve a matching tail")
+	}
+	if !strings.Contains(got, heading) {
+		t.Fatal("lost the heading")
+	}
+}
+
+func TestLaterExcerptPassageIsNotAdmittedWithoutItsContext(t *testing.T) {
+	blocks := []string{"Primary requested evidence.", "## Conditional behavior", strings.Repeat("These rules apply only to authenticated requests; ", 4), "Secondary requested evidence."}
+	kinds := []int{notHeading, sectionHeading, notHeading, notHeading}
+	keep := pickBlocks(blocks, kinds, []float64{3, 0, 0, 2}, 150, blocks)
+	if !keep[0] {
+		t.Fatal("lost the first requested passage")
+	}
+	if keep[3] {
+		t.Fatal("admitted a later passage whose qualifying context does not fit")
+	}
+}
+
+func TestExcerptKeepsHeadingsInsideADenseBlock(t *testing.T) {
+	page := "# HTTP responses\nAuthenticated requests only.\n" + strings.Repeat("General response metadata.\n", 70) + "## Legacy behavior\nDiscontinued; not available for new requests.\n429,Too Many Requests\n" + strings.Repeat("Other metadata.\n", 20)
+	got := ExcerptFor(page, []string{"429 Too Many Requests"}, nil, 1500)
+	for _, required := range []string{"# HTTP responses", "## Legacy behavior", "Discontinued; not available for new requests.", "429,Too Many Requests"} {
+		if !strings.Contains(got, required) {
+			t.Errorf("lost required context or evidence %q:\n%s", required, got)
+		}
+	}
+}
+
+func TestExcerptKeepsScopeAndAnEarlyMatchWhenContextOverflows(t *testing.T) {
+	qualifier := "These rules apply only to authenticated requests."
+	fact := "HTTP 429 means Too Many Requests."
+	body := fact + strings.Repeat("Request metadata is described here; ", 40)
+	page := "## Retry behavior\n\n" + qualifier + "\n\n" + body + "\n\n" + strings.Repeat("Appendix.\n\n", 50)
+	got := ExcerptFor(page, []string{"429"}, nil, 1500)
+	for _, required := range []string{qualifier, fact} {
+		if !strings.Contains(got, required) {
+			t.Errorf("lost scope or existing matching evidence: %q", required)
+		}
+	}
+}
+
+// Official names were present in the fetched registry but absent from the
+// checker input: treating the entire table as one passage hid matching rows.
+func TestExcerptSelectsPublicRegistryRowsForClaims(t *testing.T) {
+	data, err := os.ReadFile("testdata/http-status-codes.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := []string{
+		"The IANA registry assigns 506 with the description Variant Also Negotiates.",
+		"The IANA registry assigns 507 with the description Insufficient Storage.",
+		"The IANA registry assigns 508 with the description Loop Detected.",
+		"The IANA registry assigns 511 with the description Network Authentication Required.",
+	}
+	got := ExcerptFor(string(data), claims, nil, 1500)
+	for _, row := range []string{"| 506 | Variant Also Negotiates |", "| 507 | Insufficient Storage |", "| 508 | Loop Detected |", "| 511 | Network Authentication Required |"} {
+		if !strings.Contains(got, row) {
+			t.Errorf("omitted needed registry row %q:\n%s", row, got)
+		}
+	}
+	if !strings.Contains(got, "Value") || !strings.Contains(got, "Description") {
+		t.Fatal("lost registry columns")
+	}
+	if len(got) > 1500 {
+		t.Fatalf("excerpt grew to %d bytes", len(got))
+	}
+}
+
+func TestExcerptDoesNotCombineUnrelatedLineMatchesIntoEvidence(t *testing.T) {
+	bulky := strings.Repeat("widget\nnode\nscaling\n", 100)
+	focused := "Widget nodes support scheduled scaling."
+	page := strings.Repeat("General reference information.\n\n", 20) + bulky + "\n\n" + focused + "\n\n" + strings.Repeat("Other reference information.\n\n", 20)
+	got := ExcerptFor(page, []string{"widget node scaling"}, nil, 300)
+	if !strings.Contains(got, focused) {
+		t.Errorf("unrelated one-word lines displaced the actual passage:\n%s", got)
+	}
+}
+
+func TestExcerptSharesBudgetBetweenLongTableAndProse(t *testing.T) {
+	data, err := os.ReadFile("testdata/http-status-codes.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prose := "The server MAY send a Retry-After header field to suggest an appropriate amount of time for the client to wait before retrying the request."
+	page := string(data) + "\n\n## Retry-After\n\n" + prose
+	queries := []string{"IANA assigns 507 with the description Insufficient Storage.", "A server may send Retry-After to suggest the time for a client to wait before retrying."}
+	for _, firstTable := range []bool{true, false} {
+		first, second := queries, []string(nil)
+		if !firstTable {
+			first, second = queries[1:], queries[:1]
+		}
+		got := ExcerptFor(page, first, second, 1500)
+		for _, required := range []string{"| 507 | Insufficient Storage |", prose, "| Value | Description | Reference |"} {
+			if !strings.Contains(got, required) {
+				t.Errorf("one passage displaced another (table priority %v): %q\n%s", firstTable, required, got)
+			}
+		}
+		if len(got) > 1500 {
+			t.Fatalf("excerpt grew to %d bytes", len(got))
+		}
+	}
+}
+
+func TestExcerptRegistryRowsWithReferences(t *testing.T) {
+	data, err := os.ReadFile("testdata/http-status-codes.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := []string{
+		"The IANA HTTP Status Code Registry cites RFC 9110 Section 16.2.1 for its registration procedure.",
+		"The 5xx class means Server Error: the server failed to fulfill an apparently valid request.",
+		"IANA registers 500 as 'Internal Server Error' with reference RFC 9110 Section 15.6.1.",
+		"IANA registers 501 as 'Not Implemented' with reference RFC 9110 Section 15.6.2.",
+		"IANA registers 511 as 'Network Authentication Required' with reference RFC 6585.",
+		"The IANA registry lists 509 as Unassigned.",
+		"The IANA registry lists 510 as Not Extended (OBSOLETED) with reference RFC 2774.",
+
+		"IANA registers 502 as 'Bad Gateway' with reference RFC 9110 Section 15.6.3.",
+		"IANA registers 503 as 'Service Unavailable' with reference RFC 9110 Section 15.6.4.",
+		"IANA registers 504 as 'Gateway Timeout' with reference RFC 9110 Section 15.6.5.",
+		"IANA registers 505 as 'HTTP Version Not Supported' with reference RFC 9110 Section 15.6.6.",
+		"IANA registers 506 as 'Variant Also Negotiates' with reference RFC 2295.",
+		"IANA registers 507 as 'Insufficient Storage' with reference RFC 4918.",
+		"IANA registers 508 as 'Loop Detected' with reference RFC 5842.",
+	}
+	got := ExcerptFor(string(data), claims, nil, 1500)
+	for _, row := range []string{"| 502 | Bad Gateway |", "| 506 | Variant Also Negotiates |", "| 507 | Insufficient Storage |", "| 508 | Loop Detected |"} {
+		if !strings.Contains(got, row) {
+			t.Errorf("missing %q:\n%s", row, got)
+		}
+	}
+}
+
+func TestExcerptTieBreakKeepsCitedQueryPriority(t *testing.T) {
+	blocks := []string{"Alpha bravo evidence.", "Charlie delta evidence.", "Unrelated reference."}
+	first := []string{"alpha", "bravo", "charlie"}
+	second := []string{"delta", "delta", "delta", "delta"}
+	scores := bestScores(blocks, first, second, 1500)
+	if scores[0] <= scores[1] {
+		t.Fatalf("uncited queries changed cited priority: %v", scores)
 	}
 }
