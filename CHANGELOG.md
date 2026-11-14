@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-14
+
 ### Changed
 
 - The Plan phase view is easier to scan: each sub-topic's number and name
