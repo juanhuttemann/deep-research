@@ -1083,7 +1083,9 @@ does not. The operations are `sum`, `difference`, `product`, `ratio`,
 (`cagr`'s root is a float), and they never convert units. A chart is drawn
 from the same figures as `chart-<digest>.svg` beside the report, named by
 its content so a rerun never changes a chart an earlier report links to,
-and followed by its points as a table: the terminal shows the table, the
+and followed by its points as a table. A point that is not a supported
+figure is left out and listed with why; a chart needs two points that
+stand: the terminal shows the table, the
 PDF draws the chart, and `serve` shows the image.
 
 `--output FILE` writes the same document as the `.md` artifact: the question

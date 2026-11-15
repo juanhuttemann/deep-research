@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -398,41 +399,57 @@ func withUnit(v, unit string) string {
 }
 
 // drawChart resolves a chart's points and names the file it is drawn in,
-// or says why it is not drawn: a point that is not a supported figure, or
-// points in different units, which one axis cannot show.
+// or says why it is not drawn. A point that is not a supported figure is left
+// out, with why, and the rest are drawn when at least two stand: one year a
+// source does not state made a run's whole series disappear. Points in
+// another unit than the first that stands are left out too, since one axis
+// cannot show both.
 func drawChart(ch *agent.Chart, e *evaluator) {
 	ch.Unit, ch.File, ch.Reason = "", "", ""
 	if ch.Kind != compute.KindLine {
 		ch.Kind = compute.KindBar
 	}
-	switch {
-	case len(ch.Points) > compute.MaxPoints:
+	if len(ch.Points) > compute.MaxPoints {
 		ch.Reason = fmt.Sprintf("it has %d points, more than %d", len(ch.Points), compute.MaxPoints)
 		return
-	case ch.Kind == compute.KindLine && len(ch.Points) < 2:
-		ch.Reason = "a line needs two points"
-		return
 	}
+	standing, first := 0, ""
 	for j := range ch.Points {
 		p := &ch.Points[j]
-		in, why := e.input(p.Ref)
-		if why != "" {
-			p.Value, ch.Reason = "", why
-			return
+		p.Reason = pointReason(p, e, ch)
+		if p.Reason != "" {
+			first = cmp.Or(first, p.Reason)
+			continue
 		}
-		if j == 0 {
-			ch.Unit = in.Unit
-		} else if compute.UnitKey(in.Unit) != compute.UnitKey(ch.Unit) {
-			ch.Unit, ch.Reason = "", "its points are in different units"
-			return
+		standing++
+	}
+	if standing < 2 {
+		ch.Unit, ch.Reason = "", fmt.Sprintf("%d of its %d points stand", standing, len(ch.Points))
+		if first != "" {
+			ch.Reason += "; " + first
 		}
-		if !compute.Drawable(in.Value.Float()) {
-			ch.Unit, ch.Reason = "", p.Ref+" is too large to draw"
-			return
-		}
-		p.Value = in.Value.Plain()
+		return
 	}
 	ch.File = chartFileName(compute.SVG(chartOf(*ch)))
+}
+
+// pointReason resolves one point, setting its value and the chart's unit,
+// and says why it is left out, "" when it is drawn.
+func pointReason(p *agent.ChartPoint, e *evaluator, ch *agent.Chart) string {
+	p.Value = ""
+	in, why := e.input(p.Ref)
+	switch {
+	case why != "":
+		return why
+	case !compute.Drawable(in.Value.Float()):
+		return p.Ref + " is too large to draw"
+	case ch.Unit == "" && in.Unit != "":
+		ch.Unit = in.Unit
+	case compute.UnitKey(in.Unit) != compute.UnitKey(ch.Unit):
+		return p.Ref + " is in " + cmp.Or(in.Unit, "no unit") + ", the chart in " + ch.Unit
+	}
+	p.Value = in.Value.Plain()
+	return ""
 }
 
 // chartFileName names a chart's SVG by its content: the same chart is the
@@ -447,6 +464,9 @@ func chartFileName(svg []byte) string {
 func chartOf(ch agent.Chart) compute.Chart {
 	c := compute.Chart{Title: ch.Title, Kind: ch.Kind, Unit: ch.Unit}
 	for _, p := range ch.Points {
+		if p.Value == "" {
+			continue // left out (see drawChart)
+		}
 		n, _ := compute.ParseValue(p.Value)
 		c.Points = append(c.Points, compute.Point{Label: p.Label, Value: n.Float(), Text: n.String()})
 	}
@@ -589,6 +609,12 @@ func figuresSection(a *agent.Analysis, findings []agent.Finding) string {
 			continue
 		}
 		writeChart(&sb, ch)
+		for _, p := range ch.Points {
+			if p.Reason != "" {
+				failed = append(failed, fmt.Sprintf("- %s%s, point %s: %s", mdText(ch.ID), labelled(ch.Title),
+					mdText(firstNonEmpty(p.Label, p.Ref)), mdText(p.Reason)))
+			}
+		}
 	}
 	if len(rows) == 0 && len(failed) > 0 && !anyDrawn(a) {
 		sb.Reset()
@@ -626,6 +652,9 @@ func writeChart(sb *strings.Builder, ch agent.Chart) {
 	title := mdText(firstNonEmpty(ch.Title, ch.ID))
 	fmt.Fprintf(sb, "![%s](%s)\n\n| %s | %s |\n| --- | ---: |\n", title, ch.File, title, mdText(firstNonEmpty(ch.Unit, " ")))
 	for _, p := range ch.Points {
+		if p.Value == "" {
+			continue
+		}
 		n, _ := compute.ParseValue(p.Value)
 		fmt.Fprintf(sb, "| %s | %s |\n", mdText(firstNonEmpty(p.Label, p.Ref)), n.String())
 	}

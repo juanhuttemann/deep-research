@@ -75,6 +75,14 @@ func TestInTextMatchesWholeTokensOnly(t *testing.T) {
 		{"a fall of -3.5 points", "3.5", false}, // the sign is part of the figure
 		{"pages 10-20", "20", true},             // a hyphen between numbers is no minus
 		{"pages 10-20", "-20", false},
+		{"from 2019-2024", "-2024", false},
+		// A scraped chart's labels: escaped minus signs, cells run together.
+		{`Real GDP growth rate\-4.1%3.9%1.8%\-0.9%\-0.5%0.2%`, "-4.1", true},
+		{`Real GDP growth rate\-4.1%3.9%1.8%\-0.9%\-0.5%0.2%`, "-0.9", true},
+		{`Real GDP growth rate\-4.1%3.9%1.8%\-0.9%\-0.5%0.2%`, "-0.5", true},
+		{`growth was\-2.0 in 2023`, "-2.0", true}, // a label run into its value: both signs
+		{`a fall of \-2.0`, "2.0", false},
+		{`Real GDP growth rate\-4.1%3.9%1.8%\-0.9%\-0.5%0.2%`, "3.9", true},
 		{"rate 4.50%", "4.5", true},
 		{"v3.2 released", "3.2", false},
 		{"about 3e6 tonnes", "3", false}, // an exponent's mantissa is not the figure

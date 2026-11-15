@@ -38,8 +38,9 @@ mostly `pages` and `timeline`; read the fields you need (for example with
   Only one with `valid` true may be stated as a figure; otherwise `reason`
   says why it is not established.
 - `charts[]`: `id`, `title`, `kind` (`bar` or `line`), `points` (`label`,
-  `ref`, `value`) and `unit`. `file` is the SVG beside the report when it
-  was drawn; `reason` says why it was not.
+  `ref`, `value`, or `reason` for a point left out) and `unit`. `file` is
+  the SVG beside the report when it was drawn, from the points that stand
+  (at least two); `reason` says why it was not.
 - `recommendations[]` / `conclusions[]`: `choose` + `when`, or `statement`,
   resting on `claims`. One with `blocked` set was **not** approved
   (`failed` names the claims that did not pass): report it as not
