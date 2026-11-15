@@ -448,7 +448,7 @@ func SoleFigure(text, context string) (Number, bool) {
 		// A number in quotation marks is part of a title or a name quoted:
 		// a rank claim citing "The 100 most popular art museums" was given
 		// the value 100.
-		if len(t.readings) == 0 || isYear(t.token) || quotedAt[t.start] ||
+		if len(t.readings) == 0 || isYear(t.token) || quotedAt[t.start] || beforeName(rs, t.end) || beforeMonth(rs, t.end) ||
 			slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) {
 			continue
 		}
@@ -738,3 +738,47 @@ func writtenDecimals(tok string) int {
 	}
 	return len(tok) - i - 1
 }
+
+// beforeName reports whether a number is followed by a capitalized word
+// that is no unit or month: "360 Mozambique ranks Mawenzi third" names a
+// publisher, and the claim was given the value 360. A unit ("5 GW", "3
+// TEU") or a month ("5 March") is still a figure's.
+func beforeName(rs []rune, end int) bool {
+	words := wordsAfter(rs, end, 1)
+	if len(words) == 0 || end >= len(rs) || rs[end] != ' ' {
+		return false
+	}
+	j := end
+	for j < len(rs) && rs[j] == ' ' {
+		j++
+	}
+	if j >= len(rs) || !unicode.IsUpper(rs[j]) {
+		return false
+	}
+	w := strings.TrimSuffix(words[0], ".")
+	return units[w] == "" && scales[w] == "" && !months[w] && !moneyWords[w]
+}
+
+// beforeMonth reports whether a number is part of a date: a day before its
+// month ("11 September"), or a year before its era ("27 BC", "476 AD"),
+// which the years from 1800 to 2100 that isYear knows do not cover. A
+// history run gave "On 16 January 27 BC the Senate …" the value 16.
+func beforeMonth(rs []rune, end int) bool {
+	words := wordsAfter(rs, end, 1)
+	if len(words) != 1 {
+		return false
+	}
+	switch strings.TrimRight(words[0], ".") {
+	case "bc", "bce", "ad", "ce", "b.c", "a.d":
+		return true
+	}
+	return months[words[0]]
+}
+
+// moneyWords are currency and scale words written capitalized after a
+// figure ("1.234,5 Mio. Euro", "5 USD").
+var moneyWords = map[string]bool{"usd": true, "eur": true, "gbp": true, "jpy": true, "euro": true, "euros": true,
+	"dollar": true, "dollars": true, "pound": true, "pounds": true, "yen": true, "mio": true, "mrd": true, "mn": true, "bn": true}
+
+var months = map[string]bool{"january": true, "february": true, "march": true, "april": true, "may": true, "june": true,
+	"july": true, "august": true, "september": true, "october": true, "november": true, "december": true}

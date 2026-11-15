@@ -798,6 +798,9 @@ func byYear(cs []agent.Claim) [][]agent.Claim {
 	if distinctCount(cs, func(c agent.Claim) string { return c.Option }) == 1 {
 		return [][]agent.Claim{cs}
 	}
+	if series := seriesOf(cs); len(series) > 0 {
+		return series
+	}
 	groups, order := map[string][]agent.Claim{}, []string{}
 	for _, c := range cs {
 		year := claimYear(c)
@@ -841,10 +844,10 @@ func autoChart(cs []agent.Claim, n int) (agent.Chart, bool) {
 // autoPoints are a group's points, each label once: the subject, or for one
 // subject over a series the year in its scope (a scope is a sentence,
 // "Germany, calendar year 2023; …"). years reports whether the labels are
-// years in order, which a line draws.
+// years, put in order, which a line draws.
 func autoPoints(cs []agent.Claim, byScope bool) (points []agent.ChartPoint, years bool) {
 	seen := map[string]bool{}
-	years, prev := true, -1
+	years = true
 	for _, c := range cs {
 		label := firstNonEmpty(c.Option, c.Scope)
 		if byScope {
@@ -857,9 +860,13 @@ func autoPoints(cs []agent.Claim, byScope bool) (points []agent.ChartPoint, year
 		}
 		seen[label] = true
 		points = append(points, agent.ChartPoint{Label: label, Ref: c.ID})
-		y, err := strconv.Atoi(label)
-		years = years && err == nil && y > prev
-		prev = y
+		_, err := strconv.Atoi(label)
+		years = years && err == nil
+	}
+	// A series is drawn in time order, whatever order the claims came in
+	// (a run gave 2024, 2023, then 2019).
+	if years {
+		slices.SortStableFunc(points, func(a, b agent.ChartPoint) int { return strings.Compare(a.Label, b.Label) })
 	}
 	return points, years
 }
@@ -1022,4 +1029,33 @@ func isRank(c agent.Claim) bool {
 		}
 	}
 	return false
+}
+
+// seriesOf are the subjects of a group with figures for two or more years,
+// each its own series. When a subject has one, it is charted over its years
+// rather than beside other subjects in one year: a Schiphol run charted the
+// airport's 2024 passengers beside the group total that includes them, and
+// not the group's own 2019, 2023 and 2024 figures.
+func seriesOf(cs []agent.Claim) [][]agent.Claim {
+	bySubject, order := map[string][]agent.Claim{}, []string{}
+	for _, c := range cs {
+		s := oneLine(c.Option)
+		if bySubject[s] == nil {
+			order = append(order, s)
+		}
+		bySubject[s] = append(bySubject[s], c)
+	}
+	var out [][]agent.Claim
+	for _, s := range order {
+		years := map[string]bool{}
+		for _, c := range bySubject[s] {
+			if y := claimYear(c); y != "" {
+				years[y] = true
+			}
+		}
+		if len(years) >= 2 {
+			out = append(out, bySubject[s])
+		}
+	}
+	return out
 }

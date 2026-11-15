@@ -73,6 +73,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   value 100.
 - A conclusion may rest on a computation itself and stands or falls with
   it: a run's conclusion naming "m1" was refused as resting on no claim.
+- When a subject has figures for several years, the program charts its
+  series, in time order, rather than comparing subjects in one year: a
+  Schiphol run charted the airport's 2024 passengers beside the group
+  total that includes them, and not the group's own 2019-2024 figures.
+- A number that is part of a name or a date is not read as a claim's
+  figure: "360 Mozambique ranks Mawenzi third" gave a claim the value 360,
+  and "On 16 January 27 BC" the value 16. Capitalized scale and currency
+  words ("Mio. Euro", "USD") still read as units.
 - The program draws no chart of ranks, and a chart's title takes a scope
   only when it is short.
 - A chart the program draws to compare subjects holds them to one year: a
