@@ -34,6 +34,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- A growth rate's unit is "%": the program's cagr, written "% a period",
+  contradicted a run's claim of the same 9.25 "percent", so the answer
+  called the figure not established while the report computed it. A
+  quantity the analyzer charted is not charted again from another source,
+  and a figure several sites give for one year is named with its site
+  ("Apple 2024, bullfincher.io") rather than by its whole sentence.
 - The Fact-Check section says what the check found about each claim it did
   not confirm, in words: "Partly supported", "Contradicted", "Disputed",
   "Not established", "Not checked". It listed them under symbols ("?

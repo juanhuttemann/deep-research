@@ -11,6 +11,7 @@ import (
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/compute"
+	"github.com/juanhuttemann/deep-research/internal/tools"
 )
 
 // The report is read without the run's audit: an ID ("m1", "c5") or the
@@ -76,40 +77,49 @@ func newNamer(a *agent.Analysis) *namer {
 }
 
 // shortClaimName is the shortest name that tells c from the other claims:
-// its subject, its subject and year, its subject and criterion, else its
-// own words.
+// its subject, its subject and year, its subject and criterion, its year,
+// a short scope, then any of those with the site it was read on ("Apple
+// 2024, bullfincher.io", when three sites gave a 2024 figure), else its own
+// words.
 func shortClaimName(c agent.Claim, all []agent.Claim) string {
-	option := oneLine(c.Option)
-	year := cmp.Or(compute.SoleYear(c.Scope), compute.SoleYear(c.Text))
-	for _, name := range []string{
-		option,
-		strings.TrimSpace(option + " " + year),
-		strings.TrimSpace(option + " " + oneLine(c.Criterion)),
-		strings.TrimSpace(year),
-		shortScope(c.Scope),
-	} {
-		if name != "" && uniqueName(name, c, all) {
+	others := map[string]bool{}
+	for _, o := range all {
+		if o.ID != c.ID {
+			for _, name := range nameCandidates(o) {
+				others[name] = true
+			}
+		}
+	}
+	for _, name := range nameCandidates(c) {
+		if name != "" && !others[name] {
 			return name
 		}
 	}
 	return quoted(c.Text)
 }
 
-func uniqueName(name string, c agent.Claim, all []agent.Claim) bool {
-	for _, o := range all {
-		if o.ID == c.ID {
-			continue
-		}
-		year := cmp.Or(compute.SoleYear(o.Scope), compute.SoleYear(o.Text))
-		option := oneLine(o.Option)
-		for _, other := range []string{option, strings.TrimSpace(option + " " + year),
-			strings.TrimSpace(option + " " + oneLine(o.Criterion)), year, shortScope(o.Scope)} {
-			if other == name {
-				return false
+// nameCandidates are the names a claim may go by, shortest first.
+func nameCandidates(c agent.Claim) []string {
+	option := oneLine(c.Option)
+	year := cmp.Or(compute.SoleYear(c.Scope), compute.SoleYear(c.Text))
+	base := []string{
+		option,
+		strings.TrimSpace(option + " " + year),
+		strings.TrimSpace(option + " " + oneLine(c.Criterion)),
+		year,
+		shortScope(c.Scope),
+	}
+	out := slices.Clone(base)
+	if len(c.Sources) > 0 {
+		if site := strings.TrimPrefix(tools.DomainOf(c.Sources[0]), "www."); site != "" {
+			for _, b := range base[1:4] {
+				if b != "" {
+					out = append(out, b+", "+site)
+				}
 			}
 		}
 	}
-	return true
+	return out
 }
 
 // quoted is a claim's words in quotation marks, shortened to a line.

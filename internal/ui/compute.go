@@ -760,15 +760,11 @@ const maxAutoCharts = 3
 // the numbers are there, not only when a model remembers to ask; the claims
 // that do not pass the check are left out of them with why (drawChart).
 func autoCharts(a *agent.Analysis) []agent.Chart {
-	charted := map[string]bool{}
-	for _, ch := range a.Charts {
-		for _, p := range ch.Points {
-			charted[p.Ref] = true
-		}
-	}
+	charted, quantities := chartedAlready(a)
 	groups, order := map[string][]agent.Claim{}, []string{}
 	for _, c := range a.Claims {
-		if c.Computed != "" || charted[c.ID] || strings.TrimSpace(c.Criterion) == "" && strings.TrimSpace(c.Unit) == "" {
+		if c.Computed != "" || charted[c.ID] || quantities[strings.ToLower(oneLine(c.Criterion))] ||
+			strings.TrimSpace(c.Criterion) == "" && strings.TrimSpace(c.Unit) == "" {
 			continue
 		}
 		if _, ok := compute.ParseValue(c.Value); !ok {
@@ -925,4 +921,23 @@ func resolveRenamed(a *agent.Analysis, renamed map[string][]string) {
 			a.Charts[i].Points[j].Ref = meant(a.Charts[i].Points[j].Ref)
 		}
 	}
+}
+
+// chartedAlready are the claims the analyzer's charts draw and the
+// quantities (criteria) they draw. Neither is charted again: a run's own
+// chart of revenue in USD billion was followed by a second of the same
+// revenue from another site in USD million.
+func chartedAlready(a *agent.Analysis) (claims, quantities map[string]bool) {
+	claims, quantities = map[string]bool{}, map[string]bool{}
+	for _, ch := range a.Charts {
+		for _, p := range ch.Points {
+			claims[p.Ref] = true
+		}
+	}
+	for _, c := range a.Claims {
+		if claims[c.ID] && strings.TrimSpace(c.Criterion) != "" {
+			quantities[strings.ToLower(oneLine(c.Criterion))] = true
+		}
+	}
+	return claims, quantities
 }

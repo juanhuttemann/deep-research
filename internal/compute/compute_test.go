@@ -140,7 +140,7 @@ func TestApplyIsExact(t *testing.T) {
 		{OpRatio, []string{"248,000", "62,000"}, 0, "4.000", "×", "c1 ÷ c2"},
 		{OpShare, []string{"61,200", "248,000"}, 0, "24.68", "%", "c1 ÷ c2 × 100"},
 		{OpPercentChange, []string{"200", "250"}, 0, "25.00", "%", "(c2 − c1) ÷ c1 × 100"},
-		{OpCAGR, []string{"100", "121"}, 2, "10.00", "% a period", "((c2 ÷ c1)^(1/2) − 1) × 100"},
+		{OpCAGR, []string{"100", "121"}, 2, "10.00", "%", "((c2 ÷ c1)^(1/2) − 1) × 100"},
 	} {
 		res, err := Apply(tc.op, inputs(t, "TEU", tc.vs...), tc.periods)
 		if err != nil {
@@ -231,7 +231,7 @@ func TestNiceTicksStayBounded(t *testing.T) {
 }
 
 func TestPercentSpellingsAreOneUnit(t *testing.T) {
-	for _, u := range []string{"percent", "Per cent", "pct", "%"} {
+	for _, u := range []string{"percent", "Per cent", "pct", "%", "% a period", "percent per year", "% per annum"} {
 		if UnitKey(u) != UnitKey("%") {
 			t.Errorf("UnitKey(%q) = %q, want %%", u, UnitKey(u))
 		}
