@@ -450,3 +450,26 @@ func TestStatesResultAtTheWrittenPrecision(t *testing.T) {
 		}
 	}
 }
+
+// "360 Mozambique ranks Mawenzi as Africa's third-highest mountain" gave
+// the claim the value 360, the publisher's name.
+func TestSoleFigureSkipsANumberThatNamesSomething(t *testing.T) {
+	for _, text := range []string{
+		"360 Mozambique ranks Mawenzi as Africa's third-highest mountain.",
+		"The list 5 Iconic Buildings ranks the Burj Khalifa first.",
+		"On 16 January 27 BC the Senate gave Octavian the title augustus.",
+	} {
+		if n, ok := SoleFigure(text, ""); ok {
+			t.Errorf("SoleFigure(%q) = %s, want nothing", text, n)
+		}
+	}
+	for _, tc := range []struct{ text, want string }{
+		{"Capacity reached 3 GW in 2024.", "3"},
+		{"The minimum came on 11 September at 4.28 million square kilometres.", "4.28"},
+		{"Mount Kenya's Batian is 5,199 m above sea level.", "5,199"},
+	} {
+		if n, ok := SoleFigure(tc.text, ""); !ok || n.String() != tc.want {
+			t.Errorf("SoleFigure(%q) = %s, %v; want %s", tc.text, n, ok, tc.want)
+		}
+	}
+}

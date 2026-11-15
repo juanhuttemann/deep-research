@@ -854,3 +854,19 @@ func TestAConclusionMayRestOnAComputation(t *testing.T) {
 		t.Errorf("blocked = %q, want it to fall with the computation", got)
 	}
 }
+
+// A subject with figures for several years is charted as its series, not
+// beside other subjects in one year: a run charted Schiphol's 2024
+// passengers beside the group total that includes them.
+func TestASubjectsSeriesIsChartedBeforeComparisons(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c1", Option: "Amsterdam Airport Schiphol", Criterion: "passengers", Scope: "2024", Value: "66.8", Unit: "million passengers"},
+		{ID: "c4", Option: "Royal Schiphol Group Dutch airports", Criterion: "passengers", Scope: "2024", Value: "75.9", Unit: "million passengers"},
+		{ID: "c5", Option: "Royal Schiphol Group Dutch airports", Criterion: "passengers", Scope: "2023", Value: "70.9", Unit: "million passengers"},
+		{ID: "c6", Option: "Royal Schiphol Group Dutch airports", Criterion: "passengers", Scope: "2019", Value: "80.5", Unit: "million passengers"},
+	}}
+	got := autoCharts(a)
+	if len(got) != 1 || got[0].Kind != "line" || len(got[0].Points) != 3 || got[0].Points[0].Ref != "c6" || got[0].Points[2].Ref != "c4" {
+		t.Errorf("charts = %+v, want the group's series alone", got)
+	}
+}
