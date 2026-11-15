@@ -306,6 +306,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .prose pre code { color: inherit; background: none; padding: 0; }
 .prose blockquote { background: none; padding: 0 0 0 2ch; border-left: 1px solid var(--dim); color: var(--dim); font-size: inherit; }
 .prose hr { border: 0; border-top: 1px solid var(--rule); margin: 20px 0; }
+.prose img.chart { display: block; max-width: 100%; height: auto; margin: 14px 0 6px; border: 1px solid var(--rule); }
 
 /* ---- audit ---- */
 .summary-stats { display: flex; flex-wrap: wrap; gap: 4px 4ch; margin: 0 0 20px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
@@ -1614,10 +1615,22 @@ async function reloadReport(name) {
 // The server renders the report's and the answers' Markdown; it is still
 // model and web text, so it is parsed inert, images go (a remote one is a
 // beacon), and every link is rebuilt through link()'s http(s)-only rule.
+// The one image kept is a chart this run drew: its name is in the run's own
+// list (meta.analysis.charts), and it is rebuilt as a fresh <img> on the
+// reports directory, nothing of the original's attributes kept but its alt.
 function inert(html) {
   const t = document.createElement("template");
   t.innerHTML = html;
-  for (const img of t.content.querySelectorAll("img")) img.remove();
+  const charts = drawnCharts();
+  for (const img of t.content.querySelectorAll("img")) {
+    const src = img.getAttribute("src") || "";
+    if (!charts.has(src)) { img.remove(); continue; }
+    const chart = document.createElement("img");
+    chart.className = "chart";
+    chart.alt = img.getAttribute("alt") || "";
+    chart.src = "/reports/" + encodeURIComponent(src);
+    img.replaceWith(chart);
+  }
   for (const a of t.content.querySelectorAll("a")) {
     // The label keeps its markup ("**Qwen**"); only the link is rebuilt.
     const l = link(a.getAttribute("href"), "");
@@ -1625,6 +1638,11 @@ function inert(html) {
     a.replaceWith(l);
   }
   return t.content;
+}
+// drawnCharts are the file names of the charts the loaded run drew.
+function drawnCharts() {
+  const charts = ((meta && meta.analysis) || {}).charts || [];
+  return new Set(charts.map(c => c && c.file).filter(f => typeof f === "string" && /^chart-[0-9a-f]{16}\.svg$/.test(f)));
 }
 function renderReport(html, error) {
   const body = inert(html);

@@ -43,7 +43,8 @@ func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 	for i := range a.Claims {
 		c := &a.Claims[i]
 		c.Sources = claimSources(c.Sources, findings, evidence)
-		if len(c.Sources) == 0 {
+		// A computed claim cites its inputs' pages, worked out below.
+		if len(c.Sources) == 0 && c.Computed == "" {
 			c.Status, c.Note = statusUnsourced, "no page the run fetched states it"
 		}
 		// A repeated ID made every reference to it ambiguous; references go
@@ -62,6 +63,7 @@ func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 	for i := range a.Conflicts {
 		a.Conflicts[i].Claims = slices.DeleteFunc(a.Conflicts[i].Claims, func(id string) bool { return !ids[id] })
 	}
+	prepareFigures(a)
 }
 
 // evidenceURLs are the pages a claim may cite: the ones the run fetched,
@@ -122,6 +124,7 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	// on: they are blocked like any other that names no claim, and prose
 	// verdicts are held to the same quote check before the reports list them.
 	if len(a.Claims) == 0 {
+		settleFigures(a, nil, findings, pages)
 		blockUnits(a, nil)
 		if fc != nil && len(fc.Verdicts) > 0 {
 			fillVerdictLists(fc, proseEntries(fc.Verdicts, findings, pages))
@@ -135,10 +138,13 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 		inferences = inferencesByUnit(a, fc, &unknown)
 	}
 	for i := range a.Claims {
-		if c := &a.Claims[i]; c.Status != statusUnsourced {
+		if c := &a.Claims[i]; c.Status != statusUnsourced && c.Computed == "" {
 			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, uncheckedBy(fcErr, c.ID), findings, pages)
 		}
 	}
+	// Before the units: a recommendation resting on a computed claim stands
+	// or falls with the arithmetic.
+	settleFigures(a, verdicts, findings, pages)
 	blockUnits(a, inferences)
 	// Derived even when the checker answered in the older list shape: its
 	// lists say nothing about the claims by ID, and kept as they came they
@@ -593,7 +599,13 @@ func writeClaims(sb *strings.Builder, claims []agent.Claim) {
 			src = "no retrieved source"
 		}
 		fmt.Fprintf(sb, "  - %s [%s] %s (%s)", c.ID, about, c.Text, src)
-		if c.Status != "" && c.Status != statusSupported {
+		if c.Value != "" && c.Computed == "" {
+			// The figure the program computes with: the check judges it too.
+			fmt.Fprintf(sb, " [value: %s]", withUnit(c.Value, c.Unit))
+		}
+		// A computed claim's note is the arithmetic it was decided on, which
+		// is what the figure stands on whether or not it passed.
+		if c.Status != "" && (c.Status != statusSupported || c.Computed != "") {
 			fmt.Fprintf(sb, " — %s: %s", c.Status, c.Note)
 		}
 		sb.WriteString("\n")
@@ -649,6 +661,11 @@ func checkedSummarizePrompt(question string, a *agent.Analysis, fc *agent.FactCh
 	if fc == nil {
 		sb.WriteString("The fact-check could not be completed, so nothing passed verification. Say so, without" +
 			" implying the candidate recommendations are wrong.\n\n")
+	}
+	if len(a.Computations) > 0 || len(a.Charts) > 0 {
+		sb.WriteString("The program appends a \"## " + label(a, "computed") + "\" section with its computations" +
+			" and charts. Do not write that section or redraw its tables. State a figure only as a supported claim" +
+			" gives it; never add, divide or otherwise compute one yourself.\n\n")
 	}
 	writeGaps(&sb, a.Gaps)
 	sb.WriteString("Sources (title, URL, content) — link and quote these:\n")
@@ -858,6 +875,12 @@ var englishLabels = map[string]string{
 	noApprovalUnchecked: "Verification could not be completed, so the proposed conclusions remain unverified.",
 	noApprovalNoSources: "No source was retrieved, so the proposed conclusions could not be verified.",
 	noApprovalEvidence:  "The evidence gathered does not establish the proposed conclusions.",
+	"computed":          "Computed figures",
+	"computed_note":     "Computed by the program from the values the cited sources state. A figure is shown only when every value it uses passed the fact-check.",
+	"figure":            "Figure",
+	"value":             "Value",
+	"formula":           "Formula",
+	"inputs":            "Inputs",
 }
 
 // label is the analysis's wording for key when it gave a plain one, the

@@ -499,7 +499,8 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   the history record: `status` is `complete`, `incomplete` (a late phase
   failed, or more searches gave nothing than gave something; the report was
   saved), `failed` or `cancelled`, `detail`
-  is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote,
+  is the error, `artifacts` lists the `.md`, `.pdf` and `.json` it wrote
+  and any chart `.svg`,
   and `checkpoint` is the file `--resume` continues from, when a cancelled,
   failed or incomplete run left one (a run stopped before its plan has
   none). Validation errors (an empty question, a bad `--mode`, no key) end
@@ -1065,6 +1066,23 @@ warns on stderr when characters are lost; use `.md` or `.json` for the full
 Unicode text. Artifact filenames use a readable
 question stem plus a 128-bit hash; reports created with the earlier short
 hash keep their old filenames.
+
+When the answer needs figures the sources do not state outright (a total,
+a change, a share, a growth rate), the program computes them rather than
+the model, and closes the report with a **Computed figures** section. Its
+table gives each figure, its formula over claim IDs (`m1 = c2 + c3 + c4 +
+c5`) and each input's value with a link to the page it was read from. A
+figure is shown only when every value it uses passed the fact-check and is
+written in a passage it was supported on; the others are listed as not
+established, with why. A claim that states a computed figure is supported
+when it matches the result at its own precision, and contradicted when it
+does not. The operations are `sum`, `difference`, `product`, `ratio`,
+`share`, `percent_change`, `mean`, `min`, `max` and `cagr`; they are exact
+(`cagr`'s root is a float), and they never convert units. A chart is drawn
+from the same figures as `chart-<digest>.svg` beside the report, named by
+its content so a rerun never changes a chart an earlier report links to,
+and followed by its points as a table: the terminal shows the table, the
+PDF draws the chart, and `serve` shows the image.
 
 `--output FILE` writes the same document as the `.md` artifact: the question
 as a title, the confidence and model lines, the report body, the searches

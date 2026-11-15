@@ -4,18 +4,114 @@
   "confidence": "medium",
   "analysis": {
     "answer": "Rust is faster on raw throughput; Go is close enough for most services.",
-    "gaps": ["No benchmark covered tail latency under GC pressure"],
+    "gaps": [
+      "No benchmark covered tail latency under GC pressure"
+    ],
     "claims": [
-      {"id": "c1", "claim": "Rust handles more requests per second in TechEmpower round 23.", "status": "supported"},
-      {"id": "c2", "claim": "Go uses twice the memory of Rust for the same service.", "status": "partial"},
-      {"id": "c3", "claim": "Go's GC pauses stay under 1ms.", "status": "insufficient"}
+      {
+        "id": "c1",
+        "claim": "Rust handles more requests per second in TechEmpower round 23.",
+        "status": "supported"
+      },
+      {
+        "id": "c2",
+        "claim": "Go uses twice the memory of Rust for the same service.",
+        "status": "partial"
+      },
+      {
+        "id": "c3",
+        "claim": "Go's GC pauses stay under 1ms.",
+        "status": "insufficient"
+      },
+      {
+        "id": "c4",
+        "claim": "The Rust service handled 61,200 requests per second.",
+        "value": "61,200",
+        "unit": "req/s",
+        "status": "supported"
+      },
+      {
+        "id": "c5",
+        "claim": "The Rust service handled 120,000 requests per second across two nodes.",
+        "value": "120,000",
+        "unit": "req/s",
+        "computed": "m1",
+        "status": "contradicted",
+        "note": "it states 120,000 req/s; the program computed m1 = c4 + c4 = 122,400 req/s"
+      }
     ],
     "recommendations": [
-      {"choose": "Rust", "when": "throughput per core is the constraint", "claims": ["c1"]},
-      {"choose": "Go", "when": "memory is not a constraint", "claims": ["c2"], "blocked": "rests on a partial claim", "failed": ["c2"]}
+      {
+        "choose": "Rust",
+        "when": "throughput per core is the constraint",
+        "claims": [
+          "c1"
+        ]
+      },
+      {
+        "choose": "Go",
+        "when": "memory is not a constraint",
+        "claims": [
+          "c2"
+        ],
+        "blocked": "rests on a partial claim",
+        "failed": [
+          "c2"
+        ]
+      }
     ],
     "conclusions": [
-      {"statement": "Go's latency is predictable under load", "claims": ["c3"], "blocked": "unsupported", "failed": ["c3"]}
+      {
+        "statement": "Go's latency is predictable under load",
+        "claims": [
+          "c3"
+        ],
+        "blocked": "unsupported",
+        "failed": [
+          "c3"
+        ]
+      }
+    ],
+    "computations": [
+      {
+        "id": "m1",
+        "label": "two-node throughput",
+        "op": "sum",
+        "inputs": [
+          "c4",
+          "c4"
+        ],
+        "result": "122400",
+        "unit": "req/s",
+        "formula": "c4 + c4",
+        "valid": true
+      },
+      {
+        "id": "m2",
+        "label": "memory ratio",
+        "op": "ratio",
+        "inputs": [
+          "c2",
+          "c4"
+        ],
+        "reason": "c2 is partial"
+      }
+    ],
+    "charts": [
+      {
+        "id": "g1",
+        "title": "Throughput",
+        "kind": "bar",
+        "points": [
+          {
+            "label": "one node",
+            "ref": "c4",
+            "value": "61200"
+          }
+        ],
+        "unit": "req/s",
+        "file": "chart-0123456789abcdef.svg"
+      }
     ]
   },
   "fact_check": {
@@ -23,13 +119,44 @@
     "unverified": null,
     "contradictions": null,
     "verdicts": [
-      {"id": "c1", "claim": "Rust handles more requests per second in TechEmpower round 23.", "status": "supported"},
-      {"id": "c2", "status": "partial", "reason": "the source compares one service only"},
-      {"id": "c3", "claim": "Go's GC pauses stay under 1ms.", "status": "insufficient"}
+      {
+        "id": "c1",
+        "claim": "Rust handles more requests per second in TechEmpower round 23.",
+        "status": "supported"
+      },
+      {
+        "id": "c2",
+        "status": "partial",
+        "reason": "the source compares one service only"
+      },
+      {
+        "id": "c3",
+        "claim": "Go's GC pauses stay under 1ms.",
+        "status": "insufficient"
+      },
+      {
+        "id": "c4",
+        "status": "supported",
+        "reason": "the benchmark table",
+        "evidence": [
+          {
+            "source": "https://example.com/a",
+            "quote": "61,200"
+          }
+        ]
+      }
     ]
   },
   "citations": [
-    {"title": "TechEmpower", "url": "https://www.techempower.com/benchmarks/", "cited": true},
-    {"title": "Go GC guide", "url": "https://go.dev/doc/gc-guide", "cited": false}
+    {
+      "title": "TechEmpower",
+      "url": "https://www.techempower.com/benchmarks/",
+      "cited": true
+    },
+    {
+      "title": "Go GC guide",
+      "url": "https://go.dev/doc/gc-guide",
+      "cited": false
+    }
   ]
 }

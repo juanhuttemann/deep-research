@@ -155,3 +155,34 @@ func list(s *Store) (results []ResearchResult, skipped int, err error) {
 	skipped, err = s.Each(func(r ResearchResult) { results = append(results, r) })
 	return results, skipped, err
 }
+
+// A record with computations and charts round-trips beside the string-
+// analysis legacy schema and an object analysis from before computations.
+func TestComputedRecordsLoadBesideOlderSchemas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	older := `{"id":"old","question":"q0","analysis":"a","confidence":"low"}` + "\n" +
+		`{"id":"mid","question":"q1","analysis":{"answer":"b","claims":[{"id":"c1","claim":"x"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	a := &agent.Analysis{Answer: "c",
+		Claims:       []agent.Claim{{ID: "c1", Text: "x", Value: "61,200", Unit: "containers"}},
+		Computations: []agent.Computation{{ID: "m1", Op: "sum", Inputs: []string{"c1", "c1"}, Result: "122400", Valid: true}},
+		Charts:       []agent.Chart{{ID: "g1", Title: "t", File: "chart-0123456789abcdef.svg", Points: []agent.ChartPoint{{Label: "Q1", Ref: "c1", Value: "61200"}}}}}
+	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{Question: "q2", Analysis: a}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := list(st)
+	if err != nil || skipped != 0 || len(runs) != 3 {
+		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
+	}
+	if runs[0].Analysis == nil || runs[0].Analysis.Answer != "a" || runs[1].Analysis.Computations != nil {
+		t.Errorf("older records = %+v, %+v", runs[0].Analysis, runs[1].Analysis)
+	}
+	got := runs[2].Analysis
+	if got.Claims[0].Value != "61,200" || len(got.Computations) != 1 || !got.Computations[0].Valid ||
+		got.Charts[0].File != "chart-0123456789abcdef.svg" || got.Charts[0].Points[0].Value != "61200" {
+		t.Errorf("computed record = %+v", got)
+	}
+}

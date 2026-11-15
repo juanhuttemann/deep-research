@@ -211,7 +211,7 @@ func writeRevisionExports(path string, m *Meta, r Revision) (md, pdf string) {
 	if writeAtomic(stem+".md", []byte(doc)) == nil {
 		md = filepath.Base(stem + ".md")
 	}
-	if writeAtomic(stem+".pdf", BuildPDF(doc)) == nil {
+	if writeAtomic(stem+".pdf", BuildPDF(doc, drawnCharts(m.Analysis))) == nil {
 		pdf = filepath.Base(stem + ".pdf")
 	}
 	return md, pdf

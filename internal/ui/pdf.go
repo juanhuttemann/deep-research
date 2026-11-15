@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/juanhuttemann/deep-research/internal/compute"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -101,9 +102,11 @@ func pdfNum(v float64) string {
 	return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64)
 }
 
-// BuildPDF lays out a Markdown report and returns the PDF bytes.
-func BuildPDF(markdown string) []byte {
-	pages := layoutPDF(parsePDFBlocks(markdown))
+// BuildPDF lays out a Markdown report and returns the PDF bytes. charts are
+// the run's drawn charts by file name (drawnCharts): an image naming one is
+// drawn as the chart, any other keeps its alt text.
+func BuildPDF(markdown string, charts map[string]compute.Chart) []byte {
+	pages := layoutPDF(parsePDFBlocks(markdown, charts))
 	for i, p := range pages {
 		label := fmt.Sprintf("%d / %d", i+1, len(pages))
 		p.text((pdfPageWidth-pdfWidth(label, fontRegular, 8))/2, pdfMargin/2, fontRegular, 8, pdfGrayText, label)

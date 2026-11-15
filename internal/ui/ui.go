@@ -80,6 +80,8 @@ type RunResult struct {
 	MDPath    string
 	PDFPath   string
 	JSONPath  string
+	// ChartPaths are the drawn charts' SVGs, which the report links to.
+	ChartPaths []string
 	// TracePath is the --trace file, written by the CLI after the run.
 	TracePath string
 	// Checkpoint is the resumable checkpoint a run that did not finish in
@@ -96,7 +98,7 @@ type RunResult struct {
 // its path empty.
 func (r RunResult) Paths() []string {
 	var paths []string
-	for _, p := range []string{r.MDPath, r.PDFPath, r.JSONPath, r.TracePath} {
+	for _, p := range append([]string{r.MDPath, r.PDFPath, r.JSONPath}, append(r.ChartPaths, r.TracePath)...) {
 		if p != "" {
 			paths = append(paths, p)
 		}
@@ -175,7 +177,7 @@ func Run(ctx context.Context, opts Options) (RunResult, error) {
 	if !o.JSONL && !o.Quiet {
 		renderer.RenderReport(result, driver.sources, driver.tokens)
 	}
-	res.MDPath, res.PDFPath, res.JSONPath = o.writeArtifacts(result, sink, driver, plan)
+	res.MDPath, res.PDFPath, res.JSONPath, res.ChartPaths = o.writeArtifacts(result, sink, driver, plan)
 	o.announce(result, res)
 	res.KeysHeld = driver.stopKeys()
 	return res, nil
@@ -477,7 +479,7 @@ func (o Options) openInput(interactive bool, script Input) Input {
 // writeArtifacts persists the markdown, PDF and metadata exports. A write that
 // fails is reported on stderr and yields an empty path, so a missing artifact
 // is visible instead of quietly absent from the "Saved to" list.
-func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, driver *Driver, plan *Plan) (md, pdf, meta string) {
+func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, driver *Driver, plan *Plan) (md, pdf, meta string, charts []string) {
 	keep := func(path string, err error) string {
 		if err != nil {
 			_, _ = fmt.Fprintf(o.Stderr, "warning: could not write %s: %v\n", path, err)
@@ -496,7 +498,12 @@ func (o Options) writeArtifacts(result *agent.ResearchResult, sink *MultiSink, d
 	m.ReportSpec = plan.Report
 	m.Clarifications = plan.Clarifications
 	meta = keep(WriteMetadata(m, o.OutDir))
-	return md, pdf, meta
+	// The report links its charts by name, so they go beside it.
+	charts, err := WriteCharts(result.Analysis, o.OutDir)
+	if err != nil {
+		_, _ = fmt.Fprintf(o.Stderr, "warning: could not write the charts: %v\n", err)
+	}
+	return md, pdf, meta, charts
 }
 
 // announce closes the run out for a human: the report on --silent, otherwise

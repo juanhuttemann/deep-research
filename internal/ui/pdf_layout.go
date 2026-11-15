@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/juanhuttemann/deep-research/internal/compute"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -81,6 +82,7 @@ const (
 	blockCode
 	blockRule
 	blockTable
+	blockChart
 )
 
 type pdfBlock struct {
@@ -90,6 +92,7 @@ type pdfBlock struct {
 	marker string // list marker, drawn in the indent of the item's first line
 	runs   []pdfRun
 	rows   [][][]pdfRun // table rows of cells, header first
+	chart  *compute.Chart
 }
 
 // pdfParser walks the Markdown AST into blocks. A list item contributes one
@@ -106,12 +109,13 @@ type pdfParser struct {
 	url          string
 	linkText     strings.Builder
 	linksLeft    map[string]int // links to each destination not yet walked
+	charts       map[string]compute.Chart
 }
 
-func parsePDFBlocks(markdown string) []pdfBlock {
+func parsePDFBlocks(markdown string, charts map[string]compute.Chart) []pdfBlock {
 	src := []byte(markdown)
 	doc := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser().Parse(text.NewReader(src))
-	p := &pdfParser{src: src, cur: -1, linksLeft: map[string]int{}}
+	p := &pdfParser{src: src, cur: -1, linksLeft: map[string]int{}, charts: charts}
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if l, ok := n.(*ast.Link); ok && entering {
 			p.linksLeft[linkDestination(l)]++
@@ -153,6 +157,10 @@ func (p *pdfParser) enter(n ast.Node) ast.WalkStatus {
 		*row = append(*row, nil)
 	case *ast.HTMLBlock, *ast.RawHTML:
 		return ast.WalkSkipChildren
+	case *ast.Image:
+		if p.image(string(n.Destination)) {
+			return ast.WalkSkipChildren
+		}
 	default:
 		p.enterInline(n)
 	}
@@ -343,7 +351,7 @@ func listMarker(item *ast.ListItem, depth int) string {
 // pdfDropsText reports whether the PDF of markdown prints a '?' for any of
 // its text, judged on the same runs the layout draws.
 func pdfDropsText(markdown string) bool {
-	for _, b := range parsePDFBlocks(markdown) {
+	for _, b := range parsePDFBlocks(markdown, nil) {
 		cells := [][]pdfRun{b.runs}
 		for _, row := range b.rows {
 			cells = append(cells, row...)
@@ -595,6 +603,8 @@ func (l *pdfLayout) block(b pdfBlock) {
 		l.space(6)
 	case blockTable:
 		l.table(b, left)
+	case blockChart:
+		l.chart(b, left)
 	default:
 		l.paragraph(b, left)
 	}

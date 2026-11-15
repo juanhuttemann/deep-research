@@ -761,3 +761,31 @@ func TestReportIsTheRevisionInEffect(t *testing.T) {
 		t.Errorf("revision = %s", b)
 	}
 }
+
+// A chart opened on its own is an SVG document: served from the reports
+// directory it may draw and nothing else, and no file's type is sniffed.
+func TestReportFilesHoldSVGToDrawing(t *testing.T) {
+	reports := fstest.MapFS{
+		"chart-0123456789abcdef.svg": {Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`)},
+		"run.md":                     {Data: []byte("# r")},
+	}
+	srv := httptest.NewServer(New(context.Background(), reports, nil).Handler())
+	defer srv.Close()
+	for name, csp := range map[string]bool{"chart-0123456789abcdef.svg": true, "run.md": false} {
+		resp, err := http.Get(srv.URL + "/reports/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: status %d, nosniff %q", name, resp.StatusCode, resp.Header.Get("X-Content-Type-Options"))
+		}
+		if got := resp.Header.Get("Content-Security-Policy"); (got != "") != csp || csp && !strings.Contains(got, "default-src 'none'") {
+			t.Errorf("%s: CSP %q", name, got)
+		}
+	}
+	// The page keeps an image only when the run drew it.
+	if !strings.Contains(string(page), "if (!charts.has(src)) { img.remove(); continue; }") {
+		t.Error("inert() no longer drops the images the run did not draw")
+	}
+}

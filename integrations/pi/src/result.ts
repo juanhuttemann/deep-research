@@ -16,6 +16,16 @@ export interface Blocked {
 	failed: string[];
 }
 
+// Figure is a computation the program ran over the claims' values: its
+// result when every input passed the fact-check, or why it did not.
+export interface Figure {
+	id: string;
+	label: string;
+	value?: string;
+	formula?: string;
+	reason?: string;
+}
+
 export interface Digest {
 	question: string;
 	depth: string;
@@ -28,6 +38,7 @@ export interface Digest {
 	verdicts: Record<string, number>;
 	unconfirmed: Unconfirmed[];
 	blocked: Blocked[];
+	figures: Figure[];
 	gaps: string[];
 	sources: number;
 	cited: number;
@@ -40,7 +51,8 @@ interface RunJSON {
 	confidence?: string;
 	error?: string;
 	analysis?: {
-		claims?: { id: string; claim: string; status?: string }[];
+		claims?: { id: string; claim: string; status?: string; note?: string; computed?: string }[];
+		computations?: { id: string; label?: string; result?: string; unit?: string; formula?: string; valid?: boolean; reason?: string }[];
 		recommendations?: Rec[];
 		conclusions?: Rec[];
 		gaps?: string[] | null;
@@ -75,6 +87,18 @@ export function digest(raw: unknown): Digest {
 	const unconfirmed = verdicts
 		.filter((v) => v.status !== "supported")
 		.map((v) => ({ id: v.id, claim: v.claim || claims.get(v.id) || "", status: v.status, reason: v.reason }));
+	// A computed claim has no verdict: the program decided it against its
+	// computation, and its status and note say how.
+	for (const c of j.analysis?.claims ?? []) {
+		if (c.computed && c.status && c.status !== "supported") {
+			unconfirmed.push({ id: c.id, claim: c.claim, status: c.status, reason: c.note });
+		}
+	}
+	const figures = (j.analysis?.computations ?? []).map((m) =>
+		m.valid
+			? { id: m.id, label: m.label ?? "", value: [m.result, m.unit].filter(Boolean).join(" "), formula: m.formula }
+			: { id: m.id, label: m.label ?? "", reason: m.reason || "not computed" },
+	);
 	const blocked: Blocked[] = [];
 	for (const [kind, list] of [
 		["recommendation", j.analysis?.recommendations],
@@ -94,6 +118,7 @@ export function digest(raw: unknown): Digest {
 		verdicts: counts,
 		unconfirmed,
 		blocked,
+		figures,
 		gaps: j.analysis?.gaps ?? [],
 		sources: citations.length,
 		cited: citations.filter((c) => c.cited).length,
@@ -120,6 +145,7 @@ const rules = [
 	"Answer from this report and keep its citations.",
 	"Say the confidence it gives.",
 	"Say which claims the fact-check did not confirm, and do not present an unconfirmed claim or a blocked recommendation or conclusion as fact.",
+	"State a figure only as the report or a COMPUTED line gives it; do no arithmetic of your own.",
 	"Do not add facts the run did not establish; offer research_ask for a question its pages may answer, or a new run.",
 	"Give the user the artifact paths.",
 ];
@@ -142,6 +168,14 @@ function digestLines(d: Digest): string[] {
 	}
 	for (const b of d.blocked) {
 		out.push(`- BLOCKED ${b.kind}, not established${b.failed.length ? ` (failed: ${b.failed.join(", ")})` : ""}: ${b.text}`);
+	}
+	for (const f of d.figures) {
+		const name = f.label ? `${f.id} (${f.label})` : f.id;
+		out.push(
+			f.value
+				? `- COMPUTED by the program: ${name} = ${f.value}, from ${f.formula}`
+				: `- NOT COMPUTED, not established: ${name}: ${f.reason}`,
+		);
 	}
 	if (d.gaps.length) {
 		out.push(`Gaps the run could not close: ${d.gaps.join("; ")}`);

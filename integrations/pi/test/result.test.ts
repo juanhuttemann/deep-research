@@ -10,8 +10,8 @@ test("the digest lists what the fact-check did not confirm, and what was blocked
 	const d = digest(load("run.json"));
 	assert.equal(d.confidence, "medium");
 	assert.ok(d.factChecked);
-	assert.deepEqual(d.verdicts, { supported: 1, partial: 1, insufficient: 1 });
-	assert.deepEqual(d.unconfirmed.map((u) => [u.id, u.status]), [["c2", "partial"], ["c3", "insufficient"]]);
+	assert.deepEqual(d.verdicts, { supported: 2, partial: 1, insufficient: 1 });
+	assert.deepEqual(d.unconfirmed.map((u) => [u.id, u.status]), [["c2", "partial"], ["c3", "insufficient"], ["c5", "contradicted"]]);
 	assert.equal(d.unconfirmed[0].claim, "Go uses twice the memory of Rust for the same service.", "a verdict with no claim text takes the claim's");
 	assert.deepEqual(d.blocked.map((b) => b.kind), ["recommendation", "conclusion"]);
 	assert.equal(d.sources, 2);
@@ -73,4 +73,16 @@ test("a long report is cut, and the model is told where the rest is", () => {
 	const text = content({ status: "complete", artifacts: [], report: "x".repeat(maxReport + 10), reportPath: "/r/run.md" });
 	assert.match(text, /whole report is \/r\/run.md/);
 	assert.ok(text.length < maxReport + 2_000);
+});
+
+test("the digest gives the program's figures, and the ones it could not compute", () => {
+	const d = digest(load("run.json"));
+	assert.deepEqual(d.figures, [
+		{ id: "m1", label: "two-node throughput", value: "122400 req/s", formula: "c4 + c4" },
+		{ id: "m2", label: "memory ratio", reason: "c2 is partial" },
+	]);
+	const text = content({ status: "complete", artifacts: [], digest: d, report: "# r" });
+	assert.match(text, /COMPUTED by the program: m1 \(two-node throughput\) = 122400 req\/s, from c4 \+ c4/);
+	assert.match(text, /NOT COMPUTED, not established: m2 \(memory ratio\): c2 is partial/);
+	assert.match(text, /c5 contradicted: .*122,400/);
 });

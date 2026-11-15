@@ -199,7 +199,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/edit", s.edit)
 	mux.HandleFunc("GET /api/revision/{name}", s.revision)
 	mux.HandleFunc("POST /api/plan", s.plan)
-	mux.Handle("GET /reports/", http.StripPrefix("/reports/", http.FileServerFS(s.reports)))
+	mux.Handle("GET /reports/", reportFiles(http.StripPrefix("/reports/", http.FileServerFS(s.reports))))
 	// Cross-origin protection refuses another site's POST (a cancel is a
 	// simple request); the Host check refuses a page that rebound its own
 	// name to 127.0.0.1, which is same-origin to the browser.
@@ -788,4 +788,18 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// reportFiles serves the reports directory with its types taken as given
+// and an SVG held to drawing: a chart opened on its own, outside the page's
+// <img>, is a document that could run script or load from elsewhere, and
+// the program's charts do neither, so no SVG served from here may.
+func reportFiles(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if strings.HasSuffix(strings.ToLower(r.URL.Path), ".svg") {
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+		}
+		h.ServeHTTP(w, r)
+	})
 }

@@ -72,6 +72,31 @@ analyzer_instructions: |
   A gap is not a finding: never conclude that something does not exist, is
   not supported or does not apply because the findings do not mention it.
 
+  Never do arithmetic yourself: the program does it, exactly, and checks
+  it. When an answer needs a figure the sources do not state outright (a
+  total, a difference, a ratio, a share, a change, an average, a growth
+  rate), give each figure it is computed from as a claim of its own with
+  "value" (the number as digits, exactly as its source writes it, with
+  commas grouping thousands and a point before decimals; no words, no
+  scale: "12.4" with "unit":"USD million" for "$12.4 million") and "unit".
+  Then add a computation naming those claims as "inputs", and a claim that
+  states its result with "computed" set to the computation's ID and its
+  figure in "value" and "unit"; conclusions name that claim like any other.
+  A computed claim needs no sources: it stands on its inputs. Operations:
+  sum, difference (first minus second), product, ratio (first divided by
+  second), share (first as a percentage of second), percent_change (from
+  first to second), mean, min, max, and cagr (from first to second over
+  "periods" periods). Inputs may also be earlier computations, or the
+  claims that state them, by ID. Units
+  must agree where the operation adds or compares, and are never converted.
+  When a source states a figure the others would add up to differently,
+  give both: the stated figure as a claim, and the computed one. Use "charts"
+  only when a series of figures (over time, or across a few comparable
+  options) is clearer drawn than listed: each point names a claim or a
+  computation by ID, all in one unit; "kind" is "bar" or "line" (a line for
+  an ordered axis such as time). Leave "computations" and "charts" out when
+  the question needs no figures.
+
   "confidence" rates how well your conclusions and recommendations answer
   the question asked, and how well the evidence supports that answer,
   judged once they are written. Decide it in this order:
@@ -102,7 +127,12 @@ analyzer_instructions: |
   {
     "interpretation": "how the question is read, and the other readings",
     "answer": "the direct answer to the question, with its conditions and uncertainty",
-    "claims": [{"id":"c1", "claim":"...", "option":"...", "criterion":"...", "scope":"...", "sources":["https://..."]}],
+    "claims": [{"id":"c1", "claim":"...", "option":"...", "criterion":"...", "scope":"...", "sources":["https://..."]},
+               {"id":"c2", "claim":"... 61,200 containers in Q1 2025", "value":"61,200", "unit":"containers", "sources":["https://..."]},
+               {"id":"c9", "claim":"... 248,000 containers in 2025, the sum of its quarters", "value":"248,000", "unit":"containers", "computed":"m1"}],
+    "computations": [{"id":"m1", "label":"2025 total", "op":"sum", "inputs":["c2","c3","c4","c5"]}],
+    "charts": [{"id":"g1", "title":"Containers handled by quarter, 2025", "kind":"bar",
+                "points":[{"label":"Q1","ref":"c2"}, {"label":"Q2","ref":"c3"}]}],
     "conclusions": [{"statement":"...", "claims":["c1","c2"]}],
     "recommendations": [{"choose":"...", "when":"...", "claims":["c1","c3"]}],
     "conflicts": [{"claims":["c2","c5"], "resolution":"c2 holds", "why":"..."}],
@@ -114,6 +144,9 @@ analyzer_instructions: |
                "does_not_follow":"does not follow from its claims", "partial":"partial",
                "contradicted":"contradicted", "disputed":"disputed", "insufficient":"insufficient",
                "unsourced":"unsourced",
+               "computed":"Computed figures",
+               "computed_note":"Computed by the program from the values the cited sources state. A figure is shown only when every value it uses passed the fact-check.",
+               "figure":"Figure", "value":"Value", "formula":"Formula", "inputs":"Inputs",
                "no_approval_unchecked":"Verification could not be completed, so the proposed conclusions remain unverified.",
                "no_approval_no_sources":"No source was retrieved, so the proposed conclusions could not be verified.",
                "no_approval_evidence":"The evidence gathered does not establish the proposed conclusions."}
@@ -195,7 +228,15 @@ fact_checker_instructions: |
   words that keep its attribution, negation, qualifications, units or table
   headings. Passages that are apart are separate evidence items. A supported
   verdict needs at least one, and a quote that is not in the cited source
-  makes the verdict count as insufficient.
+  makes the verdict count as insufficient. A claim with a "value" is
+  supported only by a quote that writes that figure, as the source writes
+  it: the program uses the value in its arithmetic, and checks that a quote
+  states it.
+
+  You may be given figures the program computed from the claims' values.
+  They are exact arithmetic, valid if their inputs hold: weigh a claim that
+  states a figure against them as you would against the records it would
+  summarize.
 
   You may also be given recommendations (r1, r2, ...) and conclusions (k1,
   k2, ...), each with the premises it names. Judge each first, once, in
@@ -257,6 +298,8 @@ summarizer_instructions: |
   Return the report as clean markdown, with no code fences. Never invent
   facts or quotes: a quote must appear verbatim in the finding content you
   were given.
+  Do no arithmetic: a figure appears only as a supported claim gives it,
+  never one you added up, divided or estimated yourself.
 
 answerer_instructions: |
   You are an answerer agent for an instant run: one web search, no analysis

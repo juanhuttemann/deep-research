@@ -197,6 +197,53 @@ type Analysis struct {
 	// answer heading, "not established", status names), in the question's
 	// language, keyed as the analyzer prompt lists them.
 	Labels map[string]string `json:"labels,omitempty"`
+	// Computations and Charts are the analysis's arithmetic, asked of the
+	// program rather than done in prose: each names its inputs by claim ID,
+	// and the program evaluates it (see the compute package). Every number
+	// a report used to state was the model's own arithmetic, and a wrong
+	// total read exactly like a sourced one.
+	Computations []Computation `json:"computations,omitempty"`
+	Charts       []Chart       `json:"charts,omitempty"`
+}
+
+// Computation is one operation over claims' stated values or earlier
+// computations, by ID. The analyzer names the operation and its inputs; the
+// result and the rest are the program's, and are never read from a model.
+type Computation struct {
+	ID      string   `json:"id"`
+	Label   string   `json:"label,omitempty"`
+	Op      string   `json:"op"`
+	Inputs  []string `json:"inputs"`
+	Periods int      `json:"periods,omitempty"`
+	// Result is the value in plain digits, as computed from the inputs'
+	// stated values; Valid is set once every input passed the fact-check.
+	// Reason says why it is not valid.
+	Result  string `json:"result,omitempty"`
+	Unit    string `json:"unit,omitempty"`
+	Formula string `json:"formula,omitempty"`
+	Valid   bool   `json:"valid,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// Chart is a series the analyzer asks the program to draw, each point a
+// claim or a computation by ID. Unit, each point's Value and File (the
+// drawn SVG's name beside the report) are the program's; a chart with a
+// Reason was not drawn.
+type Chart struct {
+	ID     string       `json:"id"`
+	Title  string       `json:"title"`
+	Kind   string       `json:"kind,omitempty"`
+	Points []ChartPoint `json:"points"`
+	Unit   string       `json:"unit,omitempty"`
+	File   string       `json:"file,omitempty"`
+	Reason string       `json:"reason,omitempty"`
+}
+
+// ChartPoint is one labelled point of a chart.
+type ChartPoint struct {
+	Label string `json:"label"`
+	Ref   string `json:"ref"`
+	Value string `json:"value,omitempty"`
 }
 
 // Claim is one atomic assertion the analysis rests on, with what it is about
@@ -214,6 +261,13 @@ type Claim struct {
 	// it. Only "supported" lets a claim carry a recommendation. Note says why.
 	Status string `json:"status,omitempty"`
 	Note   string `json:"note,omitempty"`
+	// Value and Unit are the figure a numeric claim states, as its source
+	// writes it, for computations to take as an input. Computed names the
+	// computation whose result the claim states instead: the program, not
+	// the fact-check, decides such a claim, by comparing the two.
+	Value    string `json:"value,omitempty"`
+	Unit     string `json:"unit,omitempty"`
+	Computed string `json:"computed,omitempty"`
 }
 
 // Recommendation is a conditional answer: choose an option when a condition
@@ -2202,7 +2256,51 @@ func parseAnalysis(out string) *Analysis {
 		Conclusions:     parseConclusions(m["conclusions"]),
 		Conflicts:       parseConflicts(m["conflicts"]),
 		Labels:          parseLabels(m["labels"]),
+		Computations:    parseComputations(m["computations"]),
+		Charts:          parseCharts(m["charts"]),
 	}
+}
+
+// parseComputations reads the operations the analyzer asked for. Only what
+// it may give is read: a result or a validity it wrote is ignored, since
+// the program computes both.
+func parseComputations(v any) []Computation {
+	var out []Computation
+	for i, m := range objects(v) {
+		c := Computation{ID: scalar(m["id"]), Label: getString(m, "label", ""), Op: strings.ToLower(scalar(m["op"])),
+			Inputs: scalars(m["inputs"])}
+		c.Periods, _ = strconv.Atoi(scalar(m["periods"]))
+		if c.Op == "" {
+			continue
+		}
+		if c.ID == "" {
+			c.ID = "m" + strconv.Itoa(i+1)
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// parseCharts reads the charts the analyzer asked for, their points by
+// reference only: a value it wrote beside one is not read.
+func parseCharts(v any) []Chart {
+	var out []Chart
+	for i, m := range objects(v) {
+		c := Chart{ID: scalar(m["id"]), Title: getString(m, "title", ""), Kind: strings.ToLower(scalar(m["kind"]))}
+		for _, p := range objects(m["points"]) {
+			if ref := scalar(p["ref"]); ref != "" {
+				c.Points = append(c.Points, ChartPoint{Label: scalar(p["label"]), Ref: ref})
+			}
+		}
+		if len(c.Points) == 0 {
+			continue
+		}
+		if c.ID == "" {
+			c.ID = "g" + strconv.Itoa(i+1)
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func parseLabels(v any) map[string]string {
@@ -2260,7 +2358,8 @@ func parseClaims(v any) []Claim {
 	var out []Claim
 	for i, m := range objects(v) {
 		c := Claim{ID: scalar(m["id"]), Text: getString(m, "claim", ""), Option: getString(m, "option", ""),
-			Criterion: getString(m, "criterion", ""), Scope: getString(m, "scope", ""), Sources: scalars(m["sources"])}
+			Criterion: getString(m, "criterion", ""), Scope: getString(m, "scope", ""), Sources: scalars(m["sources"]),
+			Value: scalar(m["value"]), Unit: getString(m, "unit", ""), Computed: scalar(m["computed"])}
 		if c.Text == "" {
 			continue
 		}
