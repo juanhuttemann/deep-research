@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/compute"
 	"github.com/juanhuttemann/deep-research/internal/tools"
 	"golang.org/x/text/unicode/norm"
 )
@@ -437,6 +438,9 @@ func blockUnits(a *agent.Analysis, inferences map[string][]agent.Inference) {
 				reasons = append(reasons, id+" "+c.Status+": "+c.Note)
 				r.Failed = append(r.Failed, id)
 			}
+		}
+		if len(reasons) == 0 {
+			reasons = unstatedFigures(r, byID)
 		}
 		if len(reasons) == 0 && inferences != nil {
 			reasons = inferenceFailure(inferences[u.id])
@@ -1091,9 +1095,20 @@ func judgeRevisions(a *agent.Analysis, added []string, fc, recheck *agent.FactCh
 	for _, inf := range recheck.Inferences {
 		by[inf.ID] = append(by[inf.ID], inf)
 	}
+	claims := map[string]agent.Claim{}
+	for _, c := range a.Claims {
+		claims[c.ID] = c
+	}
 	for _, id := range added {
 		if u, ok := unitByID(a, id); ok {
-			u.r.Blocked = strings.Join(inferenceFailure(by[id]), "; ")
+			// A revision is held to its figures as the first pass was: one
+			// restating the arithmetic it was blocked for must not pass on
+			// the inference alone.
+			reasons := unstatedFigures(u.r, claims)
+			if len(reasons) == 0 {
+				reasons = inferenceFailure(by[id])
+			}
+			u.r.Blocked = strings.Join(reasons, "; ")
 		}
 		if fc != nil {
 			fc.Inferences = append(fc.Inferences, by[id]...)
@@ -1105,4 +1120,23 @@ func judgeRevisions(a *agent.Analysis, added []string, fc, recheck *agent.FactCh
 // case the answer shows the revision and not the original.
 func replaced(a *agent.Analysis, id string) bool {
 	return slices.ContainsFunc(units(a), func(u unit) bool { return u.r.Revises == id && u.r.Blocked == "" })
+}
+
+// unstatedFigures blocks a unit that states a number none of its claims
+// states. Its words are printed as the answer, and the inference check only
+// asks whether it follows: a conclusion that wrote "7,030,229, the
+// year-to-date total less April" on the two claims it subtracted was
+// approved, while the computed claim stating the same figure had failed.
+// A figure the answer needs is a computed claim's, which the program checks.
+func unstatedFigures(r *agent.Recommendation, claims map[string]agent.Claim) []string {
+	var premises []string
+	for _, id := range r.Claims {
+		c := claims[id]
+		premises = append(premises, c.Text, c.Option, c.Criterion, c.Scope)
+	}
+	extra := compute.Unstated(r.Statement+" "+r.Choose+" "+r.When, premises...)
+	if len(extra) == 0 {
+		return nil
+	}
+	return []string{"it states " + strings.Join(extra, ", ") + ", which none of its claims states"}
 }

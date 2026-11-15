@@ -8,6 +8,7 @@ package compute
 import (
 	"math/big"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -143,8 +144,43 @@ func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) 
 
 // numbersIn is every reading of every numeric token in text.
 func numbersIn(text string) []*big.Rat {
-	rs := []rune(text)
 	var out []*big.Rat
+	for _, t := range tokens(text) {
+		out = append(out, t.readings...)
+	}
+	return out
+}
+
+// token is a number as text writes it, and the values it can be read as.
+type token struct {
+	text     string
+	readings []*big.Rat
+}
+
+// Unstated are the numbers text writes that none of sources writes, in any
+// reading: the figures a statement adds to the claims it rests on.
+func Unstated(text string, sources ...string) []string {
+	var known []*big.Rat
+	for _, s := range sources {
+		known = append(known, numbersIn(s)...)
+	}
+	var out []string
+	for _, t := range tokens(text) {
+		// A token that reads as no number ("1.2.3") is an identifier, stated
+		// when a source writes it as it is.
+		stated := slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) ||
+			len(t.readings) == 0 && slices.ContainsFunc(sources, func(s string) bool { return strings.Contains(s, t.text) })
+		if !stated {
+			out = append(out, t.text)
+		}
+	}
+	return out
+}
+
+// tokens are text's numeric tokens with their readings (see InText).
+func tokens(text string) []token {
+	rs := []rune(text)
+	var out []token
 	for i := 0; i < len(rs); {
 		if !isDigit(rs[i]) {
 			i++
@@ -159,16 +195,17 @@ func numbersIn(text string) []*big.Rat {
 			i = e // the exponent's digits are not a number either
 			continue
 		}
-		if start > 0 && (isWordRune(rs[start-1]) || rs[start-1] == '.' || rs[start-1] == ',') {
+		if start > 0 && (isWordRune(rs[start-1]) || rs[start-1] == '.' || rs[start-1] == ',') || inName(rs, start, end) {
 			continue
 		}
-		neg := negative(rs, start)
-		for _, v := range readings(string(rs[start:end])) {
-			if neg {
+		t := token{text: string(rs[start:end]), readings: readings(string(rs[start:end]))}
+		if negative(rs, start) {
+			t.text = "-" + t.text
+			for _, v := range t.readings {
 				v.Neg(v)
 			}
-			out = append(out, v)
 		}
+		out = append(out, t)
 	}
 	return out
 }
@@ -186,6 +223,24 @@ func negative(rs []rune, start int) bool {
 	}
 	p := rs[start-2]
 	return unicode.IsSpace(p) || strings.ContainsRune("([:=", p) || unicode.Is(unicode.Sc, p)
+}
+
+// inName reports whether the token rs[start:end] is part of a name rather
+// than a quantity: after a letter and a hyphen ("GPT-4", "COVID-19"), or
+// before an ordinal or decade suffix ("1st", "4th", "1990s").
+func inName(rs []rune, start, end int) bool {
+	if start >= 2 && rs[start-1] == '-' && unicode.IsLetter(rs[start-2]) {
+		return true
+	}
+	j := end
+	for j < len(rs) && unicode.IsLetter(rs[j]) {
+		j++
+	}
+	switch strings.ToLower(string(rs[end:j])) {
+	case "st", "nd", "rd", "th", "s":
+		return true
+	}
+	return false
 }
 
 // exponentEnd is the end of an exponent following a token that ends at i
@@ -209,19 +264,36 @@ func exponentEnd(rs []rune, i int) int {
 
 // tokenEnd is where the numeric token starting at i ends: digits, and single
 // separators between digits.
+//
+// A space groups thousands only between a group of one to three digits and
+// one of exactly three: "61 200" is one number, "Q1 2025" two, and the year
+// is not lost into the quarter's name.
 func tokenEnd(rs []rune, i int) int {
-	j := i
+	j, group := i, 0
 	for j < len(rs) {
 		switch {
 		case isDigit(rs[j]):
 			j++
+			group++
+		case isSpaceSep(rs[j]) && (group > 3 || digitRun(rs, j+1) != 3):
+			return j
 		case isSep(rs[j]) && j+1 < len(rs) && isDigit(rs[j+1]):
 			j++
+			group = 0
 		default:
 			return j
 		}
 	}
 	return j
+}
+
+// digitRun is how many digits start at i.
+func digitRun(rs []rune, i int) int {
+	n := 0
+	for i+n < len(rs) && isDigit(rs[i+n]) {
+		n++
+	}
+	return n
 }
 
 // readings are the values a token can be read as. Thousands grouped by a
@@ -235,7 +307,9 @@ func readings(tok string) []*big.Rat {
 			out = append(out, v)
 		}
 	}
-	if len(out) > 0 || !strings.ContainsFunc(tok, isSpaceSep) {
+	// Spaces also part table cells ("123 456" in a row of counts): such a
+	// token is read as the cells too, whichever it was.
+	if !strings.ContainsFunc(tok, isSpaceSep) {
 		return out
 	}
 	for _, part := range strings.FieldsFunc(tok, isSpaceSep) {

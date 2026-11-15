@@ -59,6 +59,14 @@ func TestInTextMatchesWholeTokensOnly(t *testing.T) {
 		{"handled 61 200 boxes", "61,200", true},
 		{"handled 61\u202f200 boxes", "61,200", true},
 		{"in 2025 61,200 boxes", "61,200", true}, // numbers side by side
+		{"in Q1 2025 the port", "2025", true},    // a quarter's name keeps no year
+		{"handled 61 200 500 boxes", "61,200,500", true},
+		{"2025 123 456", "123", true}, // space-separated table cells
+		{"2025 123 456", "123,456", true},
+		{"GPT-4 scored higher", "4", false},
+		{"in the 1990s", "1990", false},
+		{"the 1st quarter", "1", false},
+		{"COVID-19 cases", "-19", false},
 		{"Umsatz: 1.234,5 Mio.", "1234.5", true},
 		{"growth of 2,5 %", "2.5", true},
 		{"fees of $12,400,000 in total", "12,400,000", true},
@@ -248,5 +256,21 @@ func TestANarrowLineDrawsFiniteCoordinates(t *testing.T) {
 		if svg := string(SVG(Chart{Title: "t", Kind: KindLine, Points: pts})); strings.Contains(svg, "NaN") || strings.Contains(svg, "Inf") {
 			t.Errorf("chart of %v drew non-finite coordinates", pts)
 		}
+	}
+}
+
+func TestUnstatedNamesTheFiguresTheSourcesLack(t *testing.T) {
+	got := Unstated("7,030,229 is 9,896,347 less 2,866,118 in Q1 2024", "9 896 347 passengers in 2024", "2,866,118 in April")
+	if len(got) != 1 || got[0] != "7,030,229" {
+		t.Errorf("Unstated = %v, want [7,030,229]", got)
+	}
+}
+
+func TestUnstatedAcceptsAVerbatimIdentifier(t *testing.T) {
+	if got := Unstated("Use version 1.2.3 of it", "Version 1.2.3 fixed it"); len(got) != 0 {
+		t.Errorf("Unstated = %v, want a version its premise writes accepted", got)
+	}
+	if got := Unstated("The improvement is 4%", "GPT-4 performs better"); len(got) != 1 {
+		t.Errorf("Unstated = %v, want the 4%% unstated: GPT-4 is a name", got)
 	}
 }

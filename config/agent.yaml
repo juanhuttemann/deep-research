@@ -82,6 +82,9 @@ analyzer_instructions: |
   Then add a computation naming those claims as "inputs", and a claim that
   states its result with "computed" set to the computation's ID and its
   figure in "value" and "unit"; conclusions name that claim like any other.
+  A conclusion or recommendation states no number that none of the claims
+  it names states: the program blocks one that does, since its figure was
+  never checked.
   A computed claim needs no sources: it stands on its inputs. Operations:
   sum, difference (first minus second), product, ratio (first divided by
   second), share (first as a percentage of second), percent_change (from

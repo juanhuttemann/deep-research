@@ -308,3 +308,41 @@ func TestASupportedComputedClaimIsAnInput(t *testing.T) {
 		t.Errorf("chart = %+v, want the total drawn", ch)
 	}
 }
+
+// A conclusion that does the arithmetic in its own words stands on nothing
+// the program checked: a run approved "7,030,229, the year-to-date total less
+// April" on the two claims it subtracted, beside the computed claim stating
+// the same figure, which had failed.
+func TestAStatementAddingAFigureIsBlocked(t *testing.T) {
+	a, findings := velmarAnalysis(), velmarFindings()
+	a.Conclusions = []agent.Recommendation{
+		{Statement: "The port handled 120,100 containers in the first half of 2025, Q1 plus Q2.", Claims: []string{"c2", "c3"}},
+		{Statement: "The port handled 61,200 containers in Q1 2025.", Claims: []string{"c2"}},
+	}
+	checkAnalysis(a, findings)
+	fc := quarterVerdicts(quarterQuotes)
+	fc.Inferences = []agent.Inference{{ID: "k1", Follows: true}, {ID: "k2", Follows: true}}
+	governAll(a, fc, nil, findings)
+	if got := a.Conclusions[0].Blocked; !strings.Contains(got, "it states 120,100, which none of its claims states") {
+		t.Errorf("k1 blocked = %q, want it blocked on its unstated figure", got)
+	}
+	if got := a.Conclusions[1].Blocked; got != "" {
+		t.Errorf("k2 restates its claim's figure and the year in its scope, blocked: %s", got)
+	}
+}
+
+// A revision from the repair pass is held to its figures too: one that
+// restated the arithmetic it was blocked for passed on the inference alone.
+func TestARevisionAddingAFigureIsBlocked(t *testing.T) {
+	a := &agent.Analysis{
+		Claims: []agent.Claim{{ID: "c2", Text: "The port handled 61,200 containers in Q1 2025.", Status: statusSupported}},
+		Conclusions: []agent.Recommendation{
+			{Statement: "Q1 was 61,200 plus 1,000.", Claims: []string{"c2"}, Blocked: "it states 1,000"},
+			{Statement: "The port handled 62,200 containers in Q1 2025.", Claims: []string{"c2"}, Revises: "k1"},
+		},
+	}
+	judgeRevisions(a, []string{"k2"}, nil, &agent.FactCheckResult{Inferences: []agent.Inference{{ID: "k2", Follows: true}}})
+	if got := a.Conclusions[1].Blocked; !strings.Contains(got, "it states 62,200") {
+		t.Errorf("revision blocked = %q, want it blocked on 62,200", got)
+	}
+}
