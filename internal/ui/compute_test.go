@@ -531,6 +531,9 @@ func TestAutoChartsGroupLikeFiguresAndLabelThem(t *testing.T) {
 		t.Fatalf("auto charts = %+v, want the one GDP series", got)
 	}
 	ch := got[0]
+	if ch.Title != "Germany: GDP growth" {
+		t.Errorf("title = %q, want the one subject named", ch.Title)
+	}
 	if ch.Kind != "line" || len(ch.Points) != 2 || ch.Points[0].Label != "2023" || ch.Points[1].Label != "2024" {
 		t.Errorf("chart = %+v, want a line over 2023 and 2024, the second 2024 once", ch)
 	}

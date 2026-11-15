@@ -319,3 +319,20 @@ func TestGluedTableCellsReadAsTheirCells(t *testing.T) {
 		t.Error("a grouped number was read as cells")
 	}
 }
+
+func TestSoleFigureReadsTheValueForm(t *testing.T) {
+	for _, tc := range []struct{ text, want string }{
+		{"Tesla reported 367,500 global vehicle deliveries for the 2019 calendar year.", "367,500"},
+		{"Tesla reported 1,313,851 deliveries in 2022.", "1,313,851"},
+		{"Umsatz von 1.234,5 Mio. Euro", "1,234.5"},
+		{"growth of 2.5% in 2023", "2.5"},
+	} {
+		n, ok := SoleFigure(tc.text, "")
+		if !ok || n.String() != tc.want {
+			t.Errorf("SoleFigure(%q) = %s, %v; want %s", tc.text, n, ok, tc.want)
+		}
+	}
+	if _, ok := SoleFigure("Tesla delivered 1.234 vehicles", ""); ok {
+		t.Error("a token read two ways was taken")
+	}
+}
