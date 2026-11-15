@@ -248,3 +248,25 @@ func TestEachStreamsBothSchemas(t *testing.T) {
 		t.Errorf("Each = %q, skipped %d, %v; want both runs in order and one skipped", questions, skipped, err)
 	}
 }
+
+// A record from before headlines, legacy or structured, loads with no
+// title; a titled one keeps it.
+func TestTitleRoundTripsBesideOlderRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	older := `{"id":"legacy","question":"q0","analysis":"a","confidence":"low"}` + "\n" +
+		`{"id":"structured","question":"q1","analysis":{"answer":"b"}}` + "\n"
+	if err := os.WriteFile(path, []byte(older), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := Open(path)
+	if err := st.Save(&ResearchResult{ID: "titled", ResearchResult: agent.ResearchResult{Question: "q2", Title: "Headline"}}); err != nil {
+		t.Fatal(err)
+	}
+	runs, skipped, err := list(st)
+	if err != nil || skipped != 0 || len(runs) != 3 {
+		t.Fatalf("runs=%d skipped=%d err=%v", len(runs), skipped, err)
+	}
+	if runs[0].Title != "" || runs[1].Title != "" || runs[2].Title != "Headline" {
+		t.Errorf("titles = %q, %q, %q", runs[0].Title, runs[1].Title, runs[2].Title)
+	}
+}

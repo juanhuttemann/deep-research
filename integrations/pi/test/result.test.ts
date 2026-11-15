@@ -9,6 +9,7 @@ const load = (name: string) => JSON.parse(readFileSync(fixture(name), "utf8"));
 test("the digest lists what the fact-check did not confirm, and what was blocked", () => {
 	const d = digest(load("run.json"));
 	assert.equal(d.confidence, "medium");
+	assert.equal(d.title, "Go vs Rust Web Server Speed");
 	assert.ok(d.factChecked);
 	assert.deepEqual(d.verdicts, { supported: 2, partial: 1, insufficient: 1 });
 	assert.deepEqual(d.unconfirmed.map((u) => [u.id, u.status]), [["c2", "partial"], ["c3", "insufficient"], ["c5", "contradicted"]]);
@@ -21,6 +22,7 @@ test("the digest lists what the fact-check did not confirm, and what was blocked
 test("an instant run is said to be not fact-checked", () => {
 	const d = digest(load("run-instant.json"));
 	assert.equal(d.factChecked, false);
+	assert.equal(d.title, undefined, "an instant run has no title");
 	const text = content({ status: "complete", artifacts: [], digest: d, report: "Go 1.26" });
 	assert.match(text, /NOT FACT-CHECKED/);
 	assert.doesNotMatch(text, /Confidence:/);

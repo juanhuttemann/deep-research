@@ -29,7 +29,12 @@ blocks, accepts and rejects (`EVAL_REPEAT=n` to measure variance; spends one
 request per fact-check call, two for most cases, per case and repeat; not
 part of the gate). Add a case there for
 each checker failure found in a real run.
-`make pi` typechecks and tests the Pi extension in `integrations/pi`
+`make web` runs the serve page's browser tests (`internal/web/browser`,
+Playwright, hermetic: the page is fed a recorded run's events); it needs
+Node and Playwright's Chromium (`cd internal/web/browser && npx playwright
+install chromium`), is skipped without them, and is part of `make verify`.
+Verify a page change there or with Playwright yourself, not by reading the
+HTML. `make pi` typechecks and tests the Pi extension in `integrations/pi`
 (TypeScript; needs Node 22.19+ and npm or corepack, skipped when absent),
 including its bridge driving a drsh built from the tree. It is part of
 `make verify`. The extension knows drsh only through the CLI, the
@@ -107,6 +112,16 @@ invariants:
   page all draw from. Don't add a control to one surface or copy tiers,
   counts or budget rules into `web/index.html`; add the setting there and
   every surface gets it.
+- The terminal live frame and the serve page show a run the same way:
+  [docs/surfaces.md](docs/surfaces.md) lists every feature they share (topic
+  groups, colours, labels, phase views, read rows, the report's title…)
+  with the Go function and the `data-feature` marker that draw it. A change
+  to what one surface shows of a run changes the other in the same commit,
+  with its row in that table and a `[feature-id]` test in
+  `internal/web/browser/parity.spec.js`; a difference that must stay goes
+  under its "Deliberate differences" with the reason. `TestSurfacesParity`
+  fails on a feature missing from either side; `make web` (in `make verify`)
+  runs the browser tests, and skips without Node or Playwright's Chromium.
 - The terminal UI is unix-only. Platform-split files use `//go:build unix` /
   `//go:build !unix` pairs (`term_unix.go`/`term_other.go`,
   `input_unix.go`/`input_other.go`), and the termios ioctl request numbers

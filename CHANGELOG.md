@@ -5,6 +5,40 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Short report titles. The report was headed by the whole question, which
+  could run to four lines. The planner now also writes a headline of eight
+  words or fewer, in the same call, so it costs no request. It heads the
+  `.md` and `.pdf` with the question under it in smaller type, and also
+  the completion card, `/resume` and the serve page. `drsh list` and the
+  page's recent runs list the run by it. The `.json` and the history record
+  carry it as `title`, and the `plan` event as `plan.title`. A run with no
+  title (instant runs, older runs) is headed by its question as before.
+- The serve page's live frame now matches the terminal's:
+  - each topic's activity sits under one header in the topic's colour,
+    opened by a click or its digit, and `a` shows or hides the activity;
+  - topics are numbered, `#1`, `#2`…, in the tree and the activity;
+  - a page's read and its check are one row: a spinner, then a green,
+    yellow or red dot, linked;
+  - rows are styled by kind;
+  - a topic's tree row follows its searches, reads and errors;
+  - the source total splits off the follow-up round;
+  - the reached phases on the strip open what each phase did (the plan's
+    sub-topics, searches and terms, every topic's rows, each phase's
+    reasoning, with when it started and how long it took), and `Esc`
+    closes the view.
+- `docs/surfaces.md` lists every feature the terminal and the page share,
+  so the two cannot drift apart again unnoticed. `TestSurfacesParity` fails
+  when a listed feature is missing from either side. `make web` (part of
+  `make verify`, and a CI job) runs the page in Chromium with Playwright
+  against a recorded run, one test per feature.
+
+### Changed
+
+- The serve page's audit numbers what it names: "Claim #1",
+  "Conclusion #1", "Recommendation #1".
+
 ## [0.35.0] - 2026-11-15
 
 ### Added

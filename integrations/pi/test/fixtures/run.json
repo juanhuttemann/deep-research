@@ -1,5 +1,6 @@
 {
   "question": "Which is faster for web servers, Go or Rust?",
+  "title": "Go vs Rust Web Server Speed",
   "depth": "quick",
   "confidence": "medium",
   "analysis": {

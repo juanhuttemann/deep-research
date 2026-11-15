@@ -57,13 +57,23 @@ The planner fixes misspelled words, capitalization, hyphenation, punctuation
 and unclosed brackets in the question ("best selling modules (arduino, etc"
 becomes "Best selling modules (Arduino, etc.)", "overalll" becomes
 "overall"), and a question typed over several lines is joined into one. The
-fixed question titles the report, its files and the history entry; the brief
+fixed question names the report's files and is printed in full under the
+report's title (below); the brief
 shows what you typed under it (the browser's plan review strikes through each
 word it replaced), so you can cancel before the run starts. Only a
 word-for-word fix is taken: a correction that adds, drops, reorders or
 replaces a word, or alters a word with a digit in it or one of three letters
 or fewer ("not"), is ignored, the progress log says so, and the question runs
 as typed. Grammar is left as typed.
+
+The planner also gives the run a short title, a headline of eight words or
+fewer naming its subject ("EU Wind and Solar Share 2024"), asked for in the
+same call, so it costs no request. It heads the report (`.md`, `.pdf`, the
+completion card, `/resume`, the serve page) with the question under it in
+smaller type, and `drsh list` and the serve page's recent runs list the run
+by it. A run with no title is headed by its question as before: an instant
+run, which makes no plan, a run from before titles existed, or a run whose
+planner gave none.
 
 ### A bare `drsh`
 
@@ -121,8 +131,8 @@ the question. Up and Down move between the lines, and a paste keeps its
 line breaks (tabs become spaces, and a break at its end is dropped). The
 other boxes, a sub-topic's name or a picker's filter, are one line: a paste
 goes in with its breaks as spaces. The model gets the question with its
-lines; titles (the brief, the live frame, the report's heading, the
-history, `/resume`) show it on one line. Shift-Enter is not a new line: most
+lines; titles (the brief, the live frame, the line under the report's
+heading, the history, `/resume`) show it on one line. Shift-Enter is not a new line: most
 terminals send it as Enter.
 
 Each run is a session. Its questions and answers are kept beside its
@@ -280,7 +290,7 @@ its row (and moves there), and Enter takes it; typing filters nothing.
 and Ctrl-C ends the run. The answers go to the planner, the analysis, the
 follow-up round and the report as the reading to research and answer in;
 the fact-check never sees them, and they never rewrite the question, which
-still titles the report. The brief shows each under the question it
+the report still prints under its title. The brief shows each under the question it
 answers (`read as  Which kind of heat pump? Ductless mini-split`), the live
 run keeps the answers under the question (`read as  Ductless mini-split ·
 Canada`), and the report opens with them as "Read as", in the terminal,
@@ -622,7 +632,14 @@ name unless you type one, and a sub-topic with no query searches the question
 with its name. A query you change drops the terms the planner wrote to judge
 results for its own, so that sub-topic keeps every result its search returns. Start research runs the
 edited plan (the same as `--plan`, history record included). While it runs
-the page shows the live frame. While a model reasons, the status row says
+the page shows the live frame, the terminal's in a browser
+([surfaces.md](surfaces.md) lists what the two share): each topic's
+activity under one header in the topic's colour, opened by a click or its
+digit (`a` shows or hides the activity); a page's read as one row with a
+spinner, then a green, yellow or red dot, linked; and the reached phases
+on the strip as buttons that open what each phase did (the plan's
+sub-topics with their searches and terms, every topic's rows, each phase's
+reasoning), closed again with `Esc`. While a model reasons, the status row says
 which phase is thinking and for how long, and a thinking row below the
 sub-agents holds the reasoning, a section per model call headed by its
 phase; open it to read along. It follows the newest text unless you scroll up. Interrupted runs are listed on the start
@@ -1093,12 +1110,14 @@ figure is left out and listed with why; a chart needs two points that
 stand: the terminal shows the table, the
 PDF draws the chart, and `serve` shows the image.
 
-`--output FILE` writes the same document as the `.md` artifact: the question
-as a title, the confidence and model lines, the report body, the searches
+`--output FILE` writes the same document as the `.md` artifact: the run's
+title with the question under it (the question alone for a run with no
+title), the confidence and model lines, the report body, the searches
 the analysis suggests, the fact-check counts with each claim it did not
 confirm, and the citation lists split into sources the report cites and
 sources the run only retrieved. A source with no URL is listed by title and
-marked `no URL`. The `.json` sidecar carries the same `model`, `provider`,
+marked `no URL`. The `.json` sidecar carries the same `title` (absent for
+a run with none), `model`, `provider`,
 `served_by`, the whole `analysis` (its reading of the question, claims with
 sources, recommendations, resolved conflicts, gaps and follow-ups), `topics`
 and every `fact_check` verdict, plus `error` for an incomplete run, and each

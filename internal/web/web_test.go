@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -787,5 +788,37 @@ func TestReportFilesHoldSVGToDrawing(t *testing.T) {
 	// The page keeps an image only when the run drew it.
 	if !strings.Contains(string(page), "if (!charts.has(src)) { img.remove(); continue; }") {
 		t.Error("inert() no longer drops the images the run did not draw")
+	}
+}
+
+// A run's headline is listed with it, read from the head of its .json and
+// never past the timestamp; a run before headlines, and one whose file is
+// not JSON, list none.
+func TestRunsListTheReportTitle(t *testing.T) {
+	now := time.Now()
+	reports := fstest.MapFS{
+		"titled.json":         {ModTime: now, Data: []byte(`{"version":"1","question":"q?","title":"  EU Power\n Mix ","timestamp":"x"}`)},
+		"older.json":          {ModTime: now.Add(-time.Minute), Data: []byte(`{"version":"1","question":"q?","timestamp":"x","title":"late"}`)},
+		"broken.json":         {ModTime: now.Add(-time.Hour), Data: []byte(`not json`)},
+		"run.a1.partial.json": {ModTime: now.Add(-2 * time.Hour), Data: []byte(`{"title":"checkpoint"}`)},
+	}
+	srv := httptest.NewServer(New(context.Background(), reports, nil).Handler())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/api/runs")
+	if err != nil {
+		t.Fatalf("runs: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var got []run
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	titles := map[string]string{}
+	for _, r := range got {
+		titles[r.Name] = r.Title
+	}
+	want := map[string]string{"titled.json": "EU Power Mix", "older.json": "", "broken.json": "", "run.a1.partial.json": ""}
+	if !maps.Equal(titles, want) {
+		t.Errorf("titles = %v, want %v", titles, want)
 	}
 }

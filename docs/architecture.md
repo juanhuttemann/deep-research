@@ -95,8 +95,10 @@ questions are put to the reader by `ui.Run` (the picker on the terminal,
 radio groups on the page from the `clarify` event) and the answers
 (`agent.Clarification`, aliased in `ui`) go on the plan beside the
 questions (`Plan.Clarifications`, `Plan.Questions`). The planner gets them
-as its own argument, never folded into the question, which still titles
-the report; the Driver appends them to the question it composes into the
+as its own argument, never folded into the question, which the report
+still prints under its title (the planner's `Outline.Title`, carried on
+`Plan.Title` into `ResearchResult.Title`; `ui.ReportTitle` falls back to the
+question for a run with none); the Driver appends them to the question it composes into the
 analysis, follow-up, repair and summarizer prompts (`statedQuestion`), and
 never into the fact-check's. With none, every prompt is what it was. A
 brief that asks the questions again returns to `ui.Run`, which makes the
@@ -426,7 +428,11 @@ internal/
             Last-Event-ID replay, launch / cancel, the reports directory
             read-only, a run's report rendered without its citations,
             questions about a run, a reviewed plan re-derived; the run, the
-            answer, the setup and the plan edit are functions cli injects
+            answer, the setup and the plan edit are functions cli injects.
+            The page draws the live frame as ui's Renderer does, from the
+            same events; docs/surfaces.md is the contract between the two,
+            held by TestSurfacesParity and the browser tests in
+            web/browser (Playwright, `make web`)
 config/     embedded default config.yaml and agent.yaml
 integrations/
   pi        the Pi extension (TypeScript, its own package): drives the

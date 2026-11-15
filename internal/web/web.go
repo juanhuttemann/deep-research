@@ -312,6 +312,9 @@ type run struct {
 	Name        string    `json:"name"`
 	Modified    time.Time `json:"modified"`
 	Interrupted bool      `json:"interrupted,omitempty"`
+	// Title is the report's headline, "" for a run with none (older and
+	// instant runs, checkpoints): the page reads the file name back then.
+	Title string `json:"title,omitempty"`
 }
 
 // runs lists the .json artifacts in the reports directory, newest first: the
@@ -335,12 +338,48 @@ func (s *Server) runs(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		if info, err := e.Info(); err == nil {
-			out = append(out, run{name, info.ModTime(), interrupted})
+			r := run{Name: name, Modified: info.ModTime(), Interrupted: interrupted}
+			if !interrupted {
+				r.Title = s.runTitle(name)
+			}
+			out = append(out, r)
 		}
 	}
 	slices.SortFunc(out, func(a, b run) int { return b.Modified.Compare(a.Modified) })
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out[:min(len(out), 50)])
+}
+
+// runTitle is the headline a run's .json records, read from the head of
+// the file: the sidecar writes it before the timestamp, so the decoder
+// stops there and never reads a report's findings and timeline (megabytes,
+// fifty runs to a listing). "" when it has none.
+func (s *Server) runTitle(name string) string {
+	f, err := s.reports.Open(name)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	dec := json.NewDecoder(io.LimitReader(f, 64<<10))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return ""
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil || key == "timestamp" {
+			return ""
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return ""
+		}
+		if key == "title" {
+			var title string
+			_ = json.Unmarshal(v, &title)
+			return strings.Join(strings.Fields(title), " ")
+		}
+	}
+	return ""
 }
 
 // launch starts a run. It insists on a JSON body: a form or text/plain POST

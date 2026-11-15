@@ -20,6 +20,7 @@ try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark"
 :root {
   --bg: #f3f3f0; --surface: #ffffff; --bg-2: #efefeb; --fg: #1d2025; --dim: #5d6470; --rule: #d6d7d2;
   --cyan: #0a6b7a; --green: #2d7514; --yellow: #7f5900; --red: #b3212c; --magenta: #8a3bb5;
+  --h0: #0a6b7a; --h1: #8a3bb5; --h2: #2457b5; --h3: #0d6158; --h4: #a02f80; --h5: #4150a6;
   --mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
 }
 /* Dark follows the system unless the toggle chose a theme: the same values
@@ -28,11 +29,13 @@ try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark"
   :root:not([data-theme=light]) {
     --bg: #1f2228; --surface: #2a2e35; --bg-2: #32363e; --fg: #c8ccd4; --dim: #9ba2ad; --rule: #3b4049;
     --cyan: #6fc0ca; --green: #a3c585; --yellow: #d9bb7f; --red: #e8939a; --magenta: #c99ade;
+    --h0: #6fc0ca; --h1: #c99ade; --h2: #93b2ee; --h3: #63b8ac; --h4: #e59ac9; --h5: #a9aef0;
   }
 }
 :root[data-theme=dark] {
   --bg: #1f2228; --surface: #2a2e35; --bg-2: #32363e; --fg: #c8ccd4; --dim: #9ba2ad; --rule: #3b4049;
   --cyan: #6fc0ca; --green: #a3c585; --yellow: #d9bb7f; --red: #e8939a; --magenta: #c99ade;
+  --h0: #6fc0ca; --h1: #c99ade; --h2: #93b2ee; --h3: #63b8ac; --h4: #e59ac9; --h5: #a9aef0;
 }
 :root {
   --cyan-soft: color-mix(in srgb, var(--cyan) 16%, var(--surface));
@@ -196,6 +199,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .run-head { padding: 12px 2ch; display: grid; gap: 4px; }
 .heading-row { display: flex; flex-wrap: wrap; gap: 0 2ch; justify-content: space-between; align-items: baseline; }
 .run-head h1 { font-weight: 400; color: var(--dim); overflow-wrap: anywhere; }
+/* A report's headline, with the question it answers under it, smaller: a
+   long question made a heading of four lines. */
+.run-head h1.titled { font-weight: 700; color: var(--fg); font-size: 1.15em; }
+.subtitle { margin: 0; color: var(--dim); font-size: .9em; overflow-wrap: anywhere; }
 .run-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 3ch; color: var(--dim); }
 .run-meta b { color: var(--fg); font-weight: 700; font-variant-numeric: tabular-nums; }
 .run-meta #cancel, .run-meta .exports { margin-left: auto; }
@@ -207,6 +214,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .step { color: var(--dim); white-space: nowrap; }
 .step.done { color: var(--green); }
 .step.current { color: var(--cyan); font-weight: 700; }
+/* A phase the run reached opens its view, as a click on the terminal's
+   strip does; it is underlined while its view is up. */
+button.step { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+button.step:hover, button.step.open { text-decoration: underline; text-underline-offset: 3px; }
 .step-sep { color: var(--rule); }
 
 .status { padding: 10px 2ch 0; }
@@ -233,7 +244,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 /* One row per sub-agent, as the terminal draws it: mark, name, meter, line. */
 .agents { padding: 10px 0 2px; }
 .agents:empty { display: none; }
-.agent { display: grid; grid-template-columns: 1ch minmax(10ch, 36ch) auto minmax(0, 1fr); gap: 0 2ch; padding: 0 2ch; }
+.agent { display: grid; grid-template-columns: 1ch 3ch minmax(10ch, 36ch) auto minmax(0, 1fr); gap: 0 2ch; padding: 0 2ch; }
 .agent .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent .meter { white-space: pre; color: var(--dim); }
 .agent .meter b { font-weight: 400; color: var(--dim); }
@@ -250,7 +261,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .activity summary::-webkit-details-marker { display: none; }
 .activity summary::before { content: "▸"; }
 .activity[open] summary::before { content: "▾"; }
-.log { max-height: 320px; overflow: auto; margin: 0; padding: 0 2ch 12px; list-style: none; }
+.log { max-height: 320px; overflow: auto; margin: 0; padding: 0 2ch 12px; }
 .activity + .activity { margin-top: 0; }
 /* The model's reasoning, whole, a section per call. It is the only place the
    page shows it: the status row's tail of the latest words, rewrapped every
@@ -259,12 +270,45 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 24px 64px; }
 .thought-head { color: var(--cyan); font-weight: 700; margin: 10px 0 2px; }
 .thought-head:first-child { margin-top: 0; }
 .thought-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.log li { display: grid; grid-template-columns: 5ch 2ch minmax(0, 1fr); gap: 1ch; }
-.log li span:last-child { overflow-wrap: anywhere; }
-.log .t, .log .s { color: var(--dim); }
-.log .error { color: var(--red); }
-.log .ok { color: var(--green); }
-.log .phase { color: var(--cyan); font-weight: 700; }
+/* The terminal's activity tail (tail.go): a row per run event, and one
+   header per topic, in its colour, that opens to the topic's rows. */
+.log .act, .pv-body .act { display: flex; gap: 2ch; min-width: 0; }
+.log .act > .x, .pv-body .act > .x { min-width: 0; overflow-wrap: anywhere; }
+.log .t, .pv-body .t { color: var(--dim); flex: 0 0 7ch; text-align: right; font-variant-numeric: tabular-nums; }
+.log .head { cursor: pointer; gap: 1ch; }
+.log .head:hover .nm { text-decoration: underline; }
+.log .head > .t { margin-right: 1ch; }
+.log .head .num, .log .head .cnt { color: var(--dim); flex: 0 0 auto; }
+.log .head .cnt { min-width: 3ch; }
+.log .head .nm { font-weight: 700; flex: 0 1 auto; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log .head .latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 1ch; }
+.log .sub { padding-left: 4ch; }
+.log .earlier { color: var(--dim); padding-left: 13ch; }
+.x .dim, .dim-row { color: var(--dim); }
+.x .cy, .pv-body .cy { color: var(--cyan); }
+.x .rd { color: var(--red); }
+.x .ok { color: var(--green); }
+.dot.ok { color: var(--green); }
+.dot.warn { color: var(--yellow); }
+.dot.bad { color: var(--red); }
+.x .spin { color: var(--cyan); }
+/* Each topic's colour (agentHues, render.go), the same in the tree, the
+   tail and the plan view. */
+.hue0 { --hue: var(--h0); } .hue1 { --hue: var(--h1); } .hue2 { --hue: var(--h2); }
+.hue3 { --hue: var(--h3); } .hue4 { --hue: var(--h4); } .hue5 { --hue: var(--h5); }
+.log .head .nm, .log .head .mark, .agent .nm, .pv-body .nm, .pv-body .hn { color: var(--hue, var(--fg)); }
+.agent .num { color: var(--dim); }
+/* A phase's view, in place of the tree and the tail (phaseview.go). */
+.phase-view { border-top: 1px solid var(--rule); padding: 10px 2ch 12px; }
+.pv-title, #pv-title { display: flex; flex-wrap: wrap; gap: 0 2ch; align-items: baseline; }
+.pv-title b { font-weight: 700; }
+.pv-title .btn { margin-left: auto; }
+.pv-body { max-height: 60vh; overflow: auto; margin-top: 8px; }
+.pv-body .gap { height: 1em; }
+.pv-body .lab { color: var(--dim); flex: 0 0 8ch; }
+.pv-body .ind { padding-left: 4ch; }
+.pv-body .hn { font-weight: 700; }
+.pv-body .reason { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 4ch; }
 
 /* ---- outcome ---- */
 .outcome { margin-top: 16px; padding: 10px 2ch; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 2ch; }
@@ -414,8 +458,8 @@ mark { background: var(--yellow); color: var(--bg); }
   #state-text, .wide { display: none; }
   .home, .brief { margin-top: 0; }
   .composer textarea { font-size: 16px; }
-  .agent { grid-template-columns: 1ch minmax(0, 1fr); }
-  .agent .meter, .agent .ln { grid-column: 2; }
+  .agent { grid-template-columns: 1ch 3ch minmax(0, 1fr); }
+  .agent .meter, .agent .ln { grid-column: 3; }
   .step-sep { display: none; }
   .row { flex-direction: column; gap: 2px; }
   .prose { padding: 18px 2ch; }
@@ -534,25 +578,30 @@ mark { background: var(--yellow); color: var(--bg); }
     <div class="card">
       <div class="run-head">
         <div class="heading-row"><span id="run-title" class="heading">Researching</span><span id="elapsed" class="dim"></span></div>
-        <h1 id="question"></h1>
+        <h1 id="question" data-feature="report-title"></h1>
+        <p id="question-sub" class="subtitle" hidden></p>
         <p id="run-reading" class="muted" hidden></p>
         <div class="run-meta">
-          <span><b id="n-sources">0</b> sources</span>
-          <span><b id="n-tokens">0</b> tokens</span>
+          <span data-feature="source-split"><b id="n-sources">0</b> sources<span id="n-split" class="dim"></span></span>
+          <span data-feature="counts"><b id="n-tokens">0</b> tokens</span>
           <span id="mode-label"></span>
           <button id="cancel" class="btn danger sm" hidden>cancel run</button>
           <span id="exports" class="files exports"></span>
         </div>
       </div>
       <div id="live">
-        <div id="stepper" class="stepper"></div>
+        <div id="stepper" class="stepper" data-feature="phase-nav"></div>
         <div id="note" class="notice" hidden></div>
         <div id="scrape-note" class="notice" hidden></div>
-        <div id="status" class="status" hidden><div class="now"><span class="spin"></span><span id="status-now"></span></div></div>
+        <div id="status" class="status" data-feature="status-row" hidden><div class="now"><span class="spin"></span><span id="status-now"></span></div></div>
         <div id="sources-check" class="sources" hidden></div>
-        <div id="agents" class="agents"></div>
+        <div id="agents" class="agents" data-feature="topic-colours topic-labels tree-lines"></div>
+        <div id="phase-view" class="phase-view" data-feature="phase-views" hidden>
+          <div class="pv-title"><span id="pv-title"></span><button id="pv-close" class="btn sm ghost" type="button">back to the run (esc)</button></div>
+          <div id="pv-body" class="pv-body"></div>
+        </div>
         <details id="thinking" class="activity" hidden><summary>thinking <span id="n-thought"></span></summary><div id="thought-log" class="thought-log"></div></details>
-        <details class="activity"><summary>activity <span id="n-events"></span></summary><ol id="log" class="log"></ol></details>
+        <details id="activity" class="activity" data-feature="activity-toggle"><summary>activity <span id="n-events"></span></summary><div id="log" class="log" data-feature="topic-groups read-rows row-styles"></div></details>
       </div>
     </div>
 
@@ -628,8 +677,12 @@ function link(u, text) {
   return a;
 }
 function domain(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } }
-function fmtNum(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n || 0); }
-function clock(ms) { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+// The terminal's formatCount and formatDuration (render.go, terminal.go).
+function fmtNum(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0); }
+function clock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = String(s % 60).padStart(2, "0");
+  return h ? h + ":" + String(m).padStart(2, "0") + ":" + ss : m + ":" + ss;
+}
 
 // Short results for scanning; their meaning is visible with the selected evidence.
 // These describe the material available to the checker, which may be snippets.
@@ -860,7 +913,10 @@ function setRunning(on) {
 }
 function reset() {
   agents = new Map(); phase = ""; finished = false; events = 0; startedAt = Date.now(); endedAt = 0; thoughts = []; reads = { full: 0, snippet: 0 };
-  for (const id of ["question", "agents", "sources-check", "log", "thought-log", "n-thought", "files", "exports", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
+  acts = []; opened = new Set(); phaseAt = new Map(); view = ""; runPlan = null; runPlanSettings = null; stale = new Set();
+  $("phase-view").hidden = true; $("agents").hidden = $("activity").hidden = false;
+  showTitle("", "");
+  for (const id of ["question", "n-split", "agents", "sources-check", "log", "thought-log", "n-thought", "files", "exports", "outcome-msg", "outcome-tag", "mode-label"]) $(id).replaceChildren();
   $("sources-check").hidden = $("thinking").hidden = true;
   $("n-sources").textContent = "0"; $("n-tokens").textContent = "0"; $("n-events").textContent = "";
   $("note").hidden = $("scrape-note").hidden = $("status").hidden = $("outcome").hidden = $("audit").hidden = true;
@@ -870,40 +926,69 @@ function reset() {
   stepper();
   show("run");
 }
+// stepper is the terminal's phase strip (phaseStrip, render.go): a phase
+// the run reached is a button that opens its view, or shuts it when open.
 function stepper() {
   const steps = instantRun ? ["Research", "Answer"] : PIPELINE;
   let cur = steps.findIndex(p => p.toLowerCase() === phase.toLowerCase());
   if (phase === "Report" || finished) cur = steps.length;
   $("stepper").replaceChildren(...steps.flatMap((p, i) => {
-    const s = i < cur ? el("span", "step done", "✓ " + p) : i === cur ? el("span", "step current", "▸ " + p) : el("span", "step", "· " + p);
+    const [cls, mark] = i < cur ? ["done", "✓"] : i === cur ? ["current", "▸"] : ["", "·"];
+    const reached = i <= cur;
+    const s = el(reached ? "button" : "span", "step " + cls + (view === p ? " open" : ""), mark + " " + p);
+    if (reached) {
+      s.type = "button"; s.title = view === p ? "Back to the run" : "Show what " + p + " did";
+      s.setAttribute("aria-pressed", String(view === p));
+      s.onclick = () => openPhase(view === p ? "" : p);
+    }
     return i ? [el("span", "step-sep", "─"), s] : [s];
   }));
 }
 function status(text) {
-  if (!text) { $("status").hidden = true; return; }
+  // The status row is for the phases after the research, whose single model
+  // calls leave the tree still (statusShown, render.go).
+  if (!text || phase.toLowerCase() === "research") { $("status").hidden = true; return; }
   // A thinking model's status is a line, a newline, then its latest reasoning:
   // the terminal's only view of it. Here the thinking block holds it whole,
   // so the row keeps the line.
   $("status-now").textContent = text.split("\n")[0];
   $("status").hidden = false;
 }
-function agent(e) {
-  let a = agents.get(e.sub_id);
+// In plan order, follow-ups ("f1", "f2") after: sub-agents report in
+// parallel, and in arrival order the rows came out shuffled.
+function rank(id) { return id.startsWith("f") ? 1e6 + (+id.slice(1) || 0) : +id || 0; }
+function topicOrder() { return [...agents.keys()].sort((x, y) => rank(x) - rank(y)); }
+// A topic's colour and label are its place in the tree, as the terminal's
+// hue and topicNumber: the label is the digit key that opens its group.
+function hue(id) { const i = topicOrder().indexOf(id); return i < 0 ? "" : "hue" + (i % 6); }
+function topicLabel(id) { const i = topicOrder().indexOf(id); return i < 0 ? "" : "#" + (i + 1); }
+// node is the tree's row for sub-agent id, made on its first event of any
+// kind (node, render.go).
+function node(id, name) {
+  let a = agents.get(id);
   if (!a) {
-    a = { id: e.sub_id, row: el("div", "agent"), progress: 0, sources: 0 };
-    agents.set(e.sub_id, a);
-    // In plan order, follow-ups ("f1", "f2") after: sub-agents report in
-    // parallel, and in arrival order the rows came out shuffled.
-    const rank = id => id.startsWith("f") ? 1e6 + (+id.slice(1) || 0) : +id || 0;
-    const rows = [...agents].sort((x, y) => rank(x[0]) - rank(y[0])).map(([, v]) => v.row);
+    a = { id, row: el("div", "agent"), progress: 0, sources: 0 };
+    agents.set(id, a);
+    const order = topicOrder(), rows = order.map(k => agents.get(k).row);
     // Unmarked, the follow-up rows read as more of the plan, as in the terminal.
-    const first = [...agents.keys()].sort((x, y) => rank(x) - rank(y)).findIndex(id => id.startsWith("f"));
+    const first = order.findIndex(k => k.startsWith("f"));
     if (first >= 0) rows.splice(first, 0, el("div", "divider", "follow-up searches for the analysis's open questions"));
     $("agents").replaceChildren(...rows);
+    // A new row moves the ones after it: their colours and numbers follow.
+    for (const v of agents.values()) if (v !== a) drawAgent(v);
   }
-  for (const k of ["sub_name", "sub_state", "line"]) if (e[k]) a[k] = e[k];
+  if (name) a.sub_name = name;
+  return a;
+}
+function agent(e) {
+  const a = node(e.sub_id, e.sub_name);
+  if (e.sub_state) a.sub_state = e.sub_state;
+  if (e.line) a.line = e.line;
   if (e.progress > a.progress) a.progress = e.progress;
+  // Once a topic is done no read of it is in flight (dropReads).
+  if (e.sub_state === "done") dropReads(e.sub_id);
   drawAgent(a);
+  touch("Research");
 }
 function drawAgent(a) {
   const st = a.sub_state || "queued";
@@ -914,7 +999,8 @@ function drawAgent(a) {
   if (a.sources) label += " " + String(a.sources).padStart(2) + " " + (a.sources === 1 ? "source " : "sources");
   const [full, empty] = meter(p);
   m.append(el("b", "", full), el("i", "", empty), label);
-  a.row.replaceChildren(ico, el("span", "nm", a.sub_name || "Topic " + a.id), m, el("span", "ln", a.line || ""));
+  a.row.className = "agent " + st + " " + hue(a.id);
+  a.row.replaceChildren(ico, el("span", "num", topicLabel(a.id)), el("span", "nm", a.sub_name || "Topic " + a.id), m, el("span", "ln", a.line || ""));
 }
 // source is one domain of the run's site list, as the check before planning
 // found it: read in full, from search snippets only, or not usable.
@@ -928,7 +1014,7 @@ function source(e) {
   row.title = c.sample || "";
   $("sources-check").append(row);
   $("sources-check").hidden = false;
-  log(e, (kind === "error" ? "✗ " : "✓ ") + (c.domain || "") + " " + c.status, kind === "error" ? "error" : "ok");
+  pushAct(e, "", (kind === "error" ? "✗ " : "✓ ") + (c.domain || "") + " " + c.status, { cls: kind === "error" ? "rd" : "ok" });
 }
 // think adds a piece of a streamed call's reasoning to the thinking block: a
 // call's first piece opens its section, headed by the phase it thinks for.
@@ -955,7 +1041,8 @@ function think(e) {
   s.words = (s.text.data.match(/\S+/g) || []).length;
   const words = thoughts.reduce((n, t) => n + (t.words || 0), 0);
   $("n-thought").textContent = "· " + ph.toLowerCase() + " · " + fmtNum(words) + (words === 1 ? " word" : " words");
-  $("thinking").hidden = false;
+  // A phase's view shows the reasoning in its place.
+  $("thinking").hidden = !!view;
 }
 // Opened, the block starts at the latest reasoning; closed, it could not
 // follow.
@@ -973,14 +1060,301 @@ function scraped(e) {
   $("scrape-note").textContent = warn ? "No page read in full yet: " + reads.snippet + " sources were search snippets only. " +
     setup.pages + " may be down; drsh doctor checks it." : "";
 }
-function log(e, text, cls) {
+// ---- the terminal's activity tail and phase views ----------------------------
+// Ported from internal/ui: tail.go (groups), render.go (rows, reads, hues)
+// and phaseview.go (phase views). docs/surfaces.md lists each feature with
+// the function it mirrors and its data-feature marker here: change both
+// surfaces or neither.
+const ACT_KEEP = 5000, OPEN_ROWS = 200;
+// acts are the tail's rows (activity, render.go): at (ms into the run), sub,
+// text, the phase it fell in, and for a page's read its url and status.
+let acts = [], opened = new Set(), phaseAt = new Map(), view = "", runPlan = null, drawPending = false;
+// stale are the phases whose view changed since it was drawn: an open view
+// is rebuilt only when its own phase changed, not for every event (a
+// Research view of thousands of rows redrawn per reasoning token).
+let stale = new Set();
+function touch(p) { stale.add(p || phase); redraw(); }
+
+function pushAct(e, sub, text, extra) {
+  if (!text) return;
+  acts.push({ at: e.time ? Date.parse(e.time) - startedAt : 0, sub: sub || "", text, phase, ...extra });
+  if (acts.length > ACT_KEEP) acts.splice(0, acts.length - ACT_KEEP);
   events++;
-  $("n-events").textContent = "· " + events;
-  const li = el("li", cls || "");
-  const at = e.time ? Date.parse(e.time) - startedAt : 0;
-  li.append(el("span", "t", clock(at)), el("span", "s", e.sub_id || ""), el("span", "", text));
-  $("log").append(li);
-  while ($("log").childElementCount > 500) $("log").firstChild.remove();
+  touch(phase);
+}
+// pushRead adds the row of a page being read, named by host and path: two
+// pages of one site read as the same page twice.
+function pushRead(e) {
+  let page = e.domain || "";
+  try { const u = new URL(e.url); if (u.host) page = u.host + decodeURIComponent(u.pathname).replace(/\/+$/, ""); } catch {}
+  pushAct(e, e.sub_id, page.replace(/[\u0000-\u001f\u007f]/g, ""), { url: e.url });
+}
+// settleRead turns the row of the page a verify reports on into its dot, in
+// place: a row for the read and another for how it went filled the tail
+// twice as fast.
+function settleRead(e) {
+  const a = acts.findLast(a => a.url === e.url && a.sub === (e.sub_id || "") && !a.status);
+  if (!a) return false;
+  if (["ok", "degraded", "dropped"].includes(e.status)) a.status = e.status;
+  else if (e.line) { a.url = ""; a.text = e.line; }
+  else acts.splice(acts.indexOf(a), 1);
+  touch(a.phase);
+  return true;
+}
+// dropReads removes sub's reads still spinning: once its search returned,
+// what is left was fetched past the budget and will never be verified.
+function dropReads(sub) { acts = acts.filter(a => !(a.sub === (sub || "") && a.url && !a.status)); }
+// sourceEvent is applySourceEvent (render.go): a topic's search, read,
+// verify and citation move its tree row and its group in the tail.
+function sourceEvent(e) {
+  if (e.sub_id) {
+    const a = node(e.sub_id, e.sub_name);
+    if (a.sub_state !== "done" && a.sub_state !== "error") a.sub_state = "running";
+    if (e.line) a.line = e.line;
+    if (e.type === "citation") a.sources++;
+    drawAgent(a);
+    touch("Research");
+  }
+  if (e.type === "read" && e.url) pushRead(e);
+  else if (e.type === "verify" && settleRead(e)) {}
+  else {
+    if (e.type === "search") dropReads(e.sub_id);
+    pushAct(e, e.sub_id, e.line);
+  }
+}
+// footer splits the total as the terminal's footer does, once the
+// follow-up round has cited anything.
+function footer() {
+  let f = 0;
+  for (const [id, a] of agents) if (id.startsWith("f")) f += a.sources;
+  const total = +$("n-sources").textContent || 0;
+  $("n-split").textContent = f ? " (" + Math.max(total - f, 0) + " planned + " + f + " follow-up)" : "";
+}
+function redraw() {
+  if (drawPending) return;
+  drawPending = true;
+  requestAnimationFrame(() => { drawPending = false; drawTail(); drawView(); });
+}
+// groupActs files each known topic's rows under one header placed where its
+// first row fell; the run's own rows stand alone (groupActs, tail.go).
+function groupActs() {
+  const items = [], at = new Map();
+  for (const a of acts) {
+    if (!a.sub || !agents.has(a.sub)) { items.push({ act: a }); continue; }
+    let i = at.get(a.sub);
+    if (i === undefined) { i = items.length; at.set(a.sub, i); items.push({ sub: a.sub, rows: [] }); }
+    items[i].rows.push(a);
+  }
+  return items;
+}
+function drawTail() {
+  $("n-events").textContent = acts.length ? "· " + acts.length : "";
+  const box = $("log");
+  if (!$("activity").open) return;
+  const follow = !reveal && box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  const focused = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.sub;
+  box.replaceChildren(...groupActs().flatMap(it => it.sub ? topicGroup(it) : [actRow(it.act)]));
+  if (focused) { const h = box.querySelector(`.head[data-sub="${CSS.escape(focused)}"]`); if (h) h.focus({ preventScroll: true }); }
+  if (follow) box.scrollTop = box.scrollHeight;
+  // A topic just opened shows from its header: following the newest rows
+  // scrolled the header it was opened by out of sight.
+  const h = reveal && box.querySelector(`.head[data-sub="${CSS.escape(reveal)}"]`);
+  if (h) box.scrollTop = h.offsetTop - box.offsetTop;
+  reveal = "";
+}
+function actRow(a, cls) {
+  const r = el("div", "act" + (cls ? " " + cls : ""));
+  r.append(el("span", "t", clock(a.at)), actText(a));
+  return r;
+}
+// topicGroup is a group's header (topicHead, tail.go): its time, label, a
+// mark that says whether it is open, its name in its colour, its row count
+// and, while shut, its latest row; open, its rows follow it.
+function topicGroup(it) {
+  const open = opened.has(it.sub), last = it.rows[it.rows.length - 1], a = agents.get(it.sub);
+  const head = el("div", "act head " + hue(it.sub));
+  head.dataset.sub = it.sub; head.tabIndex = 0;
+  head.setAttribute("role", "button"); head.setAttribute("aria-expanded", String(open));
+  head.append(el("span", "t", clock(last.at)), el("span", "num", topicLabel(it.sub)), el("span", "mark", open ? "▿" : "▹"),
+    el("span", "nm", a.sub_name || "Topic " + it.sub), el("span", "cnt", String(it.rows.length)));
+  if (!open) head.append(actText(last, "latest"));
+  head.onclick = () => toggleTopic(it.sub);
+  head.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleTopic(it.sub); } };
+  if (!open) return [head];
+  const rows = it.rows.slice(-OPEN_ROWS), out = [head];
+  if (rows.length < it.rows.length) out.push(el("div", "act earlier", "… " + (it.rows.length - rows.length) + " earlier"));
+  return out.concat(rows.map(r => actRow(r, "sub")));
+}
+let reveal = "";
+function toggleTopic(id) {
+  if (opened.has(id)) opened.delete(id); else { opened.add(id); reveal = id; }
+  // A topic opened with the tail hidden shows it: the click asked to see it.
+  $("activity").open = true;
+  redraw();
+}
+// actText is a row's text, a read's behind its spinner or dot, the rest
+// told apart as the terminal's styleRow tells them.
+function actText(a, cls) {
+  const s = el("span", "x" + (cls ? " " + cls : ""));
+  if (a.url) {
+    const [dot, says] = { ok: ["ok", "read in full"], degraded: ["warn", "search snippet only"], dropped: ["bad", "dropped"] }[a.status] || [];
+    let mark = spin();
+    if (dot) { mark = el("span", "dot " + dot, "●"); mark.title = says; mark.setAttribute("aria-label", says); }
+    s.append(mark, " ", dot === "ok" || dot === "warn" ? link(a.url, a.text) : a.text);
+    return s;
+  }
+  const t = a.text;
+  if (a.cls) s.append(el("span", a.cls, t));
+  else if (t.startsWith("▸ ")) s.append(el("span", "cy", "▸"), " ", el("b", "", t.slice(2)));
+  else if (t.startsWith("! ")) s.append(el("span", "rd", "!"), " ", t.slice(2));
+  else if (t.startsWith("Searching: ")) s.append(el("span", "dim", "search"), "  ", t.slice("Searching: ".length));
+  else if (a.info || !a.sub || t.startsWith("= ")) s.append(el("span", "dim", t));
+  else s.append(t);
+  return s;
+}
+$("activity").ontoggle = () => redraw();
+
+// openPhase shows a phase's view in place of the tree and the tail, or the
+// run again for "" (clickStripLocked and ClosePhase, phaseview.go).
+function openPhase(p) {
+  view = p;
+  $("phase-view").hidden = !p;
+  // The view holds the phase's reasoning too.
+  $("agents").hidden = $("activity").hidden = $("thinking").hidden = !!p;
+  if (!p) $("thinking").hidden = !thoughts.length;
+  $("pv-body").replaceChildren();
+  pvFollow = p.toLowerCase() === phase.toLowerCase() && running;
+  stepper();
+  drawView(true);
+  if (!p) return;
+  if (!pvFollow) $("pv-body").scrollTop = 0;
+}
+let pvFollow = false;
+$("pv-close").onclick = () => openPhase("");
+function drawView(force) {
+  if (!view) return;
+  // The title's "running" clock moves only with phases, which touch().
+  if (!force && !stale.has(view) && !stale.has("")) { stale.clear(); return; }
+  stale.clear();
+  const at = phaseAt.get(view), next = nextPhaseAt(view);
+  $("pv-title").replaceChildren(el("b", "", view),
+    el("span", "dim", at === undefined ? "" : "started " + clock(at) + (next !== undefined ? " · took " + clock(next - at) : " · running")));
+  const box = $("pv-body"), follow = pvFollow || box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  const rows = view === "Plan" ? planView() : view === "Research" ? researchView() : phaseRows();
+  rows.push(...reasoningView());
+  if (!rows.length) rows.push(el("div", "dim-row", "nothing recorded for this phase yet"));
+  box.replaceChildren(...rows);
+  if (follow && view.toLowerCase() === phase.toLowerCase() && running) box.scrollTop = box.scrollHeight;
+  pvFollow = false;
+}
+// nextPhaseAt is when the phase after p started, which ended it (phaseEnd).
+function nextPhaseAt(p) {
+  const steps = instantRun ? ["Research", "Answer"] : PIPELINE, i = steps.indexOf(p);
+  if (i >= 0 && i + 1 < steps.length && phaseAt.has(steps[i + 1])) return phaseAt.get(steps[i + 1]);
+  // A run that ended, cancelled and failed ones too, ended its last phase.
+  if (!running && endedAt && startedAt && p.toLowerCase() === phase.toLowerCase()) return endedAt - startedAt;
+  return undefined;
+}
+function pvRow(...parts) { const r = el("div", "act"); r.append(...parts); return r; }
+function labelled(label, text) { return pvRow(el("span", "lab", label), el("span", "x", text)); }
+// phaseRows are the run's own rows from the view's phase (phaseRows).
+function phaseRows() {
+  return acts.filter(a => a.phase === view && (!a.sub || !agents.has(a.sub))).map(a => actRow(a));
+}
+// planView is the plan the run follows: its reading, settings and sites,
+// then each sub-topic in its colour with its notes, search and terms.
+// runPlanSettings is the server's reading of the run's plan: its review
+// settings and budget, fetched once when the plan arrives.
+let runPlanSettings = null;
+async function loadPlanSettings(p) {
+  runPlanSettings = null;
+  try {
+    const r = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: p, key: "", value: "" }) });
+    if (!r.ok || runPlan !== p) return;
+    const got = await r.json();
+    if (runPlan === p && Array.isArray(got.settings)) { runPlanSettings = got; touch("Plan"); }
+  } catch {}
+}
+function planView() {
+  const p = runPlan;
+  if (!p) return phaseRows();
+  const out = [];
+  for (const c of p.clarifications || []) out.push(labelled("read as", c.question + " " + c.answer));
+  // The review settings as the server draws them (ReviewSettings, the
+  // terminal's briefSettingsRow), then the budget.
+  const perTopic = (runPlanSettings && runPlanSettings.per_topic) ||
+    Math.max(Math.floor((p.max_sources || 0) / Math.max((p.sub_topics || []).length, 1)), 1);
+  const set = runPlanSettings ? runPlanSettings.settings.flatMap(st => {
+    const o = st.choices.find(c => c.value === st.value);
+    return [el("span", "dim", st.label + " "), (o ? o.label : st.value) + "   "];
+  }) : [el("span", "dim", "depth "), (p.instant ? "instant" : (p.depth || {}).key || "standard") + "   "];
+  const row = el("div", "act"), x = el("span", "x");
+  x.append(...set, el("span", "dim", "max sources "), String(p.max_sources || 0) + "   ", el("span", "dim", "per sub-agent "), String(perTopic));
+  row.append(x);
+  out.push(row);
+  if ((p.domains || []).length) out.push(labelled("only from", p.domains.join(", ")));
+  const n = (p.sub_topics || []).length;
+  out.push(el("div", "gap"), pvRow(el("span", "cy", n + (n === 1 ? " sub-topic" : " sub-topics") + (p.scope ? " · " + p.scope + " question" : ""))));
+  (p.sub_topics || []).forEach((t, i) => {
+    const head = pvRow(el("span", "hn", "#" + (i + 1)), el("span", "nm", t.name));
+    head.classList.add("hue" + (i % 6));
+    out.push(el("div", "gap"), head);
+    if (t.notes) out.push(pvRow(el("span", "x ind", t.notes)));
+    if (t.query) out.push(labelled("search", t.query));
+    if ((t.terms || []).length) out.push(labelled("terms", t.terms.join(" · ")));
+  });
+  return out;
+}
+// researchView is the research's own rows, then every topic's rows under
+// its name, all of them (researchView).
+function researchView() {
+  const out = phaseRows();
+  for (const id of topicOrder()) {
+    const a = agents.get(id), st = a.sub_state || "queued";
+    const head = pvRow(el("span", "hn", topicLabel(id)),
+      st === "running" ? spin() : el("span", "ico " + st, st === "done" ? "✓" : st === "error" ? "✗" : "·"),
+      el("span", "nm", a.sub_name || "Topic " + id), el("span", "dim", a.sources + (a.sources === 1 ? " source" : " sources")));
+    head.classList.add(hue(id));
+    out.push(el("div", "gap"), head, ...acts.filter(r => r.sub === id).map(r => actRow(r)));
+  }
+  return out;
+}
+// reasoningView is the phase's calls' reasoning, whole, each call under its
+// part's name when the phase ran several.
+function reasoningView() {
+  const ts = thoughts.filter(t => t.phase === view);
+  if (!ts.length) return [];
+  const out = [el("div", "gap"), pvRow(el("span", "cy", "reasoning"))];
+  for (const t of ts) {
+    if (t.part) out.push(el("div", "gap"), pvRow(el("b", "", t.part)));
+    out.push(el("div", "reason", t.text.data));
+  }
+  return out;
+}
+// The terminal's keys: a digit opens or shuts that topic's group, a shows
+// or hides the tail, and Esc shuts a phase's view before anything else.
+// Never while typing, and only on the live frame.
+document.addEventListener("keydown", ev => {
+  if ($("run").hidden || $("live").hidden || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const t = ev.target;
+  if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName))) return;
+  if (ev.key === "Escape" && view) { ev.preventDefault(); openPhase(""); return; }
+  if (view) return;
+  if (ev.key === "a") { $("activity").open = !$("activity").open; return; }
+  if (/^[1-9]$/.test(ev.key)) {
+    const id = topicOrder()[+ev.key - 1];
+    if (id) toggleTopic(id);
+  }
+});
+// showTitle heads the run with the planner's headline and the question under
+// it, or with the question alone when the run has no headline (ReportTitle).
+function showTitle(title, question) {
+  const q = (question || "").replace(/\s+/g, " ").trim(), t = (title || "").replace(/\s+/g, " ").trim();
+  const titled = !!t && t.toLowerCase() !== q.toLowerCase();
+  $("question").textContent = titled ? t : q;
+  $("question").classList.toggle("titled", titled);
+  $("question-sub").textContent = titled ? q : "";
+  $("question-sub").hidden = !titled;
 }
 function handle(e) {
   if (!startedAt && e.time) startedAt = Date.parse(e.time) || Date.now();
@@ -989,6 +1363,7 @@ function handle(e) {
   // at the analysis's 21k while the run's report said 89k.
   if (e.sources) $("n-sources").textContent = e.sources;
   if (e.tokens) $("n-tokens").textContent = fmtNum(e.tokens);
+  if (e.sources || e.type === "citation") footer();
   switch (e.type) {
   case "start":
     reset(); setRunning(true);
@@ -999,7 +1374,7 @@ function handle(e) {
     startedAt = Date.parse(e.time) || Date.now();
     // A run launched from an edited plan names its question in the plan
     // event, which follows.
-    $("question").textContent = e.question || (e.resume ? runTitle(e.resume) : "");
+    showTitle("", e.question || (e.resume ? runTitle(e.resume) : ""));
     showRunReading([]);
     $("mode-label").textContent = (e.mode || "standard") + " mode";
     phase = "Plan"; stepper();
@@ -1012,35 +1387,36 @@ function handle(e) {
   case "clarify": if (clarifying) asked = e.questions || []; break;
   case "plan":
     if (planning) madePlan = e.plan;
-    instantRun = !!e.plan.instant; stepper();
-    $("question").textContent = e.plan.question;
+    instantRun = !!e.plan.instant; runPlan = e.plan; stepper(); loadPlanSettings(e.plan); touch("Plan");
+    showTitle(e.plan.title, e.plan.question);
     showRunReading(e.plan.clarifications);
     $("mode-label").textContent = e.plan.instant ? "instant" : e.plan.depth.key + " mode";
     break;
   case "phase":
-    phase = e.phase; stepper();
+    phase = e.phase;
+    // The research starts again for the follow-up round; it is still the
+    // research, timed from its first start (phaseLog).
+    if (!phaseAt.has(e.phase)) phaseAt.set(e.phase, e.time ? Date.parse(e.time) - startedAt : 0);
+    stepper();
     // A phase without a detail clears the last one: "Checking 3 sites…" stayed
     // up through the whole of Research.
     status(e.detail || "");
     // The reasoning after the first line is the status row's, not the log's.
-    log(e, e.phase + (e.detail ? " — " + e.detail.split("\n")[0] : ""), "phase");
+    pushAct(e, "", e.detail ? "▸ " + e.detail.split("\n")[0] : "");
     break;
   case "info":
-    if (e.transient) status(e.detail); else log(e, e.detail);
+    if (e.transient) status(e.detail); else pushAct(e, e.sub_id, e.detail, { info: true });
     break;
   case "subagent": agent(e); break;
-  case "thinking": think(e); break;
-  case "citation": {
-    log(e, "+ " + (e.source_title || e.url), "ok");
-    const a = agents.get(e.sub_id);
-    if (a) { a.sources++; drawAgent(a); }
+  case "thinking": think(e); touch(e.phase); break;
+  // A citation has no row: its read's green dot already says it was kept.
+  case "citation": sourceEvent(e); footer(); break;
+  case "search": case "read": sourceEvent(e); break;
+  case "verify": scraped(e); sourceEvent(e); break;
+  case "error":
+    if (e.sub_id) { const a = node(e.sub_id, e.sub_name); a.line = e.detail; drawAgent(a); }
+    pushAct(e, e.sub_id, "! " + e.detail);
     break;
-  }
-  case "search": log(e, "search “" + e.query + "”"); break;
-  case "read": log(e, "read " + (e.domain || domain(e.url))); break;
-  // An off-topic result has no line of its own: the search's line counts them.
-  case "verify": scraped(e); if (e.status === "offtopic" && !e.line) break; log(e, e.line || (e.status + " " + (e.domain || domain(e.url)) + (e.code ? " " + e.code : "")), e.status === "ok" ? "ok" : ""); break;
-  case "error": log(e, e.detail, "error"); break;
   case "done": done(e); break;
   }
 }
@@ -1071,7 +1447,7 @@ function done(e) {
   // A run that ended before this page opened is history: it is in Recent
   // runs, and the page opens on the start screen rather than on it.
   if (endedAt < loadedAt) { show("home"); return; }
-  stepper(); status("");
+  stepper(); status(""); touch("");
   $("run-title").textContent = "Research " + (e.status || "ended");
   $("outcome").hidden = false;
   $("outcome-tag").replaceChildren(tag(OUTCOME[e.status] || ["off", e.status]));
@@ -1299,6 +1675,8 @@ function editedPlan() {
   return {
     question: brief.question,
     asked: brief.asked || "",
+    // The planner's headline titles the report the reviewed plan runs to.
+    title: brief.title || "",
     depth: { key: brief.depth.key },
     instant: !!brief.instant,
     // The plan instant replaced, put back when another depth is chosen.
@@ -1512,7 +1890,8 @@ async function loadRuns() {
     if (!runs.length) { ul.append(el("li", "empty", "No runs yet. Your reports will appear here.")); return; }
     for (const r of runs) {
       const a = el("a"); a.href = "/?run=" + encodeURIComponent(r.name);
-      a.append(el("span", "t", runTitle(r.name)), el("span", "when", ago(r.modified)));
+      // The run's headline when it has one; the file name read back otherwise.
+      a.append(el("span", "t", r.title || runTitle(r.name)), el("span", "when", ago(r.modified)));
       const li = el("li"); li.append(a); ul.append(li);
     }
   } catch { ul.replaceChildren(el("li", "empty", "Could not list the reports directory.")); }
@@ -1662,7 +2041,7 @@ function showView() {
 function unitText(u) { return u.statement || ("Choose " + u.choose + (u.when ? " when " + u.when : "")); }
 function claimName(id) {
   const i = ((meta.analysis || {}).claims || []).findIndex(c => c.id === id);
-  return i < 0 ? "Missing claim" : "Claim " + (i + 1);
+  return i < 0 ? "Missing claim" : "Claim #" + (i + 1);
 }
 function auditUnits() {
   const a = meta.analysis || {};
@@ -1677,7 +2056,7 @@ function auditText(text) {
     const c = ((meta.analysis || {}).claims || []).find(c => c.id === part);
     const unit = auditUnits().find(([id]) => id === part);
     if (!c && !unit) { out.append(part); continue; }
-    const b = el("button", "audit-ref", c ? claimName(part).toLowerCase() : unit[2].toLowerCase() + " " + part.slice(1));
+    const b = el("button", "audit-ref", c ? claimName(part).toLowerCase() : unit[2].toLowerCase() + " #" + part.slice(1));
     if (c) { b.dataset.claim = part; b.onclick = () => showClaim(part, b); }
     else b.onclick = () => revealUnit(part);
     out.append(b);
@@ -1722,7 +2101,7 @@ function renderAudit() {
   for (const [id, u, kind] of units) {
     const c = el("div", "card unit" + (u.blocked ? " blocked" : ""));
     c.id = "unit-" + id; c.tabIndex = -1;
-    const head = el("div", "unit-kind", kind);
+    const head = el("div", "unit-kind", kind + " #" + id.slice(1));
     if (u.revises) {
       const original = units.find(([uid]) => uid === u.revises);
       if (original) {
@@ -2101,11 +2480,11 @@ if (permalink) {
   show("run");
   $("live").hidden = true;
   $("run-title").textContent = "Research report";
-  $("question").textContent = runTitle(permalink.split("/").pop());
+  showTitle("", runTitle(permalink.split("/").pop()));
   $("new").hidden = false;
   loadAudit(permalink).then(() => {
     if (!meta) return;
-    $("question").textContent = meta.question;
+    showTitle(meta.title, meta.question);
     showRunReading(meta.clarifications);
     $("n-sources").textContent = meta.sources || (meta.citations || []).length;
     $("n-tokens").textContent = fmtNum(meta.tokens);

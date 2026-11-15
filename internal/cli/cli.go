@@ -938,7 +938,7 @@ func givenPlan(cmd *cobra.Command, d Deps, tr *replay.Trace, question string) (*
 			return nil, "", err
 		}
 		plan := ui.PlanFor(tr.Question, depth, tr.Plan, sourceBudget(cmd, d))
-		plan.NoFollowUps, plan.Scope, plan.Instant = tr.NoFollowUps, tr.Scope, tr.Instant
+		plan.NoFollowUps, plan.Scope, plan.Instant, plan.Title = tr.NoFollowUps, tr.Scope, tr.Instant, tr.Title
 		plan.Questions, plan.Clarifications = tr.Questions, tr.Clarifications
 		// Normalized here as a plan file is in ReadPlan: a hand-edited
 		// trace's format is input too.
@@ -1072,7 +1072,7 @@ func recordPlan(rec *replay.Recorder) func(*ui.Plan) {
 // tracedSettings are what the trace records of plan beside its sub-topics.
 func tracedSettings(p *ui.Plan) replay.PlanSettings {
 	return replay.PlanSettings{Mode: p.Depth.Key, Sources: p.PinnedPerTopic, NoFollowUps: p.NoFollowUps, Instant: p.Instant,
-		Scope: p.Scope, Report: p.Report, Questions: p.Questions, Answers: p.Clarifications}
+		Scope: p.Scope, Title: p.Title, Report: p.Report, Questions: p.Questions, Answers: p.Clarifications}
 }
 
 // writeTrace saves a recorded run next to its report, named after it.
@@ -1257,7 +1257,9 @@ type listed struct {
 func runList(cmd *cobra.Command, d Deps) error {
 	var results []listed
 	skipped, err := store.Open(d.Config.DataFile).Each(func(r store.ResearchResult) {
-		l := listed{when: r.Timestamp, question: r.Question, confidence: "unknown", findings: len(r.Findings), tokens: r.Tokens}
+		// The headline is what the run is called everywhere else; a run
+		// before headlines lists its question as before.
+		l := listed{when: r.Timestamp, question: cmp.Or(ui.OneLine(r.Title), r.Question), confidence: "unknown", findings: len(r.Findings), tokens: r.Tokens}
 		if r.Summary != nil {
 			l.confidence = r.Summary.Confidence
 		}

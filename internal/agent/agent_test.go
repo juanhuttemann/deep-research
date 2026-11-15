@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kaptinlin/jsonrepair"
 	"github.com/microsoft/agent-framework-go/agent"
@@ -1067,5 +1068,35 @@ func TestParseAnalysisReadsComputationsNotTheirResults(t *testing.T) {
 	}
 	if ch := a.Charts[0]; ch.ID != "g1" || ch.Kind != "line" || ch.File != "" || len(ch.Points) != 1 || ch.Points[0].Value != "" {
 		t.Errorf("chart = %+v, want its title, kind and referenced points only", ch)
+	}
+}
+
+// The planner's headline is read beside its sub-topics, folded onto one
+// line and cut at a word when the model wrote a sentence for it.
+func TestParsePlanTitle(t *testing.T) {
+	long := strings.Repeat("electricity ", 12)
+	for out, want := range map[string]string{
+		`{"title":"EU Electricity Mix 2024","subtopics":[{"name":"a"}]}`: "EU Electricity Mix 2024",
+		`{"title":"  EU\n power   mix. "}`:                               "EU power mix",
+		`{"title":"   "}`:                                                "",
+		`{"subtopics":[{"name":"a"}]}`:                                   "",
+		`{"title":"` + long + `"}`:                                       strings.TrimSpace(strings.Repeat("electricity ", 6)),
+	} {
+		if got := parsePlanTitle(out); got != want {
+			t.Errorf("parsePlanTitle(%q) = %q, want %q", out, got, want)
+		}
+	}
+	if got := utf8.RuneCountInString(clipTitle(strings.Repeat("é", 200))); got != maxTitleRunes {
+		t.Errorf("one long word clipped to %d runes, want %d", got, maxTitleRunes)
+	}
+}
+
+// The headline is asked for in the user message, so a planner_instructions
+// edited in agent.yaml still gets the request.
+func TestPlanPromptAsksForATitle(t *testing.T) {
+	for _, b := range []Breadth{{Max: 3}, {Max: 3, Exact: true}} {
+		if p := planPrompt("q", b); !strings.Contains(p, `"title"`) {
+			t.Errorf("planPrompt(%+v) does not ask for a title: %q", b, p)
+		}
 	}
 }

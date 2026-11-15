@@ -448,7 +448,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 		summary.Confidence = runConfidence(analysis, fc, checkErr)
 	}
 	return d.finish(&agent.ResearchResult{
-		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
+		Question: plan.Question, Title: plan.Title, Findings: findings, Analysis: analysis, FactCheck: fc, Summary: summary,
 		Clarifications: plan.Clarifications,
 	}), nil
 }
@@ -472,7 +472,7 @@ func (d *Driver) answer(ctx context.Context, plan *Plan, findings []agent.Findin
 	summary.Report = instantNote(len(findings)) + summary.Report
 	summary.Confidence = ConfidenceUnchecked
 	return d.finish(&agent.ResearchResult{
-		Question: plan.Question, Findings: findings, Summary: summary,
+		Question: plan.Question, Title: plan.Title, Findings: findings, Summary: summary,
 		Clarifications: plan.Clarifications, Instant: true,
 	}), nil
 }
@@ -817,7 +817,7 @@ func (d *Driver) partial(ctx context.Context, plan *Plan, findings []agent.Findi
 		confidence = ConfidenceUnchecked
 	}
 	return d.finish(&agent.ResearchResult{
-		Question: plan.Question, Findings: findings, Analysis: analysis, FactCheck: fc,
+		Question: plan.Question, Title: plan.Title, Findings: findings, Analysis: analysis, FactCheck: fc,
 		Summary: &agent.Summary{Report: report, Confidence: confidence}, Error: reason,
 		Clarifications: plan.Clarifications, Instant: plan.Instant,
 	}), nil

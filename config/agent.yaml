@@ -475,6 +475,7 @@ planner_instructions: |
   hyphenation, punctuation and unclosed brackets corrected, word for word.
   Never add, remove, reorder or replace a word, never expand an
   abbreviation, never change a number, never answer, narrow or broaden it.
-  When nothing needs correcting, repeat it exactly. It titles the report.
+  When nothing needs correcting, repeat it exactly. It is printed in full
+  under the report's title.
 
-  Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}
+  Respond ONLY with JSON of the shape: {"question":"...","title":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}

@@ -78,6 +78,9 @@ type Plan struct {
 	// when it chose the breadth, "" otherwise: the brief and the page's
 	// review show it beside the count it led to.
 	Scope string `json:"scope,omitempty"`
+	// Title is the planner's short headline for the report, "" when it
+	// gave none (instant plans, older plans): the question titles it then.
+	Title string `json:"title,omitempty"`
 	// NoFollowUps skips the follow-up round. It is a negative so that a plan
 	// or trace written before the round could be turned off still runs it.
 	NoFollowUps bool `json:"no_follow_ups,omitempty"`
@@ -195,7 +198,7 @@ func ReadPlan(r io.Reader) (*Plan, error) {
 			plan.Before = before
 		}
 	}
-	plan.Scope = p.Scope
+	plan.Scope, plan.Title = p.Scope, OneLine(p.Title)
 	if plan.Report, err = p.Report.Normalized(); err != nil {
 		return nil, fmt.Errorf("read plan: %w", err)
 	}
@@ -332,6 +335,7 @@ func (pl *Planner) Plan(ctx context.Context, question string) (*Plan, error) {
 		Question:   question,
 		Asked:      asked,
 		Scope:      scope,
+		Title:      out.Title,
 		Depth:      pl.Depth,
 		MaxSources: pl.MaxSourcesFor(len(topics)),
 		SubTopics:  topics,

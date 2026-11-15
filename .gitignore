@@ -27,3 +27,9 @@ PENDING.md
 /integrations/pi/node_modules/
 # Its event-stream fixtures are test data, not run output.
 !/integrations/pi/test/fixtures/*.jsonl
+
+# The serve page's browser tests (internal/web/browser): their dependencies
+# and Playwright's output; the event fixtures are test data.
+/internal/web/browser/node_modules/
+/internal/web/browser/test-results/
+!/internal/web/browser/testdata/*.jsonl

@@ -1,0 +1,12 @@
+{
+  "name": "drsh-web-browser-tests",
+  "private": true,
+  "description": "Browser tests of the serve page (internal/web/index.html): the live frame's parity with the terminal UI, docs/surfaces.md.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
+}

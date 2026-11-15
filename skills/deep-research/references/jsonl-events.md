@@ -9,7 +9,7 @@ stderr. Every field except `type` and `time` is optional. The full struct is
 | `type` | When | Fields worth reading |
 | --- | --- | --- |
 | `source` | `--domains` only, one per site, before planning | `check`: `domain`, `status` (`ok`, `snippet-only`, `unindexed`, `unreadable`, `search-failed`), `pages`, `sample`, `chars`, `detail` |
-| `plan` | once, before the first search | `plan`: the plan about to run, the same shape `--plan` reads |
+| `plan` | once, before the first search | `plan`: the plan about to run, the same shape `--plan` reads; `plan.title` is the report's headline when the planner gave one |
 | `phase` | a pipeline phase starts | `phase`, `detail` |
 | `subagent` | a sub-agent changes state | `sub_id`, `sub_name`, `sub_state` (`running`, `queued`, `done`, `error`), `progress`, `line` |
 | `search` | a sub-agent issues a query | `query`, `terms`, `sub_id` |

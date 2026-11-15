@@ -734,7 +734,7 @@ func TestWriteExportsToTempDir(t *testing.T) {
 }
 
 func TestBuildPDFFormsValidStructure(t *testing.T) {
-	pdf := BuildPDF("Title line\n\nSecond paragraph that is a bit longer to exercise wrapping logic here.\n\nThird line", nil)
+	pdf := buildReportPDF("Title line\n\nSecond paragraph that is a bit longer to exercise wrapping logic here.\n\nThird line", "", nil)
 	s := string(pdf)
 	if !strings.HasPrefix(s, "%PDF-1.4") {
 		t.Fatalf("bad header: %q", s[:8])
@@ -809,7 +809,7 @@ func checkPDFXref(t *testing.T, pdf []byte) {
 // blindly: a /Length that disagrees with the bytes between stream and
 // endstream makes the page render empty or the file fail to parse.
 func TestBuildPDFStreamLengthIsAccurate(t *testing.T) {
-	s := string(BuildPDF("alpha\n\nbeta (with parens) and a \\\\ backslash", nil))
+	s := string(buildReportPDF("alpha\n\nbeta (with parens) and a \\\\ backslash", "", nil))
 	rest := s
 	found := 0
 	for {
@@ -845,7 +845,7 @@ func TestBuildPDFPaginates(t *testing.T) {
 	for i := range lines {
 		lines[i] = fmt.Sprintf("line-%03d", i)
 	}
-	s := string(BuildPDF(strings.Join(lines, "\n\n"), nil))
+	s := string(buildReportPDF(strings.Join(lines, "\n\n"), "", nil))
 	if n := strings.Count(s, "/Type /Page "); n < 2 {
 		t.Errorf("200 lines produced %d page objects, want several", n)
 	}
@@ -860,7 +860,7 @@ func TestBuildPDFPaginates(t *testing.T) {
 // TestBuildPDFEncodesNonASCII keeps the report's typographic characters (…, —,
 // •) from emitting raw UTF-8, which a WinAnsi-encoded font renders as mojibake.
 func TestBuildPDFEncodesNonASCII(t *testing.T) {
-	s := string(BuildPDF("an em—dash, an ellipsis… and a bullet •\n\narrow → ok", nil))
+	s := string(buildReportPDF("an em—dash, an ellipsis… and a bullet •\n\narrow → ok", "", nil))
 	body := s[strings.Index(s, "stream\n"):]
 	for _, r := range body {
 		if r > 0x7f {
@@ -2864,5 +2864,98 @@ func TestBriefPastInstantRunsThePlanChecked(t *testing.T) {
 		fa.answered != "" || fa.slow.Load() == 0 {
 		t.Errorf("standard → deep → instant → quick ran %+v (answer call %v, checked calls %d), %v",
 			res.Plan, fa.answered != "", fa.slow.Load(), err)
+	}
+}
+
+// titlingPlanner answers the plan with a headline, as the planner does.
+type titlingPlanner struct {
+	*fakeAssistant
+	title string
+}
+
+func (f *titlingPlanner) Plan(ctx context.Context, question string, b agent.Breadth, _ []agent.Clarification) (agent.Outline, error) {
+	out, err := f.fakeAssistant.Plan(ctx, question, b, nil)
+	out.Title = f.title
+	return out, err
+}
+
+// The planner's headline titles the run's report, its .json and its card,
+// with the question in full under it; the files are still named after the
+// question.
+func TestPlannerTitleHeadsTheReport(t *testing.T) {
+	q := "What share of the EU's electricity came from wind and solar in 2024, according to Ember?"
+	a := &titlingPlanner{fakeAssistant: &fakeAssistant{}, title: "EU Wind and Solar Share 2024"}
+	var stdout, stderr bytes.Buffer
+	res, err := Run(context.Background(), Options{
+		Question: q, Assistant: a, DepthMode: "quick", OutDir: t.TempDir(), JSONL: true, Stdout: &stdout, Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Plan.Title != a.title || res.Report.Title != a.title {
+		t.Fatalf("plan title %q, result title %q, want %q", res.Plan.Title, res.Report.Title, a.title)
+	}
+	md := MarkdownReport(res.Report)
+	if want := "# " + a.title + "\n\n*" + q + "*\n\n**Confidence:**"; !strings.HasPrefix(md, want) {
+		t.Errorf("report opens\n%.200s\nwant\n%s", md, want)
+	}
+	if !strings.Contains(res.MDPath, "share") {
+		t.Errorf("md path %s is no longer named after the question", res.MDPath)
+	}
+	raw, err := os.ReadFile(res.JSONPath)
+	if err != nil || !strings.Contains(string(raw), `"title": "`+a.title+`"`) {
+		t.Errorf("the .json lacks the title (%v)", err)
+	}
+}
+
+// ReportTitle falls back to the question for a run with no headline, or
+// one that only repeats the question.
+func TestReportTitleFallsBackToTheQuestion(t *testing.T) {
+	for _, c := range []struct{ title, question, head, sub string }{
+		{"", "What is X?\nreally", "What is X? really", ""},
+		{"what is x? REALLY", "What is X? really", "What is X? really", ""},
+		{"X Explained", "What is X?", "X Explained", "What is X?"},
+	} {
+		if h, s := ReportTitle(c.title, c.question); h != c.head || s != c.sub {
+			t.Errorf("ReportTitle(%q, %q) = %q, %q; want %q, %q", c.title, c.question, h, s, c.head, c.sub)
+		}
+	}
+	md := MarkdownReport(&agent.ResearchResult{Question: "Is *this* a_b [x]?", Title: "A_b *X*"})
+	if !strings.HasPrefix(md, "# A\\_b \\*X\\*\n\n*Is \\*this\\* a\\_b \\[x\\]?*\n\n") {
+		t.Errorf("title and question not escaped:\n%.120s", md)
+	}
+}
+
+// The question under the title is drawn smaller and grey in the PDF, and
+// a revision's italic note after a title with no question under it keeps
+// the body's size.
+func TestPDFSubtitleIsSmallerThanTheTitle(t *testing.T) {
+	sizes := func(pdf []byte) map[string]float64 {
+		out := map[string]float64{}
+		for _, tx := range pdfTexts(t, pdf) {
+			out[strings.Fields(tx.text)[0]] = tx.size
+		}
+		return out
+	}
+	got := sizes(buildReportPDF("# Headline\n\n*Question asked here?*\n\nBody.", "Question asked here?", nil))
+	if got["Headline"] != pdfHeadingSizes[1] || got["Question"] != pdfSubtitleSize || got["Body."] != pdfBodySize {
+		t.Errorf("sizes = %v, want title %v, question %v, body %v", got, pdfHeadingSizes[1], pdfSubtitleSize, pdfBodySize)
+	}
+	if got := sizes(buildReportPDF("# Question?\n\n_Revision 1, edited._\n\nBody.", "", nil)); got["Revision"] != pdfBodySize {
+		t.Errorf("a revision note after an untitled heading drawn at %v, want the body's %v", got["Revision"], pdfBodySize)
+	}
+}
+
+// The completion card is headed by the run's title, the question under it.
+func TestCompletionCardShowsTheTitle(t *testing.T) {
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows = 100, 40
+	r.result = &agent.ResearchResult{Title: "RSA-2048 Quantum Threat Timeline", Question: "When could a quantum computer break RSA-2048?"}
+	card := r.reportLines()
+	at := func(s string) int {
+		return slices.IndexFunc(card, func(l string) bool { return strings.Contains(l, s) })
+	}
+	if ti, qi := at("RSA-2048 Quantum Threat Timeline"), at("When could a quantum computer"); ti < 0 || qi != ti+1 {
+		t.Errorf("card does not head with the title over the question:\n%s", strings.Join(card, "\n"))
 	}
 }
