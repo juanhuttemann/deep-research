@@ -699,3 +699,41 @@ func TestTheFactCheckSaysWhatItFoundInWords(t *testing.T) {
 		}
 	}
 }
+
+// A run charted revenue from one site in USD billion, and the program
+// charted the same revenue from another site in USD million beside it.
+func TestAQuantityTheAnalyzerChartedIsNotChartedAgain(t *testing.T) {
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			{ID: "c1", Option: "Apple", Criterion: "Revenue", Scope: "2023", Value: "383.29", Unit: "USD billion"},
+			{ID: "c2", Option: "Apple", Criterion: "Revenue", Scope: "2024", Value: "391.04", Unit: "USD billion"},
+			{ID: "c3", Option: "Apple", Criterion: "revenue", Scope: "2023", Value: "383,285", Unit: "USD million"},
+			{ID: "c4", Option: "Apple", Criterion: "Revenue", Scope: "2024", Value: "391,035", Unit: "USD million"},
+		},
+		Charts: []agent.Chart{{ID: "g1", Points: []agent.ChartPoint{{Label: "2023", Ref: "c1"}, {Label: "2024", Ref: "c2"}}}},
+	}
+	if got := autoCharts(a); len(got) != 0 {
+		t.Errorf("charted the same quantity again: %+v", got)
+	}
+}
+
+// Three sites gave a 2024 figure: "Apple 2024" named none of them, and a
+// formula named one input "Apple 2020" and the other by its whole sentence.
+func TestNamesTellApartFiguresBySite(t *testing.T) {
+	claim := func(id, year, url string) agent.Claim {
+		return agent.Claim{ID: id, Option: "Apple", Criterion: "Revenue", Scope: "fiscal year " + year + "; a long scope that is no name",
+			Text: "Revenue in " + year, Sources: []string{url}}
+	}
+	a := &agent.Analysis{Claims: []agent.Claim{
+		claim("c1", "2020", "https://bullfincher.io/apple"),
+		claim("c5", "2024", "https://bullfincher.io/apple"),
+		claim("c8", "2024", "https://www.macrotrends.net/apple"),
+	}}
+	n := newNamer(a)
+	if got := n.say("c5 ÷ c1", false); got != "Apple 2024, bullfincher.io ÷ Apple 2020" {
+		t.Errorf("say = %q", got)
+	}
+	if got := n.short["c8"]; got != "Apple 2024, macrotrends.net" {
+		t.Errorf("c8 = %q", got)
+	}
+}

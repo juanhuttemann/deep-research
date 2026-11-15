@@ -49,6 +49,11 @@ type Result struct {
 // contradicted by its own computation "in %". Percentage points are not.
 func UnitKey(u string) string {
 	k := strings.ToLower(strings.Join(strings.Fields(u), " "))
+	// A rate's period is said in its formula, not its unit: "9.25 percent"
+	// and the program's cagr of 9.25% are one figure.
+	for _, per := range []string{" a period", " per period", " a year", " per year", " per annum", " annually", "/yr", "/year"} {
+		k = strings.TrimSuffix(k, per)
+	}
 	switch k {
 	case "percent", "per cent", "pct", "percentage", "%":
 		return "%"
@@ -237,7 +242,7 @@ func cagr(in []Input, periods int) (Result, error) {
 		return Result{}, fmt.Errorf("cagr of %s and %s is not a finite number", in[0].ID, in[1].ID)
 	}
 	formula := fmt.Sprintf("((%s ÷ %s)^(1/%d) − 1) × 100", in[1].ID, in[0].ID, periods)
-	return Result{Number{r, 2}, "% a period", formula}, nil
+	return Result{Number{r, 2}, "%", formula}, nil
 }
 
 // sigDecimals are the places that show sig significant digits of r, within
