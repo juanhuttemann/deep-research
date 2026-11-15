@@ -259,8 +259,9 @@ func (e *evaluator) record(a *agent.Analysis, checked bool) {
 // prepareFigures runs with checkAnalysis, before the fact-check: a computed
 // claim cites its inputs' sources, and the computations are evaluated over
 // the stated values, for the checker to see.
-func prepareFigures(a *agent.Analysis) {
+func prepareFigures(a *agent.Analysis, renamed map[string][]string) {
 	inferValues(a)
+	resolveRenamed(a, renamed)
 	if len(a.Computations) == 0 && len(a.Charts) == 0 && !hasComputedClaim(a) {
 		return
 	}
@@ -878,4 +879,55 @@ func capitalized(s string) string {
 		return s
 	}
 	return string(unicode.ToUpper(r)) + s[size:]
+}
+
+// resolveRenamed points a computation's input or a chart's point at the
+// figure it meant when the analyzer gave two claims one ID. References go
+// to the first claim with the ID (checkAnalysis), and a run that numbered
+// its rankings c1-c5 and then its heights c1-c4 computed "c1 - c4" over two
+// sentences with no number in them. When the first claim has no value and
+// exactly one renamed copy has one, the reference is to that copy; anything
+// less clear is left as it is.
+func resolveRenamed(a *agent.Analysis, renamed map[string][]string) {
+	if len(renamed) == 0 {
+		return
+	}
+	byID := map[string]*agent.Claim{}
+	for i := range a.Claims {
+		if byID[a.Claims[i].ID] == nil {
+			byID[a.Claims[i].ID] = &a.Claims[i]
+		}
+	}
+	numeric := func(c *agent.Claim) bool {
+		if c == nil {
+			return false
+		}
+		_, ok := compute.ParseValue(c.Value)
+		return ok || c.Computed != ""
+	}
+	meant := func(ref string) string {
+		if first := byID[ref]; first == nil || numeric(first) {
+			return ref
+		}
+		var with []string
+		for _, id := range renamed[ref] {
+			if numeric(byID[id]) {
+				with = append(with, id)
+			}
+		}
+		if len(with) == 1 {
+			return with[0]
+		}
+		return ref
+	}
+	for i := range a.Computations {
+		for j, in := range a.Computations[i].Inputs {
+			a.Computations[i].Inputs[j] = meant(in)
+		}
+	}
+	for i := range a.Charts {
+		for j := range a.Charts[i].Points {
+			a.Charts[i].Points[j].Ref = meant(a.Charts[i].Points[j].Ref)
+		}
+	}
 }

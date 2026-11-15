@@ -554,3 +554,39 @@ func TestOnlyTheCauseOfAFailureIsListed(t *testing.T) {
 		t.Errorf("section:\n%s", r)
 	}
 }
+
+// A model numbered its rankings c1-c5 and then its heights c1-c4. The
+// copies were renamed (c1.6, c4.9) and its "c1 - c4" went to the two
+// rankings, sentences with no number in them, so nothing was computed.
+func TestAReusedIDMeansTheCopyWithAFigure(t *testing.T) {
+	const url = "https://towers.example/tallest"
+	page := "Burj Khalifa is the tallest building in the world. Ping An Finance Center ranks fifth. " +
+		"Burj Khalifa: 828 metres. Ping An Finance Center: 599.1 metres."
+	findings := []agent.Finding{{URL: url, Content: page, Status: "ok"}}
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "Burj Khalifa is the tallest building in the world", Sources: []string{url}},
+			{ID: "c4", Text: "Ping An Finance Center ranks fifth", Sources: []string{url}},
+			{ID: "c1", Text: "Burj Khalifa has an architectural height of 828 metres", Option: "Burj Khalifa", Criterion: "Height", Sources: []string{url}},
+			{ID: "c4", Text: "Ping An Finance Center has an architectural height of 599.1 metres", Option: "Ping An Finance Center", Criterion: "Height", Sources: []string{url}},
+		},
+		Computations: []agent.Computation{{ID: "m1", Op: "difference", Inputs: []string{"c1", "c4"}}},
+	}
+	fc := &agent.FactCheckResult{}
+	checkAnalysis(a, findings)
+	for _, c := range a.Claims {
+		q := map[string]string{"Burj Khalifa is the tallest": "Burj Khalifa is the tallest building in the world.",
+			"Ping An Finance Center ranks": "Ping An Finance Center ranks fifth.",
+			"Burj Khalifa has":             "Burj Khalifa: 828 metres.", "Ping An Finance Center has": "Ping An Finance Center: 599.1 metres."}
+		for prefix, quote := range q {
+			if strings.HasPrefix(c.Text, prefix) {
+				fc.Verdicts = append(fc.Verdicts, agent.Verdict{ID: c.ID, Status: statusSupported,
+					Evidence: []agent.Evidence{{Source: url, Quote: quote}}})
+			}
+		}
+	}
+	governAll(a, fc, nil, findings)
+	if m := a.Computations[0]; !m.Valid || m.Result != "228.9" {
+		t.Errorf("m1 = %+v, want 828 − 599.1 = 228.9 over the height claims", m)
+	}
+}

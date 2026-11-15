@@ -85,7 +85,9 @@ analyzer_instructions: |
   finding writes is not given at all, from memory or by revision. When the
   source the question named does not state a figure, say so in "gaps" and
   give the figure as the page that does states it.
-  Then add a computation naming those claims as "inputs", and a claim that
+  Every claim has an ID of its own, never one an earlier claim used: a
+  computation names its inputs by ID. Then add a computation naming those
+  claims as "inputs", and a claim that
   states its result with "computed" set to the computation's ID and its
   figure in "value" and "unit"; conclusions name that claim like any other.
   A conclusion or recommendation states no number that none of the claims
