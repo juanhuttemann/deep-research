@@ -36,6 +36,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- Reports read as reports, not as the pipeline's working. The answer's
+  unconfirmed statements sit under "Not confirmed by the sources", without
+  the checker's reason after each. The fixed lines say what happened in
+  the reader's words ("The sources found do not support a firm answer"), and
+  no longer mention a "run", "the program" or "the fact-check". "Computed
+  figures" is now "Key figures": each figure and its value, and the charts,
+  with a line naming any point left out of a chart. The formula and inputs
+  table, the method note and the failures moved out of the report, and so
+  did the Fact-Check section, the Suggested Searches and the Other Sources
+  Retrieved. The serve page's Audit shows all of them, with new Figures and
+  Further searches sections, and the `.json` keeps them. Citations take one
+  line each, "Title — site · snippet only" with the title linked, and the
+  PDF sets them smaller without printing URLs: nine sources took a page and
+  a half.
 - The serve page's audit numbers what it names: "Claim #1",
   "Conclusion #1", "Recommendation #1".
 

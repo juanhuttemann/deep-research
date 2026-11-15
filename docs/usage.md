@@ -168,7 +168,7 @@ runs it.
 | `--sources N` | `0` | sources per sub-agent; `0` lets `--mode` decide (quick 3, standard 4, deep 5) |
 | `--topics N` | `0` | plan exactly N sub-topics (1–8); `0` lets the planner choose: it judges the question narrow (one or two sub-topics), multi-part (one per part) or a comparison (one per alternative), up to the `--mode` tier's count (quick 3, standard 4, deep 6), and the brief shows the scope beside the sub-topics. `sub_topics` in `config.yaml` sets it for every run |
 | `--no-follow-ups` | off | skip the follow-up round: one model call and up to three searches fewer, and the analysis gets what the planned searches found. `follow_ups: false` in `config.yaml` makes it the default |
-| `--format standard\|brief\|detailed\|table` | `standard` | the report's shape: `standard` organizes the explanation as the question needs; `brief` is about 300 words with at most a table or two and the limits in a sentence or two; `detailed` is about 1500 words, discussing each claim it may state; `table` puts the comparison in tables, with prose only to connect them. Every format keeps the program-written answer, the Fact-Check section and the citations. `report_format` sets the default |
+| `--format standard\|brief\|detailed\|table` | `standard` | the report's shape: `standard` organizes the explanation as the question needs; `brief` is about 300 words with at most a table or two and the limits in a sentence or two; `detailed` is about 1500 words, discussing each claim it may state; `table` puts the comparison in tables, with prose only to connect them. Every format keeps the program-written answer, the key figures and the citations. `report_format` sets the default |
 | `--words N` | `0` | about N words for the explanation (the answer section the program writes is not counted); `0` leaves it to `--format`. At most 6000. `report_words` sets the default. The length is a target the model aims at, not a guarantee |
 | `--tables auto\|none\|some\|many` | `auto` | how much of the report is in tables, over the format's own amount; `report_tables` sets the default |
 | `--clarify auto\|off` | `auto` | before planning, ask up to three questions about what the question leaves open (the audience, the market, the period, which product), none for a clear question; `off` never asks. Only a run someone can answer asks: the terminal, or `--clarify-only`. `clarify` in `config.yaml` sets the default; see [Clarifying questions](#clarifying-questions) |
@@ -648,11 +648,13 @@ checkpoint. A tab left open while the server was killed and started again
 offers to resume the run it was showing. When it ends it opens on
 the Reading view: the report's text without its inline citations or claim
 IDs. It is not the `.md` or `.pdf` download, which adds the title,
-confidence, the fact-check section and the source lists, and keeps
-the citations. Audit, beside it, reads the run's `.json` artifact and shows
-the answer, the statements the fact-check blocked and why, every claim with
-its verdict, and each quote inside the saved source text the check located
-it in. Every source is marked `fetched`, `snippet only` or
+confidence and the cited sources, and keeps the citations. Audit, beside
+it, reads the run's `.json` artifact and shows what the report leaves out
+as working: the answer, the statements the fact-check blocked and why,
+every claim with its verdict, each quote inside the saved source text the
+check located it in, every source the run retrieved (cited or not), how
+each key figure was computed and what could not be, and the searches the
+analysis would run next. Every source is marked `fetched`, `snippet only` or
 `never fetched`. Cards use readable kinds (Conclusion or Recommendation)
 instead of internal IDs. Open “Based on … claims” to read the full supporting
 statements and their verdicts, then select “Inspect evidence” to see why each
@@ -1086,12 +1088,13 @@ hash keep their old filenames.
 
 When the answer needs figures the sources do not state outright (a total,
 a change, a share, a growth rate), the program computes them rather than
-the model, and closes the report with a **Computed figures** section. Its
-table gives each figure, its formula over claim IDs (`m1 = c2 + c3 + c4 +
-c5`) and each input's value with a link to the page it was read from. A
-figure is shown only when every value it uses passed the fact-check and is
-written in a passage it was supported on; the others are listed as not
-established, with why. A figure that only restates one of its own inputs
+the model, and closes the report with a **Key figures** section: each
+figure by name with its value, and the charts. A figure is shown only when
+every value it uses passed the fact-check and is written in a passage it
+was supported on. How each was computed (its formula over claim IDs, `m1 =
+c2 + c3 + c4 + c5`, and each input's value and page) and which figures
+could not be computed, with why, are in the `.json` and the serve page's
+Audit, not the report. A figure that only restates one of its own inputs
 (the quarters summed after the last quarter was derived from the year's
 total) is refused, since it checks nothing. A claim that states a computed figure is supported
 when it matches the result at its own precision, and contradicted when it
@@ -1106,17 +1109,23 @@ exactly one besides years and its scope's numbers, under the same checks. A char
 from the same figures as `chart-<digest>.svg` beside the report, named by
 its content so a rerun never changes a chart an earlier report links to,
 and followed by its points as a table. A point that is not a supported
-figure is left out and listed with why; a chart needs two points that
-stand: the terminal shows the table, the
+figure is left out, and a line under the chart names it ("Not shown, for
+want of a confirmed figure: Q1"; the Audit says why); a chart needs two
+points that stand: the terminal shows the table, the
 PDF draws the chart, and `serve` shows the image.
 
 `--output FILE` writes the same document as the `.md` artifact: the run's
 title with the question under it (the question alone for a run with no
-title), the confidence and model lines, the report body, the searches
-the analysis suggests, the fact-check counts with each claim it did not
-confirm, and the citation lists split into sources the report cites and
-sources the run only retrieved. A source with no URL is listed by title and
-marked `no URL`. The `.json` sidecar carries the same `title` (absent for
+title), the confidence and model lines, the report body (the answer, with
+what the sources did not confirm under "Not confirmed by the sources", the
+explanation and the key figures) and the sources it cites, one line each:
+the title linked to the page, its site, and `snippet only` or `never
+fetched` when it was not read in full. The PDF sets that list smaller and
+prints no URLs. A source with no URL is listed by title and marked `no
+URL`. The report is for its reader: the fact-check's verdicts and reasons,
+the searches the analysis suggests and the sources retrieved but not cited
+are the run's working, kept in the `.json` and shown by the serve page's
+Audit. The `.json` sidecar carries the same `title` (absent for
 a run with none), `model`, `provider`,
 `served_by`, the whole `analysis` (its reading of the question, claims with
 sources, recommendations, resolved conflicts, gaps and follow-ups), `topics`

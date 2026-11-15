@@ -381,24 +381,11 @@ func TestExportSeparatesCitedSourcesFromRetrieved(t *testing.T) {
 	if !strings.Contains(md, "## Citations (1)") {
 		t.Errorf("citation count claims sources the report never used:\n%s", md)
 	}
-	if !strings.Contains(md, "## Other Sources Retrieved (2)") {
-		t.Errorf("retrieved-but-unused sources not reported separately:\n%s", md)
-	}
-	// Compare the two list sections, not the whole document: the cited URL
-	// also appears earlier, inside the report body that links to it.
-	citedList, retrievedList, found := strings.Cut(md[strings.Index(md, "## Citations (1)"):], "## Other Sources Retrieved (2)")
-	if !found {
-		t.Fatalf("sections not laid out as expected:\n%s", md)
-	}
-	if !strings.Contains(citedList, "https://cited.example/a") {
-		t.Errorf("cited source missing from the citations section:\n%s", citedList)
-	}
+	// The sources fetched and not cited are the audit's: the sidecar marks
+	// them, the report lists what it cites.
 	for _, url := range []string{"https://unused.example/b", "https://noise.example/c"} {
-		if strings.Contains(citedList, url) {
-			t.Errorf("%s listed as a citation", url)
-		}
-		if !strings.Contains(retrievedList, url) {
-			t.Errorf("%s missing from the retrieved list", url)
+		if strings.Contains(md, url) {
+			t.Errorf("%s listed in the report:\n%s", url, md)
 		}
 	}
 
@@ -1224,8 +1211,9 @@ func TestTabsCannotOverflowTheFrame(t *testing.T) {
 // The analyzer's per-topic evidence and confidence, and the fact-check
 // verdicts, were parsed and stored and never reached either artifact. Then
 // the Markdown appended all of them after a body written from the same
-// material, repeating every finding: it now states the verdict counts and
-// lists only what the check did not confirm, and the sidecar keeps the rest.
+// material, repeating every finding. Then it listed the verdict counts and
+// each claim the check did not confirm, the checker's working read as the
+// report's: the sidecar keeps all of it, for the page's Audit.
 func TestArtifactsCarryTopicsAndFactCheck(t *testing.T) {
 	res := testResult()
 	res.Analysis.Topics = []agent.Topic{{Name: "Cost", Findings: []string{"cells cost $80/kWh"}, Confidence: "medium"}}
@@ -1235,12 +1223,7 @@ func TestArtifactsCarryTopicsAndFactCheck(t *testing.T) {
 		Contradictions: []agent.Contradiction{{Claim: "launch year", Sources: []string{"a", "b"}}},
 	}
 	md := MarkdownReport(res)
-	for _, want := range []string{"Confirmed against their sources: 1 · not confirmed: 2 · contradicted or disputed: 1", "bad claim", "loose claim", "launch year"} {
-		if !strings.Contains(md, want) {
-			t.Errorf("markdown lacks %q:\n%s", want, md)
-		}
-	}
-	for _, repeated := range []string{"cells cost $80/kWh", "ok claim"} {
+	for _, repeated := range []string{"Fact-Check", "Confirmed against", "bad claim", "loose claim", "launch year", "cells cost $80/kWh", "ok claim"} {
 		if strings.Contains(md, repeated) {
 			t.Errorf("markdown repeats %q after the body:\n%s", repeated, md)
 		}
@@ -2741,13 +2724,15 @@ func TestSourceListsMarkOnlySourcesNotReadInFull(t *testing.T) {
 		{Title: "Unknown", URL: "https://c.example/x", Content: "c"},
 	}
 	md := MarkdownReport(res)
+	// One line a source: its title linked, its site, and how it was read
+	// when not in full. The analyzer's confidence per source is the audit's.
 	for _, want := range []string{
-		"[Read](https://a.example/read)\n",
-		"[Rated](https://a.example/rated) — _high_\n",
-		"[Snippet](https://b.example/snippet) — snippet only\n",
-		"[Rated snippet](https://b.example/rated) — _low_ (snippet only)\n",
-		"Recollection — never fetched, no URL\n",
-		"[Unknown](https://c.example/x) — never fetched\n",
+		"[Read](https://a.example/read) — a.example\n",
+		"[Rated](https://a.example/rated) — a.example\n",
+		"[Snippet](https://b.example/snippet) — b.example · snippet only\n",
+		"[Rated snippet](https://b.example/rated) — b.example · snippet only\n",
+		"Recollection — never fetched · no URL\n",
+		"[Unknown](https://c.example/x) — c.example · never fetched\n",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("source list lacks %q:\n%s", want, md)
@@ -3769,7 +3754,7 @@ func TestEmojiOutsideTheMainBlockIsTwoColumns(t *testing.T) {
 // .pdf linked the real source's name to the page's chosen site.
 func TestCitationTitleCannotSetTheLinkTarget(t *testing.T) {
 	var sb strings.Builder
-	writeCitationList(&sb, "Sources", []MetaCitation{{Title: "Legit ](https://evil.example/phish) title", URL: "https://good.example/a (b)", Status: "ok"}})
+	writeCitations(&sb, []MetaCitation{{Title: "Legit ](https://evil.example/phish) title", URL: "https://good.example/a (b)", Status: "ok"}})
 	md := sb.String()
 	if bytes.Contains(buildReportPDF(md, "", nil), []byte("/URI (https://evil")) {
 		t.Errorf("the PDF links the injected target:\n%s", md)

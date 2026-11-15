@@ -225,7 +225,7 @@ func writeRevisionExports(path string, m *Meta, r Revision) (md, pdf string) {
 func RevisedMarkdown(m *Meta, r Revision) string {
 	var sb strings.Builder
 	writeTitle(&sb, m.Title, m.Question)
-	fmt.Fprintf(&sb, "_Revision %d, edited in conversation on %s after the research. The confidence, the fact-check and the sources below are the original run's; the edits were not fact-checked._\n\n",
+	fmt.Fprintf(&sb, "_Revision %d, edited in conversation on %s. The confidence and the sources are the original report's; the edits were not checked against the sources._\n\n",
 		r.N, r.Time.Format("2006-01-02"))
 	fmt.Fprintf(&sb, "**Confidence (original):** %s\n\n", m.Confidence)
 	if m.Model != "" {
@@ -237,20 +237,11 @@ func RevisedMarkdown(m *Meta, r Revision) string {
 	sb.WriteString(ReadingMarkdown(m.Clarifications))
 	sb.WriteString(strings.TrimSpace(r.Report))
 	sb.WriteString("\n\n")
-	if m.Analysis != nil {
-		writeOpenQuestions(&sb, m.Analysis)
-	}
-	writeFactCheck(&sb, m.FactCheck, m.Analysis)
 	cits := slices.Clone(m.Citations)
 	for i := range cits {
 		cits[i].Cited = cits[i].URL != "" && strings.Contains(r.Report, cits[i].URL)
 	}
-	cited, retrieved := splitCited(cits)
-	if len(cited) == 0 {
-		cited, retrieved = cits, nil
-	}
-	writeCitationList(&sb, "Citations", cited)
-	writeCitationList(&sb, "Other Sources Retrieved", retrieved)
+	writeCitations(&sb, citedOnly(cits))
 	return sb.String()
 }
 

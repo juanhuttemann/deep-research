@@ -439,7 +439,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	// Its prompt cites claims by ID and findings by number; the reader has
 	// neither.
 	summary.Report, summary.Executive = readerText(summary.Report), readerText(summary.Executive)
-	summary = withFigures(withAnswer(summary, analysis), analysis, findings)
+	summary = withFigures(withAnswer(summary, analysis), analysis)
 	d.checkQuotes(summary, plan.Question, pages, decidedAnswer(analysis))
 	// The summarizer writes prose, so it reports no confidence of its own.
 	// Without the run's the report prints a bare "Confidence:" line and the

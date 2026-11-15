@@ -356,16 +356,20 @@ func TestReportFilesSaysNothingWasWritten(t *testing.T) {
 }
 
 // Follow-up queries and gaps were parsed and then read by nothing at all. The
-// gaps now reach the report through the summarizer (the body states the ones
-// that limit the answer), so the Markdown lists only the searches; both stay
-// in the sidecar.
-func TestMarkdownReportCarriesOpenQuestions(t *testing.T) {
+// gaps reach the report through the summarizer (the body states the ones that
+// limit the answer). The searches the analysis would run next are the run's
+// working, not the report's: the sidecar keeps them, and the page's Audit
+// shows them.
+func TestOpenQuestionsStayWithTheAudit(t *testing.T) {
 	res := testResult()
 	res.Analysis.Gaps = []string{"long-term cycle life"}
 	res.Analysis.FollowUp = []string{"solid-state cycle life 2026"}
 	md := MarkdownReport(res)
-	if !strings.Contains(md, "solid-state cycle life 2026") {
-		t.Error("markdown report drops the analyzer's follow-up queries")
+	if strings.Contains(md, "solid-state cycle life 2026") || strings.Contains(md, "Suggested Searches") {
+		t.Errorf("the report lists the analysis's searches:\n%s", md)
+	}
+	if m := BuildMeta(res, nil, "quick", 0, 0); m.Analysis == nil || !slices.Contains(m.Analysis.FollowUp, "solid-state cycle life 2026") {
+		t.Error("sidecar drops the analyzer's follow-up queries")
 	}
 	if m := BuildMeta(res, nil, "quick", 0, 0); m.Analysis == nil || !slices.Contains(m.Analysis.Gaps, "long-term cycle life") {
 		t.Error("sidecar drops the analyzer's gaps")

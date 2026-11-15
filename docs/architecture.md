@@ -47,9 +47,11 @@ so the replay trace can carry it without importing `ui`). The Driver
 appends a "Report shape" block, rendered from the format preset and its
 overrides (`ui/report.go`), to the summarizer's input; for the standard
 report the block is empty and the input is what it was. The shape changes
-only the summarizer's prose: the program-written answer, the quote check
-and the export's Fact-Check and citation sections are the same in every
-format.
+only the summarizer's prose: the program-written answer, the quote check,
+the key figures and the cited sources are the same in every format. The
+report carries none of the pipeline's working (the fact-check's verdicts
+and reasons, the suggested searches, the sources not cited): the `.json`
+keeps it and the serve page's Audit shows it.
 
 An instant run (`Plan.Instant`, from the `instant` depth, `--mode instant`)
 ends differently:
@@ -289,7 +291,9 @@ to the checked decision.
   label and each of the checker's "finding N" by that source's title,
   wherever the report prints a formula, an input, a reason or a fact-check
   note; the IDs stay in the `.json`, for the audit and tools.
-  The report's "Computed figures" section, the chart SVGs (named by their content
+  The report's "Key figures" section (the valid figures and the charts;
+  formulas, inputs and failures are the `.json`'s and the Audit's), the
+  chart SVGs (named by their content
   digest) and the PDF's vector charts are written from the governed
   analysis. The PDF and the serve page draw or show only the charts the
   run's own list names, never a file a report links to. What this

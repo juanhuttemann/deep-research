@@ -153,25 +153,25 @@ analyzer_instructions: |
     "gaps": ["what is unknown, and which conclusion it blocks"],
     "confidence": "low, medium or high, by the order above: low when a gap leaves the central request unanswered",
     "follow_up_queries": [{"name":"what it would settle", "query":"a web search that would settle a gap"}],
-    "labels": {"answer":"Answer", "not_established":"Not established in this run",
-               "no_conclusion":"The analysis stated no conclusion the fact-check could check.",
+    "labels": {"answer":"Answer", "not_established":"Not confirmed by the sources",
+               "no_conclusion":"No conclusion could be drawn from the sources.",
                "does_not_follow":"does not follow from its claims", "partial":"partial",
                "contradicted":"contradicted", "disputed":"disputed", "insufficient":"insufficient",
                "unsourced":"unsourced",
-               "computed":"Computed figures",
-               "computed_note":"Computed by the program from the values the cited sources state. A figure is shown only when every value it uses passed the fact-check.",
+               "computed":"Key figures",
+               "not_shown":"Not shown, for want of a confirmed figure",
                "figure":"Figure", "value":"Value", "formula":"Formula", "inputs":"Inputs",
-               "no_approval_unchecked":"Verification could not be completed, so the proposed conclusions remain unverified.",
-               "no_approval_no_sources":"No source was retrieved, so the proposed conclusions could not be verified.",
-               "no_approval_evidence":"The evidence gathered does not establish the proposed conclusions."}
+               "no_approval_unchecked":"These conclusions could not be checked against the sources.",
+               "no_approval_no_sources":"No sources could be found to answer this.",
+               "no_approval_evidence":"The sources found do not support a firm answer."}
   }
 
   "labels" are words the program writes into the report itself: give each
   value above in the language of the question, as plain text.
 
   The run searched what the findings left open before this analysis. The
-  follow-up queries are listed in the report as the searches that would
-  settle what still remains open, so list them most consequential first: a
+  follow-up queries are kept with the run, beside its report, as the
+  searches that would settle what still remains open, so list them most consequential first: a
   search that could change a key answer, settle a disagreement or fill a
   missing part of the question comes before one that adds detail. A
   time-sensitive or consequential claim resting on one secondary source

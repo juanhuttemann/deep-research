@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -197,32 +198,24 @@ func MarkdownReport(res *agent.ResearchResult) string {
 		sb.WriteString("\n\n")
 	}
 
-	// The body is written from the analysis and the fact-check, so appending
-	// them again repeated every finding two or three times. What the body
-	// cannot carry is kept: the searches still worth running and the claims
-	// the check did not confirm. The whole of both stays in the .json sidecar.
-	if res.Analysis != nil {
-		writeOpenQuestions(&sb, res.Analysis)
-	}
-	writeFactCheck(&sb, res.FactCheck, res.Analysis)
-
-	// Judged against the report body alone, exactly as the JSON sidecar does:
-	// a URL is cited when the text of the answer references it.
-	cits := citations(res, condStr(res.Summary, "report"))
-	cited, retrieved := splitCited(cits)
-	// A report that embeds no links at all gives nothing to split on, so
-	// everything stays under one heading rather than claiming the report
-	// cited none of its sources.
-	if len(cited) == 0 {
-		cited, retrieved = cits, nil
-	}
-	writeCitationList(&sb, "Citations", cited)
-	// Sources the run fetched but the report never used are still worth
-	// listing — they are what the reader would check to see what was looked
-	// at — but listing them as citations overstated the evidence behind the
-	// answer, noise included.
-	writeCitationList(&sb, "Other Sources Retrieved", retrieved)
+	// The report ends with what it cites. The pipeline's working (the
+	// fact-check's counts and verdicts, the searches the analysis would run
+	// next, the sources fetched but not cited) read as the program talking
+	// to itself, and took more pages than the answer: it is the audit's, in
+	// the .json and the serve page's Audit.
+	writeCitations(&sb, citedOnly(citations(res, condStr(res.Summary, "report"))))
 	return sb.String()
+}
+
+// citedOnly are the sources the report body cites. A report that embeds no
+// links at all gives nothing to split on, so then every source is listed
+// rather than claiming the report cited none of them.
+func citedOnly(cits []MetaCitation) []MetaCitation {
+	cited, _ := splitCited(cits)
+	if len(cited) == 0 {
+		return cits
+	}
+	return cited
 }
 
 // citations is the deduplicated, URL-ordered citation list for a result, with
@@ -265,27 +258,41 @@ func splitCited(in []MetaCitation) (cited, retrieved []MetaCitation) {
 	return cited, retrieved
 }
 
-func writeCitationList(sb *strings.Builder, heading string, cits []MetaCitation) {
+// writeCitations lists the cited sources one line each: the title linked
+// to the page, its site, and how it was read when not in full. A title
+// followed by its whole URL ran to three lines a source, and nine sources
+// took a page and a half after an answer of half a page. The PDF prints
+// this list smaller and without the URLs (pdfRefs); the .md keeps them in
+// the links.
+func writeCitations(sb *strings.Builder, cits []MetaCitation) {
 	if len(cits) == 0 {
 		return
 	}
-	fmt.Fprintf(sb, "## %s (%d)\n\n", heading, len(cits))
+	fmt.Fprintf(sb, "## %s (%d)\n\n", citationsHeading, len(cits))
 	for i, c := range cits {
-		label := sourceNote(c.Status)
-		if c.Confidence != "" {
-			label = strings.TrimSuffix("_"+c.Confidence+"_ ("+label+")", " ()")
+		meta := strings.TrimPrefix(c.Domain, "www.")
+		if note := sourceNote(c.Status); note != "" {
+			meta = strings.TrimPrefix(meta+" · "+note, " · ")
 		}
-		if c.URL == "" {
-			fmt.Fprintf(sb, "%d. %s — %s\n", i+1, c.Title, strings.TrimPrefix(label+", no URL", ", "))
+		title := strings.TrimSpace(c.Title)
+		switch {
+		case c.URL == "":
+			fmt.Fprintf(sb, "%d. %s — %s\n", i+1, citeLabel.Replace(cmp.Or(title, "untitled")), strings.TrimPrefix(meta+" · no URL", " · "))
 			continue
+		case title == "":
+			title = cmp.Or(strings.TrimPrefix(c.Domain, "www."), c.URL)
 		}
-		if label != "" {
-			label = " — " + label
+		if meta != "" {
+			meta = " — " + meta
 		}
-		fmt.Fprintf(sb, "%d. [%s](%s)%s\n", i+1, citeLabel.Replace(c.Title), citeTarget.Replace(c.URL), label)
+		fmt.Fprintf(sb, "%d. [%s](%s)%s\n", i+1, citeLabel.Replace(title), citeTarget.Replace(c.URL), meta)
 	}
 	sb.WriteString("\n")
 }
+
+// citationsHeading heads the report's source list; the PDF finds the list
+// by it (pdfRefs).
+const citationsHeading = "Citations"
 
 // citeLabel and citeTarget make a page's title and URL, which the page
 // chose, safe inside a Markdown link. Unescaped, a title holding
@@ -311,130 +318,6 @@ func sourceNote(status string) string {
 		return "never fetched"
 	}
 	return status
-}
-
-// writeOpenQuestions lists the searches the analysis says could settle what
-// is still open. The gaps themselves are in the body: the summarizer is given
-// them and states the ones that limit the answer.
-func writeOpenQuestions(sb *strings.Builder, a *agent.Analysis) {
-	var qs []string
-	for _, q := range a.FollowUp {
-		if q = strings.TrimSpace(q); q != "" {
-			qs = append(qs, q)
-		}
-	}
-	if len(qs) == 0 {
-		return
-	}
-	sb.WriteString("## Suggested Searches\n\n")
-	for _, q := range qs {
-		fmt.Fprintf(sb, "- %s\n", q)
-	}
-	sb.WriteString("\n")
-}
-
-// writeFactCheck records what the verification pass concluded. Leaving it to
-// the summarizer's prose meant a reader could not tell which claims the
-// pipeline had checked, so the counts are always stated. Confirmed claims are
-// the body's own, quoted there; listing them again with their evidence
-// doubled the report, so only the claims the check did not confirm are
-// listed, each with what the check found in words ("Contradicted", "Not
-// established"): symbols ("?", "✗") left a reader to guess, and "unverified"
-// did not tell a contradicted claim from one no passage settled. Notes are
-// named as the reader knows them (namer).
-func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult, a *agent.Analysis) {
-	if fc == nil || len(fc.Verified)+len(fc.Unverified)+len(fc.Contradictions) == 0 {
-		return
-	}
-	n := newNamer(a)
-	entries := factCheckEntries(fc, a)
-	var confirmed, against int
-	for _, e := range entries {
-		switch e.status {
-		case statusSupported:
-			confirmed++
-		case statusContradicted, statusDisputed:
-			against++
-		}
-	}
-	sb.WriteString("## Fact-Check\n\n")
-	fmt.Fprintf(sb, "Confirmed against their sources: %d · not confirmed: %d · contradicted or disputed: %d\n\n",
-		confirmed, len(entries)-confirmed-against, against)
-	for _, e := range entries {
-		if e.status == statusSupported {
-			continue
-		}
-		fmt.Fprintf(sb, "- **%s:** %s", outcomeWords(e.status, e.note), quoted(n.dropID(e.text)))
-		if note := readerNote(e.note); note != "" {
-			fmt.Fprintf(sb, " — %s", n.say(note, true))
-		}
-		sb.WriteString("\n")
-	}
-	sb.WriteString("\n")
-}
-
-// factCheckEntries are the checked claims with their status: the
-// analysis's own when it made claims, the fact-check's lists otherwise (a
-// check of prose, or a run saved before the claims carried their status).
-func factCheckEntries(fc *agent.FactCheckResult, a *agent.Analysis) []verdictEntry {
-	if a != nil && len(a.Claims) > 0 && slices.ContainsFunc(a.Claims, func(c agent.Claim) bool { return c.Status != "" }) {
-		return claimEntries(a.Claims)
-	}
-	var out []verdictEntry
-	for _, c := range fc.Verified {
-		status, note := statusSupported, c.Evidence
-		if !c.Verified {
-			status = statusInsufficient
-			if rest, ok := strings.CutPrefix(note, "partial: "); ok {
-				status, note = statusPartial, rest
-			}
-		}
-		out = append(out, verdictEntry{c.Claim, status, note})
-	}
-	for _, c := range fc.Unverified {
-		text, rest, _ := strings.Cut(c, " — ")
-		status, note, ok := strings.Cut(rest, ": ")
-		if !ok {
-			status, note = statusInsufficient, rest
-		}
-		out = append(out, verdictEntry{text, status, note})
-	}
-	for _, c := range fc.Contradictions {
-		status, note, ok := strings.Cut(strings.Join(c.Sources, "; "), ": ")
-		if !ok || status != statusDisputed {
-			status, note = statusContradicted, strings.Join(c.Sources, "; ")
-		}
-		out = append(out, verdictEntry{c.Claim, status, note})
-	}
-	return out
-}
-
-// outcomeWords is what the check found about a claim, in words.
-func outcomeWords(status, note string) string {
-	if strings.HasPrefix(note, "fact_check_unavailable") {
-		return "Not checked"
-	}
-	switch status {
-	case statusPartial:
-		return "Partly supported"
-	case statusContradicted:
-		return "Contradicted"
-	case statusDisputed:
-		return "Disputed"
-	case statusUnsourced:
-		return "No fetched page states it"
-	}
-	return "Not established"
-}
-
-// readerNote is a note without the program's codes ("quote_not_located:",
-// "fact_check_unavailable:"), which the reader's words say already.
-func readerNote(note string) string {
-	note = strings.TrimSpace(note)
-	for _, code := range []string{"quote_not_located: ", "fact_check_unavailable: ", "fact_check_unavailable"} {
-		note = strings.TrimPrefix(note, code)
-	}
-	return strings.TrimSpace(note)
 }
 
 // WriteMarkdown writes the Markdown report and returns the path written.
