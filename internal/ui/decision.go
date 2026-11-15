@@ -38,6 +38,7 @@ const (
 func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 	evidence := evidenceURLs(findings)
 	ids, given := map[string]bool{}, map[string]bool{}
+	renamed := map[string][]string{}
 	for _, c := range a.Claims {
 		given[c.ID] = true
 	}
@@ -57,6 +58,7 @@ func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 			for k := i + 1; ids[id] || given[id]; k++ {
 				id = c.ID + "." + strconv.Itoa(k)
 			}
+			renamed[c.ID] = append(renamed[c.ID], id)
 			c.ID = id
 		}
 		ids[c.ID] = true
@@ -64,7 +66,7 @@ func checkAnalysis(a *agent.Analysis, findings []agent.Finding) {
 	for i := range a.Conflicts {
 		a.Conflicts[i].Claims = slices.DeleteFunc(a.Conflicts[i].Claims, func(id string) bool { return !ids[id] })
 	}
-	prepareFigures(a)
+	prepareFigures(a, renamed)
 }
 
 // evidenceURLs are the pages a claim may cite: the ones the run fetched,

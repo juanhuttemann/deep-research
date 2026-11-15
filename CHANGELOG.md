@@ -41,6 +41,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   computations named but no value given and no chart asked, and showed
   nothing. The report lists only the cause of a failed computation, not
   every computation that failed after it.
+- A computation or chart that names a claim ID the analyzer gave twice
+  takes the copy with a figure when the first has none and exactly one copy
+  has one: a run numbered its rankings c1-c5 and its heights c1-c4, and its
+  "c1 - c4" was taken over two sentences with no number in them.
 - A chart draws the points that stand when at least two do, and the report
   lists each point left out with why: one year a source did not state made
   a run's whole series disappear. A minus sign that scraped pages escape
