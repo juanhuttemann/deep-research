@@ -274,3 +274,40 @@ func TestUnstatedAcceptsAVerbatimIdentifier(t *testing.T) {
 		t.Errorf("Unstated = %v, want the 4%% unstated: GPT-4 is a name", got)
 	}
 }
+
+// Table cells run together by PDF extraction are read as the cells: a
+// daa statistics table came out as below, and the year-to-date total in it
+// was refused as part of a malformed number.
+func TestGluedTableCellsReadAsTheirCells(t *testing.T) {
+	row := "Total Passengers 2,866,1182,834,4721%9,896,3479,493,5644%"
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"2,866,118", true}, {"2,834,472", true}, {"9,896,347", true}, {"9,493,564", true},
+		{"28,661,182", false}, {"866,118", false}, {"3,479", false},
+	} {
+		if got := InText(row, mustValue(t, tc.value)); got != tc.want {
+			t.Errorf("InText(row, %s) = %v, want %v", tc.value, got, tc.want)
+		}
+	}
+	// A run that is no row of grouped numbers is not split into one: a
+	// typo, an identifier, point groups, a lone leftover cell.
+	for _, s := range []string{"1,23456789", "1234,567", "1,2,3", "1,000,0001", "12.3456.7890"} {
+		if got := glued(s); got != nil {
+			t.Errorf("glued(%q) = %v, want nothing", s, got)
+		}
+	}
+	for _, v := range []string{"1,000,000", "1"} {
+		if InText("a typo: 1,000,0001 units", mustValue(t, v)) {
+			t.Errorf("a typo supplied %s", v)
+		}
+	}
+	if InText(row, mustValue(t, "1")) || InText(row, mustValue(t, "4")) {
+		t.Error("a leftover ungrouped cell was offered")
+	}
+	// A well-formed number keeps its one reading.
+	if InText("61,200", mustValue(t, "61")) || InText("61,200", mustValue(t, "200")) {
+		t.Error("a grouped number was read as cells")
+	}
+}
