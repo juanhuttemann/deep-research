@@ -5,133 +5,74 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-15
+
 ### Added
 
-- Computed figures and charts. Every number a report stated used to be the
-  model's own arithmetic, and a wrong total read exactly like a sourced
-  one. Now the analyzer marks the claims that state a figure, names the
+- Computed figures and charts. A report's numbers were the model's own
+  arithmetic, and a wrong total read exactly like a sourced one. The
+  analyzer now marks the claims that state a figure and names the
   operations over them (sum, difference, product, ratio, share, percent
-  change, mean, min, max, compound growth) and the series to draw. The
-  program evaluates them exactly, and uses only inputs that passed the
-  fact-check and are written in a passage they were supported on. A claim
-  stating a computed figure is supported when it matches the result and
-  contradicted when it does not. The report closes with a "Computed
-  figures" section: each figure, its formula over claim IDs and its inputs
-  linked to their pages, and what could not be computed and why. Charts are
-  written beside the report as content-named SVGs (listed in `done`'s
-  artifacts), drawn as vectors in the PDF, shown on the `serve` page and
-  given as tables in the terminal. The Pi extension's digest lists the
-  computed figures.
-- A recommendation or conclusion that states a number none of its claims
-  states is not approved. A run approved "7,030,229, the year-to-date total
-  less April" written in a conclusion's own words, while the computed claim
-  stating the same figure had failed its check.
-- A computation whose result is one of its own input claims by
-  construction is not computed: two runs derived the last quarter from the
-  year's total and then "checked" that the quarters add up to that total,
-  which holds whatever the sources say. Each input is nudged in turn and
-  the computation redone exactly; a result that moves one for one with a
-  single input and not at all with the rest is that input restated. Only
-  computations of sums, differences and means are asked, where that test is
-  an identity rather than a coincidence of the values.
-- A source's table is no longer left out of the excerpt a model reads for
-  being long. A US cities run fetched the Census Bureau's release with the
-  2024 population of every city asked for, in two tables, and reported that
-  no retrieved text stated them: the tables were scored down for their
-  length and the excerpt went to a prose sentence, a "Subscribe" heading and
-  a "Press Kit" link. A table is now scored by its header and the rows that
-  answer, so the rows asked for reach the analysis and the fact-check. A row
-  answers by a query word that tells rows apart (in no more than half of
-  them), since every row of a cities table shares "city"; a table is shown as it is scored, header and
-  answering rows, so two tables of the same cities both fit; and a table
-  takes its heading's score, so a claim naming "Table 3" sees its rows.
-  Replayed on the same recorded evidence, the run answered with the 2025
-  estimates of another page before (not the year asked) and with the
-  Census Bureau's 2024 figures, all five supported, after.
-- A claim stating a computed figure is judged by the figure its words
-  state, at the precision written: a claim reading "about $129.14" whose
-  value field held 129.14238410596026 was refused, and a claim whose words
-  state another figure than the program's is contradicted. Its unit
-  contradicts only where it changes the figure (a percentage against
-  percentage points, another currency or scale), not over wording ("USD per
-  paid membership per year").
-- The difference of two percentages is in percentage points: a run's
-  correct "6.5 percentage points" was contradicted by the program's "6.5
-  percent". A scale word both units of a ratio carry cancels: revenue in
-  USD million over memberships in millions is "USD per paid memberships",
-  not "USD million per million paid memberships".
-- Charts the program draws group a quantity whatever year its criterion
-  names ("battery-electric share, 2023" and "…, 2024" are one series), label
-  a series by the year a figure is for (its subject first, as when a model
-  files the 2012 minimum under "2012"), and treat two figures for one year
-  as alternatives, not a series: an Arctic run charted two reports of the
-  2012 minimum side by side, one bar labelled by the year the second report
-  was published.
-- A number inside quotation marks is not read as a claim's figure: a
-  claim that the Louvre tops The Art Newspaper's 2023 ranking, citing the
-  article "The 100 most popular art museums in the world", was given the
-  value 100.
-- A conclusion may rest on a computation itself and stands or falls with
-  it: a run's conclusion naming "m1" was refused as resting on no claim.
-- When a subject has figures for several years, the program charts its
-  series, in time order, rather than comparing subjects in one year: a
-  Schiphol run charted the airport's 2024 passengers beside the group
-  total that includes them, and not the group's own 2019-2024 figures.
-- A number that is part of a name or a date is not read as a claim's
-  figure: "360 Mozambique ranks Mawenzi third" gave a claim the value 360,
-  and "On 16 January 27 BC" the value 16. Capitalized scale and currency
-  words ("Mio. Euro", "USD") still read as units.
-- The program draws no chart of ranks, and a chart's title takes a scope
-  only when it is short.
-- A chart the program draws to compare subjects holds them to one year: a
-  run's GDP chart put Mexico's 2025 figure beside Brazil's 2023 one, which
-  its own analysis said did not answer for 2023.
-- A claim comparing its figure with an earlier one ("17% in 2024, up from
-  13% in 2019") is read as its figure, the number the comparison does not
-  introduce: an Ember run's answer stated wind at 17% while its chart left
-  wind out and its wind-and-solar sum failed for want of a figure. The
-  analyzer is told a chart compares like with like, never a total beside
-  its own parts.
-- A growth rate's unit is "%": the program's cagr, written "% a period",
-  contradicted a run's claim of the same 9.25 "percent", so the answer
-  called the figure not established while the report computed it. A
-  quantity the analyzer charted is not charted again from another source,
-  and a figure several sites give for one year is named with its site
-  ("Apple 2024, bullfincher.io") rather than by its whole sentence.
+  change, mean, min, max, compound growth); the program evaluates them
+  exactly, from inputs that passed the fact-check and are written in a
+  passage they were supported on. A claim stating a computed figure is
+  supported when its words state the result at their own precision and
+  contradicted when they state another figure. Units never convert: a sum
+  of different units or scales is refused, the difference of two
+  percentages is in percentage points, and a scale both sides of a ratio
+  carry cancels. A computation that only restates one of its inputs (the
+  quarters summed after the last was derived from the year's total) is
+  refused as checking nothing.
+- Reports close with a "Computed figures" section: each figure, its
+  formula and its inputs linked to the pages they were read from, and what
+  could not be computed, with why.
+- Charts are drawn whenever the checked figures make a series, asked for
+  or not: one subject over years as a line, several subjects in one year as
+  bars, never a rank or two reports of one figure as a series. A point that
+  is not a supported figure is left out and listed with why. Charts are
+  written beside the report as content-named `chart-<digest>.svg` files
+  (listed in `done`'s artifacts), drawn as vectors in the PDF, shown on the
+  `serve` page, and given as tables in the terminal. No extra tool is
+  needed.
+- A claim with no figure given takes the one its words state, with the
+  unit written beside it ("828 metres", "$12.4 million", "4.5%"); a number
+  in a name, a quoted title, a date or a comparison's reference ("up from
+  13%") is not taken for it.
+- The Pi extension's digest lists the computed figures and the ones that
+  could not be computed.
+
+### Changed
+
+- The Markdown and PDF reports read on their own: they cite no claim or
+  computation ID and no "finding 5" from the fact-check's prompt, naming
+  each claim by its subject or words, each computation by its label and
+  each source by its title. The `.json` keeps the IDs.
 - The Fact-Check section says what the check found about each claim it did
-  not confirm, in words: "Partly supported", "Contradicted", "Disputed",
-  "Not established", "Not checked". It listed them under symbols ("?
-  unverified", "✗ not verified") that did not tell a contradicted claim
-  from one no passage settled, with the program's codes
-  ("quote_not_located:") in the notes.
-- The Markdown and PDF reports read on their own. They no longer cite the
-  run's IDs: a computation is named by its label, a claim by its subject or
-  its own words, and the fact-check's "finding 5" by that source's title; a
-  computed figure's formula and inputs read "Burj Khalifa − Ping An Finance
-  Center" rather than "c1 − c4". A figure read from a claim also takes the
-  unit written with it ("828 metres", "$12.4 million", "4.5%"), so a figure
-  is not printed without one. The .json keeps the IDs.
-- Charts are drawn whenever the figures make a series, asked for or not:
-  two or more checked claims measuring the same thing become a bar chart
-  labelled by subject, or a line over years. A claim with no value given
-  takes the one number its text states. A run over five medal counts had
-  computations named but no value given and no chart asked, and showed
-  nothing. The report lists only the cause of a failed computation, not
-  every computation that failed after it.
-- A computation or chart that names a claim ID the analyzer gave twice
-  takes the copy with a figure when the first has none and exactly one copy
-  has one: a run numbered its rankings c1-c5 and its heights c1-c4, and its
-  "c1 - c4" was taken over two sentences with no number in them.
-- A chart draws the points that stand when at least two do, and the report
-  lists each point left out with why: one year a source did not state made
-  a run's whole series disappear. A minus sign that scraped pages escape
-  ("\\-0.9", or chart labels run together as "1.8%\\-0.9%") is read as a
-  sign. The analyzer is told to credit a figure to the page that writes it:
-  a run attributed figures read on a UNECE page to a Destatis release that
-  had no such table, and every one failed the check.
-- Table cells that PDF extraction ran together ("2,866,1182,834,4721") are
-  read as their cells, so a figure in such a row can be an input. The split
-  is forced by the three-digit groups, never guessed.
+  not confirm, in words: Partly supported, Contradicted, Disputed, Not
+  established, Not checked. It used symbols ("? unverified", "✗ not
+  verified") that did not tell a contradicted claim from one no passage
+  settled.
+- A recommendation or conclusion that states a number none of its claims
+  states is not approved: arithmetic in a statement's own words reached the
+  answer unchecked. One may rest on a computation, and stands or falls
+  with it.
+- The analyzer is told to credit a figure only to a page that writes it,
+  to give every claim its own ID, and to chart like with like.
+
+### Fixed
+
+- A source's table is no longer left out of the excerpt a model reads for
+  being long. A US cities run fetched the Census Bureau's release with
+  every population asked for, in two tables, and reported that no retrieved
+  text stated them: the excerpt went to a prose sentence, a "Subscribe"
+  heading and a "Press Kit" link. A table is now scored and shown by its
+  header and the rows that answer (by a word that tells rows apart), its
+  heading carries it, and two tables of the same subjects both fit.
+  Replayed on the same recorded evidence, the run answered with another
+  page's 2025 estimates before and with the Census Bureau's 2024 figures,
+  all five supported, after.
+- Table cells that PDF extraction ran together ("2,866,1182,834,4721") and
+  minus signs scraped pages escape ("\\-0.9") are read as written.
 
 ## [0.34.1] - 2026-11-14
 
