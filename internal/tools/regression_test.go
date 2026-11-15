@@ -1319,6 +1319,18 @@ func TestExcerptKeepsTheTableRowsAQueryNames(t *testing.T) {
 	for name, got := range map[string]string{
 		// As the analyzer sees the page: by the search that found it.
 		"search": ExcerptFor(string(data), []string{"Census 2024 estimates New York Los Angeles Chicago Houston Phoenix population"}, nil, 1500),
+		// As the fact-check saw it in a run: the analyzer's own claims, each
+		// naming one city. Every row of the cities' table shares "city", and
+		// counted as answering, they let a table of regional averages win.
+		"run claims": ExcerptFor(string(data), []string{
+			"The U.S. Census Bureau's Vintage 2024 Population Estimates report New York city's July 1, 2024 resident population as 8,478,072.",
+			"The U.S. Census Bureau's Vintage 2024 Population Estimates report Los Angeles city's July 1, 2024 resident population as 3,878,704.",
+			"The U.S. Census Bureau's Vintage 2024 Population Estimates report Chicago city's July 1, 2024 resident population as 2,721,308.",
+			"The U.S. Census Bureau's Vintage 2024 Population Estimates report Houston city's July 1, 2024 resident population as 2,390,125.",
+			"The U.S. Census Bureau's Vintage 2024 Population Estimates report Phoenix city's July 1, 2024 resident population as 1,673,164.",
+			"The Census Bureau's Vintage 2024 Table 3 ranks New York city, Los Angeles city, Chicago city, Houston city and Phoenix city as the five most populous U.S. cities on July 1, 2024.",
+			"The combined July 1, 2024 population of New York, Los Angeles, Chicago, Houston and Phoenix was 19,141,373, the sum of their Vintage 2024 estimates.",
+		}, nil, 1500),
 		// As the fact-check sees it: by the claims that cite it.
 		"claims": ExcerptFor(string(data), []string{
 			"New York City's 2024 population estimate was 8,478,072.",

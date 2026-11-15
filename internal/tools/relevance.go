@@ -464,13 +464,19 @@ func isTable(block string) bool {
 }
 
 // tableScore is a table scored as the excerpt would show it: its header and
-// the rows that mention a query word, with the length penalty charged on
-// those lines alone. Scored whole, a table naming every subject a query
-// asks for, a row each, was four times the page's average block and lost
-// to a sentence naming three of them: a run's excerpt of the Census
-// Bureau's release left out the table of the cities' populations it had
-// been searched for. The header counts only beside a matching row, since
-// column names alone answer nothing.
+// the rows that answer, with the length penalty charged on those lines
+// alone. Scored whole, a table naming every subject a query asks for, a row
+// each, was four times the page's average block and lost to a sentence
+// naming three of them: a run's excerpt of the Census Bureau's release left
+// out the table of the cities' populations it had been searched for.
+//
+// A row answers when it matches at least half the weight the table's best
+// row does: a word every row shares ("city", in "New York city" and
+// "Dallas city" alike) does not make fifteen rows the answer to a claim
+// about one, and in another table of the same page it made every repeated
+// sub-header ("Number of Cities") a match, so a table of regional averages
+// outscored the city's own row. The header counts only beside an answering
+// row, since column names alone answer nothing.
 func tableScore(folded string, words []string, weights []float64, avg float64) float64 {
 	lines := strings.Split(strings.TrimSpace(folded), "\n")
 	head := 1
@@ -481,28 +487,25 @@ func tableScore(folded string, words []string, weights []float64, avg float64) f
 		}
 	}
 	head = min(head, len(lines))
+	rowWeight := func(line string) float64 { return matchWeight(line, words, weights, nil) }
+	best := 0.0
+	for _, line := range lines[head:] {
+		best = max(best, rowWeight(line))
+	}
+	if best == 0 {
+		return 0
+	}
 	found := make([]bool, len(words))
 	shown := 0
 	for _, line := range lines[head:] {
-		matched := false
-		for i, w := range words {
-			if weights[i] > 0 && strings.Contains(line, w) {
-				found[i], matched = true, true
-			}
+		if rowWeight(line) < best/2 {
+			continue
 		}
-		if matched {
-			shown += len(line) + 1
-		}
-	}
-	if shown == 0 {
-		return 0
+		shown += len(line) + 1
+		matchWeight(line, words, weights, found)
 	}
 	header := strings.Join(lines[:head], "\n")
-	for i, w := range words {
-		if weights[i] > 0 && strings.Contains(header, w) {
-			found[i] = true
-		}
-	}
+	matchWeight(header, words, weights, found)
 	score := 0.0
 	for i := range words {
 		if found[i] {
@@ -710,4 +713,19 @@ func truncateUTF8Bare(s string, limit int) string {
 		limit--
 	}
 	return s[:limit]
+}
+
+// matchWeight is the weight of the query words line holds, marking each in
+// found when found is given.
+func matchWeight(line string, words []string, weights []float64, found []bool) float64 {
+	w := 0.0
+	for i, word := range words {
+		if weights[i] > 0 && strings.Contains(line, word) {
+			w += weights[i]
+			if found != nil {
+				found[i] = true
+			}
+		}
+	}
+	return w
 }
