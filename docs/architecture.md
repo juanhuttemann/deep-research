@@ -157,7 +157,13 @@ A Markdown table is also scored as the excerpt would show it, its header
 and the rows that mention a query word, the length penalty charged on those
 lines alone, so a table naming each subject asked for, a row each, is not
 outranked by a shorter sentence naming some of them; a table whose rows
-name nothing asked for scores nothing by this.
+name nothing asked for scores nothing by this. A row answers when it
+matches at least half the weight of the table's best row, so a word every
+row shares does not make every row an answer. A table that fits the budget
+is also shown that way, its header and answering rows with `| … |` for the
+rows left out, so two tables of the same subjects both fit; and a table
+takes its heading's score when that is higher, so a claim naming "Table 3"
+is shown Table 3's rows, not only its heading.
 Equal-tier ties favor the passage answering more queries, so metadata cannot
 exclude an entire table needed by several claims. Their compact matching lines are budgeted
 beside other passages before spare space is filled, retaining headers and

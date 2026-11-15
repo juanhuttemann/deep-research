@@ -40,7 +40,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   no retrieved text stated them: the tables were scored down for their
   length and the excerpt went to a prose sentence, a "Subscribe" heading and
   a "Press Kit" link. A table is now scored by its header and the rows that
-  answer, so the rows asked for reach the analysis and the fact-check.
+  answer, so the rows asked for reach the analysis and the fact-check. A row
+  answers only beside the best row's match, since every row of a cities
+  table shares "city"; a table is shown as it is scored, header and
+  answering rows, so two tables of the same cities both fit; and a table
+  takes its heading's score, so a claim naming "Table 3" sees its rows.
+  Replayed on the same recorded evidence, the run answered with the 2025
+  estimates of another page before (not the year asked) and with the
+  Census Bureau's 2024 figures, all five supported, after.
 - A claim stating a computed figure is judged by the figure its words
   state, at the precision written: a claim reading "about $129.14" whose
   value field held 129.14238410596026 was refused, and a claim whose words
