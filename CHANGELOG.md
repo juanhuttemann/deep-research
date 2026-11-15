@@ -34,6 +34,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- The Fact-Check section says what the check found about each claim it did
+  not confirm, in words: "Partly supported", "Contradicted", "Disputed",
+  "Not established", "Not checked". It listed them under symbols ("?
+  unverified", "✗ not verified") that did not tell a contradicted claim
+  from one no passage settled, with the program's codes
+  ("quote_not_located:") in the notes.
 - The Markdown and PDF reports read on their own. They no longer cite the
   run's IDs: a computation is named by its label, a claim by its subject or
   its own words, and the fact-check's "finding 5" by that source's title; a

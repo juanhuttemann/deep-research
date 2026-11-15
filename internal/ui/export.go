@@ -299,47 +299,103 @@ func writeOpenQuestions(sb *strings.Builder, a *agent.Analysis) {
 // pipeline had checked, so the counts are always stated. Confirmed claims are
 // the body's own, quoted there; listing them again with their evidence
 // doubled the report, so only the claims the check did not confirm are
-// listed. The verdict is the flag, not the array a claim arrived in.
-// The entries are named as the reader knows them (namer): the notes the
-// program and the checker write cite claims and computations by their IDs.
+// listed, each with what the check found in words ("Contradicted", "Not
+// established"): symbols ("?", "✗") left a reader to guess, and "unverified"
+// did not tell a contradicted claim from one no passage settled. Notes are
+// named as the reader knows them (namer).
 func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult, a *agent.Analysis) {
-	n := newNamer(a)
-	say := func(s string) string { return n.say(s, true) }
-	// A claim keeps its own words; an older run's entries began "c5: ".
-	claim := func(s string) string { return n.dropID(s) }
 	if fc == nil || len(fc.Verified)+len(fc.Unverified)+len(fc.Contradictions) == 0 {
 		return
 	}
-	var confirmed int
-	var rejected []agent.VerifiedClaim
-	for _, c := range fc.Verified {
-		if c.Verified {
+	n := newNamer(a)
+	entries := factCheckEntries(fc, a)
+	var confirmed, against int
+	for _, e := range entries {
+		switch e.status {
+		case statusSupported:
 			confirmed++
-		} else {
-			rejected = append(rejected, c)
+		case statusContradicted, statusDisputed:
+			against++
 		}
 	}
 	sb.WriteString("## Fact-Check\n\n")
-	fmt.Fprintf(sb, "Confirmed against their sources: %d · not confirmed: %d · contradictions: %d\n\n",
-		confirmed, len(rejected)+len(fc.Unverified), len(fc.Contradictions))
-	for _, c := range rejected {
-		fmt.Fprintf(sb, "- ✗ not verified: %s", claim(c.Claim))
-		if c.Evidence != "" {
-			fmt.Fprintf(sb, " — %s", say(c.Evidence))
+	fmt.Fprintf(sb, "Confirmed against their sources: %d · not confirmed: %d · contradicted or disputed: %d\n\n",
+		confirmed, len(entries)-confirmed-against, against)
+	for _, e := range entries {
+		if e.status == statusSupported {
+			continue
+		}
+		fmt.Fprintf(sb, "- **%s:** %s", outcomeWords(e.status, e.note), quoted(n.dropID(e.text)))
+		if note := readerNote(e.note); note != "" {
+			fmt.Fprintf(sb, " — %s", n.say(note, true))
 		}
 		sb.WriteString("\n")
 	}
-	for _, c := range fc.Unverified {
-		text, note, _ := strings.Cut(c, " — ")
-		if note != "" {
-			note = " — " + say(note)
+	sb.WriteString("\n")
+}
+
+// factCheckEntries are the checked claims with their status: the
+// analysis's own when it made claims, the fact-check's lists otherwise (a
+// check of prose, or a run saved before the claims carried their status).
+func factCheckEntries(fc *agent.FactCheckResult, a *agent.Analysis) []verdictEntry {
+	if a != nil && len(a.Claims) > 0 && slices.ContainsFunc(a.Claims, func(c agent.Claim) bool { return c.Status != "" }) {
+		return claimEntries(a.Claims)
+	}
+	var out []verdictEntry
+	for _, c := range fc.Verified {
+		status, note := statusSupported, c.Evidence
+		if !c.Verified {
+			status = statusInsufficient
+			if rest, ok := strings.CutPrefix(note, "partial: "); ok {
+				status, note = statusPartial, rest
+			}
 		}
-		fmt.Fprintf(sb, "- ? unverified: %s%s\n", claim(text), note)
+		out = append(out, verdictEntry{c.Claim, status, note})
+	}
+	for _, c := range fc.Unverified {
+		text, rest, _ := strings.Cut(c, " — ")
+		status, note, ok := strings.Cut(rest, ": ")
+		if !ok {
+			status, note = statusInsufficient, rest
+		}
+		out = append(out, verdictEntry{text, status, note})
 	}
 	for _, c := range fc.Contradictions {
-		fmt.Fprintf(sb, "- ⚠ contradiction on %s: %s\n", claim(c.Claim), say(strings.Join(c.Sources, "; ")))
+		status, note, ok := strings.Cut(strings.Join(c.Sources, "; "), ": ")
+		if !ok || status != statusDisputed {
+			status, note = statusContradicted, strings.Join(c.Sources, "; ")
+		}
+		out = append(out, verdictEntry{c.Claim, status, note})
 	}
-	sb.WriteString("\n")
+	return out
+}
+
+// outcomeWords is what the check found about a claim, in words.
+func outcomeWords(status, note string) string {
+	if strings.HasPrefix(note, "fact_check_unavailable") {
+		return "Not checked"
+	}
+	switch status {
+	case statusPartial:
+		return "Partly supported"
+	case statusContradicted:
+		return "Contradicted"
+	case statusDisputed:
+		return "Disputed"
+	case statusUnsourced:
+		return "No fetched page states it"
+	}
+	return "Not established"
+}
+
+// readerNote is a note without the program's codes ("quote_not_located:",
+// "fact_check_unavailable:"), which the reader's words say already.
+func readerNote(note string) string {
+	note = strings.TrimSpace(note)
+	for _, code := range []string{"quote_not_located: ", "fact_check_unavailable: ", "fact_check_unavailable"} {
+		note = strings.TrimPrefix(note, code)
+	}
+	return strings.TrimSpace(note)
 }
 
 // WriteMarkdown writes the Markdown report and returns the path written.
