@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-15
+
 ### Added
 
 - Short report titles. The report was headed by the whole question, which
