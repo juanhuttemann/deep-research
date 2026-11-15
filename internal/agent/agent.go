@@ -239,11 +239,13 @@ type Chart struct {
 	Reason string       `json:"reason,omitempty"`
 }
 
-// ChartPoint is one labelled point of a chart.
+// ChartPoint is one labelled point of a chart. Value is set when it is
+// drawn; Reason says why a point was left out.
 type ChartPoint struct {
-	Label string `json:"label"`
-	Ref   string `json:"ref"`
-	Value string `json:"value,omitempty"`
+	Label  string `json:"label"`
+	Ref    string `json:"ref"`
+	Value  string `json:"value,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Claim is one atomic assertion the analysis rests on, with what it is about

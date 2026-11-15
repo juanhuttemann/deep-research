@@ -79,6 +79,12 @@ analyzer_instructions: |
   "value" (the number as digits, exactly as its source writes it, with
   commas grouping thousands and a point before decimals; no words, no
   scale: "12.4" with "unit":"USD million" for "$12.4 million") and "unit".
+  A figure's claim cites only pages whose own text writes that figure, and
+  names as its source the publisher of such a page: a figure read on one
+  site is not attributed to an agency the question named, and one no
+  finding writes is not given at all, from memory or by revision. When the
+  source the question named does not state a figure, say so in "gaps" and
+  give the figure as the page that does states it.
   Then add a computation naming those claims as "inputs", and a claim that
   states its result with "computed" set to the computation's ID and its
   figure in "value" and "unit"; conclusions name that claim like any other.

@@ -109,8 +109,8 @@ func TestAValueNoQuoteStatesIsNoInput(t *testing.T) {
 	if a.Conclusions[0].Blocked == "" {
 		t.Error("the conclusion on c6 stands on arithmetic over an unquoted figure")
 	}
-	if a.Charts[0].File != "" {
-		t.Errorf("chart drawn from an unquoted figure: %+v", a.Charts[0])
+	if p := a.Charts[0].Points[0]; p.Value != "" || !strings.Contains(p.Reason, "61,300") {
+		t.Errorf("chart drew an unquoted figure: %+v", a.Charts[0])
 	}
 }
 
@@ -187,7 +187,7 @@ func TestFiguresSectionTracesEachFigure(t *testing.T) {
 		"c2 = 61,200 containers ([Operations log 2025](<" + logURL + ">))",
 		"![Containers by quarter](" + a.Charts[0].File + ")",
 		"| Q4 | 64,500 |",
-		"- g2 (Bad): c9 is neither a claim nor a computation",
+		"- g2 (Bad): 0 of its 1 points stand; c9 is neither a claim nor a computation",
 	} {
 		if !strings.Contains(r, want) {
 			t.Errorf("figures section lacks %q:\n%s", want, r)
@@ -266,8 +266,9 @@ func TestAnUndrawableChartIsNotDrawn(t *testing.T) {
 	findings[0].Content += " Q1 2025: " + big
 	checkAnalysis(a, findings)
 	governAll(a, fc, nil, findings)
-	if ch := a.Charts[0]; ch.File != "" || !strings.Contains(ch.Reason, "too large to draw") {
-		t.Errorf("chart = %+v, want it not drawn", ch)
+	// The other quarters are drawn; the one no axis can span is left out.
+	if ch := a.Charts[0]; ch.File == "" || ch.Points[0].Value != "" || !strings.Contains(ch.Points[0].Reason, "too large to draw") {
+		t.Errorf("chart = %+v, want Q1 left out and the rest drawn", ch)
 	}
 }
 
@@ -426,5 +427,31 @@ func TestOnlyLinearArithmeticIsAskedWhetherItRestatesAnInput(t *testing.T) {
 		if m.Valid != want[m.ID] {
 			t.Errorf("%s valid = %v (%s), want %v", m.ID, m.Valid, m.Reason, want[m.ID])
 		}
+	}
+}
+
+// One point a source does not state no longer hides the series: the rest
+// are drawn, and the report says which point was left out and why.
+func TestAChartDrawsThePointsThatStand(t *testing.T) {
+	a, findings := velmarAnalysis(), velmarFindings()
+	checkAnalysis(a, findings)
+	fc := quarterVerdicts(quarterQuotes)
+	fc.Verdicts[0].Status = statusInsufficient // Q1
+	governAll(a, fc, nil, findings)
+	ch := a.Charts[0]
+	if ch.File == "" || ch.Points[0].Value != "" || ch.Points[0].Reason != "c2 is insufficient" || ch.Points[1].Value != "58900" {
+		t.Fatalf("chart = %+v, want Q2-Q4 drawn and Q1 left out", ch)
+	}
+	r := figuresSection(a, findings)
+	if !strings.Contains(r, "- g1 (Containers by quarter), point Q1: c2 is insufficient") || strings.Contains(r, "| Q1 |") {
+		t.Errorf("section does not say Q1 was left out, or lists it:\n%s", r)
+	}
+	// Fewer than two standing points is no chart.
+	fc.Verdicts[1].Status, fc.Verdicts[2].Status = statusInsufficient, statusInsufficient
+	b := velmarAnalysis()
+	checkAnalysis(b, findings)
+	governAll(b, fc, nil, findings)
+	if ch := b.Charts[0]; ch.File != "" || !strings.HasPrefix(ch.Reason, "1 of its 4 points stand") {
+		t.Errorf("chart = %+v, want it not drawn", ch)
 	}
 }

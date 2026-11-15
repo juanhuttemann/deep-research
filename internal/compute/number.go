@@ -204,7 +204,13 @@ func tokens(text string) []token {
 			continue
 		}
 		t := token{text: string(rs[start:end]), readings: readings(string(rs[start:end]))}
-		if negative(rs, start) {
+		switch neg, either := negative(rs, start); {
+		case either:
+			// Both signs: the reading the claim means is the checker's call.
+			for _, v := range t.readings {
+				t.readings = append(t.readings, new(big.Rat).Neg(v))
+			}
+		case neg:
 			t.text = "-" + t.text
 			for _, v := range t.readings {
 				v.Neg(v)
@@ -216,18 +222,30 @@ func tokens(text string) []token {
 }
 
 // negative reports whether the token at start is signed: a minus right
-// before it, itself after a space, an opening bracket, a colon or equals
-// sign, or a currency symbol ("$-3.5"). A hyphen between numbers ("10-20")
-// is no sign.
-func negative(rs []rune, start int) bool {
-	if start == 0 || rs[start-1] != '-' && rs[start-1] != '−' {
-		return false
+// before it, Markdown-escaped or not ("\-0.9"), that does not follow a
+// letter, a digit or a decimal mark. A hyphen between numbers ("10-20",
+// "2019-2024") is no sign; one after a space, a bracket, a currency symbol
+// ("$-3.5") or the end of another cell ("1.8%\-0.9%", as scraped chart
+// labels run together) is. either is set for an escaped minus right after a
+// letter: a label run into its value ("rate\-4.1") and a name ("COVID\-19")
+// are written alike, so the token is read with both signs.
+func negative(rs []rune, start int) (neg, either bool) {
+	i := start - 1
+	if i < 0 || rs[i] != '-' && rs[i] != '−' {
+		return false, false
 	}
-	if start == 1 {
-		return true
+	escaped := i > 0 && rs[i-1] == '\\'
+	if escaped {
+		i--
 	}
-	p := rs[start-2]
-	return unicode.IsSpace(p) || strings.ContainsRune("([:=", p) || unicode.Is(unicode.Sc, p)
+	if i == 0 {
+		return true, false
+	}
+	p := rs[i-1]
+	if escaped && unicode.IsLetter(p) {
+		return false, true
+	}
+	return !isWordRune(p) && p != '.' && p != ',', false
 }
 
 // inName reports whether the token rs[start:end] is part of a name rather

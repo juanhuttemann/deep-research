@@ -34,6 +34,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- A chart draws the points that stand when at least two do, and the report
+  lists each point left out with why: one year a source did not state made
+  a run's whole series disappear. A minus sign that scraped pages escape
+  ("\\-0.9", or chart labels run together as "1.8%\\-0.9%") is read as a
+  sign. The analyzer is told to credit a figure to the page that writes it:
+  a run attributed figures read on a UNECE page to a Destatis release that
+  had no such table, and every one failed the check.
 - Table cells that PDF extraction ran together ("2,866,1182,834,4721") are
   read as their cells, so a figure in such a row can be an input. The split
   is forced by the three-digit groups, never guessed.
