@@ -442,9 +442,14 @@ func readAs(tok string, groupSep, decimal rune) (*big.Rat, bool) {
 func SoleFigure(text, context string) (Number, bool) {
 	known := numbersIn(context)
 	rs := []rune(text)
+	quotedAt := quotedRunes(rs)
 	var found, references []token
 	for _, t := range tokensAt(rs) {
-		if len(t.readings) == 0 || isYear(t.token) || slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) {
+		// A number in quotation marks is part of a title or a name quoted:
+		// a rank claim citing "The 100 most popular art museums" was given
+		// the value 100.
+		if len(t.readings) == 0 || isYear(t.token) || quotedAt[t.start] ||
+			slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) {
 			continue
 		}
 		if comparedWith(rs, t.start) {
@@ -674,4 +679,30 @@ func comparedWith(rs []rune, start int) bool {
 		}
 	}
 	return false
+}
+
+// quotedRunes marks the runes of text inside quotation marks: “…”, "…",
+// ‘…’ and '…' where the single mark opens after a space or the start, so an
+// apostrophe ("Louvre's") opens nothing.
+func quotedRunes(rs []rune) []bool {
+	in := make([]bool, len(rs))
+	closing := map[rune]rune{'“': '”', '"': '"', '‘': '’', '\'': '\''}
+	for i := 0; i < len(rs); i++ {
+		end, ok := closing[rs[i]]
+		if !ok || (rs[i] == '\'' || rs[i] == '‘') && i > 0 && !unicode.IsSpace(rs[i-1]) && !strings.ContainsRune("([", rs[i-1]) {
+			continue
+		}
+		j := i + 1
+		for j < len(rs) && (rs[j] != end || end == '\'' && j+1 < len(rs) && unicode.IsLetter(rs[j+1])) {
+			j++
+		}
+		if j == len(rs) {
+			continue // never closed: no quotation
+		}
+		for k := i; k <= j; k++ {
+			in[k] = true
+		}
+		i = j
+	}
+	return in
 }

@@ -34,6 +34,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- A number inside quotation marks is not read as a claim's figure: a
+  claim that the Louvre tops The Art Newspaper's 2023 ranking, citing the
+  article "The 100 most popular art museums in the world", was given the
+  value 100.
 - A chart the program draws to compare subjects holds them to one year: a
   run's GDP chart put Mexico's 2025 figure beside Brazil's 2023 one, which
   its own analysis said did not answer for 2023.

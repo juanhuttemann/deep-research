@@ -396,3 +396,26 @@ func TestSoleFigureSkipsAComparisonsReference(t *testing.T) {
 		}
 	}
 }
+
+// A rank claim citing an article by its title was given the title's number:
+// "The 100 most popular art museums" made the Louvre's rank 100.
+func TestSoleFigureSkipsQuotedTitles(t *testing.T) {
+	for _, text := range []string{
+		"The Art Newspaper article 'The 100 most popular art museums in the world' says the Louvre tops its chart.",
+		"The article “The 100 most popular art museums” ranks the Louvre first.",
+		`The report "Top 20 ports of 2023" lists Shanghai first.`,
+	} {
+		if n, ok := SoleFigure(text, ""); ok {
+			t.Errorf("SoleFigure(%q) = %s, want nothing", text, n)
+		}
+	}
+	// An apostrophe opens no quotation, and a figure outside one is read.
+	for _, tc := range []struct{ text, want string }{
+		{"The Louvre's 2023 attendance was 8.86 million visitors.", "8.86"},
+		{"The survey 'Visitor Figures 2023' gives the Louvre 8.9 million visitors.", "8.9"},
+	} {
+		if n, ok := SoleFigure(tc.text, ""); !ok || n.String() != tc.want {
+			t.Errorf("SoleFigure(%q) = %s, %v; want %s", tc.text, n, ok, tc.want)
+		}
+	}
+}
