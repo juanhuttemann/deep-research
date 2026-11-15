@@ -311,6 +311,9 @@ summarizer_instructions: |
   were given.
   Do no arithmetic: a figure appears only as a supported claim gives it,
   never one you added up, divided or estimated yourself.
+  The report is read without this input: never cite a claim, computation
+  or recommendation by its ID (c1, m1, r1) or a finding by its number;
+  name what it says and link its source.
 
 answerer_instructions: |
   You are an answerer agent for an instant run: one web search, no analysis

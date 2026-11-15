@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func velmarFindings() []agent.Finding {
 func velmarAnalysis() *agent.Analysis {
 	q := func(id, quarter, v string) agent.Claim {
 		return agent.Claim{ID: id, Text: "The port handled " + v + " containers in " + quarter + " 2025.",
-			Value: v, Unit: "containers", Sources: []string{logURL}}
+			Value: v, Unit: "containers", Scope: quarter + " 2025", Sources: []string{logURL}}
 	}
 	return &agent.Analysis{
 		Claims: []agent.Claim{
@@ -101,7 +102,7 @@ func TestAValueNoQuoteStatesIsNoInput(t *testing.T) {
 	a.Claims[1].Value, a.Claims[1].Text = "61,300", "The port handled 61,300 containers in Q1 2025."
 	checkAnalysis(a, findings)
 	governAll(a, quarterVerdicts(quarterQuotes), nil, findings)
-	if m := a.Computations[0]; m.Valid || !strings.Contains(m.Reason, "c2's value 61,300") {
+	if m := a.Computations[0]; m.Valid || !strings.Contains(m.Reason, "do not state its figure 61,300") {
 		t.Errorf("m1 = %+v, want it invalid on c2's unquoted value", m)
 	}
 	if c := claimByID(a, "c6"); c.Status != statusInsufficient {
@@ -121,7 +122,7 @@ func TestAnInputTheCheckDidNotSupportInvalidatesTheComputation(t *testing.T) {
 	fc := quarterVerdicts(quarterQuotes)
 	fc.Verdicts[3].Status = statusPartial
 	governAll(a, fc, nil, findings)
-	if m := a.Computations[0]; m.Valid || !strings.Contains(m.Reason, "c5 is partial") {
+	if m := a.Computations[0]; m.Valid || !strings.Contains(m.Reason, "c5 did not pass the fact-check (partial)") {
 		t.Errorf("m1 = %+v, want it invalid on c5", m)
 	}
 	// No check at all approves no arithmetic either.
@@ -144,8 +145,8 @@ func TestComputationsThatAreNotArithmeticSayWhy(t *testing.T) {
 		agent.Computation{ID: "m5", Op: "median", Inputs: []string{"c4", "c5"}})
 	checkAnalysis(a, findings)
 	governAll(a, quarterVerdicts(quarterQuotes), nil, findings)
-	want := map[string]string{"m1": "units differ", "m2": "not computed", "m3": "depends on itself",
-		"c2": "used by another", "m4": "c1 is insufficient", "m5": "not an operation"}
+	want := map[string]string{"m1": "units differ", "m2": "could not be computed", "m3": "depends on itself",
+		"c2": "used by another", "m4": "c1 did not pass the fact-check (insufficient)", "m5": "not an operation"}
 	for _, c := range a.Computations {
 		if w := want[c.ID]; c.Valid || !strings.Contains(c.Reason, w) {
 			t.Errorf("%s = valid %v, %q; want invalid with %q", c.ID, c.Valid, c.Reason, w)
@@ -184,11 +185,11 @@ func TestFiguresSectionTracesEachFigure(t *testing.T) {
 	r := sum.Report
 	for _, want := range []string{
 		"## Computed figures",
-		"| 248,000 containers | m1 = c2 + c3 + c4 + c5 |",
-		"c2 = 61,200 containers ([Operations log 2025](<" + logURL + ">))",
+		"| 248,000 containers | Q1 2025 + Q2 2025 + Q3 2025 + Q4 2025 |",
+		"Q1 2025 = 61,200 containers ([Operations log 2025](<" + logURL + ">))",
 		"![Containers by quarter](" + a.Charts[0].File + ")",
 		"| Q4 | 64,500 |",
-		"- g2 (Bad): 0 of its 1 points stand; c9 is neither a claim nor a computation",
+		"- Chart “Bad” not drawn: 0 of its 1 points stand; c9 is named but is neither a claim nor a computation",
 	} {
 		if !strings.Contains(r, want) {
 			t.Errorf("figures section lacks %q:\n%s", want, r)
@@ -237,7 +238,7 @@ func TestAClaimsTextMustStateItsValue(t *testing.T) {
 	a.Claims[2].Text = "The port handled about sixty thousand containers in Q2 2025."
 	checkAnalysis(a, findings)
 	governAll(a, quarterVerdicts(quarterQuotes), nil, findings)
-	if m := a.Computations[0]; m.Valid || !strings.Contains(m.Reason, "c3's text does not state its value") {
+	if m := a.Computations[0]; m.Valid || !strings.Contains(m.Reason, "c3 does not itself state the figure") {
 		t.Errorf("m1 = %+v, want it invalid on c3's text", m)
 	}
 	b := velmarAnalysis()
@@ -440,11 +441,12 @@ func TestAChartDrawsThePointsThatStand(t *testing.T) {
 	fc.Verdicts[0].Status = statusInsufficient // Q1
 	governAll(a, fc, nil, findings)
 	ch := a.Charts[0]
-	if ch.File == "" || ch.Points[0].Value != "" || ch.Points[0].Reason != "c2 is insufficient" || ch.Points[1].Value != "58900" {
+	if ch.File == "" || ch.Points[0].Value != "" || ch.Points[0].Reason != "c2 did not pass the fact-check (insufficient)" || ch.Points[1].Value != "58900" {
 		t.Fatalf("chart = %+v, want Q2-Q4 drawn and Q1 left out", ch)
 	}
 	r := figuresSection(a, findings)
-	if !strings.Contains(r, "- g1 (Containers by quarter), point Q1: c2 is insufficient") || strings.Contains(r, "| Q1 |") {
+	if !strings.Contains(r, "- Chart “Containers by quarter”, point “Q1” left out: “The port handled 61,200 containers in Q1 2025” did not pass the fact-check (insufficient)") ||
+		strings.Contains(r, "| Q1 |") {
 		t.Errorf("section does not say Q1 was left out, or lists it:\n%s", r)
 	}
 	// Fewer than two standing points is no chart.
@@ -546,11 +548,11 @@ func TestAutoChartsGroupLikeFiguresAndLabelThem(t *testing.T) {
 
 func TestOnlyTheCauseOfAFailureIsListed(t *testing.T) {
 	a := &agent.Analysis{Computations: []agent.Computation{
-		{ID: "m1", Op: "sum", Reason: "c2 is insufficient"},
-		{ID: "m2", Op: "ratio", Reason: "m1 is not computed"},
+		{ID: "m1", Label: "Total", Op: "sum", Reason: "c2 is insufficient"},
+		{ID: "m2", Label: "Share", Op: "ratio", Reason: "m1 could not be computed"},
 	}}
 	r := figuresSection(a, nil)
-	if !strings.Contains(r, "m1: c2 is insufficient") || strings.Contains(r, "m2") {
+	if !strings.Contains(r, "- Total: c2 is insufficient") || strings.Contains(r, "Share") {
 		t.Errorf("section:\n%s", r)
 	}
 }
@@ -588,5 +590,78 @@ func TestAReusedIDMeansTheCopyWithAFigure(t *testing.T) {
 	governAll(a, fc, nil, findings)
 	if m := a.Computations[0]; !m.Valid || m.Result != "228.9" {
 		t.Errorf("m1 = %+v, want 828 − 599.1 = 228.9 over the height claims", m)
+	}
+}
+
+// The report is read without the run's audit: no claim or computation ID,
+// and no "finding 5" from the checker's prompt, may reach it unexplained.
+// A PDF said "m1 (Difference between …): c1 states no value" and "c5: …
+// The ranking list in finding 5 is truncated".
+func TestTheReportNamesWhatItCitesWithoutIDs(t *testing.T) {
+	a, findings := velmarAnalysis(), velmarFindings()
+	a.Computations = append(a.Computations, agent.Computation{ID: "m2", Label: "Q1 less Q9", Op: "difference", Inputs: []string{"c2", "c99"}})
+	checkAnalysis(a, findings)
+	fc := quarterVerdicts(quarterQuotes)
+	fc.Verdicts[3].Status, fc.Verdicts[3].Reason = statusInsufficient, "The table in finding 1 stops before Q4; finding 2 gives only the year."
+	governAll(a, fc, nil, findings)
+	sum := withFigures(withAnswer(&agent.Summary{Report: "## Findings\n\nBody."}, a), a, findings)
+	report := MarkdownReport(&agent.ResearchResult{Question: "q", Findings: findings, Analysis: a, FactCheck: fc, Summary: sum})
+	ids := regexp.MustCompile(`\b(?:c[0-9]|m[0-9]|k[0-9]|g[0-9]|auto[0-9])`)
+	for _, ln := range strings.Split(report, "\n") {
+		if strings.Contains(ln, "c99") {
+			continue // a dangling reference the analyzer made: there is nothing to name it by
+		}
+		if ids.MatchString(ln) || regexp.MustCompile(`(?i)\bfindings? \d`).MatchString(ln) {
+			t.Errorf("report line cites an ID or a finding number:\n%s", ln)
+		}
+	}
+	for _, want := range []string{"“Operations log 2025”", "Q4 2025", "did not pass the fact-check"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report lacks %q:\n%s", want, report)
+		}
+	}
+}
+
+func TestNamesReplaceIDsOnlyAsWholeWords(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c1", Text: "Burj Khalifa is the tallest building", Option: "Burj Khalifa", Criterion: "Rank"},
+		{ID: "c1.6", Text: "Burj Khalifa is 828 m tall", Option: "Burj Khalifa", Criterion: "Height"},
+		{ID: "c12", Text: "Other", Option: "Other tower"},
+	}}
+	n := newNamer(a)
+	got := n.say("c1.6 − c12 (not c1x, but c1)", false)
+	if got != "Burj Khalifa Height − Other tower (not c1x, but Burj Khalifa Rank)" {
+		t.Errorf("say = %q", got)
+	}
+	if got := n.say("c1 states no figure", true); got != "“Burj Khalifa is the tallest building” states no figure" {
+		t.Errorf("full = %q", got)
+	}
+	f := []agent.Finding{{Title: "Tallest list"}, {Title: "Atlas"}}
+	if got := nameFindings("finding 1 is cut; findings 1 and 2 agree; finding 9 is none", f); got != "“Tallest list” is cut; “Tallest list” and “Atlas” agree; finding 9 is none" {
+		t.Errorf("nameFindings = %q", got)
+	}
+}
+
+func TestNamesLeaveURLsUnitsAndQuotedWordsAlone(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{{ID: "c1", Text: "x", Option: "Tower"}},
+		Computations: []agent.Computation{{ID: "m2", Label: "Area"}}}
+	n := newNamer(a)
+	for in, want := range map[string]string{
+		"see https://example.com/c1?ref=m2": "see https://example.com/c1?ref=m2",
+		"[page](https://example.com/c1)":    "[page](https://example.com/c1)",
+		"a flat of 10 m2 and c1":            "a flat of 10 m2 and Tower",
+		"m2 failed: c1 is out":              "Area failed: Tower is out",
+	} {
+		if got := n.say(in, false); got != want {
+			t.Errorf("say(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for in, want := range map[string]string{
+		"Q1 was 61,200 (c2). The total (m1, c3) is set [c4] (finding 3).": "Q1 was 61,200. The total is set.",
+		"Measured in (cm) and [k]":                                        "Measured in (cm) and [k]",
+	} {
+		if got := readerText(in); got != want {
+			t.Errorf("readerText(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

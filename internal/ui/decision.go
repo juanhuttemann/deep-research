@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"html"
 	"regexp"
@@ -143,6 +144,8 @@ func govern(a *agent.Analysis, fc *agent.FactCheckResult, fcErr error, findings 
 	for i := range a.Claims {
 		if c := &a.Claims[i]; c.Status != statusUnsourced && c.Computed == "" {
 			c.Status, c.Note = judge(verdicts[c.ID], fc == nil, uncheckedBy(fcErr, c.ID), findings, pages)
+			// The checker cites findings by their number in its prompt.
+			c.Note = nameFindings(c.Note, findings)
 		}
 	}
 	// Before the units: a recommendation resting on a computed claim stands
@@ -502,7 +505,8 @@ type verdictEntry struct{ text, status, note string }
 func claimEntries(claims []agent.Claim) []verdictEntry {
 	var out []verdictEntry
 	for _, c := range claims {
-		out = append(out, verdictEntry{c.ID + ": " + c.Text, c.Status, c.Note})
+		// By its words: the ID is the run's, and the report is read without it.
+		out = append(out, verdictEntry{c.Text, c.Status, c.Note})
 	}
 	return out
 }
@@ -516,7 +520,7 @@ func proseEntries(vs []agent.Verdict, findings []agent.Finding, pages map[string
 		if status == statusSupported && (len(pages) == 0 || !quotesLocated(v.Evidence, findings, pages)) {
 			status, note = statusInsufficient, "quote_not_located: "+v.Reason
 		}
-		out = append(out, verdictEntry{strings.TrimSpace(v.ID + ": " + v.Claim), status, note})
+		out = append(out, verdictEntry{cmp.Or(strings.TrimSpace(v.Claim), v.ID), status, nameFindings(note, findings)})
 	}
 	return out
 }
@@ -773,8 +777,9 @@ func renderAnswer(a *agent.Analysis) string {
 		sb.WriteString("\n")
 		sb.WriteString(label(a, "not_established"))
 		sb.WriteString(":\n\n")
+		n := newNamer(a)
 		for _, r := range blocked {
-			writeChoice(&sb, r, notEstablished(a, r))
+			writeChoice(&sb, r, notEstablished(a, r, n))
 		}
 	}
 	return sb.String()
@@ -816,9 +821,11 @@ func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
 	sb.WriteString("\n")
 }
 
-// claimRefs are claim IDs the analyzer wrote into a statement ("(c1)",
-// "(c9, c10)"): they mean nothing to a reader of the answer.
-var claimRefs = regexp.MustCompile(`\s*\((?:c\d+(?:\s*[,;]\s*|\s+and\s+)?)+\)`)
+// claimRefs are the run's references a model wrote into a statement or
+// its prose, bracketed: claim, computation and unit IDs ("(c1)", "(c9,
+// c10)", "[m1]") and the prompts' finding numbers ("(finding 3)"). They mean
+// nothing to a reader of the report.
+var claimRefs = regexp.MustCompile(`\s*[(\[](?:(?:[cmkr]\d+(?:\.\d+)?|(?:findings?|entr(?:y|ies)|sources?)\s+\d+)(?:\s*[,;]\s*|\s+and\s+)?)+[)\]]`)
 
 // readerText is a statement as the answer prints it, without claim IDs.
 func readerText(s string) string {
@@ -827,7 +834,7 @@ func readerText(s string) string {
 
 // notEstablished names what blocked a recommendation: the claims that did not
 // pass, by their text and status, or the checker's reason it does not follow.
-func notEstablished(a *agent.Analysis, r agent.Recommendation) string {
+func notEstablished(a *agent.Analysis, r agent.Recommendation, n *namer) string {
 	var parts []string
 	for _, c := range a.Claims {
 		if slices.Contains(r.Failed, c.ID) {
@@ -838,9 +845,9 @@ func notEstablished(a *agent.Analysis, r agent.Recommendation) string {
 		return strings.Join(parts, "; ")
 	}
 	if reason, ok := strings.CutPrefix(r.Blocked, followPrefix); ok {
-		return label(a, "does_not_follow") + ": " + reason
+		return label(a, "does_not_follow") + ": " + n.say(reason, true)
 	}
-	return r.Blocked
+	return n.say(r.Blocked, true)
 }
 
 // Why nothing was approved. A single "no recommendation passed" read as the

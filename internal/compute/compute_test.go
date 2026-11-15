@@ -336,3 +336,37 @@ func TestSoleFigureReadsTheValueForm(t *testing.T) {
 		t.Error("a token read two ways was taken")
 	}
 }
+
+func TestUnitOfReadsTheUnitWrittenWithAFigure(t *testing.T) {
+	for _, tc := range []struct{ text, value, want string }{
+		{"Burj Khalifa has an architectural height of 828 metres", "828", "m"},
+		{"fees of $12.4 million in 2024", "12.4", "USD million"},
+		{"growth of 4.5% in 2023", "4.5", "%"},
+		{"growth of 4.5 percent", "4.5", "%"},
+		{"wind capacity reached 3 GW", "3", "GW"},
+		{"The United States won 40 gold medals", "40", ""},
+		{"Q1 handled 61,200 TEU", "61,200", "TEU"},
+		{"no such figure here", "7", ""},
+		{"daa had revenue of $12.4m in 2024", "12.4", "USD million"},
+		{"33.3m passengers went through", "33.3", ""},
+		{"the tower is 828 m.", "828", "m"},
+		{"€3bn investment", "3", "EUR billion"},
+	} {
+		if got := UnitOf(tc.text, mustValue(t, tc.value)); got != tc.want {
+			t.Errorf("UnitOf(%q, %s) = %q, want %q", tc.text, tc.value, got, tc.want)
+		}
+	}
+}
+
+func TestUnitOfRefusesWhatTheTextDoesNotSettle(t *testing.T) {
+	for _, tc := range []struct{ text, value, want string }{
+		{"33.3m.", "33.3", ""},                     // metres or millions
+		{"5 km away, capacity was 5 GW", "5", ""},  // two units for one number
+		{"Of 5 sites, capacity was 5 GW", "5", ""}, // the number unitless once
+		{"capacity was 5 GW, up from 4 GW", "5", "GW"},
+	} {
+		if got := UnitOf(tc.text, mustValue(t, tc.value)); got != tc.want {
+			t.Errorf("UnitOf(%q, %s) = %q, want %q", tc.text, tc.value, got, tc.want)
+		}
+	}
+}
