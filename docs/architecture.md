@@ -263,7 +263,12 @@ to the checked decision.
   page writes; that the figure means what the claim says (the period, the
   unit, the population) is still the checker's judgement. A token such as
   "61,200" reads as 61200 or 61.2, since nothing in a passage says which
-  convention it uses; the checker judges which one the claim means.
+  convention it uses; the checker judges which one the claim means. A run
+  of digits that is no valid number in either convention is read as table
+  cells run together ("2,866,1182,834,4721" as 2,866,118 and 2,834,472),
+  split where a group passes three digits, but only when the split gives
+  two or more whole comma-grouped numbers: a typo ("1,000,0001") reads as
+  nothing.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the

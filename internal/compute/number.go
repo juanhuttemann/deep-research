@@ -307,6 +307,9 @@ func readings(tok string) []*big.Rat {
 			out = append(out, v)
 		}
 	}
+	if len(out) == 0 {
+		out = glued(tok)
+	}
 	// Spaces also part table cells ("123 456" in a row of counts): such a
 	// token is read as the cells too, whichever it was.
 	if !strings.ContainsFunc(tok, isSpaceSep) {
@@ -329,6 +332,52 @@ func containsRat(rs []*big.Rat, v *big.Rat) bool {
 		}
 	}
 	return false
+}
+
+// glued reads a token that is table cells run together, as text extracted
+// from a PDF often is: "2,866,1182,834,4721" is 2,866,118 then 2,834,472.
+// Every group after the first of a grouped number has three digits, so a
+// longer group ends one number after its third digit and starts the next
+// with the rest; the split is forced, never guessed. It is read so only on
+// evidence of a row: two or more whole comma-grouped numbers come out of it.
+// A typo ("1,000,0001") gives one and reads as nothing; digits left over
+// with no grouping (the 1 above, the start of a "1%" cell) are not offered;
+// and point-grouped runs are left alone, being as often identifiers or
+// coordinates ("12.3456.7890").
+func glued(tok string) []*big.Rat {
+	if strings.ContainsFunc(tok, func(r rune) bool { return isSep(r) && r != ',' }) {
+		return nil
+	}
+	groups := strings.Split(tok, ",")
+	if len(groups) < 2 || len(groups[0]) > 3 {
+		return nil
+	}
+	var out []*big.Rat
+	cur, n := groups[0], 1
+	for _, g := range groups[1:] {
+		switch {
+		case len(g) == 3:
+			cur, n = cur+g, n+1
+		case len(g) > 3 && len(g) <= 6:
+			// The number this group closes has at least two groups.
+			out = append(out, ratOf(cur+g[:3]))
+			cur, n = g[3:], 1
+		default:
+			return nil
+		}
+	}
+	if n >= 2 {
+		out = append(out, ratOf(cur))
+	}
+	if len(out) < 2 {
+		return nil
+	}
+	return out
+}
+
+func ratOf(digits string) *big.Rat {
+	r, _ := new(big.Rat).SetString(digits)
+	return r
 }
 
 // readAs reads tok with groupSep grouping thousands and decimal before the

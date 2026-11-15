@@ -26,6 +26,9 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   states is not approved. A run approved "7,030,229, the year-to-date total
   less April" written in a conclusion's own words, while the computed claim
   stating the same figure had failed its check.
+- Table cells that PDF extraction ran together ("2,866,1182,834,4721") are
+  read as their cells, so a figure in such a row can be an input. The split
+  is forced by the three-digit groups, never guessed.
 
 ## [0.34.1] - 2026-11-14
 
