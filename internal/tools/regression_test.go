@@ -1299,3 +1299,65 @@ func TestExcerptTieBreakKeepsCitedQueryPriority(t *testing.T) {
 		t.Fatalf("uncited queries changed cited priority: %v", scores)
 	}
 }
+
+// A US cities run fetched the Census Bureau's Vintage 2024 release, whose
+// "Table 2" lists the 2024 population of New York, Houston, Los Angeles,
+// Chicago and Phoenix, and the analysis said no retrieved text stated them:
+// the table, four times the page's average block, was scored down for its
+// length, and the excerpt went to a prose sentence naming three cities, a
+// "Subscribe" heading and a "Press Kit" link.
+func TestExcerptKeepsTheTableRowsAQueryNames(t *testing.T) {
+	data, err := os.ReadFile("testdata/census-vintage-2024-cities.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each city's row, in whichever of the page's tables gives its 2024
+	// population: the release's Table 3 (the most populous cities) is the
+	// one a reader would want, its Table 2 (numeric gains) has them too.
+	cities := map[string]string{"New York city": "8,478,072", "Los Angeles city": "3,878,704",
+		"Chicago city": "2,721,308", "Houston city": "2,390,125", "Phoenix city": "1,673,164"}
+	for name, got := range map[string]string{
+		// As the analyzer sees the page: by the search that found it.
+		"search": ExcerptFor(string(data), []string{"Census 2024 estimates New York Los Angeles Chicago Houston Phoenix population"}, nil, 1500),
+		// As the fact-check sees it: by the claims that cite it.
+		"claims": ExcerptFor(string(data), []string{
+			"New York City's 2024 population estimate was 8,478,072.",
+			"Los Angeles's 2024 population estimate was 3,878,704.",
+			"Chicago's 2024 population estimate was 2,721,308.",
+			"Houston's 2024 population estimate was 2,390,125.",
+			"Phoenix's 2024 population estimate was 1,673,164.",
+		}, nil, 1500),
+	} {
+		for city, population := range cities {
+			if !slices.ContainsFunc(strings.Split(got, "\n"), func(line string) bool {
+				return strings.HasPrefix(line, "|") && strings.Contains(line, city) && strings.Contains(line, population)
+			}) {
+				t.Errorf("%s: omitted a row giving %s's %s:\n%s", name, city, population, got)
+			}
+		}
+		if !strings.Contains(got, "2024 Total Population") {
+			t.Errorf("%s: lost the table's columns:\n%s", name, got)
+		}
+		if len(got) > 1500 {
+			t.Errorf("%s: excerpt grew to %d bytes", name, len(got))
+		}
+	}
+}
+
+// The counterpart: a table is scored by its rows that answer, so one whose
+// rows name none of what was asked, only its header the quantity, does not
+// outrank the sentence that answers.
+func TestExcerptPrefersTheAnsweringProseToATableThatOnlyHeadsTheQuantity(t *testing.T) {
+	var table strings.Builder
+	table.WriteString("| City | Population 2024 |\n| --- | --- |\n")
+	for _, c := range []string{"London", "Berlin", "Madrid", "Rome", "Vienna", "Warsaw", "Prague", "Lisbon"} {
+		table.WriteString("| " + c + " | 1,000,000 |\n")
+	}
+	answer := "Paris had 2,102,650 inhabitants on 1 January 2024, according to INSEE's population estimates."
+	page := strings.Repeat("General notes on European capitals and their growth.\n\n", 15) +
+		table.String() + "\n" + answer + "\n\n" + strings.Repeat("Further reading about city statistics.\n\n", 15)
+	got := ExcerptFor(page, []string{"Paris population 2024 INSEE"}, nil, 400)
+	if !strings.Contains(got, answer) {
+		t.Errorf("the answering sentence lost to a table that names none of what was asked:\n%s", got)
+	}
+}

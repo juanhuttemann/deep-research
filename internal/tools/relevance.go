@@ -444,8 +444,73 @@ func blockScores(blocks, folded, words []string, limit int) []float64 {
 		if len(b) > limit && strings.Contains(b, "\n") {
 			scores[i] = max(scores[i], bestLineScore(folded[i], words, weights, avg))
 		}
+		if isTable(b) {
+			scores[i] = max(scores[i], tableScore(folded[i], words, weights, avg))
+		}
 	}
 	return scores
+}
+
+// isTable reports whether a block is a Markdown table: two or more lines
+// that are rows ("| … |").
+func isTable(block string) bool {
+	rows := 0
+	for _, line := range strings.Split(block, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "|") {
+			rows++
+		}
+	}
+	return rows >= 2
+}
+
+// tableScore is a table scored as the excerpt would show it: its header and
+// the rows that mention a query word, with the length penalty charged on
+// those lines alone. Scored whole, a table naming every subject a query
+// asks for, a row each, was four times the page's average block and lost
+// to a sentence naming three of them: a run's excerpt of the Census
+// Bureau's release left out the table of the cities' populations it had
+// been searched for. The header counts only beside a matching row, since
+// column names alone answer nothing.
+func tableScore(folded string, words []string, weights []float64, avg float64) float64 {
+	lines := strings.Split(strings.TrimSpace(folded), "\n")
+	head := 1
+	for i, line := range lines {
+		if strings.Contains(line, "---") {
+			head = i + 1
+			break
+		}
+	}
+	head = min(head, len(lines))
+	found := make([]bool, len(words))
+	shown := 0
+	for _, line := range lines[head:] {
+		matched := false
+		for i, w := range words {
+			if weights[i] > 0 && strings.Contains(line, w) {
+				found[i], matched = true, true
+			}
+		}
+		if matched {
+			shown += len(line) + 1
+		}
+	}
+	if shown == 0 {
+		return 0
+	}
+	header := strings.Join(lines[:head], "\n")
+	for i, w := range words {
+		if weights[i] > 0 && strings.Contains(header, w) {
+			found[i] = true
+		}
+	}
+	score := 0.0
+	for i := range words {
+		if found[i] {
+			score += weights[i]
+		}
+	}
+	shown += len(header)
+	return score / (0.25 + 0.75*max(float64(shown), avg)/max(avg, 1))
 }
 
 // A matching row must compete on its own evidence, not the total size of an
