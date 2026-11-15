@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,6 +47,11 @@ type evaluator struct {
 	usable func(*agent.Claim) string
 	done   map[string]evaluated
 	busy   map[string]bool
+	// nudged is set on a probe (see echo): the claim whose value is taken
+	// one more than it states. A probe asks only how a result moves, so it
+	// takes computed claims as their computations without deciding them.
+	nudged string
+	probe  bool
 }
 
 func newEvaluator(a *agent.Analysis, usable func(*agent.Claim) string) *evaluator {
@@ -85,7 +91,7 @@ func (e *evaluator) input(ref string) (compute.Input, string) {
 		// It stands for its computation's exact result, once its own figure is
 		// found to state it: models name the claim ("Q2" in a chart of
 		// quarters) more often than the computation behind it.
-		if status, note := e.decide(c); status != statusSupported {
+		if status, note := e.decide(c); !e.probe && status != statusSupported {
 			return compute.Input{}, ref + " is " + status + ": " + note
 		}
 		x, why := e.input(c.Computed)
@@ -100,6 +106,9 @@ func (e *evaluator) input(ref string) (compute.Input, string) {
 	}
 	if why := e.usable(c); why != "" {
 		return compute.Input{}, why
+	}
+	if ref == e.nudged {
+		n = n.PlusOne()
 	}
 	return compute.Input{ID: ref, Value: n, Unit: c.Unit}, ""
 }
@@ -128,10 +137,99 @@ func (e *evaluator) eval(c *agent.Computation) evaluated {
 		r.res = res
 		if err != nil {
 			r.err = err.Error()
+		} else if x := e.echo(c, res.Value); x != "" {
+			r.err = "it is " + x + " by construction: the inputs other than " + x + " cancel out, so it checks nothing"
 		}
 	}
 	e.done[c.ID] = r
 	return r
+}
+
+// echo is the input claim a computation's result merely reproduces, "" when
+// there is none. A run derived Q4 as the year's total less January to
+// September, then "checked" that the quarters add up to the total: true by
+// construction, whatever the sources say. Each input claim is nudged by one
+// in turn and the computation done again: the result is an input X in
+// disguise when it moves by exactly one with X and not at all with any
+// other input.
+//
+// It is asked only of a computation made of sums, differences and means
+// throughout. Those are linear, so a nudge of one moves the result by that
+// input's coefficient exactly, at any values: the test is an identity. A
+// product or a ratio moves by an amount that depends on the values, and
+// product(0, 1) would have looked like its first input. min and max return
+// an input by design.
+func (e *evaluator) echo(c *agent.Computation, base compute.Number) string {
+	if e.probe || !e.linear(c.ID, map[string]bool{}) {
+		return ""
+	}
+	leaves := e.leafClaims(c.ID, map[string]bool{})
+	moved := func(id string) (*big.Rat, bool) {
+		p := &evaluator{claims: e.claims, comps: e.comps, usable: func(*agent.Claim) string { return "" },
+			done: map[string]evaluated{}, busy: map[string]bool{}, nudged: id, probe: true}
+		r := p.eval(c)
+		if r.err != "" {
+			return nil, false
+		}
+		return new(big.Rat).Sub(r.res.Value.Rat(), base.Rat()), true
+	}
+	one := big.NewRat(1, 1)
+	for _, x := range leaves {
+		if d, ok := moved(x); !ok || d.Cmp(one) != 0 {
+			continue
+		}
+		if !slices.ContainsFunc(leaves, func(y string) bool {
+			d, ok := moved(y)
+			return y != x && (!ok || d.Sign() != 0)
+		}) {
+			return x
+		}
+	}
+	return ""
+}
+
+// linear reports whether ref is a sum, difference or mean of claims and of
+// computations that are, all the way down.
+func (e *evaluator) linear(ref string, seen map[string]bool) bool {
+	if seen[ref] {
+		return true
+	}
+	seen[ref] = true
+	if c := e.claims[ref]; c != nil {
+		return c.Computed == "" || e.linear(c.Computed, seen)
+	}
+	c := e.comps[ref]
+	if c == nil || c.Op != compute.OpSum && c.Op != compute.OpDifference && c.Op != compute.OpMean {
+		return false
+	}
+	for _, in := range c.Inputs {
+		if !e.linear(in, seen) {
+			return false
+		}
+	}
+	return true
+}
+
+// leafClaims are the stated-value claims ref rests on, through computations
+// and the computed claims that stand for them, each once.
+func (e *evaluator) leafClaims(ref string, seen map[string]bool) []string {
+	if seen[ref] {
+		return nil
+	}
+	seen[ref] = true
+	if c := e.claims[ref]; c != nil {
+		if c.Computed != "" {
+			return e.leafClaims(c.Computed, seen)
+		}
+		return []string{ref}
+	}
+	var out []string
+	if c := e.comps[ref]; c != nil {
+		for _, in := range c.Inputs {
+			out = append(out, e.leafClaims(in, seen)...)
+		}
+	}
+	return out
 }
 
 // record writes each computation's outcome onto it. checked marks the pass

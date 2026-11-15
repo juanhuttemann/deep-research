@@ -249,7 +249,16 @@ to the checked decision.
   the value is a whole number token in a located passage the claim was
   supported on. A claim with `computed` is left out of the fact-check and
   decided against its computation: supported at its own precision,
-  contradicted otherwise, insufficient when an input failed. A
+  contradicted otherwise, insufficient when an input failed. A computation
+  whose result is one of its input claims by construction (the quarters
+  summed after the last was derived from the year's total) is refused as
+  checking nothing: `echo` redoes it exactly with each input claim nudged
+  by one, and a result that moves one for one with a single input and not
+  at all with the others is that input restated. It is asked only of
+  computations made of sums, differences and means throughout: being
+  linear, a nudge moves them by each input's coefficient at any values, so
+  the test is an identity; a product or ratio moves by a value-dependent
+  amount (product(0, 1) would look like its first input). A
   recommendation or conclusion that states a number none of its claims
   states (in their text, option, criterion or scope) is blocked in
   `blockUnits`: its words are printed as the answer, and the inference

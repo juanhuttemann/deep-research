@@ -29,6 +29,11 @@ func (n Number) Rat() *big.Rat {
 	return new(big.Rat).Set(n.r)
 }
 
+// PlusOne is n increased by one, shown as n is.
+func (n Number) PlusOne() Number {
+	return Number{r: new(big.Rat).Add(n.Rat(), big.NewRat(1, 1)), dec: n.dec}
+}
+
 // Float is the value as a float, for drawing.
 func (n Number) Float() float64 {
 	f, _ := n.Rat().Float64()
