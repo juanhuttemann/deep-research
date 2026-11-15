@@ -769,7 +769,7 @@ func autoCharts(a *agent.Analysis) []agent.Chart {
 			strings.TrimSpace(c.Criterion) == "" && strings.TrimSpace(c.Unit) == "" {
 			continue
 		}
-		if _, ok := compute.ParseValue(c.Value); !ok {
+		if _, ok := compute.ParseValue(c.Value); !ok || isRank(c) {
 			continue
 		}
 		key := quantityKey(c.Criterion) + "|" + compute.UnitKey(c.Unit)
@@ -877,7 +877,10 @@ func autoTitle(cs []agent.Claim, byScope bool) string {
 	if subject := oneLine(cs[0].Option); byScope && subject != "" && distinctCount(cs, func(c agent.Claim) string { return c.Option }) == 1 {
 		title = subject + ": " + title
 	}
-	if scope := sharedScope(cs); scope != "" && !strings.Contains(title, scope) {
+	// Only a scope short enough to read as part of a title: a model's scope
+	// is often a sentence ("U.S. Census Bureau Vintage 2024 estimates;
+	// resident population of an incorporated place; July 1, 2024; …").
+	if scope := shortScope(sharedScope(cs)); scope != "" && !strings.Contains(title, scope) {
 		return title + ", " + scope
 	}
 	if year := claimYear(cs[0]); !byScope && year != "" && !strings.Contains(title, year) {
@@ -1006,4 +1009,17 @@ var yearWords = regexp.MustCompile(`\b(?:18|19|20)\d\d\b`)
 func quantityKey(criterion string) string {
 	k := yearWords.ReplaceAllString(strings.ToLower(criterion), "")
 	return strings.Trim(oneLine(strings.NewReplacer(" ,", ",", ",,", ",").Replace(k)), " ,;:-")
+}
+
+// isRank reports whether a claim's figure is a rank or position, an order
+// rather than a quantity: a run's chart of "2024 population rank" drew New
+// York's 1 beside Los Angeles's 2.
+func isRank(c agent.Claim) bool {
+	for _, w := range strings.Fields(strings.ToLower(c.Criterion + " " + c.Unit)) {
+		switch strings.Trim(w, ",;:()") {
+		case "rank", "ranking", "ranked", "position", "place":
+			return true
+		}
+	}
+	return false
 }

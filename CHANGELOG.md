@@ -41,8 +41,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   length and the excerpt went to a prose sentence, a "Subscribe" heading and
   a "Press Kit" link. A table is now scored by its header and the rows that
   answer, so the rows asked for reach the analysis and the fact-check. A row
-  answers only beside the best row's match, since every row of a cities
-  table shares "city"; a table is shown as it is scored, header and
+  answers by a query word that tells rows apart (in no more than half of
+  them), since every row of a cities table shares "city"; a table is shown as it is scored, header and
   answering rows, so two tables of the same cities both fit; and a table
   takes its heading's score, so a claim naming "Table 3" sees its rows.
   Replayed on the same recorded evidence, the run answered with the 2025
@@ -71,6 +71,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   claim that the Louvre tops The Art Newspaper's 2023 ranking, citing the
   article "The 100 most popular art museums in the world", was given the
   value 100.
+- The program draws no chart of ranks, and a chart's title takes a scope
+  only when it is short.
 - A chart the program draws to compare subjects holds them to one year: a
   run's GDP chart put Mexico's 2025 figure beside Brazil's 2023 one, which
   its own analysis said did not answer for 2023.
