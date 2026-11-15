@@ -269,12 +269,14 @@ func ExcerptFor(content string, first, second []string, limit int) string {
 		kinds[i] = headingKind(b)
 	}
 	scores := bestScores(blocks, first, second, limit)
+	headedTables(blocks, kinds, scores)
 	visible := slices.Clone(blocks)
 	for i, b := range blocks {
 		if len(b) > limit {
 			visible[i] = lineExcerpt(b, first, second, limit, true)
 		}
 	}
+	compactTables(blocks, visible, append(slices.Clone(first), second...))
 	keep := pickBlocks(blocks, kinds, scores, limit, visible)
 	if keep == nil {
 		if len(blocks) == 1 {
@@ -479,14 +481,7 @@ func isTable(block string) bool {
 // row, since column names alone answer nothing.
 func tableScore(folded string, words []string, weights []float64, avg float64) float64 {
 	lines := strings.Split(strings.TrimSpace(folded), "\n")
-	head := 1
-	for i, line := range lines {
-		if strings.Contains(line, "---") {
-			head = i + 1
-			break
-		}
-	}
-	head = min(head, len(lines))
+	head := tableHead(lines)
 	rowWeight := func(line string) float64 { return matchWeight(line, words, weights, nil) }
 	best := 0.0
 	for _, line := range lines[head:] {
@@ -728,4 +723,149 @@ func matchWeight(line string, words []string, weights []float64, found []bool) f
 		}
 	}
 	return w
+}
+
+// compactTables shows each table that fits the budget as it is scored
+// (tableScore): its header and the rows that answer some query, with "| … |"
+// where rows were left out. Shown whole, a page's two tables of the same
+// cities could not both fit: the second was cut to its heading, and the
+// claim that it ranked them was judged on a table whose rows were missing.
+// A table no query's rows answer, or every row of which answers, is shown
+// as it is.
+func compactTables(blocks, visible []string, queries []string) {
+	var tables []int
+	for i, b := range blocks {
+		if visible[i] == b && isTable(b) {
+			tables = append(tables, i)
+		}
+	}
+	if len(tables) == 0 || len(queries) == 0 {
+		return
+	}
+	f := newFolder()
+	folded := make([]string, len(blocks))
+	for i, b := range blocks {
+		folded[i] = foldWith(f, b)
+	}
+	// Each table's lines are folded one by one, so they stay the raw
+	// table's lines: folded whole, a line folding to nothing (a lone
+	// combining mark) was trimmed away and every row after it shifted.
+	foldedLines := map[int][]string{}
+	for _, i := range tables {
+		for _, line := range strings.Split(strings.TrimSpace(blocks[i]), "\n") {
+			foldedLines[i] = append(foldedLines[i], foldWith(f, line))
+		}
+	}
+	keep := map[int][]bool{}
+	for _, q := range queries {
+		words := queryWords(f, q)
+		weights := pageWeights(folded, words)
+		for _, i := range tables {
+			if keep[i] == nil {
+				keep[i] = make([]bool, len(foldedLines[i]))
+			}
+			markAnswering(foldedLines[i], words, weights, keep[i])
+		}
+	}
+	for _, i := range tables {
+		visible[i] = compactTable(blocks[i], keep[i])
+	}
+}
+
+// pageWeights are the words' weights on the page, as blockScores weighs them.
+func pageWeights(folded, words []string) []float64 {
+	weights := make([]float64, len(words))
+	for k, w := range words {
+		df := 0
+		for _, b := range folded {
+			if strings.Contains(b, w) {
+				df++
+			}
+		}
+		weights[k] = math.Log(float64(len(folded)+1) / float64(df+1))
+	}
+	return weights
+}
+
+// markAnswering marks the rows of a folded table that answer a query, by
+// tableScore's rule: at least half the weight of its best row.
+func markAnswering(lines, words []string, weights []float64, keep []bool) {
+	head := tableHead(lines)
+	best := 0.0
+	for _, line := range lines[head:] {
+		best = max(best, matchWeight(line, words, weights, nil))
+	}
+	if best == 0 {
+		return
+	}
+	for k := head; k < len(lines); k++ {
+		if matchWeight(lines[k], words, weights, nil) >= best/2 {
+			keep[k] = true
+		}
+	}
+}
+
+// tableHead is how many lines head a table: through its first separator
+// row ("| --- |"), or its first line when it has none.
+func tableHead(lines []string) int {
+	for i, line := range lines {
+		if strings.Contains(line, "---") {
+			return min(i+1, len(lines))
+		}
+	}
+	return min(1, len(lines))
+}
+
+// compactTable is a table's header and the rows keep marks, "| … |" standing
+// for each run of rows left out. With no row or every row marked it is the
+// table as it is.
+func compactTable(block string, keep []bool) string {
+	lines := strings.Split(strings.TrimSpace(block), "\n")
+	head := tableHead(lines)
+	marked := 0
+	for k := head; k < len(lines) && k < len(keep); k++ {
+		if keep[k] {
+			marked++
+		}
+	}
+	if marked == 0 || marked == len(lines)-head {
+		return block
+	}
+	out := slices.Clone(lines[:head])
+	gap := false
+	for k := head; k < len(lines); k++ {
+		// A header part-way down ("| City | Area |" over its own "| --- |")
+		// says what the rows under it mean, and stays with them.
+		subHeader := isSeparator(lines[k]) || k+1 < len(lines) && isSeparator(lines[k+1])
+		if subHeader || k < len(keep) && keep[k] {
+			out = append(out, lines[k])
+			gap = false
+		} else if !gap {
+			out = append(out, "| … |")
+			gap = true
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// headedTables gives a table its heading's score, just above it, when that
+// is higher: a
+// claim naming "Table 3" matched the short heading "Table 3. The 15 Most
+// Populous Cities" best, and the heading was kept without the rows it
+// heads, which are what the claim is about.
+func headedTables(blocks []string, kinds []int, scores []float64) {
+	for i := 1; i < len(blocks); i++ {
+		// Just above the heading: chosen first, the table brings its heading
+		// as its section context; tied, the heading won and the table might
+		// not fit after it.
+		if kinds[i-1] != notHeading && isTable(blocks[i]) && scores[i-1] > 0 {
+			scores[i] = max(scores[i], math.Nextafter(scores[i-1], math.Inf(1)))
+		}
+	}
+}
+
+// isSeparator reports whether a line is a table's header separator, "| --- |".
+func isSeparator(line string) bool {
+	t := strings.TrimSpace(line)
+	return strings.HasPrefix(t, "|") && strings.Contains(t, "---") && strings.Trim(t, "|-: ") == ""
 }

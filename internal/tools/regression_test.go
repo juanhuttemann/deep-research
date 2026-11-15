@@ -1373,3 +1373,76 @@ func TestExcerptPrefersTheAnsweringProseToATableThatOnlyHeadsTheQuantity(t *test
 		t.Errorf("the answering sentence lost to a table that names none of what was asked:\n%s", got)
 	}
 }
+
+// The same release has two tables of the same cities, Table 2 (numeric
+// gains) and Table 3 (most populous). Shown whole, the first filled the
+// budget and the second was cut to its heading, so a run's claim that Table
+// 3 ranks the five cities was judged on a table whose rows were missing.
+// Tables are now shown as they are scored: header and answering rows.
+func TestExcerptShowsBothTablesARankingClaimNeeds(t *testing.T) {
+	data, err := os.ReadFile("testdata/census-vintage-2024-cities.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ExcerptFor(string(data), []string{
+		"The Census Bureau's Vintage 2024 Table 3 ranks New York City, Los Angeles, Chicago, Houston, and Phoenix as the five most populous U.S. cities on July 1, 2024, in that order.",
+		"New York City's total population was estimated at 8,478,072 on July 1, 2024.",
+		"Los Angeles's total population was estimated at 3,878,704 on July 1, 2024.",
+		"Chicago's total population was estimated at 2,721,308 on July 1, 2024.",
+		"Houston's total population was estimated at 2,390,125 on July 1, 2024.",
+		"Phoenix's total population was estimated at 1,673,164 on July 1, 2024.",
+		// The run's claim of the five cities' combined population is computed,
+		// decided by the program, and no part of what the fact-check excerpts.
+	}, nil, 1500)
+	table3 := []string{
+		"| 1   | New York city | New York | 8,478,072 |",
+		"| 2   | Los Angeles city | California | 3,878,704 |",
+		"| 3   | Chicago city | Illinois | 2,721,308 |",
+		"| 4   | Houston city | Texas | 2,390,125 |",
+		"| 5   | Phoenix city | Arizona | 1,673,164 |",
+	}
+	if !strings.Contains(got, "Table 3. The 15 Most Populous Cities on July 1, 2024") {
+		t.Errorf("lost Table 3's heading:\n%s", got)
+	}
+	for _, row := range table3 {
+		if !strings.Contains(got, row) {
+			t.Errorf("Table 3 lost the row %q:\n%s", row, got)
+		}
+	}
+	if len(got) > 1500 {
+		t.Errorf("excerpt grew to %d bytes", len(got))
+	}
+}
+
+func TestACompactTableKeepsItsHeaderAndMarksWhatItLeavesOut(t *testing.T) {
+	block := "| Rank | City | Population |\n| --- | --- | --- |\n| 1 | A | 10 |\n| 2 | B | 9 |\n| 3 | C | 8 |\n| 4 | D | 7 |"
+	got := compactTable(block, []bool{false, false, true, false, false, true})
+	want := "| Rank | City | Population |\n| --- | --- | --- |\n| 1 | A | 10 |\n| … |\n| 4 | D | 7 |"
+	if got != want {
+		t.Errorf("compactTable =\n%s\nwant\n%s", got, want)
+	}
+	if got := compactTable(block, make([]bool, 6)); got != block {
+		t.Error("a table no row of which answers was changed")
+	}
+}
+
+// Codex's counterexamples to the compact tables: a line folding to nothing
+// shifted every row after it; a sub-header part-way down was dropped, so a
+// row's area read as its population; and a heading tied with its table was
+// chosen first and the table did not fit after it.
+func TestCompactTablesKeepRowsAlignedAndSubHeaders(t *testing.T) {
+	filler := strings.Repeat("Unrelated notes about weather and travel.\n\n", 6)
+	aligned := "\u0301\n| Name |\n| --- |\n| Dallas |\n| Boston |\n| Austin |"
+	if got := ExcerptFor(filler+aligned+"\n\n"+filler, []string{"Boston"}, nil, 120); !strings.Contains(got, "| Boston |") || strings.Contains(got, "| Dallas |") {
+		t.Errorf("the row kept is not the row that answers:\n%s", got)
+	}
+	sub := "| City | Population |\n| --- | --- |\n| Paris | 200 |\n| City | Area |\n| --- | --- |\n| Dallas | 300 |\n| Lyon | 100 |"
+	got := ExcerptFor(filler+sub+"\n\n"+filler, []string{"Dallas"}, nil, 200)
+	if !strings.Contains(got, "| City | Area |\n| --- | --- |\n| Dallas | 300 |") {
+		t.Errorf("Dallas lost the sub-header that says its figure is an area:\n%s", got)
+	}
+	headed := "# Target\n\n| Name |\n| --- |\n| alpha long value |\n| beta long value |"
+	if got := ExcerptFor(filler+headed+"\n\n"+filler, []string{"Target"}, nil, 60); !strings.Contains(got, "| Name |") {
+		t.Errorf("the heading was kept without its table:\n%s", got)
+	}
+}
