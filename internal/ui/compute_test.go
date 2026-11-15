@@ -665,3 +665,37 @@ func TestNamesLeaveURLsUnitsAndQuotedWordsAlone(t *testing.T) {
 		}
 	}
 }
+
+// A claim the check did not confirm is listed with what the check found, in
+// words: "? unverified" left the reader to guess at the "?", and did not
+// tell a contradicted claim from one no passage settled.
+func TestTheFactCheckSaysWhatItFoundInWords(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c1", Text: "A is 5", Status: statusSupported},
+		{ID: "c2", Text: "B is 6", Status: statusPartial, Note: "only for 2023"},
+		{ID: "c3", Text: "C is 7", Status: statusContradicted, Note: "the table gives 8"},
+		{ID: "c4", Text: "D is 9", Status: statusInsufficient, Note: "quote_not_located: no passage names D"},
+		{ID: "c5", Text: "E is 1", Status: statusInsufficient, Note: "fact_check_unavailable: timeout"},
+	}}
+	fc := &agent.FactCheckResult{}
+	fillVerdictLists(fc, claimEntries(a.Claims))
+	var sb strings.Builder
+	writeFactCheck(&sb, fc, a)
+	got := sb.String()
+	for _, want := range []string{
+		"Confirmed against their sources: 1 · not confirmed: 3 · contradicted or disputed: 1",
+		"- **Partly supported:** “B is 6” — only for 2023",
+		"- **Contradicted:** “C is 7” — the table gives 8",
+		"- **Not established:** “D is 9” — no passage names D",
+		"- **Not checked:** “E is 1” — timeout",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("fact-check section lacks %q:\n%s", want, got)
+		}
+	}
+	for _, glyph := range []string{"?", "✗", "⚠", "quote_not_located", "c2"} {
+		if strings.Contains(got, glyph) {
+			t.Errorf("fact-check section has %q:\n%s", glyph, got)
+		}
+	}
+}

@@ -1235,7 +1235,7 @@ func TestArtifactsCarryTopicsAndFactCheck(t *testing.T) {
 		Contradictions: []agent.Contradiction{{Claim: "launch year", Sources: []string{"a", "b"}}},
 	}
 	md := MarkdownReport(res)
-	for _, want := range []string{"Confirmed against their sources: 1 · not confirmed: 2 · contradictions: 1", "bad claim", "loose claim", "launch year"} {
+	for _, want := range []string{"Confirmed against their sources: 1 · not confirmed: 2 · contradicted or disputed: 1", "bad claim", "loose claim", "launch year"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("markdown lacks %q:\n%s", want, md)
 		}
