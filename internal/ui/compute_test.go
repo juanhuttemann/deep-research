@@ -346,3 +346,85 @@ func TestARevisionAddingAFigureIsBlocked(t *testing.T) {
 		t.Errorf("revision blocked = %q, want it blocked on 62,200", got)
 	}
 }
+
+// A run derived Q4 as the year's total less January to September, then
+// "checked" that the quarters add up to the year's total, which they do by
+// construction, whatever the sources say.
+func TestAComputationThatOnlyRestatesAnInputChecksNothing(t *testing.T) {
+	const url = "https://stats.example/airport-2024"
+	page := "Passengers January to March 2024 were 7,030,229. January to September 2024 were 26,889,799. Total passengers for 2024 34,634,007."
+	findings := []agent.Finding{{URL: url, Title: "Airport statistics 2024", Content: page, Status: "ok"}}
+	claim := func(id, text, v string) agent.Claim {
+		return agent.Claim{ID: id, Text: text, Value: v, Unit: "passengers", Sources: []string{url}}
+	}
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			claim("c1", "Passengers in January to March 2024 were 7,030,229.", "7,030,229"),
+			claim("c2", "Passengers in January to September 2024 were 26,889,799.", "26,889,799"),
+			claim("c3", "Passengers in 2024 were 34,634,007.", "34,634,007"),
+			{ID: "c6", Text: "Q2 and Q3 2024 together had 19,859,570 passengers.", Value: "19,859,570", Unit: "passengers", Computed: "m1"},
+			{ID: "c7", Text: "Q4 2024 had 7,744,208 passengers.", Value: "7,744,208", Unit: "passengers", Computed: "m2"},
+			{ID: "c8", Text: "The quarters sum to 34,634,007, the 2024 total.", Value: "34,634,007", Unit: "passengers", Computed: "m3"},
+		},
+		Computations: []agent.Computation{
+			{ID: "m1", Op: "difference", Inputs: []string{"c2", "c1"}},
+			{ID: "m2", Op: "difference", Inputs: []string{"c3", "c2"}},
+			{ID: "m3", Op: "sum", Inputs: []string{"c1", "c6", "c7"}},
+			{ID: "m4", Op: "max", Inputs: []string{"c1", "c7"}}, // returns an input by design
+		},
+	}
+	fc := &agent.FactCheckResult{}
+	for id, q := range map[string]string{"c1": "January to March 2024 were 7,030,229", "c2": "January to September 2024 were 26,889,799",
+		"c3": "Total passengers for 2024 34,634,007"} {
+		fc.Verdicts = append(fc.Verdicts, agent.Verdict{ID: id, Status: statusSupported, Evidence: []agent.Evidence{{Source: url, Quote: q}}})
+	}
+	checkAnalysis(a, findings)
+	governAll(a, fc, nil, findings)
+	for _, m := range a.Computations[:2] {
+		if !m.Valid {
+			t.Errorf("%s = %+v, want valid: a difference of two sources is a real figure", m.ID, m)
+		}
+	}
+	if m := a.Computations[2]; m.Valid || !strings.Contains(m.Reason, "it is c3 by construction") {
+		t.Errorf("m3 = %+v, want it refused as c3 restated", m)
+	}
+	if c := claimByID(a, "c8"); c.Status != statusInsufficient || !strings.Contains(c.Note, "by construction") {
+		t.Errorf("c8 = %s: %s, want insufficient: it checks nothing", c.Status, c.Note)
+	}
+	if !a.Computations[3].Valid {
+		t.Errorf("m4 = %+v, want max kept: it returns an input by design", a.Computations[3])
+	}
+}
+
+// The check is an identity only for linear arithmetic: a product of 0 and 1
+// moves one for one with its first input at those values, and is a real
+// figure; a mean of one claim with itself is that claim restated.
+func TestOnlyLinearArithmeticIsAskedWhetherItRestatesAnInput(t *testing.T) {
+	const url = "https://stats.example/x"
+	findings := []agent.Finding{{URL: url, Content: "Faults: 0. Units: 1. Units: 7.", Status: "ok"}}
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "There were 0 faults.", Value: "0", Unit: "", Sources: []string{url}},
+			{ID: "c2", Text: "There was 1 unit.", Value: "1", Unit: "", Sources: []string{url}},
+			{ID: "c3", Text: "There were 7 units.", Value: "7", Unit: "", Sources: []string{url}},
+		},
+		Computations: []agent.Computation{
+			{ID: "m1", Op: "product", Inputs: []string{"c1", "c2"}},
+			{ID: "m2", Op: "ratio", Inputs: []string{"c1", "c2"}},
+			{ID: "m3", Op: "mean", Inputs: []string{"c3", "c3"}},
+			{ID: "m4", Op: "sum", Inputs: []string{"c3", "c3"}},
+		},
+	}
+	fc := &agent.FactCheckResult{}
+	for id, q := range map[string]string{"c1": "Faults: 0.", "c2": "Units: 1.", "c3": "Units: 7."} {
+		fc.Verdicts = append(fc.Verdicts, agent.Verdict{ID: id, Status: statusSupported, Evidence: []agent.Evidence{{Source: url, Quote: q}}})
+	}
+	checkAnalysis(a, findings)
+	governAll(a, fc, nil, findings)
+	want := map[string]bool{"m1": true, "m2": true, "m3": false, "m4": true}
+	for _, m := range a.Computations {
+		if m.Valid != want[m.ID] {
+			t.Errorf("%s valid = %v (%s), want %v", m.ID, m.Valid, m.Reason, want[m.ID])
+		}
+	}
+}

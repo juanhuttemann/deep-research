@@ -26,6 +26,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   states is not approved. A run approved "7,030,229, the year-to-date total
   less April" written in a conclusion's own words, while the computed claim
   stating the same figure had failed its check.
+- A computation whose result is one of its own input claims by
+  construction is not computed: two runs derived the last quarter from the
+  year's total and then "checked" that the quarters add up to that total,
+  which holds whatever the sources say. Each input is nudged in turn and
+  the computation redone exactly; a result that moves one for one with a
+  single input and not at all with the rest is that input restated. Only
+  computations of sums, differences and means are asked, where that test is
+  an identity rather than a coincidence of the values.
 - Table cells that PDF extraction ran together ("2,866,1182,834,4721") are
   read as their cells, so a figure in such a row can be an input. The split
   is forced by the three-digit groups, never guessed.

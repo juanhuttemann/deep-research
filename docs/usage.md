@@ -1074,7 +1074,9 @@ table gives each figure, its formula over claim IDs (`m1 = c2 + c3 + c4 +
 c5`) and each input's value with a link to the page it was read from. A
 figure is shown only when every value it uses passed the fact-check and is
 written in a passage it was supported on; the others are listed as not
-established, with why. A claim that states a computed figure is supported
+established, with why. A figure that only restates one of its own inputs
+(the quarters summed after the last quarter was derived from the year's
+total) is refused, since it checks nothing. A claim that states a computed figure is supported
 when it matches the result at its own precision, and contradicted when it
 does not. The operations are `sum`, `difference`, `product`, `ratio`,
 `share`, `percent_change`, `mean`, `min`, `max` and `cagr`; they are exact
