@@ -249,7 +249,12 @@ to the checked decision.
   the value is a whole number token in a located passage the claim was
   supported on. A claim with `computed` is left out of the fact-check and
   decided against its computation: supported at its own precision,
-  contradicted otherwise, insufficient when an input failed. The report's
+  contradicted otherwise, insufficient when an input failed. A
+  recommendation or conclusion that states a number none of its claims
+  states (in their text, option, criterion or scope) is blocked in
+  `blockUnits`: its words are printed as the answer, and the inference
+  check only asks whether it follows, so arithmetic done in a statement's
+  own words would reach the answer unchecked. The report's
   "Computed figures" section, the chart SVGs (named by their content
   digest) and the PDF's vector charts are written from the governed
   analysis. The PDF and the serve page draw or show only the charts the

@@ -22,6 +22,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   artifacts), drawn as vectors in the PDF, shown on the `serve` page and
   given as tables in the terminal. The Pi extension's digest lists the
   computed figures.
+- A recommendation or conclusion that states a number none of its claims
+  states is not approved. A run approved "7,030,229, the year-to-date total
+  less April" written in a conclusion's own words, while the computed claim
+  stating the same figure had failed its check.
 
 ## [0.34.1] - 2026-11-14
 
