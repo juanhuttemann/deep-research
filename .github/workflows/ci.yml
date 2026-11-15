@@ -8,8 +8,11 @@ on:
     branches: [main]
 
 jobs:
+  # A tag push does not test again: the tagged commit was tested when it was
+  # pushed to main, and the release job requires that run's success (below).
   test:
     name: Vet & Test
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -65,6 +68,7 @@ jobs:
   # driving a drsh built from this commit with a scripted model, offline.
   pi:
     name: Pi extension
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -83,6 +87,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -109,15 +114,29 @@ jobs:
           out=$(deadcode ./...)
           if [ -n "$out" ]; then echo "unreachable code:"; echo "$out"; exit 1; fi
 
+  # The release builds only a commit main's CI passed: rather than run the
+  # same tests a second time on the tag, it asks for a successful run of
+  # this workflow on main for the tagged commit, and stops without one (main
+  # not pushed, still running, failed, or the tag on another commit).
   release:
     name: Draft Release
-    needs: [test, lint, pi]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+      actions: read
     steps:
+      - name: Require main's CI to have passed for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$GITHUB_WORKFLOW" \
+            --branch main --commit "$GITHUB_SHA" --status success --json databaseId --jq length)
+          if [ "$passed" -eq 0 ]; then
+            echo "::error::No successful CI run on main for $GITHUB_SHA. Push the commit to main, wait for its CI to pass, then re-run this job."
+            exit 1
+          fi
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # goreleaser needs full history (previous tags)
