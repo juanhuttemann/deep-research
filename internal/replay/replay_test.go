@@ -478,3 +478,19 @@ func TestSearchesWithTheSameQueryAndOtherTermsAreKeptApart(t *testing.T) {
 		t.Errorf("recorded %d searches, want both", n)
 	}
 }
+
+// A trace keeps the planner's headline, so a replayed or resumed run is
+// titled as the run it reproduces.
+func TestTraceKeepsThePlanTitle(t *testing.T) {
+	r := Record(&live{}, "q", "quick", 0)
+	r.SetPlan([]agent.SubTopic{{ID: "1"}}, PlanSettings{Title: "Headline"})
+	out, err := Play(&live{}, &r.trace).Plan(context.Background(), "q", agent.Breadth{}, nil)
+	if err != nil || out.Title != "Headline" {
+		t.Errorf("replayed plan title %q (%v), want the recorded one", out.Title, err)
+	}
+	seeded := Record(&live{}, "q", "quick", 0)
+	seeded.Seed(&r.trace)
+	if seeded.trace.Title != "Headline" {
+		t.Errorf("a resumed recording lost the title")
+	}
+}

@@ -138,10 +138,12 @@ type SubTopic struct {
 // no fix the caller should take. Scope is the planner's reading of how much
 // the question asks (ScopeNarrow, ScopeMultiPart, ScopeComparison), "" when
 // it gave none or one not among them; the caller decides what it allows.
+// Title is the report's short headline, "" when the planner wrote none.
 type Outline struct {
 	Question  string
 	SubTopics []SubTopic
 	Scope     string
+	Title     string
 }
 
 // The scopes a planner may judge a question to have.
@@ -469,7 +471,11 @@ type SourceScoper interface {
 // SourceSignal is the quality/availability outcome of fetching a single URL.
 type SourceSignal = tools.SourceSignal
 type ResearchResult struct {
-	Question  string           `json:"question"`
+	Question string `json:"question"`
+	// Title is the report's short headline, which the question is printed
+	// under; "" for a run with none (instant, older records), titled by
+	// the question as before.
+	Title     string           `json:"title,omitempty"`
 	Tokens    int              `json:"tokens"`
 	Findings  []Finding        `json:"findings"`
 	Analysis  *Analysis        `json:"analysis"`
@@ -1757,7 +1763,7 @@ func (a *impl) Answer(ctx context.Context, prompt string) (*Summary, error) {
 	return &Summary{Report: out, Executive: extractExecutive(out)}, nil
 }
 
-const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. The question field is the question as asked, written as a title: misspelled words, capitalization (a capital first letter, proper names, acronyms), hyphenation, punctuation and unclosed brackets corrected, word for word. Never add, remove, reorder or replace a word, never expand an abbreviation, never change a number, never answer, narrow or broaden it; when nothing needs correcting repeat it exactly. Respond ONLY with JSON of the shape: {"question":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
+const defaultPlanningInstructions = `You are a research planner. Decompose the following question into focused, non-overlapping research sub-topics that together answer it, as many as the request asks for. For each sub-topic give a name, a single sentence describing what to investigate, a web search query and the terms a relevant page must mention. Plan the streams the question needs (its subjects, mechanisms, periods, evidence, interpretations or alternatives) without forcing a comparison onto it; when it compares alternatives, use their established names and research every one of them on the dimensions they share, since a plan that covers one side of a comparison cannot answer it. The name is a short readable title, never an identifier: no underscores, no snake_case, no camelCase. Write every name and note in the language of the question. The query is what a person would type into a search engine for this sub-topic: keywords rather than a sentence, naming the subject of the question, under 80 characters, in the language of the question. The terms are 2-5 distinctive words or identifiers a page answering this sub-topic would show in its title or snippet (names, identifiers, technical terms; never generic words like "advantages" or "overview"), in the language of the question and in their shortest common form. One term is always the question's own subject (the product, person, event, condition, place or idea asked about), so a page about the subject is not rejected for wording the sub-topic differently. The question field is the question as asked, written as a title: misspelled words, capitalization (a capital first letter, proper names, acronyms), hyphenation, punctuation and unclosed brackets corrected, word for word. Never add, remove, reorder or replace a word, never expand an abbreviation, never change a number, never answer, narrow or broaden it; when nothing needs correcting repeat it exactly. Respond ONLY with JSON of the shape: {"question":"...","title":"...","subtopics":[{"name":"...","notes":"...","query":"...","terms":["..."]}]}` //nolint:lll
 
 // Breadth is how many sub-topics a plan may have. Exact asks for Max of
 // them; otherwise Max is a ceiling and the planner chooses fewer when the
@@ -1779,7 +1785,7 @@ func planPrompt(question string, b Breadth) string {
 		n = defaultSubTopicCount
 	}
 	if b.Exact {
-		return fmt.Sprintf("Plan exactly %d sub-topics.\n\nQuestion: %s", n, question)
+		return fmt.Sprintf("Plan exactly %d sub-topics. %s\n\nQuestion: %s", n, titleAsk, question)
 	}
 	// Told only "as few as needed", the planner filled the ceiling for
 	// nearly every question. Judging the scope first, as a field of its own,
@@ -1791,9 +1797,16 @@ func planPrompt(question string, b Breadth) string {
 		"\"%s\" when it weighs alternatives (one per alternative, and one for the criteria only if they "+
 		"need research of their own). Plan at most %d and never more than the scope calls for: a sub-topic "+
 		"that restates another, or adds background the answer does not need, is padding. List them most "+
-		"essential first.\n\nQuestion: %s",
-		ScopeNarrow, ScopeMultiPart, ScopeComparison, n, question)
+		"essential first. %s\n\nQuestion: %s",
+		ScopeNarrow, ScopeMultiPart, ScopeComparison, n, titleAsk, question)
 }
+
+// titleAsk asks for the report's headline in the user message, beside the
+// scope, rather than in planner_instructions: an edited agent.yaml would
+// otherwise lose it. A long question made a heading of four lines; the
+// question is still printed in full under the title.
+const titleAsk = `Also give "title": a headline for the report of at most 8 words naming its subject, ` +
+	`in the language of the question, not a question and not an answer.`
 
 // defaultSubTopicCount is the ceiling used when a caller names none.
 const defaultSubTopicCount = 4
@@ -1831,7 +1844,7 @@ func (a *impl) Plan(ctx context.Context, question string, b Breadth, reading []C
 	if fixed == "" && proposed != "" && proposed != strings.Join(strings.Fields(question), " ") {
 		a.log(fmt.Sprintf("kept the question as typed: the planner's %q changes a word, not only its spelling", proposed))
 	}
-	return Outline{Question: fixed, SubTopics: topics, Scope: parsePlanScope(out)}, nil
+	return Outline{Question: fixed, SubTopics: topics, Scope: parsePlanScope(out), Title: parsePlanTitle(out)}, nil
 }
 
 // inLayoutOf is the correction proposed laid out as asked is: each of its
@@ -1874,6 +1887,45 @@ func parsePlanScope(out string) string {
 		}
 	}
 	return ""
+}
+
+// parsePlanTitle is the headline the planner wrote, on one line and at
+// most maxTitleRunes long, cut at a word; "" when it wrote none.
+func parsePlanTitle(out string) string {
+	for payload := range jsonPayloads(out) {
+		var obj struct {
+			Title string `json:"title"`
+		}
+		if json.Unmarshal([]byte(payload), &obj) == nil {
+			if t := clipTitle(obj.Title); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
+}
+
+// maxTitleRunes bounds a headline a model padded: eight words asked for
+// came back as a sentence often enough to need a ceiling.
+const maxTitleRunes = 80
+
+func clipTitle(s string) string {
+	words := strings.Fields(s)
+	var b strings.Builder
+	for _, w := range words {
+		if utf8.RuneCountInString(b.String())+1+utf8.RuneCountInString(w) > maxTitleRunes {
+			break
+		}
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(w)
+	}
+	if b.Len() == 0 && len(words) > 0 {
+		r := []rune(words[0])
+		return string(r[:min(len(r), maxTitleRunes)])
+	}
+	return strings.TrimRight(b.String(), " .")
 }
 
 // parsePlanQuestion is the corrected question the planner wrote beside its

@@ -1343,8 +1343,12 @@ func (r *Renderer) reportLines() []string {
 	// The question the report answers, and the reading it was answered in:
 	// the card replaces the live frame that showed them, and the report
 	// under it opens with its own title, not the question.
-	for _, l := range wrapWords(r.result.Question, r.width-4) {
+	head, sub := ReportTitle(r.result.Title, r.result.Question)
+	for _, l := range wrapWords(head, r.width-4) {
 		out = append(out, "  "+r.T.bold(l))
+	}
+	for _, l := range wrapWords(sub, r.width-4) {
+		out = append(out, "  "+r.T.dim(l))
 	}
 	if cs := r.result.Clarifications; len(cs) > 0 {
 		out = append(out, "  "+r.T.dim("read as  ")+clip(clarifiedLine(cs), r.width-11))

@@ -83,7 +83,15 @@ const (
 	blockRule
 	blockTable
 	blockChart
+	// blockSubtitle is the question under a report's title, drawn smaller
+	// and grey. It is marked by the caller (subtitled), never guessed from
+	// the Markdown: a revision's italic provenance note follows the title
+	// too, and must stay as legible as the body.
+	blockSubtitle
 )
+
+// pdfSubtitleSize is the question's size under the title.
+const pdfSubtitleSize = 11.5
 
 type pdfBlock struct {
 	kind   pdfBlockKind
@@ -605,6 +613,8 @@ func (l *pdfLayout) block(b pdfBlock) {
 		l.table(b, left)
 	case blockChart:
 		l.chart(b, left)
+	case blockSubtitle:
+		l.subtitle(b, left)
 	default:
 		l.paragraph(b, left)
 	}
@@ -630,6 +640,25 @@ func (l *pdfLayout) paragraph(b pdfBlock, left float64) {
 	} else {
 		l.space(7)
 	}
+}
+
+// subtitled marks the paragraph right after the opening title as its
+// subtitle, when the document has one.
+func subtitled(blocks []pdfBlock, has bool) []pdfBlock {
+	if has && len(blocks) > 1 && blocks[0].kind == blockHeading && blocks[0].level == 1 && blocks[1].kind == blockPara {
+		blocks[1].kind = blockSubtitle
+	}
+	return blocks
+}
+
+func (l *pdfLayout) subtitle(b pdfBlock, left float64) {
+	lead := pdfSubtitleSize * 1.35
+	for _, line := range wrapAtoms(pdfAtoms(b.runs), pdfPageWidth-pdfMargin-left, pdfSubtitleSize) {
+		l.room(lead)
+		l.drawLine(line, left, l.y-lead+0.25*pdfSubtitleSize, pdfSubtitleSize, pdfGrayText)
+		l.y -= lead
+	}
+	l.space(9)
 }
 
 func (l *pdfLayout) heading(b pdfBlock, left float64) {

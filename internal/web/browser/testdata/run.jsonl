@@ -1,0 +1,41 @@
+{"type":"start","time":"2026-01-01T00:00:00Z","question":"What share of the EU's electricity came from wind and solar in 2024, and how did it compare with gas?","mode":"quick"}
+{"type":"phase","time":"2026-01-01T00:00:01Z","phase":"Plan","detail":"Planning research scope"}
+{"type":"thinking","time":"2026-01-01T00:00:02Z","phase":"Plan","status":"start","detail":"Two streams: the renewables share and gas."}
+{"type":"plan","time":"2026-01-01T00:00:04Z","plan":{"question":"What share of the EU's electricity came from wind and solar in 2024, and how did it compare with gas?","title":"EU Wind, Solar and Gas Shares 2024","scope":"multi-part","depth":{"key":"quick","label":"Quick","max_sources":6,"sub_topics":2},"max_sources":6,"sub_topics":[{"id":"1","name":"Wind and solar share","notes":"Ember's 2024 figures for wind and solar.","query":"Ember 2024 EU wind solar share","terms":["Ember","wind","solar"]},{"id":"2","name":"Gas generation","notes":"Gas-fired generation in 2024.","query":"EU gas power generation 2024","terms":["gas","EU"]}]}}
+{"type":"phase","time":"2026-01-01T00:00:05Z","phase":"Research","detail":"Running sub-agents"}
+{"type":"subagent","time":"2026-01-01T00:00:05Z","phase":"Research","sub_id":"1","sub_name":"Wind and solar share","sub_state":"queued","line":"queued"}
+{"type":"subagent","time":"2026-01-01T00:00:05Z","phase":"Research","sub_id":"2","sub_name":"Gas generation","sub_state":"queued","line":"queued"}
+{"type":"subagent","time":"2026-01-01T00:00:06Z","phase":"Research","sub_id":"1","sub_name":"Wind and solar share","sub_state":"running","line":"starting"}
+{"type":"info","time":"2026-01-01T00:00:06Z","phase":"Research","detail":"searxng: 8 results","sub_id":"1"}
+{"type":"search","time":"2026-01-01T00:00:07Z","phase":"Research","query":"Ember 2024 EU wind solar share","sub_id":"1","sub_name":"Wind and solar share","line":"Searching: Ember 2024 EU wind solar share"}
+{"type":"read","time":"2026-01-01T00:00:08Z","phase":"Research","url":"https://ember-energy.org/latest-insights/european-electricity-review-2025/","domain":"ember-energy.org","sub_id":"1","line":"read ember-energy.org"}
+{"type":"read","time":"2026-01-01T00:00:08Z","phase":"Research","url":"https://example.org/wind/","domain":"example.org","sub_id":"1","line":"read example.org"}
+{"type":"read","time":"2026-01-01T00:00:09Z","phase":"Research","url":"https://blocked.example.com/x","domain":"blocked.example.com","sub_id":"1","line":"read blocked.example.com"}
+{"type":"verify","time":"2026-01-01T00:00:10Z","phase":"Research","url":"https://ember-energy.org/latest-insights/european-electricity-review-2025/","status":"ok","code":"200","sub_id":"1","line":"ok ember-energy.org"}
+{"type":"citation","time":"2026-01-01T00:00:10Z","phase":"Research","source_title":"European Electricity Review 2025","source_url":"https://ember-energy.org/latest-insights/european-electricity-review-2025/","sources":1,"sub_id":"1"}
+{"type":"verify","time":"2026-01-01T00:00:11Z","phase":"Research","url":"https://example.org/wind/","status":"degraded","sub_id":"1","line":"degraded example.org"}
+{"type":"citation","time":"2026-01-01T00:00:11Z","phase":"Research","source_title":"Wind","source_url":"https://example.org/wind/","sources":2,"sub_id":"1"}
+{"type":"verify","time":"2026-01-01T00:00:12Z","phase":"Research","url":"https://blocked.example.com/x","status":"dropped","code":"403","sub_id":"1","line":"dropped blocked.example.com 403"}
+{"type":"subagent","time":"2026-01-01T00:00:12Z","phase":"Research","sub_id":"2","sub_name":"Gas generation","sub_state":"running","line":"starting"}
+{"type":"search","time":"2026-01-01T00:00:13Z","phase":"Research","query":"EU gas power generation 2024","sub_id":"2","sub_name":"Gas generation","line":"Searching: EU gas power generation 2024"}
+{"type":"read","time":"2026-01-01T00:00:14Z","phase":"Research","url":"https://example.net/gas","domain":"example.net","sub_id":"2","line":"read example.net"}
+{"type":"error","time":"2026-01-01T00:00:15Z","phase":"Research","detail":"search failed: rate-limited","sub_id":"2"}
+{"type":"token","time":"2026-01-01T00:00:16Z","phase":"Research","tokens":12345,"sources":2}
+{"type":"subagent","time":"2026-01-01T00:00:17Z","phase":"Research","sub_id":"1","sub_name":"Wind and solar share","sub_state":"done","progress":100,"line":"complete"}
+{"type":"subagent","time":"2026-01-01T00:00:18Z","phase":"Research","sub_id":"2","sub_name":"Gas generation","sub_state":"done","progress":100,"line":"complete"}
+{"type":"phase","time":"2026-01-01T00:00:20Z","phase":"Analyze","detail":"Synthesizing findings into an answer"}
+{"type":"thinking","time":"2026-01-01T00:00:21Z","phase":"Analyze","status":"start","detail":"Wind 17% and solar 11% make 28%."}
+{"type":"phase","time":"2026-01-01T00:00:25Z","phase":"Research","detail":"Finding what the evidence leaves open"}
+{"type":"subagent","time":"2026-01-01T00:00:25Z","phase":"Research","sub_id":"f1","sub_name":"Gas share 2024","sub_state":"running","line":"starting"}
+{"type":"search","time":"2026-01-01T00:00:26Z","phase":"Research","query":"Ember gas share 2024","sub_id":"f1","sub_name":"Gas share 2024","line":"Searching: Ember gas share 2024"}
+{"type":"read","time":"2026-01-01T00:00:27Z","phase":"Research","url":"https://ember-energy.org/gas","domain":"ember-energy.org","sub_id":"f1","line":"read ember-energy.org"}
+{"type":"verify","time":"2026-01-01T00:00:28Z","phase":"Research","url":"https://ember-energy.org/gas","status":"ok","code":"200","sub_id":"f1","line":"ok ember-energy.org"}
+{"type":"citation","time":"2026-01-01T00:00:28Z","phase":"Research","source_title":"Gas","source_url":"https://ember-energy.org/gas","sources":3,"sub_id":"f1"}
+{"type":"subagent","time":"2026-01-01T00:00:29Z","phase":"Research","sub_id":"f1","sub_name":"Gas share 2024","sub_state":"done","progress":100,"line":"complete"}
+{"type":"phase","time":"2026-01-01T00:00:30Z","phase":"Fact-Check","detail":"Checking 4 claims"}
+{"type":"thinking","time":"2026-01-01T00:00:31Z","phase":"Fact-Check","status":"start","part":"claims 1-2","detail":"Claim one is quoted verbatim."}
+{"type":"thinking","time":"2026-01-01T00:00:31Z","phase":"Fact-Check","status":"start","part":"claims 3-4","detail":"Claim three needs the gas page."}
+{"type":"phase","time":"2026-01-01T00:00:40Z","phase":"Summarize","detail":"Writing the report"}
+{"type":"token","time":"2026-01-01T00:00:45Z","phase":"Summarize","tokens":1234567,"sources":3}
+{"type":"report","time":"2026-01-01T00:00:46Z","phase":"Report","detail":"Research complete","sources":3}
+{"type":"done","time":"2026-01-01T00:00:46Z","status":"complete","artifacts":[]}

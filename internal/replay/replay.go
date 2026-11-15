@@ -46,6 +46,8 @@ type Trace struct {
 	// Scope is the planner's reading of the question, which the brief shows
 	// beside the sub-topics; a resumed run's brief lost it.
 	Scope string `json:"scope,omitempty"`
+	// Title is the planner's headline for the report.
+	Title string `json:"title,omitempty"`
 	// Report is the shape the run's report was asked for. A replay re-writes
 	// the report live, in this shape unless its flags give another.
 	Report agent.ReportSpec `json:"report,omitzero"`
@@ -121,6 +123,7 @@ func (r *Recorder) Plan(ctx context.Context, question string, b agent.Breadth, r
 	// handed it, on one line. The line breaks of the question as typed
 	// changed every fallback query, and a replay found none of them.
 	r.trace.Question = cmp.Or(out.Question, question)
+	r.trace.Title = out.Title
 	r.mu.Unlock()
 	return out, err
 }
@@ -160,7 +163,7 @@ func (r *Recorder) Seed(t *Trace) {
 	defer r.mu.Unlock()
 	r.trace.Plan, r.trace.Mode, r.trace.Sources = slices.Clone(t.Plan), t.Mode, t.Sources
 	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = t.NoFollowUps, t.Scope, t.Report
-	r.trace.Instant = t.Instant
+	r.trace.Instant, r.trace.Title = t.Instant, t.Title
 	r.trace.Questions, r.trace.Clarifications = slices.Clone(t.Questions), slices.Clone(t.Clarifications)
 	if r.finished == nil {
 		r.finished = map[string]bool{}
@@ -233,6 +236,7 @@ type PlanSettings struct {
 	NoFollowUps bool
 	Instant     bool
 	Scope       string
+	Title       string
 	Report      agent.ReportSpec
 	Questions   []agent.Question
 	Answers     []agent.Clarification
@@ -250,7 +254,7 @@ func (r *Recorder) SetPlan(subs []agent.SubTopic, s PlanSettings) {
 	r.trace.Plan = slices.Clone(subs)
 	r.trace.Mode, r.trace.Sources = s.Mode, s.Sources
 	r.trace.NoFollowUps, r.trace.Scope, r.trace.Report = s.NoFollowUps, s.Scope, s.Report
-	r.trace.Instant = s.Instant
+	r.trace.Instant, r.trace.Title = s.Instant, s.Title
 	r.trace.Questions, r.trace.Clarifications = slices.Clone(s.Questions), slices.Clone(s.Answers)
 	r.mu.Unlock()
 	r.save()
@@ -462,7 +466,7 @@ func Play(live agent.Assistant, t *Trace) *Player {
 }
 
 func (p *Player) Plan(context.Context, string, agent.Breadth, []agent.Clarification) (agent.Outline, error) {
-	return agent.Outline{SubTopics: p.trace.Plan}, nil
+	return agent.Outline{SubTopics: p.trace.Plan, Title: p.trace.Title}, nil
 }
 
 // Clarify asks nothing: the recorded plan carries the reading it was made

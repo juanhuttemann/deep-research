@@ -22,8 +22,10 @@ import (
 // Meta is the structured trace written to the .json sidecar: full citations,
 // per-sub-agent research notes, and the full event timeline.
 type Meta struct {
-	Version   string    `json:"version"`
-	Question  string    `json:"question"`
+	Version  string `json:"version"`
+	Question string `json:"question"`
+	// Title is the report's short headline, "" when the run has none.
+	Title     string    `json:"title,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Depth     string    `json:"depth"`
 	Model     string    `json:"model,omitempty"`
@@ -126,6 +128,43 @@ type TimelineEntry struct {
 	Line   string    `json:"line,omitempty"`
 }
 
+// ReportTitle is what heads a report: the planner's headline with the
+// question under it, or the question alone for a run with no headline
+// (instant runs, older runs) or one that only repeats it. A long question
+// made a heading of four lines; it is still printed whole, smaller.
+func ReportTitle(title, question string) (head, sub string) {
+	q, t := OneLine(question), OneLine(title)
+	if t == "" || strings.EqualFold(t, q) {
+		return q, ""
+	}
+	return t, q
+}
+
+// writeTitle writes a report's heading and, under it, the question as an
+// emphasized paragraph of its own, which the PDF draws smaller
+// (pdfSubtitle). Both are escaped: a model's headline or a question with
+// "*" or "_" in it would otherwise change the Markdown around it.
+func writeTitle(sb *strings.Builder, title, question string) {
+	sb.WriteString(TitleMarkdown(title, question))
+}
+
+// TitleMarkdown is a report's heading as Markdown, the question under the
+// title when there is one: what a reopened report (/resume) prints, the
+// same as its files.
+func TitleMarkdown(title, question string) string {
+	head, sub := ReportTitle(title, question)
+	out := "# " + escapeInline(head) + "\n\n"
+	if sub != "" {
+		out += "*" + escapeInline(sub) + "*\n\n"
+	}
+	return out
+}
+
+// mdEscaper escapes what would start inline Markdown in a line of text.
+var mdEscaper = strings.NewReplacer(`\`, `\\`, "*", `\*`, "_", `\_`, "`", "\\`", "[", `\[`, "]", `\]`, "<", `\<`)
+
+func escapeInline(s string) string { return mdEscaper.Replace(s) }
+
 // MarkdownReport renders a self-contained Markdown document from a result,
 // including an executive summary, the report body and a numbered citations
 // list deduplicated by URL.
@@ -135,7 +174,7 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	if sum == nil {
 		sum = &agent.Summary{}
 	}
-	fmt.Fprintf(&sb, "# %s\n\n", OneLine(res.Question))
+	writeTitle(&sb, res.Title, res.Question)
 	fmt.Fprintf(&sb, "**Confidence:** %s\n\n", sum.Confidence)
 	if res.Model != "" {
 		fmt.Fprintf(&sb, "**Model:** %s", res.Model)
@@ -461,7 +500,8 @@ func WriteMarkdown(res *agent.ResearchResult, dir string) (string, error) {
 
 // WritePDF builds a PDF from the report and executive summary and writes it.
 func WritePDF(res *agent.ResearchResult, dir string) (string, error) {
-	data := BuildPDF(MarkdownReport(res), drawnCharts(res.Analysis))
+	_, sub := ReportTitle(res.Title, res.Question)
+	data := buildReportPDF(MarkdownReport(res), sub, drawnCharts(res.Analysis))
 	name := slug(res.Question) + ".pdf"
 	path := filepath.Join(dir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -586,6 +626,7 @@ func BuildMeta(res *agent.ResearchResult, timeline []Event, depth string, tokens
 	m := Meta{
 		Version:          "1",
 		Question:         res.Question,
+		Title:            res.Title,
 		Timestamp:        res.Timestamp,
 		Depth:            depth,
 		Confidence:       condStr(res.Summary, "confidence"),

@@ -10,6 +10,7 @@ mostly `pages` and `timeline`; read the fields you need (for example with
 | Field | Meaning |
 | --- | --- |
 | `question`, `timestamp`, `depth` | what was asked, when, at which `--mode` tier |
+| `title` | the report's short headline, which the question is printed under; absent for a run with none (instant and older runs) |
 | `model`, `provider`, `served_by` | what wrote the report; `served_by` is what a router alias picked |
 | `domains` | sites the run was confined to (`--domains`), if any |
 | `confidence` | the report's overall confidence |

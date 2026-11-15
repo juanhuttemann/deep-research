@@ -28,6 +28,9 @@ export interface Figure {
 
 export interface Digest {
 	question: string;
+	// title is the report's headline, absent for a run with none (instant
+	// and older runs): the question titles it then.
+	title?: string;
 	depth: string;
 	confidence: string;
 	// instant is a run that answers in one call with no fact-check at all.
@@ -47,6 +50,7 @@ export interface Digest {
 
 interface RunJSON {
 	question?: string;
+	title?: string;
 	depth?: string;
 	confidence?: string;
 	error?: string;
@@ -111,6 +115,7 @@ export function digest(raw: unknown): Digest {
 	const citations = j.citations ?? [];
 	return {
 		question: j.question ?? "",
+		title: j.title || undefined,
 		depth: j.depth ?? "",
 		confidence: j.confidence ?? "",
 		instant: j.depth === "instant",

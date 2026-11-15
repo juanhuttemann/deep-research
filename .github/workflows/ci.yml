@@ -85,6 +85,27 @@ jobs:
       - name: Typecheck and test
         run: make pi
 
+  # The serve page in a browser (internal/web/browser): its live frame's
+  # parity with the terminal UI, docs/surfaces.md. Required here: locally a
+  # missing browser skips it.
+  web:
+    name: Browser tests
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: internal/web/browser/package-lock.json
+      - name: Install Chromium
+        working-directory: internal/web/browser
+        run: npm ci --ignore-scripts --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: Browser tests
+        run: WEB_REQUIRED=1 make web
+
   lint:
     name: Lint
     if: github.ref_type != 'tag'

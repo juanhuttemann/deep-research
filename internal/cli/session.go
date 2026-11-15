@@ -376,7 +376,7 @@ func (s *session) reopen(path string) {
 				r.N, r.Time.Format("2006-01-02"), r.Report)
 		}
 	}
-	fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, ui.WithReading("# "+ui.OneLine(m.Question)+"\n\n"+report, m.Clarifications), s.noColor()))
+	fmt.Fprintf(out, "\n%s\n", ui.FormatMarkdown(out, ui.WithReading(ui.TitleMarkdown(m.Title, m.Question)+report, m.Clarifications), s.noColor()))
 	s.open(path, m, turns)
 }
 

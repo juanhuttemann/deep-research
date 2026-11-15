@@ -211,7 +211,8 @@ func writeRevisionExports(path string, m *Meta, r Revision) (md, pdf string) {
 	if writeAtomic(stem+".md", []byte(doc)) == nil {
 		md = filepath.Base(stem + ".md")
 	}
-	if writeAtomic(stem+".pdf", BuildPDF(doc, drawnCharts(m.Analysis))) == nil {
+	_, sub := ReportTitle(m.Title, m.Question)
+	if writeAtomic(stem+".pdf", buildReportPDF(doc, sub, drawnCharts(m.Analysis))) == nil {
 		pdf = filepath.Base(stem + ".pdf")
 	}
 	return md, pdf
@@ -223,7 +224,7 @@ func writeRevisionExports(path string, m *Meta, r Revision) (md, pdf string) {
 // read under the revised text unlabelled, it vouched for prose it never saw.
 func RevisedMarkdown(m *Meta, r Revision) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "# %s\n\n", OneLine(m.Question))
+	writeTitle(&sb, m.Title, m.Question)
 	fmt.Fprintf(&sb, "_Revision %d, edited in conversation on %s after the research. The confidence, the fact-check and the sources below are the original run's; the edits were not fact-checked._\n\n",
 		r.N, r.Time.Format("2006-01-02"))
 	fmt.Fprintf(&sb, "**Confidence (original):** %s\n\n", m.Confidence)

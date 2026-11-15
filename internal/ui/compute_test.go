@@ -221,11 +221,11 @@ func TestChartFilesAndThePDFDrawTheRunsOwnCharts(t *testing.T) {
 		t.Fatalf("chart file does not digest to its name or lost its title: %v", err)
 	}
 	md := "Body.\n\n![Containers](" + a.Charts[0].File + ")\n\n![other](chart-0000000000000000.svg)\n"
-	pdf := BuildPDF(md, drawnCharts(a))
+	pdf := buildReportPDF(md, "", drawnCharts(a))
 	if !bytes.Contains(pdf, []byte(pdfChartSeries+" rg")) {
 		t.Error("the PDF did not draw the run's chart")
 	}
-	if bytes.Contains(BuildPDF(md, nil), []byte(pdfChartSeries+" rg")) {
+	if bytes.Contains(buildReportPDF(md, "", nil), []byte(pdfChartSeries+" rg")) {
 		t.Error("the PDF drew a chart the run did not give it")
 	}
 }

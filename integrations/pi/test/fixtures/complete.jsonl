@@ -1,5 +1,5 @@
 {"type":"source","time":"2026-10-31T16:08:58Z","check":{"domain":"go.dev","status":"ok","pages":3}}
-{"type":"plan","time":"2026-10-31T16:08:58Z","plan":{"question":"Which is faster?","depth":{"key":"quick","label":"Quick","max_sources":3,"sub_topics":3},"max_sources":3,"sub_topics":[{"id":"1","name":"Benchmarks"},{"id":"2","name":"Memory use"}]}}
+{"type":"plan","time":"2026-10-31T16:08:58Z","plan":{"question":"Which is faster?","title":"Go vs Rust Speed","depth":{"key":"quick","label":"Quick","max_sources":3,"sub_topics":3},"max_sources":3,"sub_topics":[{"id":"1","name":"Benchmarks"},{"id":"2","name":"Memory use"}]}}
 {"type":"phase","time":"2026-10-31T16:08:58Z","phase":"Plan","detail":"Planning research scope"}
 {"type":"thinking","time":"2026-10-31T16:08:58Z","status":"start","detail":"Weighing the"}
 {"type":"thinking","time":"2026-10-31T16:08:58Z","detail":" two sub-topics"}

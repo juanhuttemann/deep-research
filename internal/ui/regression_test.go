@@ -285,7 +285,7 @@ func TestPDFRendersMarkdownAsReadableText(t *testing.T) {
 
 func TestMarkdownTablesRenderWithoutSourceDelimiters(t *testing.T) {
 	var drawn []string
-	for _, tx := range pdfTexts(t, BuildPDF("| Read:Write Ratio | Choice |\n| --- | --- |\n| 1:1 | **Mutex** |\n| 10:1 | RWMutex |\n", nil)) {
+	for _, tx := range pdfTexts(t, buildReportPDF("| Read:Write Ratio | Choice |\n| --- | --- |\n| 1:1 | **Mutex** |\n| 10:1 | RWMutex |\n", "", nil)) {
 		drawn = append(drawn, tx.text)
 	}
 	got := strings.Join(drawn, " ")
@@ -1923,7 +1923,7 @@ func TestPDFDropsEmojiWithoutWarning(t *testing.T) {
 	if pdfDropsText(report) {
 		t.Errorf("warned for emoji: %+v", parsePDFBlocks(report, nil))
 	}
-	pdf := string(BuildPDF(report, nil))
+	pdf := string(buildReportPDF(report, "", nil))
 	for _, want := range []string{"$580.0M", " $1,813.0M", "of 2025!", "example.com/%F0%9F%A4%AF"} {
 		if !strings.Contains(pdf, want) {
 			t.Errorf("PDF lacks %q", want)
@@ -2323,7 +2323,7 @@ func findPDFText(texts []pdfText, text string) (pdfText, bool) {
 // The exported PDF drew every heading in the body's font and size, so the
 // report read as one undifferentiated wall of text.
 func TestPDFHeadingsStandOutFromBody(t *testing.T) {
-	texts := pdfTexts(t, BuildPDF("# Title\n\n## Section\n\nBody text here.\n\n### Detail\n\nMore body.", nil))
+	texts := pdfTexts(t, buildReportPDF("# Title\n\n## Section\n\nBody text here.\n\n### Detail\n\nMore body.", "", nil))
 	body, _ := findPDFText(texts, "Body")
 	for _, h := range []string{"Title", "Section", "Detail"} {
 		got, ok := findPDFText(texts, h)
@@ -2341,7 +2341,7 @@ func TestPDFHeadingsStandOutFromBody(t *testing.T) {
 // the bullet instead of under the text.
 func TestPDFListItemsAreTightWithHangingIndent(t *testing.T) {
 	long := strings.Repeat("evidence supports the conditional answer ", 6)
-	texts := pdfTexts(t, BuildPDF("- first item\n- second item\n- "+long+"\n- last item", nil))
+	texts := pdfTexts(t, buildReportPDF("- first item\n- second item\n- "+long+"\n- last item", "", nil))
 	first, _ := findPDFText(texts, "first")
 	second, _ := findPDFText(texts, "second")
 	if gap := first.y - second.y; gap <= 0 || gap > 2*first.size {
@@ -2371,7 +2371,7 @@ func TestPDFListItemsAreTightWithHangingIndent(t *testing.T) {
 // Ordered lists lost their numbers: every item became "- ", so the
 // numbered citations no longer matched the numbers the report refers to.
 func TestPDFOrderedListsKeepTheirNumbers(t *testing.T) {
-	texts := pdfTexts(t, BuildPDF("3. third\n4. fourth", nil))
+	texts := pdfTexts(t, buildReportPDF("3. third\n4. fourth", "", nil))
 	for _, n := range []string{"3.", "4."} {
 		if _, ok := findPDFText(texts, n); !ok {
 			t.Errorf("marker %q missing: %+v", n, texts)
@@ -2382,7 +2382,7 @@ func TestPDFOrderedListsKeepTheirNumbers(t *testing.T) {
 // Lines were wrapped at 78 characters of a proportional font, which filled
 // about two thirds of the page and left a ragged empty right margin.
 func TestPDFFillsTheMeasuredLineWidth(t *testing.T) {
-	texts := pdfTexts(t, BuildPDF(strings.Repeat("The residential evidence is narrower than the commercial record. ", 20), nil))
+	texts := pdfTexts(t, buildReportPDF(strings.Repeat("The residential evidence is narrower than the commercial record. ", 20), "", nil))
 	lines := map[float64][]pdfText{}
 	for _, tx := range texts {
 		if tx.size > 8 { // skip the page-number footer
@@ -2411,7 +2411,7 @@ func TestPDFFillsTheMeasuredLineWidth(t *testing.T) {
 // the measured wrap must keep words whole, styled pieces included.
 func TestPDFWrapKeepsWordsWhole(t *testing.T) {
 	src := strings.Repeat("sup**ply**-chain security versus manufacturing maturity ", 12)
-	texts := pdfTexts(t, BuildPDF(src, nil))
+	texts := pdfTexts(t, buildReportPDF(src, "", nil))
 	for i := 1; i < len(texts); i++ {
 		prev, cur := texts[i-1], texts[i]
 		if strings.HasSuffix(prev.text, "sup") && (cur.text != "ply" || cur.y != prev.y) {
@@ -2426,7 +2426,7 @@ func TestPDFWrapKeepsWordsWhole(t *testing.T) {
 // Tables were flattened into "cell — cell — cell" runs of text with no
 // columns at all.
 func TestPDFTablesRenderAsColumns(t *testing.T) {
-	pdf := BuildPDF("| Dimension | LFP | Sodium-ion |\n|---|---|---|\n| Safety | Proven | Assessed |\n| Cost | Lower | Higher |\n", nil)
+	pdf := buildReportPDF("| Dimension | LFP | Sodium-ion |\n|---|---|---|\n| Safety | Proven | Assessed |\n| Cost | Lower | Higher |\n", "", nil)
 	texts := pdfTexts(t, pdf)
 	if strings.Contains(string(pdf), "—") || strings.Contains(string(pdf), `\227`) || strings.Contains(string(pdf), "|") {
 		t.Error("table cells are still joined by delimiters")
@@ -2453,7 +2453,7 @@ func TestPDFTablesRenderAsColumns(t *testing.T) {
 // off the bottom of the first, and nothing in it may be lost.
 func TestPDFSplitsOversizedTableRows(t *testing.T) {
 	long := strings.Repeat("word ", 1500) + "LASTWORD"
-	texts := pdfTexts(t, BuildPDF("| A | B |\n|---|---|\n| "+long+" | short |\n", nil))
+	texts := pdfTexts(t, buildReportPDF("| A | B |\n|---|---|\n| "+long+" | short |\n", "", nil))
 	last, ok := findPDFText(texts, "LASTWORD")
 	if !ok {
 		t.Fatal("oversized row lost its tail")
@@ -2471,7 +2471,7 @@ func TestPDFSplitsOversizedTableRows(t *testing.T) {
 // Links must stay clickable and printed: the link text, an annotation that
 // opens the URL, and the URL itself for a paper copy.
 func TestPDFLinksAreClickableAndKeepTheURL(t *testing.T) {
-	pdf := string(BuildPDF("See [the guide](https://example.com/a_(b)/c) and https://example.org/x.", nil))
+	pdf := string(buildReportPDF("See [the guide](https://example.com/a_(b)/c) and https://example.org/x.", "", nil))
 	if !strings.Contains(pdf, `/S /URI /URI (https://example.com/a_\(b\)/c)`) {
 		t.Errorf("no URI annotation for the link:\n%s", pdf)
 	}
@@ -2494,7 +2494,7 @@ func TestPDFLinksAreClickableAndKeepTheURL(t *testing.T) {
 // the line; it must break at its own separators and stay inside the margin.
 func TestPDFLongURLsStayInsideTheMargin(t *testing.T) {
 	url := "https://www.downgraf.com/general/sodium-ion-battery-for-home-storage-best-brands-buyers-guide-2026-with-a-very-long-tail/"
-	texts := pdfTexts(t, BuildPDF("Source: ["+url+"]("+url+") and ["+url+"]("+url+")", nil))
+	texts := pdfTexts(t, buildReportPDF("Source: ["+url+"]("+url+") and ["+url+"]("+url+")", "", nil))
 	for _, tx := range texts {
 		if right := tx.x + pdfWidth(tx.text, pdfFont(tx.font-1), tx.size); right > pdfPageWidth-pdfMargin+0.01 {
 			t.Errorf("%q ends at %.1f, past the margin", tx.text, right)
@@ -2509,7 +2509,7 @@ func TestPDFPrintsFactCheckMarks(t *testing.T) {
 	if pdfHasUnsupportedText("✗ not verified · ⚠ contradiction") {
 		t.Error("fact-check marks still count as unsupported text")
 	}
-	pdf := string(BuildPDF("- ✗ not verified: c3\n- ⚠ contradiction on c4", nil))
+	pdf := string(buildReportPDF("- ✗ not verified: c3\n- ⚠ contradiction on c4", "", nil))
 	if strings.Contains(pdf, "(?)") || strings.Contains(pdf, "?") {
 		t.Errorf("a mark printed as ?:\n%s", pdf)
 	}
@@ -2517,7 +2517,7 @@ func TestPDFPrintsFactCheckMarks(t *testing.T) {
 
 // A twelve-page export had no page numbers.
 func TestPDFNumbersPages(t *testing.T) {
-	texts := pdfTexts(t, BuildPDF(strings.Repeat("A paragraph of report text.\n\n", 120), nil))
+	texts := pdfTexts(t, buildReportPDF(strings.Repeat("A paragraph of report text.\n\n", 120), "", nil))
 	pages := texts[len(texts)-1].page + 1
 	if pages < 2 {
 		t.Fatalf("120 paragraphs fit on %d page", pages)
@@ -2533,7 +2533,7 @@ func TestPDFNumbersPages(t *testing.T) {
 // sources carried three URLs and grew a page tall. Each destination is
 // printed once, at its last link: the citation list closing the report.
 func TestPDFPrintsEachLinkDestinationOnce(t *testing.T) {
-	pdf := BuildPDF("Body cites [Guide](https://example.com/guide).\n\n1. [Guide: full title](https://example.com/guide) — ok", nil)
+	pdf := buildReportPDF("Body cites [Guide](https://example.com/guide).\n\n1. [Guide: full title](https://example.com/guide) — ok", "", nil)
 	var drawn []string
 	for _, tx := range pdfTexts(t, pdf) {
 		drawn = append(drawn, tx.text)
@@ -2563,7 +2563,7 @@ func TestPDFURLKeepsItsClosingParenthesis(t *testing.T) {
 // Found in review of the typeset PDF: a heading longer than a page was drawn
 // after a single room check and ran off the bottom.
 func TestPDFLongHeadingStaysOnThePage(t *testing.T) {
-	for _, tx := range pdfTexts(t, BuildPDF("# "+strings.Repeat("Wide ", 400), nil)) {
+	for _, tx := range pdfTexts(t, buildReportPDF("# "+strings.Repeat("Wide ", 400), "", nil)) {
 		if tx.y < pdfMargin-1 && tx.size > 8 {
 			t.Fatalf("heading drawn below the bottom margin: %+v", tx)
 		}
@@ -2573,7 +2573,7 @@ func TestPDFLongHeadingStaysOnThePage(t *testing.T) {
 // goldmark keeps a link destination as written, so a Markdown escape or an
 // entity reached the clickable URI instead of the URL it spells.
 func TestPDFLinkDestinationIsUnescaped(t *testing.T) {
-	pdf := string(BuildPDF(`[x](https://example.com/a\_b?x=1&amp;y=2)`, nil))
+	pdf := string(buildReportPDF(`[x](https://example.com/a\_b?x=1&amp;y=2)`, "", nil))
 	if !strings.Contains(pdf, "/URI (https://example.com/a_b?x=1&y=2)") {
 		t.Errorf("URI keeps Markdown escapes:\n%s", pdf)
 	}
@@ -2583,7 +2583,7 @@ func TestPDFLinkDestinationIsUnescaped(t *testing.T) {
 // third below its own padding, so its text ran past the right margin.
 func TestPDFTableColumnsStayInsideTheMargin(t *testing.T) {
 	long := strings.Repeat("W", 100)
-	texts := pdfTexts(t, BuildPDF("| A | B | W |\n|---|---|---|\n| "+long+" | "+long+" | W |\n", nil))
+	texts := pdfTexts(t, buildReportPDF("| A | B | W |\n|---|---|---|\n| "+long+" | "+long+" | W |\n", "", nil))
 	for _, tx := range texts {
 		if right := tx.x + pdfWidth(tx.text, pdfFont(tx.font-1), tx.size); right > pdfPageWidth-pdfMargin+0.01 {
 			t.Errorf("%q ends at %.2f, past the margin", tx.text, right)
@@ -2595,7 +2595,7 @@ func TestPDFTableColumnsStayInsideTheMargin(t *testing.T) {
 // kept in a code block printed as "?" unwarned, and an em space, drawn as a
 // plain space, warned.
 func TestPDFWarningMatchesWhatIsDrawn(t *testing.T) {
-	if pdf := string(BuildPDF("```\r\nalpha\r\n```\r\n", nil)); strings.Contains(pdf, "alpha?") || strings.Contains(pdf, `alpha\015`) {
+	if pdf := string(buildReportPDF("```\r\nalpha\r\n```\r\n", "", nil)); strings.Contains(pdf, "alpha?") || strings.Contains(pdf, `alpha\015`) {
 		t.Error("carriage return printed in a code block")
 	}
 	if pdfDropsText("A B") {
@@ -2613,7 +2613,7 @@ func TestPDFDrawsArrowsAndComparisons(t *testing.T) {
 		t.Error("arrows and comparisons still count as lost text")
 	}
 	var drawn []string
-	for _, tx := range pdfTexts(t, BuildPDF(src, nil)) {
+	for _, tx := range pdfTexts(t, buildReportPDF(src, "", nil)) {
 		drawn = append(drawn, tx.text)
 	}
 	got := strings.Join(drawn, "")
@@ -2630,7 +2630,7 @@ func TestPDFDrawsArrowsAndComparisons(t *testing.T) {
 // Helvetica, draws them, each run of its glyphs a string of its own set
 // where the line's measured width puts it.
 func TestPDFDrawsGreekFromTheSymbolFont(t *testing.T) {
-	pdf := BuildPDF("## How π's decimal digits are produced", nil)
+	pdf := buildReportPDF("## How π's decimal digits are produced", "", nil)
 	if !strings.Contains(string(pdf), "/BaseFont /Symbol >>") {
 		t.Error("the Symbol font is not declared with its built-in encoding")
 	}
@@ -2658,7 +2658,7 @@ func TestPDFWarnsOnlyForGreekSymbolLacks(t *testing.T) {
 		t.Errorf("Greek counts as lost text: %+v", parsePDFBlocks(src, nil))
 	}
 	var drawn []string
-	for _, tx := range pdfTexts(t, BuildPDF(src, nil)) {
+	for _, tx := range pdfTexts(t, buildReportPDF(src, "", nil)) {
 		drawn = append(drawn, tx.text)
 	}
 	if got := strings.Join(drawn, ""); !strings.Contains(got, "Archimedes bounded π with αβ-polygons.") {
@@ -3771,7 +3771,7 @@ func TestCitationTitleCannotSetTheLinkTarget(t *testing.T) {
 	var sb strings.Builder
 	writeCitationList(&sb, "Sources", []MetaCitation{{Title: "Legit ](https://evil.example/phish) title", URL: "https://good.example/a (b)", Status: "ok"}})
 	md := sb.String()
-	if bytes.Contains(BuildPDF(md, nil), []byte("/URI (https://evil")) {
+	if bytes.Contains(buildReportPDF(md, "", nil), []byte("/URI (https://evil")) {
 		t.Errorf("the PDF links the injected target:\n%s", md)
 	}
 	doc := markdownParser.Parse(text.NewReader([]byte(md)))
@@ -3863,8 +3863,8 @@ func TestPromptEchoesOnlyWholeCharacters(t *testing.T) {
 // page, and the file grew some fifty times.
 func TestDeeplyNestedBlocksKeepTheirWidth(t *testing.T) {
 	text := strings.Repeat("word ", 300)
-	flat := len(BuildPDF("> "+text, nil))
-	nested := len(BuildPDF(strings.Repeat("> ", 40)+text, nil))
+	flat := len(buildReportPDF("> "+text, "", nil))
+	nested := len(buildReportPDF(strings.Repeat("> ", 40)+text, "", nil))
 	if nested > 3*flat {
 		t.Errorf("nested PDF is %d bytes, flat %d", nested, flat)
 	}

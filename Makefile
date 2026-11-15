@@ -1,4 +1,4 @@
-.PHONY: catalog diagram test e2e eval-replay eval-test build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools pi
+.PHONY: web catalog diagram test e2e eval-replay eval-test build run fmt fmt-check vet cyclo ineffassign golangci deadcode lint verify tools pi
 
 # -race is part of the gate, not an extra step: the tools and driver both fan
 # work out across goroutines, and a race that only `go test -race` sees is a
@@ -146,4 +146,21 @@ pi:
 	COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm run --silent typecheck && \
 	DRSH_BIN=$$bin COREPACK_ENABLE_DOWNLOAD_PROMPT=0 $$npm test --silent
 
-verify: lint test eval-test ignored-go pi
+# The serve page's browser tests (internal/web/browser): its live frame
+# driven through a run's events, one test per feature it shares with the
+# terminal UI (docs/surfaces.md). Without Node, npm or Playwright's Chromium
+# it is reported and skipped, as the Pi extension is; WEB_REQUIRED=1 (CI)
+# fails instead, or the parity check could vanish from the gate unseen.
+WEB_DIR = internal/web/browser
+web:
+	@skip() { if [ -n "$$WEB_REQUIRED" ]; then echo "error: $$1"; exit 1; fi; echo "warning: $$1 — skipping the browser tests"; exit 0; }; \
+	command -v node >/dev/null 2>&1 || skip "node not installed"; \
+	command -v npm >/dev/null 2>&1 || skip "npm not installed"; \
+	cd $(WEB_DIR) && \
+	if [ ! node_modules/.package-lock.json -nt package-lock.json ]; then \
+		npm ci --ignore-scripts --no-audit --no-fund --silent || exit 1; fi && \
+	if ! node -e 'const {chromium}=require("@playwright/test");process.exit(require("fs").existsSync(chromium.executablePath())?0:1)'; then \
+		skip "Playwright's Chromium is not installed (cd $(WEB_DIR) && npx playwright install chromium)"; fi && \
+	npm test --silent
+
+verify: lint test eval-test ignored-go pi web
