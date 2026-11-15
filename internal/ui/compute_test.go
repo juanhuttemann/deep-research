@@ -245,8 +245,8 @@ func TestAClaimsTextMustStateItsValue(t *testing.T) {
 	b.Claims[5].Text = "The port handled 412,000 containers in 2025."
 	checkAnalysis(b, findings)
 	governAll(b, quarterVerdicts(quarterQuotes), nil, findings)
-	if c := claimByID(b, "c6"); c.Status == statusSupported || !strings.Contains(c.Note, "its text does not state") {
-		t.Errorf("c6 = %s: %s, want its text held to its value", c.Status, c.Note)
+	if c := claimByID(b, "c6"); c.Status != statusContradicted || !strings.Contains(c.Note, "it states 412,000") {
+		t.Errorf("c6 = %s: %s, want its text's figure contradicted", c.Status, c.Note)
 	}
 }
 
@@ -754,5 +754,70 @@ func TestAutoChartsCompareSubjectsInOneYear(t *testing.T) {
 	if len(got) != 1 || len(got[0].Points) != 2 || got[0].Points[0].Label != "Brazil" || got[0].Points[1].Label != "Chile" ||
 		got[0].Title != "GDP, Year 2023" {
 		t.Errorf("charts = %+v, want Brazil and Chile in 2023", got)
+	}
+}
+
+// An Arctic run charted two reports of the 2012 minimum (3.41 and 3.39) as
+// a series, one bar labelled by a scope sentence and the other by the year
+// the second report was published.
+func TestAlternativeFiguresForOneYearAreNoSeries(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c3", Option: "2012", Criterion: "annual minimum extent (record low)", Value: "3.41", Unit: "million square kilometers",
+			Scope: "NSIDC analysis published September 18, 2012 (figure repeated September 20, 2013)"},
+		{ID: "c4", Option: "2012", Criterion: "annual minimum extent (record low)", Value: "3.39", Unit: "million square kilometers",
+			Scope: "NSIDC Sea Ice Index data as cited in the September 2023 analysis"},
+	}}
+	if got := autoCharts(a); len(got) != 0 {
+		t.Errorf("charted two figures for one year as a series: %+v", got)
+	}
+	// One quantity over years, the year written in its criterion, is one series.
+	b := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c1", Option: "Norway", Criterion: "battery-electric share, 2023", Scope: "Calendar year 2023", Value: "82.4", Unit: "percent"},
+		{ID: "c2", Option: "Norway", Criterion: "battery-electric share, 2024", Scope: "Calendar year 2024", Value: "88.9", Unit: "percent"},
+	}}
+	got := autoCharts(b)
+	if len(got) != 1 || got[0].Kind != "line" || got[0].Points[0].Label != "2023" || got[0].Points[1].Label != "2024" ||
+		got[0].Title != "Norway: Battery-electric share" {
+		t.Errorf("charts = %+v, want one line over 2023 and 2024", got)
+	}
+}
+
+// Netflix: revenue in USD million over memberships in millions, a claim
+// reading "about $129.14" with the value 129.14238410596026, and the
+// difference of two percentages, which is in percentage points.
+func TestComputedClaimsAreJudgedAsTheirWordsStateThem(t *testing.T) {
+	const url = "https://ir.example/q4"
+	page := "Revenue $39,001 million. Paid memberships 302 million. BEV share 82.4% in 2023 and 88.9% in 2024."
+	findings := []agent.Finding{{URL: url, Content: page, Status: "ok"}}
+	a := &agent.Analysis{
+		Claims: []agent.Claim{
+			{ID: "c1", Text: "Revenue was $39,001 million.", Value: "39,001", Unit: "USD million", Sources: []string{url}},
+			{ID: "c2", Text: "Paid memberships were 302 million.", Value: "302", Unit: "million paid memberships", Sources: []string{url}},
+			{ID: "c3", Text: "The BEV share was 82.4% in 2023.", Value: "82.4", Unit: "percent", Sources: []string{url}},
+			{ID: "c4", Text: "The BEV share was 88.9% in 2024.", Value: "88.9", Unit: "percent", Sources: []string{url}},
+			{ID: "c6", Text: "Revenue per paid membership was about $129.14.", Value: "129.14238410596026",
+				Unit: "USD per paid membership per year", Computed: "m1"},
+			{ID: "c7", Text: "The share rose 6.5 percentage points.", Value: "6.5", Unit: "percentage points", Computed: "m2"},
+			{ID: "c8", Text: "The share rose 6.5 percent.", Value: "6.5", Unit: "percent", Computed: "m2"},
+		},
+		Computations: []agent.Computation{
+			{ID: "m1", Op: "ratio", Inputs: []string{"c1", "c2"}},
+			{ID: "m2", Op: "difference", Inputs: []string{"c4", "c3"}},
+		},
+	}
+	fc := &agent.FactCheckResult{}
+	for id, q := range map[string]string{"c1": "Revenue $39,001 million.", "c2": "Paid memberships 302 million.",
+		"c3": "BEV share 82.4% in 2023", "c4": "88.9% in 2024"} {
+		fc.Verdicts = append(fc.Verdicts, agent.Verdict{ID: id, Status: statusSupported, Evidence: []agent.Evidence{{Source: url, Quote: q}}})
+	}
+	checkAnalysis(a, findings)
+	governAll(a, fc, nil, findings)
+	if m := a.Computations[0]; m.Unit != "USD per paid memberships" {
+		t.Errorf("m1 unit = %q, want the shared scale cancelled", m.Unit)
+	}
+	for id, want := range map[string]string{"c6": statusSupported, "c7": statusSupported, "c8": statusContradicted} {
+		if c := claimByID(a, id); c.Status != want {
+			t.Errorf("%s = %s (%s), want %s", id, c.Status, c.Note, want)
+		}
 	}
 }

@@ -706,3 +706,35 @@ func quotedRunes(rs []rune) []bool {
 	}
 	return in
 }
+
+// StatesResult reports whether text writes result as one of its numbers, at
+// that number's own precision: "about $129.14" states 129.142384…, and "6.5
+// points" states 6.5. A number in quotation marks is a title's, not one.
+func StatesResult(text string, result Number) bool {
+	rs := []rune(text)
+	quotedAt := quotedRunes(rs)
+	for _, t := range tokensAt(rs) {
+		if quotedAt[t.start] || isYear(t.token) {
+			continue
+		}
+		for _, r := range t.readings {
+			if Matches(Number{r: r, dec: writtenDecimals(t.text)}, result) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writtenDecimals are the places a token is written with: "129.14" has two,
+// "61,200" none.
+func writtenDecimals(tok string) int {
+	i := strings.LastIndexAny(tok, ".,")
+	if i < 0 || len(tok)-i-1 == 3 && strings.Count(tok, string(tok[i])) >= 1 && !strings.Contains(tok, ".") {
+		return 0
+	}
+	if tok[i] == ',' && strings.Contains(tok, ".") {
+		return 0
+	}
+	return len(tok) - i - 1
+}

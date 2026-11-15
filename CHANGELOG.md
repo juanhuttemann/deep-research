@@ -34,6 +34,25 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- A claim stating a computed figure is judged by the figure its words
+  state, at the precision written: a claim reading "about $129.14" whose
+  value field held 129.14238410596026 was refused, and a claim whose words
+  state another figure than the program's is contradicted. Its unit
+  contradicts only where it changes the figure (a percentage against
+  percentage points, another currency or scale), not over wording ("USD per
+  paid membership per year").
+- The difference of two percentages is in percentage points: a run's
+  correct "6.5 percentage points" was contradicted by the program's "6.5
+  percent". A scale word both units of a ratio carry cancels: revenue in
+  USD million over memberships in millions is "USD per paid memberships",
+  not "USD million per million paid memberships".
+- Charts the program draws group a quantity whatever year its criterion
+  names ("battery-electric share, 2023" and "…, 2024" are one series), label
+  a series by the year a figure is for (its subject first, as when a model
+  files the 2012 minimum under "2012"), and treat two figures for one year
+  as alternatives, not a series: an Arctic run charted two reports of the
+  2012 minimum side by side, one bar labelled by the year the second report
+  was published.
 - A number inside quotation marks is not read as a claim's figure: a
   claim that the Louvre tops The Art Newspaper's 2023 ranking, citing the
   article "The 100 most popular art museums in the world", was given the

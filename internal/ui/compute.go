@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -375,22 +376,23 @@ func (e *evaluator) decide(c *agent.Claim) (string, string) {
 		return statusInsufficient, comp.ID + " could not be computed: " + r.err
 	}
 	got := comp.ID + " = " + r.res.Formula + " = " + withUnit(r.res.Value.String(), r.res.Unit)
+	// The figure judged is the one the claim's words state, as the reader
+	// and the inference check read it, at the precision written: a model
+	// gave a claim reading "about $129.14" the value 129.14238410596026,
+	// and the value field is no part of the report.
 	stated, ok := compute.ParseValue(c.Value)
 	switch {
-	case strings.TrimSpace(c.Value) == "":
-		return statusInsufficient, "it states no figure to compare with " + got
-	case !ok:
-		return statusInsufficient, fmt.Sprintf("its value %q is not a number", c.Value)
-	case !compute.InText(c.Text, stated):
-		// The claim is what the answer and the inference check read, so the
-		// figure judged must be the one its words state.
-		return statusInsufficient, "its text does not state its value " + stated.String() + "; the program computed " + got
-	case c.Unit != "" && compute.UnitKey(c.Unit) != compute.UnitKey(r.res.Unit):
+	case !compute.UnitsAgree(c.Unit, r.res.Unit):
 		return statusContradicted, "it is in " + c.Unit + "; the program computed " + got
-	case !compute.Matches(stated, r.res.Value):
+	case compute.StatesResult(c.Text, r.res.Value):
+		return statusSupported, "computed by the program: " + got
+	case ok && compute.InText(c.Text, stated):
 		return statusContradicted, "it states " + withUnit(stated.String(), c.Unit) + "; the program computed " + got
 	}
-	return statusSupported, "computed by the program: " + got
+	if n, sole := compute.SoleFigure(c.Text, c.Scope+" "+c.Option); sole {
+		return statusContradicted, "it states " + withUnit(n.String(), c.Unit) + "; the program computed " + got
+	}
+	return statusInsufficient, "its text states no figure the program computed; it computed " + got
 }
 
 func withUnit(v, unit string) string {
@@ -763,14 +765,14 @@ func autoCharts(a *agent.Analysis) []agent.Chart {
 	charted, quantities := chartedAlready(a)
 	groups, order := map[string][]agent.Claim{}, []string{}
 	for _, c := range a.Claims {
-		if c.Computed != "" || charted[c.ID] || quantities[strings.ToLower(oneLine(c.Criterion))] ||
+		if c.Computed != "" || charted[c.ID] || quantities[quantityKey(c.Criterion)] ||
 			strings.TrimSpace(c.Criterion) == "" && strings.TrimSpace(c.Unit) == "" {
 			continue
 		}
 		if _, ok := compute.ParseValue(c.Value); !ok {
 			continue
 		}
-		key := strings.ToLower(oneLine(c.Criterion)) + "|" + compute.UnitKey(c.Unit)
+		key := quantityKey(c.Criterion) + "|" + compute.UnitKey(c.Unit)
 		if groups[key] == nil {
 			order = append(order, key)
 		}
@@ -811,10 +813,12 @@ func byYear(cs []agent.Claim) [][]agent.Claim {
 	return out
 }
 
-// claimYear is the year a claim's figure is for: its scope's, else its
-// text's, "" when neither names exactly one.
+// claimYear is the year a claim's figure is for: its subject's when the
+// subject is a year (a model filed the 2012 minimum under "2012"), else its
+// scope's, else its text's; "" when none names exactly one. A scope may also
+// name the year a report was published, which is not the figure's.
 func claimYear(c agent.Claim) string {
-	return cmp.Or(compute.SoleYear(c.Scope), compute.SoleYear(c.Text))
+	return cmp.Or(compute.SoleYear(c.Option), compute.SoleYear(c.Scope), compute.SoleYear(c.Text))
 }
 
 // autoChart is one group's chart, when its claims have two or more
@@ -844,7 +848,9 @@ func autoPoints(cs []agent.Claim, byScope bool) (points []agent.ChartPoint, year
 	for _, c := range cs {
 		label := firstNonEmpty(c.Option, c.Scope)
 		if byScope {
-			label = firstNonEmpty(compute.SoleYear(c.Scope), compute.SoleYear(c.Text), c.Scope, c.Option)
+			// Labelled by year, or not at all: a scope sentence is no label.
+			// Two figures for one year are alternatives, and the first stands.
+			label = claimYear(c)
 		}
 		if label == "" || seen[label] {
 			continue
@@ -863,6 +869,11 @@ func autoPoints(cs []agent.Claim, byScope bool) (points []agent.ChartPoint, year
 // subjects share.
 func autoTitle(cs []agent.Claim, byScope bool) string {
 	title := capitalized(firstNonEmpty(cs[0].Criterion, cs[0].Unit))
+	if byScope {
+		// A series spans years: a year its first claim's criterion carries
+		// ("battery-electric share, 2023") is no title of all of them.
+		title = capitalized(strings.Trim(oneLine(yearWords.ReplaceAllString(title, "")), " ,;:-"))
+	}
 	if subject := oneLine(cs[0].Option); byScope && subject != "" && distinctCount(cs, func(c agent.Claim) string { return c.Option }) == 1 {
 		title = subject + ": " + title
 	}
@@ -979,8 +990,20 @@ func chartedAlready(a *agent.Analysis) (claims, quantities map[string]bool) {
 	}
 	for _, c := range a.Claims {
 		if claims[c.ID] && strings.TrimSpace(c.Criterion) != "" {
-			quantities[strings.ToLower(oneLine(c.Criterion))] = true
+			quantities[quantityKey(c.Criterion)] = true
 		}
 	}
 	return claims, quantities
+}
+
+// yearWords are years in a criterion ("battery-electric share, 2023").
+var yearWords = regexp.MustCompile(`\b(?:18|19|20)\d\d\b`)
+
+// quantityKey is a criterion as quantities are grouped: lower case, with
+// any year taken out. A model wrote "battery-electric share, 2023" and
+// "battery-electric share, 2024", one quantity in two years, and the two
+// were never charted together.
+func quantityKey(criterion string) string {
+	k := yearWords.ReplaceAllString(strings.ToLower(criterion), "")
+	return strings.Trim(oneLine(strings.NewReplacer(" ,", ",", ",,", ",").Replace(k)), " ,;:-")
 }

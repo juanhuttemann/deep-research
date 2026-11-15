@@ -419,3 +419,34 @@ func TestSoleFigureSkipsQuotedTitles(t *testing.T) {
 		}
 	}
 }
+
+func TestUnitsAgreeOnWhatChangesAFigure(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"USD per paid membership per year", "USD per paid memberships", true},
+		{"percent", "%", true},
+		{"percentage points", "pp", true},
+		{"percent", "percentage points", false},
+		{"USD billion", "USD million", false},
+		{"EUR", "USD", false},
+		{"", "TEU", true},
+	} {
+		if got := UnitsAgree(tc.a, tc.b); got != tc.want {
+			t.Errorf("UnitsAgree(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestStatesResultAtTheWrittenPrecision(t *testing.T) {
+	res, _ := Apply(OpRatio, []Input{{"a", mustValue(t, "39,001"), ""}, {"b", mustValue(t, "302"), ""}}, 0)
+	for text, want := range map[string]bool{
+		"about $129.14 a membership": true, "about $129 a membership": true, "about $130 a membership": false,
+		"the 'Top 129 list'": false,
+	} {
+		if got := StatesResult(text, res.Value); got != want {
+			t.Errorf("StatesResult(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

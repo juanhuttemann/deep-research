@@ -57,6 +57,8 @@ func UnitKey(u string) string {
 	switch k {
 	case "percent", "per cent", "pct", "percentage", "%":
 		return "%"
+	case "percentage points", "percentage point", "percent points", "% points", "pp", "pps", "p.p.":
+		return "percentage points"
 	}
 	return k
 }
@@ -164,6 +166,11 @@ func difference(in []Input) (Result, error) {
 		return Result{}, err
 	}
 	d := new(big.Rat).Sub(in[0].Value.Rat(), in[1].Value.Rat())
+	// The difference of two percentages is in percentage points: 88.9% less
+	// 82.4% is 6.5 points, not 6.5%, which would be a relative change.
+	if UnitKey(unit) == "%" {
+		unit = "percentage points"
+	}
 	return Result{Number{d, maxDecimals(in)}, unit, in[0].ID + " − " + in[1].ID}, nil
 }
 
@@ -259,7 +266,7 @@ func sigDecimals(r *big.Rat, sig int) int {
 // ratioUnit is the unit of a ÷ b: "×" for like units, which cancel, and
 // "a per b" otherwise.
 func ratioUnit(a, b string) string {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	a, b = cancelScale(strings.TrimSpace(a), strings.TrimSpace(b))
 	switch {
 	case UnitKey(a) == UnitKey(b):
 		return "×"
@@ -269,4 +276,73 @@ func ratioUnit(a, b string) string {
 		return "per " + b
 	}
 	return a + " per " + b
+}
+
+// scaleWords multiply a unit: "USD million", "million paid memberships".
+var scaleWords = []string{"thousand", "million", "billion", "trillion"}
+
+// cancelScale drops a scale word both units of a ratio carry: revenue in
+// USD million over memberships in millions is USD per membership, which a
+// run printed as "129.1 USD million per million paid memberships".
+func cancelScale(a, b string) (string, string) {
+	for _, w := range scaleWords {
+		if hasWord(a, w) && hasWord(b, w) {
+			return dropWord(a, w), dropWord(b, w)
+		}
+	}
+	return a, b
+}
+
+func hasWord(s, w string) bool {
+	for _, f := range strings.Fields(strings.ToLower(s)) {
+		if f == w {
+			return true
+		}
+	}
+	return false
+}
+
+func dropWord(s, w string) string {
+	var out []string
+	dropped := false
+	for _, f := range strings.Fields(s) {
+		if !dropped && strings.ToLower(f) == w {
+			dropped = true
+			continue
+		}
+		out = append(out, f)
+	}
+	return strings.Join(out, " ")
+}
+
+// UnitsAgree reports whether a unit a claim gives its figure says the same
+// as the program's: the same unit, or wording that differs only where it
+// does not change the figure. Two units disagree when they are a
+// percentage and percentage points, or name different currencies or
+// scales; "USD per paid membership per year" and "USD per paid membership"
+// do not. A missing unit agrees with any.
+func UnitsAgree(a, b string) bool {
+	ka, kb := UnitKey(a), UnitKey(b)
+	if ka == "" || kb == "" || ka == kb {
+		return true
+	}
+	pa, pb := ka == "%" || ka == "percentage points", kb == "%" || kb == "percentage points"
+	if pa || pb {
+		return false
+	}
+	return wordIn(ka, kb, scaleWords) && wordIn(ka, kb, []string{"usd", "eur", "gbp", "jpy", "cny", "$", "€", "£"})
+}
+
+// wordIn reports whether a and b name the same one of words, or neither
+// names any.
+func wordIn(a, b string, words []string) bool {
+	first := func(s string) string {
+		for _, w := range words {
+			if hasWord(s, w) || strings.Contains(s, w) && len([]rune(w)) == 1 {
+				return w
+			}
+		}
+		return ""
+	}
+	return first(a) == first(b)
 }
