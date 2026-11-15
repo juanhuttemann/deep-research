@@ -34,6 +34,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- A source's table is no longer left out of the excerpt a model reads for
+  being long. A US cities run fetched the Census Bureau's release with the
+  2024 population of every city asked for, in two tables, and reported that
+  no retrieved text stated them: the tables were scored down for their
+  length and the excerpt went to a prose sentence, a "Subscribe" heading and
+  a "Press Kit" link. A table is now scored by its header and the rows that
+  answer, so the rows asked for reach the analysis and the fact-check.
 - A claim stating a computed figure is judged by the figure its words
   state, at the precision written: a claim reading "about $129.14" whose
   value field held 129.14238410596026 was refused, and a claim whose words

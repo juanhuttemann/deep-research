@@ -25,3 +25,17 @@ SHA-256:
 
 - CSV: `6098f56a5f25ca050313838886090a5e58a40ca72c2b44eb19d5ac7c9f6b4896`
 - Markdown: `52e162d926a6bb6bbdb17feec026a6ce7a4bc3d64b72224a012901551da43812`
+
+`census-vintage-2024-cities.md` is the U.S. Census Bureau press release
+"Population Growth Reported Across Cities and Towns in All U.S. Regions"
+(May 15, 2025), public U.S. government data, as the configured Firecrawl page
+extractor delivered it during a research run on 2026-11-15, from:
+
+https://www.census.gov/newsroom/press-releases/2025/vintage-2024-popest.html
+
+It is stored unchanged. Its Table 3 lists the 15 most populous cities on
+July 1, 2024; the run that fetched it was asked for the five most populous
+and reported that no retrieved text stated them, because the excerpt left
+the tables out.
+
+- Markdown: `78737c3c9ce686cc882f414ead4284dcd97a4195d6de11d46c0586d670088d2f`

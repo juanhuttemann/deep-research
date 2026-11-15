@@ -153,6 +153,11 @@ navigation and a cookie dialog. Each passage carries its section context,
 the heading above it and the section's opening sentence, inside the same
 budget, so its scope survives the cut. Oversized multi-line blocks also
 compete by their best matching line, using the same page-level term weights.
+A Markdown table is also scored as the excerpt would show it, its header
+and the rows that mention a query word, the length penalty charged on those
+lines alone, so a table naming each subject asked for, a row each, is not
+outranked by a shorter sentence naming some of them; a table whose rows
+name nothing asked for scores nothing by this.
 Equal-tier ties favor the passage answering more queries, so metadata cannot
 exclude an entire table needed by several claims. Their compact matching lines are budgeted
 beside other passages before spare space is filled, retaining headers and
