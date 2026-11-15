@@ -432,3 +432,51 @@ func readAs(tok string, groupSep, decimal rune) (*big.Rat, bool) {
 	r, ok := new(big.Rat).SetString(plain)
 	return r, ok
 }
+
+// SoleFigure is the one number text states, when it states exactly one that
+// is not a year (a whole number from 1800 to 2100 written without grouping)
+// and not a number context writes: "The United States won 40 gold medals at
+// Paris 2024" is 40. Numbers are compared whole, so the 20 of "Japan won 20"
+// is not taken for part of a context's "2024". A token read more than one
+// way ("1.234") or two candidate numbers give nothing, rather than a guess.
+func SoleFigure(text, context string) (Number, bool) {
+	known := numbersIn(context)
+	var found []token
+	for _, t := range tokens(text) {
+		if len(t.readings) == 0 || isYear(t) || slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) {
+			continue
+		}
+		found = append(found, t)
+	}
+	if len(found) != 1 || len(found[0].readings) != 1 {
+		return Number{}, false
+	}
+	r := found[0].readings[0]
+	_, frac, _ := strings.Cut(found[0].text, ".")
+	if strings.Contains(found[0].text, ",") && !strings.Contains(found[0].text, ".") {
+		frac = ""
+	}
+	return Number{r: r, dec: len(frac)}, true
+}
+
+func isYear(t token) bool {
+	if len(t.readings) != 1 || len(t.text) != 4 || !t.readings[0].IsInt() {
+		return false
+	}
+	v := t.readings[0].Num().Int64()
+	return v >= 1800 && v <= 2100
+}
+
+// SoleYear is the one year text writes, "" when it writes none or several.
+func SoleYear(text string) string {
+	var years []string
+	for _, t := range tokens(text) {
+		if isYear(t) && !slices.Contains(years, t.text) {
+			years = append(years, t.text)
+		}
+	}
+	if len(years) != 1 {
+		return ""
+	}
+	return years[0]
+}

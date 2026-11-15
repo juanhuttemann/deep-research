@@ -263,8 +263,13 @@ to the checked decision.
   states (in their text, option, criterion or scope) is blocked in
   `blockUnits`: its words are printed as the answer, and the inference
   check only asks whether it follows, so arithmetic done in a statement's
-  own words would reach the answer unchecked. The report's
-  "Computed figures" section, the chart SVGs (named by their content
+  own words would reach the answer unchecked. Charts are the program's to
+  draw when the numbers are there: `autoCharts` groups the claims with a
+  value by criterion and unit and draws each group of two or more that the
+  analyzer did not chart, and `inferValues` gives a claim with no value the
+  one number its text states (years and its scope's numbers aside), so a
+  model that skips the value fields does not leave a run with no figures.
+  The report's "Computed figures" section, the chart SVGs (named by their content
   digest) and the PDF's vector charts are written from the governed
   analysis. The PDF and the serve page draw or show only the charts the
   run's own list names, never a file a report links to. What this
