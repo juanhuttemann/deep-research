@@ -71,6 +71,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   claim that the Louvre tops The Art Newspaper's 2023 ranking, citing the
   article "The 100 most popular art museums in the world", was given the
   value 100.
+- A conclusion may rest on a computation itself and stands or falls with
+  it: a run's conclusion naming "m1" was refused as resting on no claim.
 - The program draws no chart of ranks, and a chart's title takes a scope
   only when it is short.
 - A chart the program draws to compare subjects holds them to one year: a

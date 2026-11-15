@@ -833,3 +833,24 @@ func TestRanksAreNotCharted(t *testing.T) {
 		t.Errorf("charted ranks: %+v", got)
 	}
 }
+
+// A run's conclusion rested on the computation m1 itself, and was refused
+// as naming no claim; it stands or falls with the computation.
+func TestAConclusionMayRestOnAComputation(t *testing.T) {
+	a, findings := velmarAnalysis(), velmarFindings()
+	a.Conclusions = []agent.Recommendation{{Statement: "The port handled 248,000 containers in 2025.", Claims: []string{"m1"}}}
+	checkAnalysis(a, findings)
+	fc := quarterVerdicts(quarterQuotes)
+	governAll(a, fc, nil, findings)
+	if got := a.Conclusions[0].Blocked; got != "" {
+		t.Errorf("a conclusion on a valid computation was blocked: %s", got)
+	}
+	b := velmarAnalysis()
+	b.Conclusions = []agent.Recommendation{{Statement: "The port handled 248,000 containers in 2025.", Claims: []string{"m1"}}}
+	checkAnalysis(b, findings)
+	fc.Verdicts[0].Status = statusInsufficient
+	governAll(b, fc, nil, findings)
+	if got := b.Conclusions[0].Blocked; !strings.Contains(got, "m1 could not be computed") {
+		t.Errorf("blocked = %q, want it to fall with the computation", got)
+	}
+}

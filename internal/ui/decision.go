@@ -437,6 +437,13 @@ func blockUnits(a *agent.Analysis, inferences map[string][]agent.Inference) {
 		for _, id := range r.Claims {
 			c, ok := byID[id]
 			switch {
+			case !ok && computationOf(a, id) != nil:
+				// A conclusion may rest on a computation itself: it stands or
+				// falls with it. A run's "m1" was refused as no claim.
+				if m := computationOf(a, id); !m.Valid {
+					reasons = append(reasons, id+" could not be computed: "+m.Reason)
+					r.Failed = append(r.Failed, id)
+				}
 			case !ok:
 				reasons = append(reasons, id+" is not a claim of the analysis")
 			case c.Status != statusSupported:
@@ -445,7 +452,7 @@ func blockUnits(a *agent.Analysis, inferences map[string][]agent.Inference) {
 			}
 		}
 		if len(reasons) == 0 {
-			reasons = unstatedFigures(r, byID)
+			reasons = unstatedFigures(r, a, byID)
 		}
 		if len(reasons) == 0 && inferences != nil {
 			reasons = inferenceFailure(inferences[u.id])
@@ -1113,7 +1120,7 @@ func judgeRevisions(a *agent.Analysis, added []string, fc, recheck *agent.FactCh
 			// A revision is held to its figures as the first pass was: one
 			// restating the arithmetic it was blocked for must not pass on
 			// the inference alone.
-			reasons := unstatedFigures(u.r, claims)
+			reasons := unstatedFigures(u.r, a, claims)
 			if len(reasons) == 0 {
 				reasons = inferenceFailure(by[id])
 			}
@@ -1137,15 +1144,47 @@ func replaced(a *agent.Analysis, id string) bool {
 // year-to-date total less April" on the two claims it subtracted was
 // approved, while the computed claim stating the same figure had failed.
 // A figure the answer needs is a computed claim's, which the program checks.
-func unstatedFigures(r *agent.Recommendation, claims map[string]agent.Claim) []string {
+func unstatedFigures(r *agent.Recommendation, a *agent.Analysis, claims map[string]agent.Claim) []string {
 	var premises []string
 	for _, id := range r.Claims {
 		c := claims[id]
 		premises = append(premises, c.Text, c.Option, c.Criterion, c.Scope)
 	}
+	premises = append(premises, computedPremises(r, a, claims)...)
 	extra := compute.Unstated(r.Statement+" "+r.Choose+" "+r.When, premises...)
 	if len(extra) == 0 {
 		return nil
 	}
 	return []string{"it states " + strings.Join(extra, ", ") + ", which none of its claims states"}
+}
+
+// computationOf is the analysis's computation with the ID, nil when none.
+func computationOf(a *agent.Analysis, id string) *agent.Computation {
+	for i := range a.Computations {
+		if a.Computations[i].ID == id {
+			return &a.Computations[i]
+		}
+	}
+	return nil
+}
+
+// computedPremises are what a unit's computation premises state: each
+// result, its label, and the words of the claims it was computed from.
+func computedPremises(r *agent.Recommendation, a *agent.Analysis, claims map[string]agent.Claim) []string {
+	var out []string
+	for _, id := range r.Claims {
+		m := computationOf(a, id)
+		if m == nil {
+			continue
+		}
+		out = append(out, m.Label, m.Result)
+		if n, ok := compute.ParseValue(m.Result); ok {
+			out = append(out, n.String())
+		}
+		for _, in := range m.Inputs {
+			c := claims[in]
+			out = append(out, c.Text, c.Scope)
+		}
+	}
+	return out
 }
