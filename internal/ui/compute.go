@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
@@ -257,6 +258,7 @@ func (e *evaluator) record(a *agent.Analysis, checked bool) {
 // claim cites its inputs' sources, and the computations are evaluated over
 // the stated values, for the checker to see.
 func prepareFigures(a *agent.Analysis) {
+	inferValues(a)
 	if len(a.Computations) == 0 && len(a.Charts) == 0 && !hasComputedClaim(a) {
 		return
 	}
@@ -321,6 +323,8 @@ func checkedClaims(claims []agent.Claim) []agent.Claim {
 // decided against them, and the charts are drawn from what stands.
 func settleFigures(a *agent.Analysis, verdicts map[string][]agent.Verdict, findings []agent.Finding,
 	pages map[string]*pageText) {
+	a.Charts = slices.DeleteFunc(a.Charts, func(ch agent.Chart) bool { return ch.Auto })
+	a.Charts = append(a.Charts, autoCharts(a)...)
 	if len(a.Computations) == 0 && len(a.Charts) == 0 && !hasComputedClaim(a) {
 		return
 	}
@@ -588,34 +592,12 @@ func figuresSection(a *agent.Analysis, findings []agent.Finding) string {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## %s\n\n_%s_\n\n", label(a, "computed"), label(a, "computed_note"))
-	var failed []string
-	var rows []string
-	for _, c := range a.Computations {
-		if !c.Valid {
-			failed = append(failed, fmt.Sprintf("- %s%s: %s", mdText(c.ID), labelled(c.Label), mdText(c.Reason)))
-			continue
-		}
-		n, _ := compute.ParseValue(c.Result)
-		rows = append(rows, fmt.Sprintf("| %s | %s | %s | %s |", mdText(firstNonEmpty(c.Label, c.ID)),
-			mdText(withUnit(n.String(), c.Unit)), mdText(c.ID+" = "+c.Formula), inputCell(a, c, findings)))
-	}
+	rows, failed := computationRows(a, findings)
 	if len(rows) > 0 {
 		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n| --- | ---: | --- | --- |\n%s\n\n", label(a, "figure"),
 			label(a, "value"), label(a, "formula"), label(a, "inputs"), strings.Join(rows, "\n"))
 	}
-	for _, ch := range a.Charts {
-		if ch.File == "" {
-			failed = append(failed, fmt.Sprintf("- %s%s: %s", mdText(ch.ID), labelled(ch.Title), mdText(ch.Reason)))
-			continue
-		}
-		writeChart(&sb, ch)
-		for _, p := range ch.Points {
-			if p.Reason != "" {
-				failed = append(failed, fmt.Sprintf("- %s%s, point %s: %s", mdText(ch.ID), labelled(ch.Title),
-					mdText(firstNonEmpty(p.Label, p.Ref)), mdText(p.Reason)))
-			}
-		}
-	}
+	failed = append(failed, writeCharts(&sb, a)...)
 	if len(rows) == 0 && len(failed) > 0 && !anyDrawn(a) {
 		sb.Reset()
 		fmt.Fprintf(&sb, "## %s\n\n", label(a, "computed"))
@@ -624,6 +606,44 @@ func figuresSection(a *agent.Analysis, findings []agent.Finding) string {
 		fmt.Fprintf(&sb, "%s:\n\n%s\n", label(a, "not_established"), strings.Join(failed, "\n"))
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// computationRows are the table rows of the valid computations, and a line
+// for each that failed for a cause of its own.
+func computationRows(a *agent.Analysis, findings []agent.Finding) (rows, failed []string) {
+	for _, c := range a.Computations {
+		if !c.Valid {
+			// One that failed only because an earlier one did adds nothing:
+			// the earlier one is listed with the cause.
+			if !knockOn(a, c.Reason) {
+				failed = append(failed, fmt.Sprintf("- %s%s: %s", mdText(c.ID), labelled(c.Label), mdText(c.Reason)))
+			}
+			continue
+		}
+		n, _ := compute.ParseValue(c.Result)
+		rows = append(rows, fmt.Sprintf("| %s | %s | %s | %s |", mdText(firstNonEmpty(c.Label, c.ID)),
+			mdText(withUnit(n.String(), c.Unit)), mdText(c.ID+" = "+c.Formula), inputCell(a, c, findings)))
+	}
+	return rows, failed
+}
+
+// writeCharts writes the drawn charts and returns a line for each chart
+// not drawn and each point left out.
+func writeCharts(sb *strings.Builder, a *agent.Analysis) (failed []string) {
+	for _, ch := range a.Charts {
+		if ch.File == "" {
+			failed = append(failed, fmt.Sprintf("- %s%s: %s", mdText(ch.ID), labelled(ch.Title), mdText(ch.Reason)))
+			continue
+		}
+		writeChart(sb, ch)
+		for _, p := range ch.Points {
+			if p.Reason != "" {
+				failed = append(failed, fmt.Sprintf("- %s%s, point %s: %s", mdText(ch.ID), labelled(ch.Title),
+					mdText(firstNonEmpty(p.Label, p.Ref)), mdText(p.Reason)))
+			}
+		}
+	}
+	return failed
 }
 
 func anyDrawn(a *agent.Analysis) bool {
@@ -703,4 +723,133 @@ func mdText(s string) string {
 		sb.WriteRune(r)
 	}
 	return sb.String()
+}
+
+// inferValues gives a claim with no value the one number its text states
+// (compute.SoleFigure), skipping years and what its scope already writes.
+// Models skip the value field: a run named every computation over five
+// medal counts and gave no claim a value, so nothing was computed or drawn.
+// An inferred value is held to the same checks as a stated one: the claim
+// supported, the number in a passage it was supported on.
+func inferValues(a *agent.Analysis) {
+	for i := range a.Claims {
+		c := &a.Claims[i]
+		if c.Computed != "" || strings.TrimSpace(c.Value) != "" {
+			continue
+		}
+		if n, ok := compute.SoleFigure(c.Text, c.Scope+" "+c.Option); ok {
+			c.Value = n.String()
+		}
+	}
+}
+
+// maxAutoCharts bounds the charts drawn unasked.
+const maxAutoCharts = 3
+
+// autoCharts are the charts the program draws of the analysis's figures
+// when they make a series the analyzer did not chart: two or more claims
+// with a value measuring the same thing (the same criterion and unit),
+// labelled by what each is about. Charts are the program's to draw when
+// the numbers are there, not only when a model remembers to ask; the claims
+// that do not pass the check are left out of them with why (drawChart).
+func autoCharts(a *agent.Analysis) []agent.Chart {
+	charted := map[string]bool{}
+	for _, ch := range a.Charts {
+		for _, p := range ch.Points {
+			charted[p.Ref] = true
+		}
+	}
+	groups, order := map[string][]agent.Claim{}, []string{}
+	for _, c := range a.Claims {
+		if c.Computed != "" || charted[c.ID] || strings.TrimSpace(c.Criterion) == "" && strings.TrimSpace(c.Unit) == "" {
+			continue
+		}
+		if _, ok := compute.ParseValue(c.Value); !ok {
+			continue
+		}
+		key := strings.ToLower(oneLine(c.Criterion)) + "|" + compute.UnitKey(c.Unit)
+		if groups[key] == nil {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], c)
+	}
+	var out []agent.Chart
+	for _, key := range order {
+		if ch, ok := autoChart(groups[key], len(out)+1); ok && len(out) < maxAutoCharts {
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// autoChart is one group's chart, when its claims have two or more
+// distinct labels: what each is about (its option, else its scope), each
+// label once. Years in order make a line, anything else bars.
+func autoChart(cs []agent.Claim, n int) (agent.Chart, bool) {
+	ch := agent.Chart{ID: "auto" + strconv.Itoa(n), Auto: true, Title: oneLine(cs[0].Criterion)}
+	seen := map[string]bool{}
+	years := true
+	prev := -1
+	byScope := !distinct(cs, func(c agent.Claim) string { return c.Option })
+	for _, c := range cs {
+		label := firstNonEmpty(c.Option, c.Scope)
+		if byScope {
+			// A scope is a sentence ("Germany, calendar year 2023; …"); the
+			// year in it is the label a reader needs.
+			label = firstNonEmpty(compute.SoleYear(c.Scope), compute.SoleYear(c.Text), c.Scope, c.Option)
+		}
+		if label == "" || seen[label] {
+			continue
+		}
+		seen[label] = true
+		ch.Points = append(ch.Points, agent.ChartPoint{Label: label, Ref: c.ID})
+		y, err := strconv.Atoi(label)
+		years = years && err == nil && y > prev
+		prev = y
+	}
+	if len(ch.Points) < 2 {
+		return agent.Chart{}, false
+	}
+	if ch.Title == "" {
+		ch.Title = cs[0].Unit
+	}
+	if scope := sharedScope(cs); scope != "" && !strings.Contains(ch.Title, scope) {
+		ch.Title += ", " + scope
+	}
+	ch.Kind = compute.KindBar
+	if years {
+		ch.Kind = compute.KindLine
+	}
+	return ch, true
+}
+
+// sharedScope is the scope every claim gives, "" when they differ.
+func sharedScope(cs []agent.Claim) string {
+	s := oneLine(cs[0].Scope)
+	for _, c := range cs[1:] {
+		if oneLine(c.Scope) != s {
+			return ""
+		}
+	}
+	return s
+}
+
+// distinct reports whether field gives every claim its own non-empty value.
+func distinct(cs []agent.Claim, field func(agent.Claim) string) bool {
+	seen := map[string]bool{}
+	for _, c := range cs {
+		v := oneLine(field(c))
+		if v == "" || seen[v] {
+			return false
+		}
+		seen[v] = true
+	}
+	return true
+}
+
+// knockOn reports whether reason is only that another computation of a
+// failed ("m1 is not computed").
+func knockOn(a *agent.Analysis, reason string) bool {
+	id, ok := strings.CutSuffix(reason, " is not computed")
+	return ok && slices.ContainsFunc(a.Computations, func(c agent.Computation) bool { return c.ID == id })
 }

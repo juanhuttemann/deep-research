@@ -237,6 +237,9 @@ type Chart struct {
 	Unit   string       `json:"unit,omitempty"`
 	File   string       `json:"file,omitempty"`
 	Reason string       `json:"reason,omitempty"`
+	// Auto marks a chart the program drew of the analysis's figures
+	// unasked (see autoCharts), rebuilt each time the analysis is governed.
+	Auto bool `json:"auto,omitempty"`
 }
 
 // ChartPoint is one labelled point of a chart. Value is set when it is

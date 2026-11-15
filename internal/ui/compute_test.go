@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -453,5 +454,100 @@ func TestAChartDrawsThePointsThatStand(t *testing.T) {
 	governAll(b, fc, nil, findings)
 	if ch := b.Charts[0]; ch.File != "" || !strings.HasPrefix(ch.Reason, "1 of its 4 points stand") {
 		t.Errorf("chart = %+v, want it not drawn", ch)
+	}
+}
+
+func medalAnalysis() (*agent.Analysis, []agent.Finding, *agent.FactCheckResult) {
+	const url = "https://medals.example/paris-2024"
+	page := "Paris 2024 medal table. United States 40 gold. China 40 gold. Japan 20 gold. Australia 18 gold. France 16 gold."
+	findings := []agent.Finding{{URL: url, Title: "Medal table", Content: page, Status: "ok"}}
+	a := &agent.Analysis{}
+	fc := &agent.FactCheckResult{}
+	for i, row := range [][2]string{{"United States", "40"}, {"China", "40"}, {"Japan", "20"}, {"Australia", "18"}, {"France", "16"}} {
+		id := "c" + strconv.Itoa(i+1)
+		// As a model wrote them: no value, no unit; the figure is in the text.
+		a.Claims = append(a.Claims, agent.Claim{ID: id, Text: row[0] + " won " + row[1] + " gold medals at the Paris 2024 Olympics",
+			Option: row[0], Criterion: "Gold Medals", Scope: "Paris 2024 Olympics", Sources: []string{url}})
+		fc.Verdicts = append(fc.Verdicts, agent.Verdict{ID: id, Status: statusSupported,
+			Evidence: []agent.Evidence{{Source: url, Quote: row[0] + " " + row[1] + " gold."}}})
+	}
+	return a, findings, fc
+}
+
+// A model named every computation over five medal counts and gave no claim
+// a value, and asked for no chart: nothing was computed or drawn. The
+// numbers were in the claims' own words, and charting them is the
+// program's job, not the model's to remember.
+func TestFiguresInTheClaimsAreComputedAndChartedUnasked(t *testing.T) {
+	a, findings, fc := medalAnalysis()
+	a.Computations = []agent.Computation{{ID: "m1", Op: "sum", Inputs: []string{"c1", "c2", "c3", "c4", "c5"}}}
+	checkAnalysis(a, findings)
+	governAll(a, fc, nil, findings)
+	// Japan's 20 is not mistaken for part of the scope's 2024.
+	if c := claimByID(a, "c3"); c.Value != "20" {
+		t.Errorf("c3 value = %q, want 20 read from its text", c.Value)
+	}
+	if m := a.Computations[0]; !m.Valid || m.Result != "134" {
+		t.Errorf("m1 = %+v, want 134", m)
+	}
+	if len(a.Charts) != 1 || !a.Charts[0].Auto || a.Charts[0].File == "" || a.Charts[0].Kind != "bar" {
+		t.Fatalf("charts = %+v, want one bar chart drawn unasked", a.Charts)
+	}
+	ch := a.Charts[0]
+	if ch.Title != "Gold Medals, Paris 2024 Olympics" || ch.Points[2].Label != "Japan" || ch.Points[2].Value != "20" {
+		t.Errorf("chart = %+v", ch)
+	}
+	// Governing again rebuilds it rather than adding a second one.
+	governAll(a, fc, nil, findings)
+	if len(a.Charts) != 1 {
+		t.Errorf("a second govern added charts: %d", len(a.Charts))
+	}
+}
+
+func TestNoFigureIsGuessedFromAmbiguousText(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c1", Text: "In 2024 the US won 40 golds and 126 medals in all."},
+		{ID: "c2", Text: "The 2024 Games were held in Paris."},
+		{ID: "c3", Text: "Japan won 20 golds at Paris 2024.", Scope: "Paris 2024"},
+	}}
+	inferValues(a)
+	if a.Claims[0].Value != "" || a.Claims[1].Value != "" || a.Claims[2].Value != "20" {
+		t.Errorf("values = %q %q %q, want none, none, 20", a.Claims[0].Value, a.Claims[1].Value, a.Claims[2].Value)
+	}
+}
+
+func TestAutoChartsGroupLikeFiguresAndLabelThem(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		// One subject over years: labelled by the year in its scope, a line.
+		{ID: "c1", Option: "Germany", Criterion: "GDP growth", Scope: "Germany, calendar year 2023", Value: "-0.87", Unit: "%"},
+		{ID: "c2", Option: "Germany", Criterion: "GDP growth", Scope: "Germany, calendar year 2024", Value: "-0.50", Unit: "%"},
+		{ID: "c3", Option: "Germany", Criterion: "GDP growth", Scope: "2024, base year 2015", Text: "growth in 2024 was -0.50%", Value: "-0.50", Unit: "%"},
+		// A lone figure of another quantity, and one with nothing to group by.
+		{ID: "c4", Option: "Germany", Criterion: "Population", Value: "84,000,000"},
+		{ID: "c5", Value: "7"}, {ID: "c6", Value: "8"},
+	}}
+	got := autoCharts(a)
+	if len(got) != 1 {
+		t.Fatalf("auto charts = %+v, want the one GDP series", got)
+	}
+	ch := got[0]
+	if ch.Kind != "line" || len(ch.Points) != 2 || ch.Points[0].Label != "2023" || ch.Points[1].Label != "2024" {
+		t.Errorf("chart = %+v, want a line over 2023 and 2024, the second 2024 once", ch)
+	}
+	// What the analyzer charted itself is not charted again.
+	a.Charts = []agent.Chart{{ID: "g1", Points: []agent.ChartPoint{{Ref: "c1"}, {Ref: "c2"}, {Ref: "c3"}}}}
+	if got := autoCharts(a); len(got) != 0 {
+		t.Errorf("charted again: %+v", got)
+	}
+}
+
+func TestOnlyTheCauseOfAFailureIsListed(t *testing.T) {
+	a := &agent.Analysis{Computations: []agent.Computation{
+		{ID: "m1", Op: "sum", Reason: "c2 is insufficient"},
+		{ID: "m2", Op: "ratio", Reason: "m1 is not computed"},
+	}}
+	r := figuresSection(a, nil)
+	if !strings.Contains(r, "m1: c2 is insufficient") || strings.Contains(r, "m2") {
+		t.Errorf("section:\n%s", r)
 	}
 }

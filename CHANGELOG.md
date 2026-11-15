@@ -34,6 +34,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- Charts are drawn whenever the figures make a series, asked for or not:
+  two or more checked claims measuring the same thing become a bar chart
+  labelled by subject, or a line over years. A claim with no value given
+  takes the one number its text states. A run over five medal counts had
+  computations named but no value given and no chart asked, and showed
+  nothing. The report lists only the cause of a failed computation, not
+  every computation that failed after it.
 - A chart draws the points that stand when at least two do, and the report
   lists each point left out with why: one year a source did not state made
   a run's whole series disappear. A minus sign that scraped pages escape

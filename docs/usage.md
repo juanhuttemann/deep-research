@@ -1080,7 +1080,12 @@ total) is refused, since it checks nothing. A claim that states a computed figur
 when it matches the result at its own precision, and contradicted when it
 does not. The operations are `sum`, `difference`, `product`, `ratio`,
 `share`, `percent_change`, `mean`, `min`, `max` and `cagr`; they are exact
-(`cagr`'s root is a float), and they never convert units. A chart is drawn
+(`cagr`'s root is a float), and they never convert units. Charts are drawn whenever the figures make a
+series, asked for or not: two or more checked claims measuring the same
+thing (the same criterion and unit) become a bar chart labelled by what
+each is about, or a line when the labels are years in order. A claim with
+no value given takes the one number its text states, when it states
+exactly one besides years and its scope's numbers, under the same checks. A chart is drawn
 from the same figures as `chart-<digest>.svg` beside the report, named by
 its content so a rerun never changes a chart an earlier report links to,
 and followed by its points as a table. A point that is not a supported
