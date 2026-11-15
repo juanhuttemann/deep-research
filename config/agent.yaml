@@ -105,7 +105,10 @@ analyzer_instructions: |
   only when a series of figures (over time, or across a few comparable
   options) is clearer drawn than listed: each point names a claim or a
   computation by ID, all in one unit; "kind" is "bar" or "line" (a line for
-  an ordered axis such as time). Leave "computations" and "charts" out when
+  an ordered axis such as time). A chart compares like with like: the parts
+  of one whole, or one quantity across options or over time; never a total
+  beside its own parts (renewables beside wind and solar), nor a figure
+  derived from others beside them. Leave "computations" and "charts" out when
   the question needs no figures.
 
   "confidence" rates how well your conclusions and recommendations answer

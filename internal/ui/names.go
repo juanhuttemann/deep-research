@@ -98,28 +98,27 @@ func shortClaimName(c agent.Claim, all []agent.Claim) string {
 	return quoted(c.Text)
 }
 
-// nameCandidates are the names a claim may go by, shortest first.
+// nameCandidates are the names a claim may go by, shortest first: its
+// subject, with its year, with the site it was read on ("Solar,
+// ember-energy.org" beside a Reuters figure for the same), then its
+// criterion, its year or a short scope.
 func nameCandidates(c agent.Claim) []string {
 	option := oneLine(c.Option)
 	year := cmp.Or(compute.SoleYear(c.Scope), compute.SoleYear(c.Text))
-	base := []string{
-		option,
-		strings.TrimSpace(option + " " + year),
-		strings.TrimSpace(option + " " + oneLine(c.Criterion)),
-		year,
-		shortScope(c.Scope),
-	}
-	out := slices.Clone(base)
+	site := ""
 	if len(c.Sources) > 0 {
-		if site := strings.TrimPrefix(tools.DomainOf(c.Sources[0]), "www."); site != "" {
-			for _, b := range base[1:4] {
-				if b != "" {
-					out = append(out, b+", "+site)
-				}
-			}
-		}
+		site = strings.TrimPrefix(tools.DomainOf(c.Sources[0]), "www.")
 	}
-	return out
+	withSite := func(s string) string {
+		if s == "" || site == "" {
+			return ""
+		}
+		return s + ", " + site
+	}
+	optYear := strings.TrimSpace(option + " " + year)
+	optCrit := strings.TrimSpace(option + " " + oneLine(c.Criterion))
+	return []string{option, optYear, withSite(optYear), withSite(option), optCrit, year,
+		shortScope(c.Scope), withSite(optCrit), withSite(year)}
 }
 
 // quoted is a claim's words in quotation marks, shortened to a line.

@@ -441,14 +441,22 @@ func readAs(tok string, groupSep, decimal rune) (*big.Rat, bool) {
 // way ("1.234") or two candidate numbers give nothing, rather than a guess.
 func SoleFigure(text, context string) (Number, bool) {
 	known := numbersIn(context)
-	var found []token
-	for _, t := range tokens(text) {
-		if len(t.readings) == 0 || isYear(t) || slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) {
+	rs := []rune(text)
+	var found, references []token
+	for _, t := range tokensAt(rs) {
+		if len(t.readings) == 0 || isYear(t.token) || slices.ContainsFunc(t.readings, func(v *big.Rat) bool { return containsRat(known, v) }) {
 			continue
 		}
-		found = append(found, t)
+		if comparedWith(rs, t.start) {
+			references = append(references, t.token)
+			continue
+		}
+		found = append(found, t.token)
 	}
-	if len(found) != 1 {
+	// "17% in 2024, up from 13% in 2019": the number a comparison names is
+	// the reference, and the claim's figure is the other. Only when one is
+	// left; a claim with no reference keeps the plain rule.
+	if len(found) != 1 || len(found)+len(references) == 0 {
 		return Number{}, false
 	}
 	// A claim written with commas grouping thousands ("367,500"), the
@@ -640,4 +648,30 @@ func firstOf(words []string) string {
 func oneLetter(w string) bool {
 	r := []rune(w)
 	return len(r) == 1 && unicode.IsLetter(r[0])
+}
+
+// referenceWords introduce the figure a claim is compared with.
+var referenceWords = map[string]bool{"from": true, "than": true, "versus": true, "vs": true, "vs.": true,
+	"against": true, "compared": true, "previously": true, "previous": true, "prior": true}
+
+// comparedWith reports whether the number at start is introduced as a
+// comparison's reference: one of referenceWords among the three words
+// before it ("up from 13%", "compared with 9.3%", "than 40").
+func comparedWith(rs []rune, start int) bool {
+	words := strings.Fields(strings.ToLower(string(rs[:start])))
+	for i := len(words) - 1; i >= 0 && i >= len(words)-3; i-- {
+		w := strings.Trim(words[i], ",;:()")
+		if referenceWords[w] {
+			return true
+		}
+		// "from 40 to 52": the "from" is 40's; another number or a "to"
+		// in between ends the look back.
+		if w == "to" || w != "" && w[0] >= '0' && w[0] <= '9' {
+			return false
+		}
+		if strings.ContainsAny(words[i], ",;") && i < len(words)-1 {
+			return false // a clause ended: what came before is another phrase's
+		}
+	}
+	return false
 }

@@ -370,3 +370,29 @@ func TestUnitOfRefusesWhatTheTextDoesNotSettle(t *testing.T) {
 		}
 	}
 }
+
+// A claim comparing its figure with an earlier one names two numbers:
+// "17% in 2024, up from 13% in 2019". The reference is the one a comparison
+// introduces, and the figure is the other.
+func TestSoleFigureSkipsAComparisonsReference(t *testing.T) {
+	for _, tc := range []struct{ text, want string }{
+		{"Ember reports wind energy reached a share of 17% of EU electricity in 2024, up from 13% in 2019.", "17"},
+		{"Solar provided 11% of the EU's electricity mix in 2024, up from 9.3% in 2023.", "11"},
+		{"Output rose from 40 to 52 units.", "52"},
+		{"Prices were 12 euros, compared with 10 euros a year earlier.", "12"},
+		{"Turnout was 61%, higher than 58% in the last election.", "61"},
+	} {
+		n, ok := SoleFigure(tc.text, "")
+		if !ok || n.String() != tc.want {
+			t.Errorf("SoleFigure(%q) = %s, %v; want %s", tc.text, n, ok, tc.want)
+		}
+	}
+	for _, text := range []string{
+		"Wind gave 17% and solar 11% of the total.", // two figures, no reference
+		"It fell from 20 to 15, then from 15 to 9.", // more than one left
+	} {
+		if n, ok := SoleFigure(text, ""); ok {
+			t.Errorf("SoleFigure(%q) = %s, want nothing", text, n)
+		}
+	}
+}
