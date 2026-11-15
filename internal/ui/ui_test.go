@@ -1619,12 +1619,14 @@ func TestAnswerNamesTheOptionsNotEstablished(t *testing.T) {
 	}, Inferences: follows("r1", "r2", "r3")}
 	governAll(a, fc, nil, findings)
 	got := renderAnswer(a)
-	if !strings.Contains(got, "Not established in this run") ||
-		!strings.Contains(got, "- **Node-based**: traffic is steady (partial: \u201cReserved nodes save 90%\u201d)") {
-		t.Errorf("answer does not name the blocked option and its failed claim:\n%s", got)
+	// The blocked option is named, in the reader's words; why the check
+	// held it back is the audit's.
+	if !strings.Contains(got, "Not confirmed by the sources") ||
+		!strings.Contains(got, "- **Node-based**: traffic is steady\n") || strings.Contains(got, "partial") {
+		t.Errorf("answer does not name the blocked option alone:\n%s", got)
 	}
 	governAll(a, nil, errors.New("timeout"), findings)
-	if got := renderAnswer(a); strings.Contains(got, "Not established") {
+	if got := renderAnswer(a); strings.Contains(got, "Not confirmed") {
 		t.Errorf("with no fact-check there is no per-option reason to give:\n%s", got)
 	}
 }
@@ -1689,11 +1691,11 @@ func TestApprovedRevisionReplacesItsOriginal(t *testing.T) {
 	added := acceptRevisions(a, &agent.Analysis{Recommendations: []agent.Recommendation{{Revises: "r2", Choose: "Node-based", When: "hourly billing suits you", Claims: []string{"c1"}}}})
 	judgeRevisions(a, added, fc, &agent.FactCheckResult{Inferences: follows("r3")})
 	got := renderAnswer(a)
-	if !strings.Contains(got, "- **Node-based**: hourly billing suits you") || strings.Contains(got, "Not established") {
+	if !strings.Contains(got, "- **Node-based**: hourly billing suits you") || strings.Contains(got, "Not confirmed") {
 		t.Errorf("answer does not show the revision in place of the original:\n%s", got)
 	}
 	a.Recommendations[2].Blocked = "it does not follow from its claims: r"
-	if got := renderAnswer(a); !strings.Contains(got, "Not established") || !strings.Contains(got, "traffic is steady") {
+	if got := renderAnswer(a); !strings.Contains(got, "Not confirmed") || !strings.Contains(got, "traffic is steady") {
 		t.Errorf("with the revision blocked the original should be named as not established:\n%s", got)
 	}
 }
@@ -1711,7 +1713,7 @@ func TestAnswerUsesTheAnalysisLabels(t *testing.T) {
 		verdict("c2", "partial", "1", "save up to 55%"),
 	}, Inferences: follows("r1", "r2", "r3")}, nil, findings)
 	got := renderAnswer(a)
-	for _, want := range []string{"## Respuesta\n", "No establecido en esta ejecuci\u00f3n:", "(parcial: \u201c"} {
+	for _, want := range []string{"## Respuesta\n", "No establecido en esta ejecuci\u00f3n:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("answer lacks %q:\n%s", want, got)
 		}
@@ -1838,7 +1840,7 @@ func TestConclusionsAreGovernedLikeRecommendations(t *testing.T) {
 	if !strings.Contains(got, "- An election starts on a follower's timeout and is won with a majority of votes.") {
 		t.Errorf("the approved conclusion is not the answer:\n%s", got)
 	}
-	if !strings.Contains(got, "Not established in this run") || !strings.Contains(got, "always settles") {
+	if !strings.Contains(got, "Not confirmed by the sources") || !strings.Contains(got, "always settles") {
 		t.Errorf("the blocked conclusion is not named as not established:\n%s", got)
 	}
 	if p := claimsToCheck(a); !strings.Contains(p, "k1: conclude: An election starts") || !strings.Contains(p, "premise c2:") {
@@ -2957,5 +2959,51 @@ func TestCompletionCardShowsTheTitle(t *testing.T) {
 	}
 	if ti, qi := at("RSA-2048 Quantum Threat Timeline"), at("When could a quantum computer"); ti < 0 || qi != ti+1 {
 		t.Errorf("card does not head with the title over the question:\n%s", strings.Join(card, "\n"))
+	}
+}
+
+// The source list took a page and a half: each title was followed by its
+// whole URL. The PDF sets the list smaller, title and site on one line,
+// with no URL printed; the body keeps its size and its links.
+func TestPDFSourceListIsCompact(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("Body cites [Guide](https://example.com/guide).\n\n")
+	writeCitations(&sb, []MetaCitation{{Title: "Guide", URL: "https://example.com/guide", Domain: "www.example.com", Status: "degraded"}})
+	pdf := buildReportPDF(sb.String(), "", nil)
+	var body, ref float64
+	for _, tx := range pdfTexts(t, pdf) {
+		switch {
+		case strings.HasPrefix(tx.text, "Body"):
+			body = tx.size
+		case strings.HasPrefix(tx.text, "example.com"), strings.Contains(tx.text, "snippet"):
+			ref = tx.size
+		case strings.Contains(tx.text, "https://example.com/guide"):
+			t.Errorf("a URL is printed: %q", tx.text)
+		}
+	}
+	if body != pdfBodySize || ref != pdfRefSize {
+		t.Errorf("body at %v, source list at %v; want %v and %v", body, ref, pdfBodySize, pdfRefSize)
+	}
+	if !bytes.Contains(pdf, []byte("/URI (https://example.com/guide)")) {
+		t.Error("the title no longer links to its page")
+	}
+}
+
+// A blocked statement's reason reached the summarizer with "explain them
+// under the limits", and came back in the report as the checker's words.
+// It is still given, so the limits can say what the sources lack, but as
+// context to put in the reader's terms.
+func TestSummarizerStatesLimitsInTheReadersTerms(t *testing.T) {
+	a := &agent.Analysis{
+		Claims: []agent.Claim{{ID: "c1", Text: "LFP packs cost $81/kWh", Status: statusPartial}},
+		Conclusions: []agent.Recommendation{{Statement: "LFP was cheaper than NMC in 2024", Claims: []string{"c1"},
+			Blocked: "it does not follow from its claims: it states 2024, which none of its claims states"}},
+	}
+	p := summarizePrompt("q", a, &agent.FactCheckResult{}, nil, true)
+	if !strings.Contains(p, "in the reader's terms") || !strings.Contains(p, "never mention the fact-check") {
+		t.Errorf("the summarizer is not told to put the limits in the reader's terms:\n%s", p)
+	}
+	if strings.Contains(p, "Explain them under the limits") {
+		t.Errorf("the summarizer is still told to explain the checker's reasons:\n%s", p)
 	}
 }

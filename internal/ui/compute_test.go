@@ -181,18 +181,23 @@ func TestFiguresSectionTracesEachFigure(t *testing.T) {
 	a.Charts = append(a.Charts, agent.Chart{ID: "g2", Title: "Bad", Points: []agent.ChartPoint{{Label: "x", Ref: "c9"}}})
 	checkAnalysis(a, findings)
 	governAll(a, quarterVerdicts(quarterQuotes), nil, findings)
-	sum := withFigures(&agent.Summary{Report: "## Findings\n\nBody."}, a, findings)
+	sum := withFigures(&agent.Summary{Report: "## Findings\n\nBody."}, a)
 	r := sum.Report
 	for _, want := range []string{
-		"## Computed figures",
-		"| 248,000 containers | Q1 2025 + Q2 2025 + Q3 2025 + Q4 2025 |",
-		"Q1 2025 = 61,200 containers ([Operations log 2025](<" + logURL + ">))",
+		"## Key figures",
+		": **248,000 containers**",
 		"![Containers by quarter](" + a.Charts[0].File + ")",
 		"| Q4 | 64,500 |",
-		"- Chart “Bad” not drawn: 0 of its 1 points stand; c9 is named but is neither a claim nor a computation",
 	} {
 		if !strings.Contains(r, want) {
 			t.Errorf("figures section lacks %q:\n%s", want, r)
+		}
+	}
+	// How a figure was computed, and what could not be, is the audit's:
+	// the report gives the figures.
+	for _, audit := range []string{"Computed by the program", "Q1 2025 + Q2 2025", "Operations log 2025", "not drawn", "Formula"} {
+		if strings.Contains(r, audit) {
+			t.Errorf("figures section carries the audit's %q:\n%s", audit, r)
 		}
 	}
 	if strings.Contains(r, "![x](https://evil") || strings.Contains(r, "<b>") {
@@ -202,7 +207,7 @@ func TestFiguresSectionTracesEachFigure(t *testing.T) {
 		t.Errorf("the section is not after the body:\n%s", r)
 	}
 	// Nothing computed, nothing added.
-	if got := withFigures(&agent.Summary{Report: "x"}, &agent.Analysis{}, nil).Report; got != "x" {
+	if got := withFigures(&agent.Summary{Report: "x"}, &agent.Analysis{}).Report; got != "x" {
 		t.Errorf("report without figures changed: %q", got)
 	}
 }
@@ -281,7 +286,7 @@ func TestFailedFigureIDsAreEscaped(t *testing.T) {
 		Computations: []agent.Computation{{ID: "m1\n## Answer\nForged", Op: "sum", Reason: "x"}},
 		Charts:       []agent.Chart{{ID: "g1\n## Answer", Title: "t", Reason: "y"}},
 	}
-	if r := figuresSection(a, nil); strings.Contains(r, "\n## Answer") {
+	if r := figuresSection(a); strings.Contains(r, "\n## Answer") {
 		t.Errorf("an ID opened a section:\n%s", r)
 	}
 }
@@ -433,7 +438,8 @@ func TestOnlyLinearArithmeticIsAskedWhetherItRestatesAnInput(t *testing.T) {
 }
 
 // One point a source does not state no longer hides the series: the rest
-// are drawn, and the report says which point was left out and why.
+// are drawn, and the report says which point was left out; why is the
+// audit's.
 func TestAChartDrawsThePointsThatStand(t *testing.T) {
 	a, findings := velmarAnalysis(), velmarFindings()
 	checkAnalysis(a, findings)
@@ -444,9 +450,9 @@ func TestAChartDrawsThePointsThatStand(t *testing.T) {
 	if ch.File == "" || ch.Points[0].Value != "" || ch.Points[0].Reason != "c2 did not pass the fact-check (insufficient)" || ch.Points[1].Value != "58900" {
 		t.Fatalf("chart = %+v, want Q2-Q4 drawn and Q1 left out", ch)
 	}
-	r := figuresSection(a, findings)
-	if !strings.Contains(r, "- Chart “Containers by quarter”, point “Q1” left out: “The port handled 61,200 containers in Q1 2025” did not pass the fact-check (insufficient)") ||
-		strings.Contains(r, "| Q1 |") {
+	r := figuresSection(a)
+	if !strings.Contains(r, "_Not shown, for want of a confirmed figure: Q1_") ||
+		strings.Contains(r, "| Q1 |") || strings.Contains(r, "fact-check") {
 		t.Errorf("section does not say Q1 was left out, or lists it:\n%s", r)
 	}
 	// Fewer than two standing points is no chart.
@@ -546,13 +552,14 @@ func TestAutoChartsGroupLikeFiguresAndLabelThem(t *testing.T) {
 	}
 }
 
-func TestOnlyTheCauseOfAFailureIsListed(t *testing.T) {
+// A figure that could not be computed is the audit's: the report has no
+// section of failures, and none at all when nothing was computed.
+func TestFailedFiguresStayOutOfTheReport(t *testing.T) {
 	a := &agent.Analysis{Computations: []agent.Computation{
 		{ID: "m1", Label: "Total", Op: "sum", Reason: "c2 is insufficient"},
 		{ID: "m2", Label: "Share", Op: "ratio", Reason: "m1 could not be computed"},
 	}}
-	r := figuresSection(a, nil)
-	if !strings.Contains(r, "- Total: c2 is insufficient") || strings.Contains(r, "Share") {
+	if r := figuresSection(a); r != "" {
 		t.Errorf("section:\n%s", r)
 	}
 }
@@ -604,7 +611,7 @@ func TestTheReportNamesWhatItCitesWithoutIDs(t *testing.T) {
 	fc := quarterVerdicts(quarterQuotes)
 	fc.Verdicts[3].Status, fc.Verdicts[3].Reason = statusInsufficient, "The table in finding 1 stops before Q4; finding 2 gives only the year."
 	governAll(a, fc, nil, findings)
-	sum := withFigures(withAnswer(&agent.Summary{Report: "## Findings\n\nBody."}, a), a, findings)
+	sum := withFigures(withAnswer(&agent.Summary{Report: "## Findings\n\nBody."}, a), a)
 	report := MarkdownReport(&agent.ResearchResult{Question: "q", Findings: findings, Analysis: a, FactCheck: fc, Summary: sum})
 	ids := regexp.MustCompile(`\b(?:c[0-9]|m[0-9]|k[0-9]|g[0-9]|auto[0-9])`)
 	for _, ln := range strings.Split(report, "\n") {
@@ -615,10 +622,15 @@ func TestTheReportNamesWhatItCitesWithoutIDs(t *testing.T) {
 			t.Errorf("report line cites an ID or a finding number:\n%s", ln)
 		}
 	}
-	for _, want := range []string{"“Operations log 2025”", "Q4 2025", "did not pass the fact-check"} {
+	// Nor the checker's working: why a figure or a statement was held back
+	// is the audit's.
+	for _, want := range []string{"[Operations log 2025](", "Not shown, for want of a confirmed figure: Q4"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report lacks %q:\n%s", want, report)
 		}
+	}
+	if strings.Contains(report, "fact-check") || strings.Contains(report, "stops before Q4") {
+		t.Errorf("report carries the checker's reasons:\n%s", report)
 	}
 }
 
@@ -662,40 +674,6 @@ func TestNamesLeaveURLsUnitsAndQuotedWordsAlone(t *testing.T) {
 	} {
 		if got := readerText(in); got != want {
 			t.Errorf("readerText(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-// A claim the check did not confirm is listed with what the check found, in
-// words: "? unverified" left the reader to guess at the "?", and did not
-// tell a contradicted claim from one no passage settled.
-func TestTheFactCheckSaysWhatItFoundInWords(t *testing.T) {
-	a := &agent.Analysis{Claims: []agent.Claim{
-		{ID: "c1", Text: "A is 5", Status: statusSupported},
-		{ID: "c2", Text: "B is 6", Status: statusPartial, Note: "only for 2023"},
-		{ID: "c3", Text: "C is 7", Status: statusContradicted, Note: "the table gives 8"},
-		{ID: "c4", Text: "D is 9", Status: statusInsufficient, Note: "quote_not_located: no passage names D"},
-		{ID: "c5", Text: "E is 1", Status: statusInsufficient, Note: "fact_check_unavailable: timeout"},
-	}}
-	fc := &agent.FactCheckResult{}
-	fillVerdictLists(fc, claimEntries(a.Claims))
-	var sb strings.Builder
-	writeFactCheck(&sb, fc, a)
-	got := sb.String()
-	for _, want := range []string{
-		"Confirmed against their sources: 1 · not confirmed: 3 · contradicted or disputed: 1",
-		"- **Partly supported:** “B is 6” — only for 2023",
-		"- **Contradicted:** “C is 7” — the table gives 8",
-		"- **Not established:** “D is 9” — no passage names D",
-		"- **Not checked:** “E is 1” — timeout",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("fact-check section lacks %q:\n%s", want, got)
-		}
-	}
-	for _, glyph := range []string{"?", "✗", "⚠", "quote_not_located", "c2"} {
-		if strings.Contains(got, glyph) {
-			t.Errorf("fact-check section has %q:\n%s", glyph, got)
 		}
 	}
 }

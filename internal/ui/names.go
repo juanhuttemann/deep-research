@@ -211,16 +211,6 @@ func capitalized(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-// dropID is s without a leading "c5: ", the ID older runs' fact-check
-// entries began with, when it is one of the analysis's IDs.
-func (n *namer) dropID(s string) string {
-	id, rest, ok := strings.Cut(s, ": ")
-	if _, known := n.full[id]; ok && known {
-		return rest
-	}
-	return s
-}
-
 // shortScope is a scope short enough to name a claim by ("Q1 2025"), ""
 // for one that is a sentence.
 func shortScope(s string) string {

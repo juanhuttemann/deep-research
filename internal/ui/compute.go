@@ -574,87 +574,49 @@ func refValue(a *agent.Analysis, ref string) string {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// withFigures closes the report with the computed figures, written by the
+// withFigures closes the report with its key figures, written by the
 // program from the governed analysis like the answer section: the
 // summarizer is told not to do arithmetic, and the figures it could state
-// are these, each with what it was computed from and where those values
-// were read.
-func withFigures(sum *agent.Summary, a *agent.Analysis, findings []agent.Finding) *agent.Summary {
-	if section := figuresSection(a, findings); section != "" {
+// are these.
+func withFigures(sum *agent.Summary, a *agent.Analysis) *agent.Summary {
+	if section := figuresSection(a); section != "" {
 		sum.Report = strings.TrimSpace(sum.Report) + "\n\n" + section
 	}
 	return sum
 }
 
-// figuresSection is the report's computed figures: a table of the valid
-// computations, each drawn chart with its data as a table (the chart a
-// terminal can show), and what was not established, with why. It reads on
-// its own: every figure, input and reason is named as the reader knows it
-// (namer), never by the run's IDs.
-func figuresSection(a *agent.Analysis, findings []agent.Finding) string {
-	if a == nil || len(a.Computations) == 0 && len(a.Charts) == 0 {
+// figuresSection is the report's key figures: each valid computation by
+// name with its value, then each drawn chart with its data as a table (the
+// chart a terminal can show). How each was computed, from which values,
+// and what could not be computed are the audit's (the .json and the serve
+// page's Audit): a note on the program's method, a formula column and a
+// list of failures read as the pipeline's working, not the report's
+// findings. Every name is the reader's (namer), never the run's IDs.
+func figuresSection(a *agent.Analysis) string {
+	if a == nil {
 		return ""
 	}
 	n := newNamer(a)
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "## %s\n\n_%s_\n\n", label(a, "computed"), label(a, "computed_note"))
-	rows, failed := computationRows(a, n, findings)
-	if len(rows) > 0 {
-		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n| --- | ---: | --- | --- |\n%s\n\n", label(a, "figure"),
-			label(a, "value"), label(a, "formula"), label(a, "inputs"), strings.Join(rows, "\n"))
-	}
-	failed = append(failed, writeCharts(&sb, a, n)...)
-	if len(rows) == 0 && len(failed) > 0 && !anyDrawn(a) {
-		sb.Reset()
-		fmt.Fprintf(&sb, "## %s\n\n", label(a, "computed"))
-	}
-	if len(failed) > 0 {
-		fmt.Fprintf(&sb, "%s:\n\n%s\n", label(a, "not_established"), strings.Join(failed, "\n"))
-	}
-	return strings.TrimSpace(sb.String())
-}
-
-// computationRows are the table rows of the valid computations, and a line
-// for each that failed for a cause of its own.
-func computationRows(a *agent.Analysis, n *namer, findings []agent.Finding) (rows, failed []string) {
 	for _, c := range a.Computations {
 		if !c.Valid {
-			// One that failed only because an earlier one did adds nothing:
-			// the earlier one is listed with the cause.
-			if !knockOn(a, c.Reason) {
-				failed = append(failed, "- "+mdText(capitalized(n.full[c.ID])+": "+n.say(c.Reason, true)))
-			}
 			continue
 		}
 		v, _ := compute.ParseValue(c.Result)
-		rows = append(rows, fmt.Sprintf("| %s | %s | %s | %s |", mdText(capitalized(n.full[c.ID])),
-			mdText(withUnit(v.String(), c.Unit)), mdText(n.say(c.Formula, false)), inputCell(a, c, n, findings)))
+		fmt.Fprintf(&sb, "- %s: **%s**\n", mdText(capitalized(n.full[c.ID])), mdText(withUnit(v.String(), c.Unit)))
 	}
-	return rows, failed
-}
-
-// writeCharts writes the drawn charts and returns a line for each chart
-// not drawn and each point left out.
-func writeCharts(sb *strings.Builder, a *agent.Analysis, n *namer) (failed []string) {
+	if sb.Len() > 0 {
+		sb.WriteString("\n")
+	}
 	for _, ch := range a.Charts {
-		name := "Chart " + quoted(firstNonEmpty(ch.Title, "untitled"))
-		if ch.File == "" {
-			failed = append(failed, "- "+mdText(name+" not drawn: "+n.say(ch.Reason, true)))
-			continue
-		}
-		writeChart(sb, ch, n)
-		for _, p := range ch.Points {
-			if p.Reason != "" {
-				failed = append(failed, "- "+mdText(name+", point "+quoted(firstNonEmpty(p.Label, n.short[p.Ref]))+
-					" left out: "+n.say(p.Reason, true)))
-			}
+		if ch.File != "" {
+			writeChart(&sb, a, ch, n)
 		}
 	}
-	return failed
-}
-
-func anyDrawn(a *agent.Analysis) bool {
-	return slices.ContainsFunc(a.Charts, func(ch agent.Chart) bool { return ch.File != "" })
+	if sb.Len() == 0 {
+		return ""
+	}
+	return "## " + label(a, "computed") + "\n\n" + strings.TrimSpace(sb.String())
 }
 
 func firstNonEmpty(ss ...string) string {
@@ -668,7 +630,7 @@ func firstNonEmpty(ss ...string) string {
 
 // writeChart is a drawn chart, linked as an image beside the report, and
 // its points as a table.
-func writeChart(sb *strings.Builder, ch agent.Chart, n *namer) {
+func writeChart(sb *strings.Builder, a *agent.Analysis, ch agent.Chart, n *namer) {
 	title := mdText(n.say(firstNonEmpty(ch.Title, "Chart"), false))
 	fmt.Fprintf(sb, "![%s](%s)\n\n| %s | %s |\n| --- | ---: |\n", title, ch.File, title, mdText(firstNonEmpty(ch.Unit, " ")))
 	for _, p := range ch.Points {
@@ -679,35 +641,18 @@ func writeChart(sb *strings.Builder, ch agent.Chart, n *namer) {
 		fmt.Fprintf(sb, "| %s | %s |\n", mdText(firstNonEmpty(p.Label, n.short[p.Ref], p.Ref)), v.String())
 	}
 	sb.WriteString("\n")
-}
-
-// inputCell lists a computation's inputs: each by name, with its figure and
-// the page it was read from, linked.
-func inputCell(a *agent.Analysis, c agent.Computation, n *namer, findings []agent.Finding) string {
-	var parts []string
-	for _, ref := range c.Inputs {
-		part := mdText(n.short[ref] + " = " + refValue(a, ref))
-		for _, cl := range a.Claims {
-			if cl.ID == ref && len(cl.Sources) > 0 {
-				part += " (" + sourceLink(cl.Sources[0], findings) + ")"
-				break
-			}
-		}
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, "; ")
-}
-
-// sourceLink is a link to a page by its title.
-func sourceLink(url string, findings []agent.Finding) string {
-	title := url
-	for _, f := range findings {
-		if f.URL == url && strings.TrimSpace(f.Title) != "" {
-			title = oneLine(f.Title)
-			break
+	// A point left out is said, in the reader's words: a series missing a
+	// quarter, unmarked, reads as the quarter having none. Why the check
+	// held its value back is the audit's.
+	var gone []string
+	for _, p := range ch.Points {
+		if p.Value == "" {
+			gone = append(gone, mdText(firstNonEmpty(p.Label, n.short[p.Ref], p.Ref)))
 		}
 	}
-	return "[" + mdText(title) + "](<" + strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20").Replace(url) + ">)"
+	if len(gone) > 0 {
+		fmt.Fprintf(sb, "_%s: %s_\n\n", label(a, "not_shown"), strings.Join(gone, ", "))
+	}
 }
 
 // mdText is model or web text made literal in Markdown: on one line, with
@@ -918,13 +863,6 @@ func distinct(cs []agent.Claim, field func(agent.Claim) string) bool {
 		seen[v] = true
 	}
 	return true
-}
-
-// knockOn reports whether reason is only that another computation of a
-// failed ("m1 could not be computed").
-func knockOn(a *agent.Analysis, reason string) bool {
-	id, ok := strings.CutSuffix(reason, " could not be computed")
-	return ok && slices.ContainsFunc(a.Computations, func(c agent.Computation) bool { return c.ID == id })
 }
 
 // distinctCount is how many different values field gives the claims.

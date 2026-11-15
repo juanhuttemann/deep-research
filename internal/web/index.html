@@ -367,6 +367,7 @@ button.step:hover, button.step.open { text-decoration: underline; text-underline
 .unit { padding: 8px 2ch; margin-bottom: 8px; overflow-wrap: anywhere; }
 .unit.blocked { border-color: color-mix(in srgb, var(--red) 40%, var(--rule)); }
 .unit-kind { color: var(--dim); margin-bottom: 4px; }
+.unit .calc { margin-top: 4px; color: var(--dim); }
 .unit .why { margin-top: 6px; padding-left: 1.5ch; border-left: 2px solid var(--red); color: var(--red); }
 .audit-ref { padding: 0; border: 0; background: none; color: var(--cyan); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .why .audit-ref { color: inherit; }
@@ -385,6 +386,8 @@ button.step:hover, button.step.open { text-decoration: underline; text-underline
 .list > li + li { border-top: 1px solid var(--rule); }
 .row { display: flex; gap: 2ch; align-items: flex-start; width: 100%; padding: 6px 2ch; text-align: left; background: none; border: 0; cursor: pointer; }
 .row:hover { background: var(--bg-2); }
+.row.static { cursor: default; }
+.row.static:hover { background: none; }
 .row:focus-visible { outline-offset: -2px; }
 .row.active { background: var(--cyan-soft); box-shadow: inset 2px 0 var(--cyan); }
 .row > .tag { min-width: 15ch; }
@@ -635,6 +638,15 @@ mark { background: var(--yellow); color: var(--bg); }
             <ul id="claims" class="list card"></ul>
             <h2>Sources <span id="c-srcs" class="count"></span></h2>
             <ul id="srcs" class="list card"></ul>
+            <div id="figs-wrap" hidden>
+              <h2>Figures <span id="c-figs" class="count"></span></h2>
+              <div id="figs"></div>
+            </div>
+            <div id="next-wrap" hidden>
+              <h2>Further searches <span id="c-next" class="count"></span></h2>
+              <p class="muted">What the analysis would search next to settle what is still open. These searches were not run.</p>
+              <ul id="next" class="list card"></ul>
+            </div>
           </div>
           <aside id="inspector" class="inspector card" aria-label="Evidence inspector" tabindex="-1" aria-live="polite"></aside>
         </div>
@@ -2139,6 +2151,8 @@ function renderAudit() {
     const li = el("li"); li.append(b); srcs.append(li);
   }
   $("c-srcs").textContent = (meta.citations || []).length;
+  auditFigures(a);
+  auditSearches(a);
 
   const supported = (a.claims || []).filter(c => c.status === "supported").length;
   const fetched = (meta.citations || []).filter(c => c.status === "ok").length;
@@ -2156,6 +2170,42 @@ function renderAudit() {
     stat(supported + "/" + (a.claims || []).length, "claims supported"),
     stat(fetched + "/" + (meta.citations || []).length, "sources fetched in full"));
   placeholder();
+}
+// auditFigures is how each figure in the report's Key figures was worked
+// out, and what could not be: the report gives the figures, the audit the
+// arithmetic and its failures (figuresSection, compute.go).
+function auditFigures(a) {
+  const box = $("figs"), cs = a.computations || [], gone = [];
+  box.replaceChildren();
+  for (const [i, c] of cs.entries()) {
+    const card = el("div", "card unit" + (c.valid ? "" : " blocked"));
+    card.append(el("div", "unit-kind", "Figure #" + (i + 1) + (c.label ? " · " + c.label : "")),
+      el("div", "", c.valid ? (c.result || "") + (c.unit ? " " + c.unit : "") : "Not computed"));
+    if (c.formula) card.append(el("div", "calc", c.formula));
+    if ((c.inputs || []).length) { const d = el("div", "calc"); d.append("From ", auditText(c.inputs.join(", "))); card.append(d); }
+    if (!c.valid && c.reason) { const w = el("div", "why"); w.append(el("strong", "", "Why: "), auditText(c.reason)); card.append(w); }
+    box.append(card);
+  }
+  for (const ch of a.charts || []) {
+    if (!ch.file && ch.reason) gone.push("Chart “" + (ch.title || "untitled") + "” not drawn: " + ch.reason);
+    for (const p of ch.points || []) if (p.reason) gone.push("Chart “" + (ch.title || "untitled") + "”, " + (p.label || p.ref) + " left out: " + p.reason);
+  }
+  for (const g of gone) { const card = el("div", "card unit blocked"), w = el("div", "why"); w.append(auditText(g)); card.append(w); box.append(card); }
+  $("c-figs").textContent = cs.length;
+  $("figs-wrap").hidden = !cs.length && !gone.length;
+}
+// auditSearches are the analysis's follow-up queries, which the report no
+// longer lists: they were never run.
+function auditSearches(a) {
+  const qs = (a.follow_up || []).filter(q => q && q.trim()), names = a.follow_up_names || {};
+  $("next").replaceChildren(...qs.map(q => {
+    const li = el("li", "row static"), txt = el("span", "txt");
+    txt.append(names[q] || q, ...(names[q] ? [el("span", "sub", q)] : []));
+    li.append(txt);
+    return li;
+  }));
+  $("c-next").textContent = qs.length;
+  $("next-wrap").hidden = !qs.length;
 }
 function placeholder() {
   const v = $("inspector"); v.replaceChildren();

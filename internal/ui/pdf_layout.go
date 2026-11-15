@@ -93,11 +93,29 @@ const (
 // pdfSubtitleSize is the question's size under the title.
 const pdfSubtitleSize = 11.5
 
+// The report's source list is set smaller than the body: it is for looking
+// a source up, not for reading through.
+const (
+	pdfRefSize    = 9
+	pdfRefLeading = 12.5
+)
+
+// isRefsHeading reports whether a heading's text is the source list's
+// (writeCitations): "Citations (9)".
+func isRefsHeading(runs []pdfRun) bool {
+	var sb strings.Builder
+	for _, r := range runs {
+		sb.WriteString(r.text)
+	}
+	return strings.HasPrefix(strings.TrimSpace(sb.String()), citationsHeading+" (")
+}
+
 type pdfBlock struct {
 	kind   pdfBlockKind
 	level  int    // heading level
 	indent int    // list and quote nesting
 	marker string // list marker, drawn in the indent of the item's first line
+	small  bool   // a line of the report's source list, set smaller (pdfRefSize)
 	runs   []pdfRun
 	rows   [][][]pdfRun // table rows of cells, header first
 	chart  *compute.Chart
@@ -117,6 +135,7 @@ type pdfParser struct {
 	url          string
 	linkText     strings.Builder
 	linksLeft    map[string]int // links to each destination not yet walked
+	refs         bool           // inside the report's source list (writeCitations)
 	charts       map[string]compute.Chart
 }
 
@@ -199,7 +218,10 @@ func (p *pdfParser) enterInline(n ast.Node) {
 
 func (p *pdfParser) leave(n ast.Node) {
 	switch n := n.(type) {
-	case *ast.Heading, *ast.Paragraph, *ast.TextBlock, *extast.Table:
+	case *ast.Heading:
+		p.refs = n.Level == 2 && p.cur >= 0 && isRefsHeading(p.blocks[p.cur].runs)
+		p.cur = -1
+	case *ast.Paragraph, *ast.TextBlock, *extast.Table:
 		p.cur = -1
 	case *ast.List, *ast.Blockquote:
 		p.indent--
@@ -228,13 +250,16 @@ func (p *pdfParser) closeLink() {
 	u := p.url
 	p.url = ""
 	p.linksLeft[u]--
-	if u != "" && p.linksLeft[u] == 0 && strings.TrimSpace(p.linkText.String()) != u {
+	// The source list names each page's site beside its linked title; its
+	// URLs printed in full took three lines a source.
+	if u != "" && !p.refs && p.linksLeft[u] == 0 && strings.TrimSpace(p.linkText.String()) != u {
 		p.addRun(pdfRun{text: " (" + u + ")", url: u, note: true})
 	}
 }
 
 func (p *pdfParser) open(b pdfBlock) {
 	b.indent, b.marker, p.marker = p.indent, p.marker, ""
+	b.small = p.refs && b.kind == blockPara
 	p.blocks = append(p.blocks, b)
 	p.cur = len(p.blocks) - 1
 }
@@ -621,21 +646,27 @@ func (l *pdfLayout) block(b pdfBlock) {
 }
 
 func (l *pdfLayout) paragraph(b pdfBlock, left float64) {
-	lines := wrapAtoms(pdfAtoms(b.runs), pdfPageWidth-pdfMargin-left, pdfBodySize)
+	size, lead := pdfBodySize, pdfBodyLeading
+	if b.small {
+		size, lead = pdfRefSize, pdfRefLeading
+	}
+	lines := wrapAtoms(pdfAtoms(b.runs), pdfPageWidth-pdfMargin-left, size)
 	if len(lines) <= 3 {
-		l.room(float64(len(lines)) * pdfBodyLeading) // no lone line atop the next page
+		l.room(float64(len(lines)) * lead) // no lone line atop the next page
 	}
 	for i, line := range lines {
-		l.room(pdfBodyLeading)
-		base := l.y - pdfBodyLeading + 0.25*pdfBodySize
+		l.room(lead)
+		base := l.y - lead + 0.25*size
 		if i == 0 && b.marker != "" {
-			x := left - 4 - pdfWidth(b.marker, fontRegular, pdfBodySize)
-			l.page.text(x, base, fontRegular, pdfBodySize, pdfInk, b.marker)
+			x := left - 4 - pdfWidth(b.marker, fontRegular, size)
+			l.page.text(x, base, fontRegular, size, pdfInk, b.marker)
 		}
-		l.drawLine(line, left, base, pdfBodySize, pdfInk)
-		l.y -= pdfBodyLeading
+		l.drawLine(line, left, base, size, pdfInk)
+		l.y -= lead
 	}
-	if b.indent > 0 {
+	if b.small {
+		l.space(1)
+	} else if b.indent > 0 {
 		l.space(3)
 	} else {
 		l.space(7)

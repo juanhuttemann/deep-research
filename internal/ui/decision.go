@@ -741,8 +741,14 @@ func writeDecided(sb *strings.Builder, a *agent.Analysis) {
 	}
 	sb.WriteString("\n")
 	if blocked := notEstablishedUnits(a); len(blocked) > 0 {
+		// The reason is the checker's, given so the limits can say what the
+		// sources lack; written into the report as given ("it states 2024,
+		// which none of its claims states") it read as the pipeline talking
+		// to itself.
 		sb.WriteString("Not established: a claim each rests on did not pass the fact-check, or it does not follow" +
-			" from them. Explain them under the limits; never assert them:\n")
+			" from them. Never assert them. Under the limits, say in the reader's terms what the sources lack" +
+			" for each (a missing year, a different measure, a region not covered); never mention the fact-check," +
+			" claims, premises, the analysis or the run, and never quote the reason given here:\n")
 		for _, r := range blocked {
 			fmt.Fprintf(sb, "  - %s — %s\n", statement(r), r.Blocked)
 		}
@@ -774,7 +780,7 @@ func renderAnswer(a *agent.Analysis) string {
 		sb.WriteString("\n")
 	}
 	for _, r := range ok {
-		writeChoice(&sb, r, "")
+		writeChoice(&sb, r)
 	}
 	if noApproval(a) != noApprovalEvidence {
 		return sb.String()
@@ -784,9 +790,12 @@ func renderAnswer(a *agent.Analysis) string {
 		sb.WriteString("\n")
 		sb.WriteString(label(a, "not_established"))
 		sb.WriteString(":\n\n")
-		n := newNamer(a)
+		// Only the statement: why the check held it back (the claims that
+		// failed, a premise it did not follow from) is the checker's
+		// working, and read in a report as the pipeline talking to itself.
+		// The audit and the .json keep it.
 		for _, r := range blocked {
-			writeChoice(&sb, r, notEstablished(a, r, n))
+			writeChoice(&sb, r)
 		}
 	}
 	return sb.String()
@@ -805,9 +814,8 @@ func notEstablishedUnits(a *agent.Analysis) []agent.Recommendation {
 	return out
 }
 
-// writeChoice writes one recommendation as a list item, with why it is not
-// established when it is not.
-func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
+// writeChoice writes one recommendation as a list item.
+func writeChoice(sb *strings.Builder, r agent.Recommendation) {
 	if st := readerText(r.Statement); st != "" {
 		sb.WriteString("- ")
 		sb.WriteString(st)
@@ -819,11 +827,6 @@ func writeChoice(sb *strings.Builder, r agent.Recommendation, why string) {
 			sb.WriteString(": ")
 			sb.WriteString(when)
 		}
-	}
-	if why != "" {
-		sb.WriteString(" (")
-		sb.WriteString(why)
-		sb.WriteString(")")
 	}
 	sb.WriteString("\n")
 }
@@ -837,24 +840,6 @@ var claimRefs = regexp.MustCompile(`\s*[(\[](?:(?:[cmkr]\d+(?:\.\d+)?|(?:finding
 // readerText is a statement as the answer prints it, without claim IDs.
 func readerText(s string) string {
 	return strings.TrimSpace(claimRefs.ReplaceAllString(s, ""))
-}
-
-// notEstablished names what blocked a recommendation: the claims that did not
-// pass, by their text and status, or the checker's reason it does not follow.
-func notEstablished(a *agent.Analysis, r agent.Recommendation, n *namer) string {
-	var parts []string
-	for _, c := range a.Claims {
-		if slices.Contains(r.Failed, c.ID) {
-			parts = append(parts, label(a, c.Status)+": \u201c"+c.Text+"\u201d")
-		}
-	}
-	if len(parts) > 0 {
-		return strings.Join(parts, "; ")
-	}
-	if reason, ok := strings.CutPrefix(r.Blocked, followPrefix); ok {
-		return label(a, "does_not_follow") + ": " + n.say(reason, true)
-	}
-	return n.say(r.Blocked, true)
 }
 
 // Why nothing was approved. A single "no recommendation passed" read as the
@@ -884,19 +869,19 @@ func noApproval(a *agent.Analysis) string {
 // "Not established in this run" between Spanish sentences.
 var englishLabels = map[string]string{
 	"answer":            "Answer",
-	"not_established":   "Not established in this run",
-	"no_conclusion":     "The analysis stated no conclusion the fact-check could check.",
+	"not_established":   "Not confirmed by the sources",
+	"no_conclusion":     "No conclusion could be drawn from the sources.",
 	"does_not_follow":   "does not follow from its claims",
 	statusPartial:       "partial",
 	statusContradicted:  "contradicted",
 	statusDisputed:      "disputed",
 	statusInsufficient:  "insufficient",
 	statusUnsourced:     "unsourced",
-	noApprovalUnchecked: "Verification could not be completed, so the proposed conclusions remain unverified.",
-	noApprovalNoSources: "No source was retrieved, so the proposed conclusions could not be verified.",
-	noApprovalEvidence:  "The evidence gathered does not establish the proposed conclusions.",
-	"computed":          "Computed figures",
-	"computed_note":     "Computed by the program from the values the cited sources state. A figure is shown only when every value it uses passed the fact-check.",
+	noApprovalUnchecked: "These conclusions could not be checked against the sources.",
+	noApprovalNoSources: "No sources could be found to answer this.",
+	noApprovalEvidence:  "The sources found do not support a firm answer.",
+	"computed":          "Key figures",
+	"not_shown":         "Not shown, for want of a confirmed figure",
 	"figure":            "Figure",
 	"value":             "Value",
 	"formula":           "Formula",
