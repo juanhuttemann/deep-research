@@ -778,58 +778,101 @@ func autoCharts(a *agent.Analysis) []agent.Chart {
 	}
 	var out []agent.Chart
 	for _, key := range order {
-		if ch, ok := autoChart(groups[key], len(out)+1); ok && len(out) < maxAutoCharts {
-			out = append(out, ch)
+		for _, g := range byYear(groups[key]) {
+			if ch, ok := autoChart(g, len(out)+1); ok && len(out) < maxAutoCharts {
+				out = append(out, ch)
+			}
 		}
 	}
 	return out
+}
+
+// byYear splits a group comparing subjects by the year each figure is for:
+// one chart compares subjects in one year. A run's chart of GDP put
+// Mexico's 2025 figure beside Brazil's 2023 one, which its own analysis said
+// did not answer for 2023. A series of one subject over years is one group,
+// as it is. A figure with no year is compared only with others with none.
+func byYear(cs []agent.Claim) [][]agent.Claim {
+	if distinctCount(cs, func(c agent.Claim) string { return c.Option }) == 1 {
+		return [][]agent.Claim{cs}
+	}
+	groups, order := map[string][]agent.Claim{}, []string{}
+	for _, c := range cs {
+		year := claimYear(c)
+		if groups[year] == nil {
+			order = append(order, year)
+		}
+		groups[year] = append(groups[year], c)
+	}
+	out := make([][]agent.Claim, 0, len(order))
+	for _, y := range order {
+		out = append(out, groups[y])
+	}
+	return out
+}
+
+// claimYear is the year a claim's figure is for: its scope's, else its
+// text's, "" when neither names exactly one.
+func claimYear(c agent.Claim) string {
+	return cmp.Or(compute.SoleYear(c.Scope), compute.SoleYear(c.Text))
 }
 
 // autoChart is one group's chart, when its claims have two or more
 // distinct labels: what each is about (its option, else its scope), each
 // label once. Years in order make a line, anything else bars.
 func autoChart(cs []agent.Claim, n int) (agent.Chart, bool) {
-	ch := agent.Chart{ID: "auto" + strconv.Itoa(n), Auto: true, Title: oneLine(cs[0].Criterion)}
-	seen := map[string]bool{}
-	years := true
-	prev := -1
 	byScope := !distinct(cs, func(c agent.Claim) string { return c.Option })
+	points, years := autoPoints(cs, byScope)
+	if len(points) < 2 {
+		return agent.Chart{}, false
+	}
+	ch := agent.Chart{ID: "auto" + strconv.Itoa(n), Auto: true, Title: autoTitle(cs, byScope), Points: points,
+		Kind: compute.KindBar}
+	if years {
+		ch.Kind = compute.KindLine
+	}
+	return ch, true
+}
+
+// autoPoints are a group's points, each label once: the subject, or for one
+// subject over a series the year in its scope (a scope is a sentence,
+// "Germany, calendar year 2023; …"). years reports whether the labels are
+// years in order, which a line draws.
+func autoPoints(cs []agent.Claim, byScope bool) (points []agent.ChartPoint, years bool) {
+	seen := map[string]bool{}
+	years, prev := true, -1
 	for _, c := range cs {
 		label := firstNonEmpty(c.Option, c.Scope)
 		if byScope {
-			// A scope is a sentence ("Germany, calendar year 2023; …"); the
-			// year in it is the label a reader needs.
 			label = firstNonEmpty(compute.SoleYear(c.Scope), compute.SoleYear(c.Text), c.Scope, c.Option)
 		}
 		if label == "" || seen[label] {
 			continue
 		}
 		seen[label] = true
-		ch.Points = append(ch.Points, agent.ChartPoint{Label: label, Ref: c.ID})
+		points = append(points, agent.ChartPoint{Label: label, Ref: c.ID})
 		y, err := strconv.Atoi(label)
 		years = years && err == nil && y > prev
 		prev = y
 	}
-	if len(ch.Points) < 2 {
-		return agent.Chart{}, false
-	}
-	if ch.Title == "" {
-		ch.Title = cs[0].Unit
-	}
-	ch.Title = capitalized(ch.Title)
-	// One subject over a series ("Tesla" each year) is named in the title,
-	// since the labels are years.
+	return points, years
+}
+
+// autoTitle names what a group's chart shows: its criterion (else unit),
+// the subject when one subject runs over years, and the scope or year its
+// subjects share.
+func autoTitle(cs []agent.Claim, byScope bool) string {
+	title := capitalized(firstNonEmpty(cs[0].Criterion, cs[0].Unit))
 	if subject := oneLine(cs[0].Option); byScope && subject != "" && distinctCount(cs, func(c agent.Claim) string { return c.Option }) == 1 {
-		ch.Title = subject + ": " + ch.Title
+		title = subject + ": " + title
 	}
-	if scope := sharedScope(cs); scope != "" && !strings.Contains(ch.Title, scope) {
-		ch.Title += ", " + scope
+	if scope := sharedScope(cs); scope != "" && !strings.Contains(title, scope) {
+		return title + ", " + scope
 	}
-	ch.Kind = compute.KindBar
-	if years {
-		ch.Kind = compute.KindLine
+	if year := claimYear(cs[0]); !byScope && year != "" && !strings.Contains(title, year) {
+		return title + ", " + year // the year every subject's figure is for (byYear)
 	}
-	return ch, true
+	return title
 }
 
 // sharedScope is the scope every claim gives, "" when they differ.

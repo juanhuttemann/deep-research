@@ -737,3 +737,22 @@ func TestNamesTellApartFiguresBySite(t *testing.T) {
 		t.Errorf("c8 = %q", got)
 	}
 }
+
+// A chart comparing countries put Mexico's 2025 GDP beside Brazil's 2023
+// one. Subjects are compared in one year; one subject over years is a line.
+func TestAutoChartsCompareSubjectsInOneYear(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c1", Option: "Mexico", Criterion: "GDP", Scope: "Year 2025", Value: "1.83", Unit: "USD trillion"},
+		{ID: "c2", Option: "Brazil", Criterion: "GDP", Scope: "Year 2023", Value: "2.3", Unit: "USD trillion"},
+	}}
+	if got := autoCharts(a); len(got) != 0 {
+		t.Errorf("charted figures of different years together: %+v", got)
+	}
+	a.Claims = append(a.Claims,
+		agent.Claim{ID: "c3", Option: "Chile", Criterion: "GDP", Scope: "Year 2023", Value: "0.34", Unit: "USD trillion"})
+	got := autoCharts(a)
+	if len(got) != 1 || len(got[0].Points) != 2 || got[0].Points[0].Label != "Brazil" || got[0].Points[1].Label != "Chile" ||
+		got[0].Title != "GDP, Year 2023" {
+		t.Errorf("charts = %+v, want Brazil and Chile in 2023", got)
+	}
+}
