@@ -498,3 +498,146 @@ func SoleYear(text string) string {
 	}
 	return years[0]
 }
+
+// units are the measurement words a figure may be followed by, as the unit
+// they name. A noun that is not a unit ("40 gold medals") names none: the
+// claim's criterion says what is counted.
+var units = map[string]string{
+	"%": "%", "percent": "%", "per cent": "%",
+	"m": "m", "metre": "m", "metres": "m", "meter": "m", "meters": "m",
+	"km": "km", "kilometre": "km", "kilometres": "km", "kilometer": "km", "kilometers": "km",
+	"cm": "cm", "mm": "mm", "ft": "ft", "feet": "ft", "mi": "mi", "miles": "mi",
+	"kg": "kg", "kilograms": "kg", "g": "g", "grams": "g", "t": "t", "tonnes": "t", "tons": "tons", "lb": "lb", "pounds": "lb",
+	"kw": "kW", "mw": "MW", "gw": "GW", "tw": "TW", "kwh": "kWh", "mwh": "MWh", "gwh": "GWh", "twh": "TWh",
+	"°c": "°C", "°f": "°F", "teu": "TEU", "km/h": "km/h", "mph": "mph",
+}
+
+// currencies are the symbols written before a figure.
+var currencies = map[rune]string{'$': "USD", '€': "EUR", '£': "GBP", '¥': "JPY"}
+
+// scales are the words that multiply a figure, kept in its unit: "$12.4
+// million" is 12.4 in USD million, never 12,400,000 by conversion.
+var scales = map[string]string{"thousand": "thousand", "million": "million", "billion": "billion", "trillion": "trillion"}
+
+// UnitOf is the unit text writes n in: a currency symbol before it, a
+// scale word and a measurement word after it ("$12.4 million" is "USD
+// million", "828 metres" is "m", "4.5%" is "%"). It is "" when n is not
+// in text or is followed by no unit word.
+func UnitOf(text string, n Number) string {
+	rs := []rune(text)
+	want := n.Rat()
+	unit, found := "", false
+	for _, t := range tokensAt(rs) {
+		if !containsRat(t.readings, want) {
+			continue
+		}
+		u := unitAt(rs, t)
+		// The same number written twice in different units ("5 km away,
+		// 5 GW") is no unit of the figure's.
+		if found && u != unit {
+			return ""
+		}
+		unit, found = u, true
+	}
+	return unit
+}
+
+// unitAt is the unit written around the token t: a currency symbol before
+// it, a scale word and a measurement word after it.
+func unitAt(rs []rune, t positioned) string {
+	var parts []string
+	if t.start > 0 {
+		if cur, ok := currencies[rs[t.start-1]]; ok {
+			parts = append(parts, cur)
+		}
+	}
+	words := wordsAfter(rs, t.end, 3)
+	scale := scales[firstOf(words)]
+	if len(parts) > 0 && scale == "" {
+		// After a currency, "m", "bn" and "k" are scales: "$12.4m".
+		scale = map[string]string{"m": "million", "bn": "billion", "b": "billion", "k": "thousand"}[firstOf(words)]
+	}
+	if scale != "" {
+		parts = append(parts, scale)
+		words = words[1:]
+	}
+	// A one-letter unit is taken only set apart from the number and with no
+	// word after it: "828 m" is metres; "33.3m" and "33.3m passengers" may
+	// be millions.
+	spaced := t.end < len(rs) && rs[t.end] == ' '
+	if u := units[firstOf(words)]; u != "" && (!oneLetter(words[0]) || len(words) == 1 && spaced && scale == "") {
+		parts = append(parts, u)
+	}
+	return strings.Join(parts, " ")
+}
+
+// wordsAfter are up to n lower-cased words right after i: a "%" or "°C"
+// written against the number counts as one.
+func wordsAfter(rs []rune, i, n int) []string {
+	var out []string
+	for len(out) < n && i < len(rs) {
+		for i < len(rs) && rs[i] == ' ' {
+			i++
+		}
+		j := i
+		for j < len(rs) && (unicode.IsLetter(rs[j]) || strings.ContainsRune("%°/", rs[j])) {
+			j++
+			if rs[j-1] == '%' {
+				break
+			}
+		}
+		if j == i {
+			break
+		}
+		out = append(out, strings.ToLower(string(rs[i:j])))
+		i = j
+	}
+	return out
+}
+
+// positioned is a token and where it is in the text.
+type positioned struct {
+	token
+	start, end int
+}
+
+// tokensAt are tokens with their places, for reading what is written
+// around a figure.
+func tokensAt(rs []rune) []positioned {
+	var out []positioned
+	text := string(rs)
+	toks := tokens(text)
+	// tokens() does not keep places; find each token's text in order.
+	at := 0
+	for _, t := range toks {
+		raw := strings.TrimPrefix(t.text, "-")
+		k := indexRunes(rs, []rune(raw), at)
+		if k < 0 {
+			continue
+		}
+		out = append(out, positioned{t, k, k + len([]rune(raw))})
+		at = k + len([]rune(raw))
+	}
+	return out
+}
+
+func indexRunes(rs, sub []rune, from int) int {
+	for i := from; i+len(sub) <= len(rs); i++ {
+		if string(rs[i:i+len(sub)]) == string(sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+func firstOf(words []string) string {
+	if len(words) == 0 {
+		return ""
+	}
+	return words[0]
+}
+
+func oneLetter(w string) bool {
+	r := []rune(w)
+	return len(r) == 1 && unicode.IsLetter(r[0])
+}

@@ -436,6 +436,9 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err != nil {
 		return d.partial(ctx, plan, findings, analysis, fc, checkErr, "report writing failed", err)
 	}
+	// Its prompt cites claims by ID and findings by number; the reader has
+	// neither.
+	summary.Report, summary.Executive = readerText(summary.Report), readerText(summary.Executive)
 	summary = withFigures(withAnswer(summary, analysis), analysis, findings)
 	d.checkQuotes(summary, plan.Question, pages, decidedAnswer(analysis))
 	// The summarizer writes prose, so it reports no confidence of its own.

@@ -269,6 +269,11 @@ to the checked decision.
   analyzer did not chart, and `inferValues` gives a claim with no value the
   one number its text states (years and its scope's numbers aside), so a
   model that skips the value fields does not leave a run with no figures.
+  The Markdown and PDF reports cite no ID: `ui/names.go` names each
+  claim by its subject (or year, or own words), each computation by its
+  label and each of the checker's "finding N" by that source's title,
+  wherever the report prints a formula, an input, a reason or a fact-check
+  note; the IDs stay in the `.json`, for the audit and tools.
   The report's "Computed figures" section, the chart SVGs (named by their content
   digest) and the PDF's vector charts are written from the governed
   analysis. The PDF and the serve page draw or show only the charts the

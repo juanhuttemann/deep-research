@@ -34,6 +34,13 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- The Markdown and PDF reports read on their own. They no longer cite the
+  run's IDs: a computation is named by its label, a claim by its subject or
+  its own words, and the fact-check's "finding 5" by that source's title; a
+  computed figure's formula and inputs read "Burj Khalifa − Ping An Finance
+  Center" rather than "c1 − c4". A figure read from a claim also takes the
+  unit written with it ("828 metres", "$12.4 million", "4.5%"), so a figure
+  is not printed without one. The .json keeps the IDs.
 - Charts are drawn whenever the figures make a series, asked for or not:
   two or more checked claims measuring the same thing become a bar chart
   labelled by subject, or a line over years. A claim with no value given

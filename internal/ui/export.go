@@ -165,7 +165,7 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	if res.Analysis != nil {
 		writeOpenQuestions(&sb, res.Analysis)
 	}
-	writeFactCheck(&sb, res.FactCheck)
+	writeFactCheck(&sb, res.FactCheck, res.Analysis)
 
 	// Judged against the report body alone, exactly as the JSON sidecar does:
 	// a URL is cited when the text of the answer references it.
@@ -300,7 +300,13 @@ func writeOpenQuestions(sb *strings.Builder, a *agent.Analysis) {
 // the body's own, quoted there; listing them again with their evidence
 // doubled the report, so only the claims the check did not confirm are
 // listed. The verdict is the flag, not the array a claim arrived in.
-func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult) {
+// The entries are named as the reader knows them (namer): the notes the
+// program and the checker write cite claims and computations by their IDs.
+func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult, a *agent.Analysis) {
+	n := newNamer(a)
+	say := func(s string) string { return n.say(s, true) }
+	// A claim keeps its own words; an older run's entries began "c5: ".
+	claim := func(s string) string { return n.dropID(s) }
 	if fc == nil || len(fc.Verified)+len(fc.Unverified)+len(fc.Contradictions) == 0 {
 		return
 	}
@@ -317,17 +323,21 @@ func writeFactCheck(sb *strings.Builder, fc *agent.FactCheckResult) {
 	fmt.Fprintf(sb, "Confirmed against their sources: %d · not confirmed: %d · contradictions: %d\n\n",
 		confirmed, len(rejected)+len(fc.Unverified), len(fc.Contradictions))
 	for _, c := range rejected {
-		fmt.Fprintf(sb, "- ✗ not verified: %s", c.Claim)
+		fmt.Fprintf(sb, "- ✗ not verified: %s", claim(c.Claim))
 		if c.Evidence != "" {
-			fmt.Fprintf(sb, " — %s", c.Evidence)
+			fmt.Fprintf(sb, " — %s", say(c.Evidence))
 		}
 		sb.WriteString("\n")
 	}
 	for _, c := range fc.Unverified {
-		fmt.Fprintf(sb, "- ? unverified: %s\n", c)
+		text, note, _ := strings.Cut(c, " — ")
+		if note != "" {
+			note = " — " + say(note)
+		}
+		fmt.Fprintf(sb, "- ? unverified: %s%s\n", claim(text), note)
 	}
 	for _, c := range fc.Contradictions {
-		fmt.Fprintf(sb, "- ⚠ contradiction on %s: %s\n", c.Claim, strings.Join(c.Sources, "; "))
+		fmt.Fprintf(sb, "- ⚠ contradiction on %s: %s\n", claim(c.Claim), say(strings.Join(c.Sources, "; ")))
 	}
 	sb.WriteString("\n")
 }

@@ -239,7 +239,7 @@ func RevisedMarkdown(m *Meta, r Revision) string {
 	if m.Analysis != nil {
 		writeOpenQuestions(&sb, m.Analysis)
 	}
-	writeFactCheck(&sb, m.FactCheck)
+	writeFactCheck(&sb, m.FactCheck, m.Analysis)
 	cits := slices.Clone(m.Citations)
 	for i := range cits {
 		cits[i].Cited = cits[i].URL != "" && strings.Contains(r.Report, cits[i].URL)
