@@ -34,6 +34,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   single input and not at all with the rest is that input restated. Only
   computations of sums, differences and means are asked, where that test is
   an identity rather than a coincidence of the values.
+- A claim comparing its figure with an earlier one ("17% in 2024, up from
+  13% in 2019") is read as its figure, the number the comparison does not
+  introduce: an Ember run's answer stated wind at 17% while its chart left
+  wind out and its wind-and-solar sum failed for want of a figure. The
+  analyzer is told a chart compares like with like, never a total beside
+  its own parts.
 - A growth rate's unit is "%": the program's cagr, written "% a period",
   contradicted a run's claim of the same 9.25 "percent", so the answer
   called the figure not established while the report computed it. A
