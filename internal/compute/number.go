@@ -448,15 +448,33 @@ func SoleFigure(text, context string) (Number, bool) {
 		}
 		found = append(found, t)
 	}
-	if len(found) != 1 || len(found[0].readings) != 1 {
+	if len(found) != 1 {
+		return Number{}, false
+	}
+	// A claim written with commas grouping thousands ("367,500"), the
+	// program's value form, is one number, not also 367.5. Any other token
+	// read more than one way ("1.234") gives nothing.
+	if n, ok := ParseValue(found[0].text); ok && strings.Contains(found[0].text, ",") {
+		return n, true
+	}
+	if len(found[0].readings) != 1 {
 		return Number{}, false
 	}
 	r := found[0].readings[0]
-	_, frac, _ := strings.Cut(found[0].text, ".")
-	if strings.Contains(found[0].text, ",") && !strings.Contains(found[0].text, ".") {
-		frac = ""
+	return Number{r: r, dec: exactDecimals(r)}, true
+}
+
+// exactDecimals are the places that write r exactly, at most twelve.
+func exactDecimals(r *big.Rat) int {
+	x := new(big.Rat).Set(r)
+	ten := big.NewRat(10, 1)
+	for d := 0; d < 12; d++ {
+		if x.IsInt() {
+			return d
+		}
+		x.Mul(x, ten)
 	}
-	return Number{r: r, dec: len(frac)}, true
+	return 12
 }
 
 func isYear(t token) bool {

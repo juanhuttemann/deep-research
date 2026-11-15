@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
 	"github.com/juanhuttemann/deep-research/internal/compute"
@@ -813,6 +815,12 @@ func autoChart(cs []agent.Claim, n int) (agent.Chart, bool) {
 	if ch.Title == "" {
 		ch.Title = cs[0].Unit
 	}
+	ch.Title = capitalized(ch.Title)
+	// One subject over a series ("Tesla" each year) is named in the title,
+	// since the labels are years.
+	if subject := oneLine(cs[0].Option); byScope && subject != "" && distinctCount(cs, func(c agent.Claim) string { return c.Option }) == 1 {
+		ch.Title = subject + ": " + ch.Title
+	}
 	if scope := sharedScope(cs); scope != "" && !strings.Contains(ch.Title, scope) {
 		ch.Title += ", " + scope
 	}
@@ -852,4 +860,22 @@ func distinct(cs []agent.Claim, field func(agent.Claim) string) bool {
 func knockOn(a *agent.Analysis, reason string) bool {
 	id, ok := strings.CutSuffix(reason, " is not computed")
 	return ok && slices.ContainsFunc(a.Computations, func(c agent.Computation) bool { return c.ID == id })
+}
+
+// distinctCount is how many different values field gives the claims.
+func distinctCount(cs []agent.Claim, field func(agent.Claim) string) int {
+	seen := map[string]bool{}
+	for _, c := range cs {
+		seen[oneLine(field(c))] = true
+	}
+	return len(seen)
+}
+
+// capitalized is s with its first letter upper case.
+func capitalized(s string) string {
+	r, size := utf8.DecodeRuneInString(s)
+	if size == 0 {
+		return s
+	}
+	return string(unicode.ToUpper(r)) + s[size:]
 }
