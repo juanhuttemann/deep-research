@@ -821,3 +821,15 @@ func TestComputedClaimsAreJudgedAsTheirWordsStateThem(t *testing.T) {
 		}
 	}
 }
+
+// A rank is an order, not a quantity: a run charted New York's 1 beside
+// Los Angeles's 2 as "2024 population rank".
+func TestRanksAreNotCharted(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{
+		{ID: "c3", Option: "New York City", Criterion: "2024 population rank", Value: "1", Unit: "rank"},
+		{ID: "c4", Option: "Los Angeles", Criterion: "2024 population rank", Value: "2", Unit: "rank"},
+	}}
+	if got := autoCharts(a); len(got) != 0 {
+		t.Errorf("charted ranks: %+v", got)
+	}
+}
