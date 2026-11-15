@@ -14,23 +14,29 @@ features, `0.x.PATCH` for fixes only — the project is pre-1.0).
 Then, in `integrations/pi/package.json`, bump `version` when the extension
 changed since its last publish.
 
-## 2. Commit and tag
+## 2. Commit and push to main
 
 ```sh
 git add -A
 git commit -m "Release vX.Y.Z"
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push
 ```
 
-## 3. Push
+Wait for that commit's CI run on `main` to pass (`gh run watch`). The tag
+does not test again: its release job requires a successful run of the CI
+workflow on `main` for the tagged commit, and fails without one.
+
+## 3. Tag and push the tag
 
 ```sh
-git push && git push --tags
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push --tags
 ```
 
 Pushing the tag runs the `release` job in `.github/workflows/ci.yml`, which
-builds the binaries with GoReleaser (`.goreleaser.yml`) and drafts a release
-with archives and `deep-research_checksums.txt` attached:
+checks that `main`'s CI passed for the commit, builds the binaries with
+GoReleaser (`.goreleaser.yml`) and drafts a release with archives and
+`deep-research_checksums.txt` attached:
 
 - `deep-research_linux_amd64.tar.gz`
 - `deep-research_linux_arm64.tar.gz`
@@ -39,9 +45,12 @@ with archives and `deep-research_checksums.txt` attached:
 - `deep-research_windows_amd64.zip`
 - `deep-research_windows_arm64.zip`
 
-The release job runs only after `test` and `lint` pass, and the `test` job
-cross-compiles every one of those targets — a platform that does not build is
-a red CI run, not a half-empty release.
+The tag's run skips `test`, `lint` and `pi`: they ran on `main` for the same
+commit, and the release job builds only once that run succeeded. The `test`
+job cross-compiles every one of those targets, so a platform that does not
+build is a red run on `main`, not a half-empty release. If the tag was pushed
+before `main`'s run finished, the release job fails saying so; re-run it once
+`main` is green (`gh run rerun <id> --failed`).
 
 Ordinary `main` pushes do not trigger a release — the job only fires on
 `refs/tags/v*` (see the `if: startsWith(github.ref, 'refs/tags/')` guard).
