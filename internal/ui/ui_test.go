@@ -734,7 +734,7 @@ func TestWriteExportsToTempDir(t *testing.T) {
 }
 
 func TestBuildPDFFormsValidStructure(t *testing.T) {
-	pdf := BuildPDF("Title line\n\nSecond paragraph that is a bit longer to exercise wrapping logic here.\n\nThird line")
+	pdf := BuildPDF("Title line\n\nSecond paragraph that is a bit longer to exercise wrapping logic here.\n\nThird line", nil)
 	s := string(pdf)
 	if !strings.HasPrefix(s, "%PDF-1.4") {
 		t.Fatalf("bad header: %q", s[:8])
@@ -809,7 +809,7 @@ func checkPDFXref(t *testing.T, pdf []byte) {
 // blindly: a /Length that disagrees with the bytes between stream and
 // endstream makes the page render empty or the file fail to parse.
 func TestBuildPDFStreamLengthIsAccurate(t *testing.T) {
-	s := string(BuildPDF("alpha\n\nbeta (with parens) and a \\\\ backslash"))
+	s := string(BuildPDF("alpha\n\nbeta (with parens) and a \\\\ backslash", nil))
 	rest := s
 	found := 0
 	for {
@@ -845,7 +845,7 @@ func TestBuildPDFPaginates(t *testing.T) {
 	for i := range lines {
 		lines[i] = fmt.Sprintf("line-%03d", i)
 	}
-	s := string(BuildPDF(strings.Join(lines, "\n\n")))
+	s := string(BuildPDF(strings.Join(lines, "\n\n"), nil))
 	if n := strings.Count(s, "/Type /Page "); n < 2 {
 		t.Errorf("200 lines produced %d page objects, want several", n)
 	}
@@ -860,7 +860,7 @@ func TestBuildPDFPaginates(t *testing.T) {
 // TestBuildPDFEncodesNonASCII keeps the report's typographic characters (…, —,
 // •) from emitting raw UTF-8, which a WinAnsi-encoded font renders as mojibake.
 func TestBuildPDFEncodesNonASCII(t *testing.T) {
-	s := string(BuildPDF("an em—dash, an ellipsis… and a bullet •\n\narrow → ok"))
+	s := string(BuildPDF("an em—dash, an ellipsis… and a bullet •\n\narrow → ok", nil))
 	body := s[strings.Index(s, "stream\n"):]
 	for _, r := range body {
 		if r > 0x7f {
@@ -1170,7 +1170,7 @@ func TestWriteArtifactsReportsFailures(t *testing.T) {
 	o.Stderr = &stderr
 
 	d := NewDriver(&fakeAssistant{}, &MultiSink{}, NewByteReader(nil), 1)
-	md, pdf, meta := o.writeArtifacts(testResult(), &MultiSink{}, d, newTestPlan("quick", nil))
+	md, pdf, meta, _ := o.writeArtifacts(testResult(), &MultiSink{}, d, newTestPlan("quick", nil))
 	if md != "" || pdf != "" || meta != "" {
 		t.Errorf("failed writes reported paths: md=%q pdf=%q meta=%q", md, pdf, meta)
 	}
@@ -1737,6 +1737,7 @@ type checkerCase struct {
 	Claims          []agent.Claim          `json:"claims"`
 	Recommendations []agent.Recommendation `json:"recommendations"`
 	Conclusions     []agent.Recommendation `json:"conclusions"`
+	Computations    []agent.Computation    `json:"computations"`
 	Expect          struct {
 		Supported    []string `json:"supported"`
 		NotSupported []string `json:"not_supported"`

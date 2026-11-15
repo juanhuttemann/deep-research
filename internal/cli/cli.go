@@ -1134,6 +1134,10 @@ func printResult(cmd *cobra.Command, result *agent.ResearchResult, printed bool)
 		if err := os.WriteFile(out, []byte(ui.MarkdownReport(result)), 0o644); err != nil {
 			return fmt.Errorf("write output: %w", err)
 		}
+		// The report links its charts by name: they go beside it.
+		if _, err := ui.WriteCharts(result.Analysis, filepath.Dir(out)); err != nil {
+			return fmt.Errorf("write charts: %w", err)
+		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s\n", out)
 		return nil
 	}

@@ -5,6 +5,24 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Computed figures and charts. Every number a report stated used to be the
+  model's own arithmetic, and a wrong total read exactly like a sourced
+  one. Now the analyzer marks the claims that state a figure, names the
+  operations over them (sum, difference, product, ratio, share, percent
+  change, mean, min, max, compound growth) and the series to draw. The
+  program evaluates them exactly, and uses only inputs that passed the
+  fact-check and are written in a passage they were supported on. A claim
+  stating a computed figure is supported when it matches the result and
+  contradicted when it does not. The report closes with a "Computed
+  figures" section: each figure, its formula over claim IDs and its inputs
+  linked to their pages, and what could not be computed and why. Charts are
+  written beside the report as content-named SVGs (listed in `done`'s
+  artifacts), drawn as vectors in the PDF, shown on the `serve` page and
+  given as tables in the terminal. The Pi extension's digest lists the
+  computed figures.
+
 ## [0.34.1] - 2026-11-14
 
 ### Fixed

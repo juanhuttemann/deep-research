@@ -239,6 +239,26 @@ true. It is made before the check, so it is lowered to low when the check
 did not run, left a share of the claims unchecked, or approved none of the
 answer's statements, whether the report was written or the run fell back
 to the checked decision.
+- Computed figures are the program's: the analyzer marks a numeric claim
+  with `value` and `unit`, names operations over claim IDs
+  (`computations`) and series to draw (`charts`), and never states the
+  arithmetic itself. `ui/compute.go` evaluates them with `compute` twice.
+  Before the check it uses the stated values alone, so every claim call is
+  shown what they add up to. After the check (`settleFigures`, in `govern`
+  before the units are blocked) only supported inputs count, and only when
+  the value is a whole number token in a located passage the claim was
+  supported on. A claim with `computed` is left out of the fact-check and
+  decided against its computation: supported at its own precision,
+  contradicted otherwise, insufficient when an input failed. The report's
+  "Computed figures" section, the chart SVGs (named by their content
+  digest) and the PDF's vector charts are written from the governed
+  analysis. The PDF and the serve page draw or show only the charts the
+  run's own list names, never a file a report links to. What this
+  guarantees is the arithmetic and that each input is a figure a fetched
+  page writes; that the figure means what the claim says (the period, the
+  unit, the population) is still the checker's judgement. A token such as
+  "61,200" reads as 61200 or 61.2, since nothing in a passage says which
+  convention it uses; the checker judges which one the claim means.
 - The summarizer gets only the checked decision: approved and blocked
   recommendations, claims by status, gaps and sources; not the analyzer's
   answer prose. The report's `## Answer` section is rendered from the
@@ -399,14 +419,17 @@ config → { agent, auth }
 setup → { auth, catalog }
 replay → agent
 store → agent
-ui → { agent, tools }
+ui → { agent, compute, tools }
 agent → tools
 tools → (standalone HTTP clients)
+compute → (nothing in this module)
 update → (nothing in this module)
 web → (nothing in this module)
 ```
 
-`auth` and `catalog` import nothing in this module. Imports go one way only. In particular `tools` must not import `agent`, and
+`auth`, `catalog` and `compute` import nothing in this module: `compute` is
+the run's arithmetic (numbers as a source writes them, the operations, and
+the chart layout both the SVG and the PDF draw), pure and deterministic. Imports go one way only. In particular `tools` must not import `agent`, and
 sequencing must not move into `agent`.
 
 `web` passes the run's `--jsonl` lines through unparsed, and the page, not

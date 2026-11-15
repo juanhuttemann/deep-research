@@ -436,7 +436,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	if err != nil {
 		return d.partial(ctx, plan, findings, analysis, fc, checkErr, "report writing failed", err)
 	}
-	summary = withAnswer(summary, analysis)
+	summary = withFigures(withAnswer(summary, analysis), analysis, findings)
 	d.checkQuotes(summary, plan.Question, pages, decidedAnswer(analysis))
 	// The summarizer writes prose, so it reports no confidence of its own.
 	// Without the run's the report prints a bare "Confidence:" line and the

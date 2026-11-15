@@ -65,16 +65,24 @@ func checkParts(a *agent.Analysis, findings []agent.Finding, retrieved bool) []c
 	if len(a.Claims) == 0 {
 		return []checkPart{{prompt: factCheckPrompt(claimsToCheck(a), findings, retrieved, nil), claims: true}}
 	}
-	groups := claimGroups(a.Claims)
+	// The computed claims are the program's to decide (see settleFigures);
+	// what the computations add up to is given to every call instead.
+	checked := checkedClaims(a.Claims)
+	groups := claimGroups(checked)
+	if len(checked) == 0 {
+		groups = nil
+	}
+	figures := computedBlock(a)
 	// Every page is excerpted by all the claims, as in one call: a passage
 	// another call's claim matched can contradict one of these, and an
 	// excerpt chosen by this call's claims alone left it out. The same for
 	// every call, so written once: each call made it again, scoring every
 	// page's passages against every claim, before any call could start.
-	evidence := evidenceBlock(findings, a.Claims)
+	evidence := evidenceBlock(findings, checked)
 	var parts []checkPart
 	for _, g := range groups {
 		var sb strings.Builder
+		sb.WriteString(figures)
 		sb.WriteString("Claims:\n")
 		writeClaims(&sb, g)
 		label := "claims"
@@ -188,8 +196,11 @@ func merge(parts []checkPart, results []*agent.FactCheckResult, errs []error) (*
 		}
 	}
 	// One line, as every other error the run reports.
+	// An analysis whose every claim is computed has no claim call to make:
+	// the check ran, on the inferences alone, and its arithmetic is the
+	// program's (see settleFigures).
 	switch {
-	case !claimsJudged:
+	case !claimsJudged && slices.ContainsFunc(parts, func(p checkPart) bool { return p.claims }):
 		return nil, errors.New(strings.Join(failed, "; "))
 	case len(failed) > 0:
 		return merged, &partialCheck{claims: unchecked, err: errors.New(strings.Join(failed, "; "))}

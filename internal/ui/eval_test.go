@@ -124,7 +124,7 @@ func flipped(name string, runs map[string][]string) []string {
 // telling apart a judgement that changed between repeats.
 func evalCase(ctx context.Context, asst agent.Assistant, c checkerCase, trace *evalTrace) (evalScore, string, map[string]string) {
 	a := &agent.Analysis{Claims: slices.Clone(c.Claims), Recommendations: slices.Clone(c.Recommendations),
-		Conclusions: slices.Clone(c.Conclusions)}
+		Conclusions: slices.Clone(c.Conclusions), Computations: slices.Clone(c.Computations)}
 	checkAnalysis(a, c.Findings)
 	// The check as a run makes it: split into parallel calls (see checkParts).
 	parts := checkParts(a, c.Findings, true)

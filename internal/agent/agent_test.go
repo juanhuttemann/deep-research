@@ -1030,3 +1030,42 @@ func TestFailedStreamKeepsItsUsage(t *testing.T) {
 		t.Errorf("tokens = %d, want the failed attempt's 150", got)
 	}
 }
+
+// The analyzer names computations and charts; their results, validity and
+// drawn files are the program's, so a model that writes them is not read.
+const computedAnalysis = `{"answer":"x","claims":[
+  {"id":"c1","claim":"61,200 in Q1","value":"61,200","unit":"containers","sources":["https://a.example"]},
+  {"id":"c2","claim":"total","value":248000,"computed":"m1"}],
+ "computations":[{"id":"m1","label":"total","op":"SUM","inputs":["c1","c3"],"periods":"3","result":"999","valid":true},
+                 {"label":"no op"}, {"op":"mean","inputs":"c1"}],
+ "charts":[{"title":"q","kind":"Line","file":"evil.svg","points":[{"label":"Q1","ref":"c1","value":"5"},{"label":"none"}]},
+           {"title":"empty","points":[]}]}`
+
+func TestParseAnalysisReadsNumericClaims(t *testing.T) {
+	a := parseAnalysis(computedAnalysis)
+	if c := a.Claims[0]; c.Value != "61,200" || c.Unit != "containers" || c.Computed != "" {
+		t.Errorf("c1 = %+v", c)
+	}
+	if c := a.Claims[1]; c.Value != "248000" || c.Computed != "m1" {
+		t.Errorf("c2 = %+v", c)
+	}
+}
+
+func TestParseAnalysisReadsComputationsNotTheirResults(t *testing.T) {
+	a := parseAnalysis(computedAnalysis)
+	if len(a.Computations) != 2 {
+		t.Fatalf("computations = %+v, want the two with an op", a.Computations)
+	}
+	if m := a.Computations[0]; m.Op != "sum" || m.Periods != 3 || m.Result != "" || m.Valid || len(m.Inputs) != 2 {
+		t.Errorf("m1 = %+v, want the op and inputs only", m)
+	}
+	if m := a.Computations[1]; m.ID != "m3" || len(m.Inputs) != 1 {
+		t.Errorf("second computation = %+v, want ID m3 and its one input", m)
+	}
+	if len(a.Charts) != 1 {
+		t.Fatalf("charts = %+v, want the one with points", a.Charts)
+	}
+	if ch := a.Charts[0]; ch.ID != "g1" || ch.Kind != "line" || ch.File != "" || len(ch.Points) != 1 || ch.Points[0].Value != "" {
+		t.Errorf("chart = %+v, want its title, kind and referenced points only", ch)
+	}
+}
