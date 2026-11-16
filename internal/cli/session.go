@@ -152,7 +152,7 @@ func (s *session) say(msg string) {
 // after opens the report of a run that finished for questions.
 func (s *session) after(res ui.RunResult, err error) {
 	if err != nil {
-		s.say("error: " + err.Error())
+		s.say(ui.FailureNote(err))
 		return
 	}
 	if res.Cancelled {

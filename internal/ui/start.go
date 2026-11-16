@@ -86,8 +86,8 @@ func (r *Renderer) startLines() []string {
 		// Each line of the note wrapped on its own: a model switch says
 		// what it uses and where its key went, which run together as one.
 		for para := range strings.SplitSeq(r.briefNote, "\n") {
-			for _, l := range wrapWords(para, r.width-4) {
-				out = append(out, "  "+r.T.yellow(l))
+			for _, l := range r.noteLines(para, r.width-4) {
+				out = append(out, "  "+l)
 			}
 		}
 		out = append(out, "")

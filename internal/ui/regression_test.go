@@ -4081,3 +4081,52 @@ func TestMarkdownBodyAvoidsThemeRepaintedGreys(t *testing.T) {
 		t.Errorf("prose lost: %q", out)
 	}
 }
+
+// A run that no public SearXNG instance would answer ended on the start
+// screen as one paragraph: "error: research failed: no search answered
+// (challenge): not searched: …", the reason and both fixes run on after it,
+// the way out last of seven lines. The screen now heads it with the
+// problem, gives the cause and reason under it, and the fixes on their own
+// arrowed lines; the one-line error stays for stderr and JSONL.
+func TestRefusedSearchFailureIsLaidOutOnTheStartScreen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><title>Making sure you're not a bot!</title></html>`)
+	}))
+	defer srv.Close()
+	c := tools.NewSearXNGClient(srv.URL+","+srv.URL+"/x", 0)
+	c.Public = true
+	_, searchErr := c.Search(context.Background(), "q")
+	d := NewDriver(nil, &MultiSink{}, nil, 1)
+	d.noteSearch(time.Now(), searchErr, nil)
+	err := fmt.Errorf("research failed: %w", d.searchFailure(nil))
+
+	line := err.Error()
+	for _, want := range []string{"research failed: no search answered (challenge): ", "Run SearXNG in Docker: drsh setup search", "Exa or Tavily (" + tools.ServicesDoc + ")"} {
+		if !strings.Contains(line, want) || strings.Contains(line, "\n") {
+			t.Errorf("one-line error lacks %q: %q", want, line)
+		}
+	}
+
+	r := NewRenderer(&bytes.Buffer{}, Theme{})
+	r.width, r.rows, r.plain = 100, 40, false
+	r.RenderStart(agent.Setup{}, nil, "an example?", FailureNote(err))
+	rows := r.frameLines()
+	frame := strings.Join(rows, "\n")
+	head := slices.IndexFunc(rows, func(s string) bool { return strings.Contains(s, "✗ No search answered") })
+	docker := slices.IndexFunc(rows, func(s string) bool { return strings.Contains(s, "→ Run SearXNG in Docker") })
+	hosted := slices.IndexFunc(rows, func(s string) bool {
+		return strings.Contains(s, "→ Without Docker, choose a hosted engine there: Exa or Tavily.")
+	})
+	if head < 0 || docker <= head+1 || hosted <= docker {
+		t.Errorf("failure not laid out as headline, detail, then fixes:\n%s", frame)
+	}
+	if strings.Contains(frame, "research failed: no search answered (challenge)") {
+		t.Errorf("start screen still shows the run-on error:\n%s", frame)
+	}
+	for _, row := range rows {
+		if w := utf8.RuneCountInString(stripANSI(row)); w > 100 {
+			t.Errorf("row exceeds width (%d): %q", w, row)
+		}
+	}
+}
