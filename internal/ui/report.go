@@ -29,8 +29,8 @@ var reportPresets = map[string]reportPreset{
 		shape: "Keep it short: one section with the claims that decide the answer and nothing else, no separate" +
 			" section on how the claims bear on it, and the limits in one or two sentences."},
 	"detailed": {words: 1500, tables: "many", note: "≈1500 words",
-		shape: "Go into depth: sections and sub-sections organized as the question needs, discussing each claim" +
-			" you may state with its source and a quote, and the limits in full."},
+		shape: "Go into depth: sections and sub-sections organized as the question needs, explaining mechanisms, evidence quality, trade-offs and useful examples" +
+			" from supported claims. Add detail rather than repeating the answer; quote selectively, and keep limits concise."},
 	"table": {tables: "many", note: "tables first", tabular: true,
 		shape: "Lead with tables: after a sentence under the first heading, the comparison in tables, prose only" +
 			" to connect and qualify them. A question with no alternatives to compare gets tables of the figures," +

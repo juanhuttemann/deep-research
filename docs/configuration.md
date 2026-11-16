@@ -117,7 +117,7 @@ choice made later in setup, which is why setup's review lists them.
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
 | `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
-| `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: search snippets only) |
+| `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: built-in HTML reader) |
 | `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none), when `setup` stored none for that address | — |
 | `DEEP_RESEARCH_SEARCH_ENGINE` | `searxng`, `exa`, `tavily` or `off` (LLM search) | `searxng` |
 | `DEEP_RESEARCH_SCRAPER` | `firecrawl`, `exa`, `tavily` or `none` | `firecrawl` when `FIRECRAWL_URL` is set, else `none` |
@@ -127,6 +127,22 @@ choice made later in setup, which is why setup's review lists them.
 A trailing slash on `FIRECRAWL_URL` is ignored when building API paths.
 
 To run SearXNG and Firecrawl yourself, see [services.md](services.md).
+
+### Built-in page extraction
+
+`scraper: direct` reads public HTML and plain text without a separate
+service or API key. It is the default when `scraper` and `firecrawl_url`
+are unset; a Firecrawl address still selects Firecrawl. Set
+`DEEP_RESEARCH_SCRAPER=direct` to override a saved `scraper: none`.
+`none` explicitly keeps search snippets. `setup scraper` offers both.
+
+The reader preserves headings, table rows and superseded-text markers,
+checks public addresses at connection time and on redirects, and bounds
+response size and time. It does not execute JavaScript or extract PDFs;
+those and refused pages keep their snippets, marked as such. Choose
+Firecrawl, Exa or Tavily for broader extraction support. Snippet evidence
+is explicitly identified to analysis and checking, not represented as a
+full page.
 
 ### Hosted search: Exa and Tavily
 
@@ -364,8 +380,9 @@ Which mode a run uses is decided by what is configured:
 - **Web search** — `searxng_url` set, which it is by default (`auto`), or
   `search_engine` set to `exa` or `tavily` (see above).
   Findings come from real web search. With `firecrawl_url` set too, each
-  result page is scraped for its full text; without it the search snippet is
-  the source. Firecrawl is given 60 seconds per page, and the request gives
+  result page is scraped for its full text. Otherwise the built-in reader
+  extracts HTML unless `scraper: none` was explicitly selected. Unsupported
+  or refused pages retain their search snippets. Firecrawl is given 60 seconds per page, and the request gives
   up at 70 whatever `model_call_timeout` says: a page it cannot fetch in
   that time falls back to its search snippet, like any failed scrape. Each source is labelled by how it was obtained: `✓ fetched`,
   `! snippet only` (with the reason: `noservice` when no scraper is
@@ -446,7 +463,9 @@ targets are scraped, and targets that name the fetcher's own host, a private
 or link-local address, or the cloud metadata service are refused before any
 request is made (the source is reported with a `blocked` code).
 
-Hostnames are resolved by the scraper itself, not here, so a name that
+The built-in reader also validates resolved addresses on each connection
+and every redirect target. For external services, hostnames are resolved
+by the scraper itself, not here, so a name that
 resolves into private space is not caught by this check: run a self-hosted
 Firecrawl where you would run any other service that fetches arbitrary URLs,
 not somewhere it can reach admin interfaces.

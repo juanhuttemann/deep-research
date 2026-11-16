@@ -9,7 +9,7 @@ func TestDescribe(t *testing.T) {
 		cfg  Config
 		want Setup
 	}{
-		{Config{OpenAIModel: "openrouter/free", OpenAIBaseURL: "https://u:p@openrouter.ai/api/v1", SearXNGURL: "auto"},
+		{Config{OpenAIModel: "openrouter/free", OpenAIBaseURL: "https://u:p@openrouter.ai/api/v1", SearXNGURL: "auto", Scraper: "none"},
 			Setup{"openrouter/free", "openrouter.ai", "searxng (public instances)", "snippets only"}},
 		{Config{OpenAIModel: "m", OpenAIBaseURL: "http://localhost:8000/v1", SearXNGURL: "http://a:8888, http://b",
 			FirecrawlURL: "http://localhost:3002"},

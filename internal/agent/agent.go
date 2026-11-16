@@ -272,9 +272,11 @@ type Claim struct {
 	// writes it, for computations to take as an input. Computed names the
 	// computation whose result the claim states instead: the program, not
 	// the fact-check, decides such a claim, by comparing the two.
-	Value    string `json:"value,omitempty"`
-	Unit     string `json:"unit,omitempty"`
-	Computed string `json:"computed,omitempty"`
+	// Qualifier keeps a bound or range out of exact computations and charts.
+	Qualifier string `json:"qualifier,omitempty"`
+	Value     string `json:"value,omitempty"`
+	Unit      string `json:"unit,omitempty"`
+	Computed  string `json:"computed,omitempty"`
 }
 
 // Recommendation is a conditional answer: choose an option when a condition
@@ -2416,7 +2418,7 @@ func parseClaims(v any) []Claim {
 	for i, m := range objects(v) {
 		c := Claim{ID: scalar(m["id"]), Text: getString(m, "claim", ""), Option: getString(m, "option", ""),
 			Criterion: getString(m, "criterion", ""), Scope: getString(m, "scope", ""), Sources: scalars(m["sources"]),
-			Value: scalar(m["value"]), Unit: getString(m, "unit", ""), Computed: scalar(m["computed"])}
+			Value: scalar(m["value"]), Unit: getString(m, "unit", ""), Computed: scalar(m["computed"]), Qualifier: scalar(m["qualifier"])}
 		if c.Text == "" {
 			continue
 		}

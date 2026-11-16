@@ -524,3 +524,26 @@ constant under a `unix` tag is invisible to a local `go build`.
   on purpose for existing scripts; each carries an inline comment saying why.
 - New config keys must work through all three channels: environment,
   `config.yaml`, and the embedded defaults.
+
+## Evidence context and report editing
+
+The tools layer's built-in `direct` reader extracts public HTML without a
+service. It validates resolved addresses and redirect targets, retains
+headings, table rows and historical corrections, and falls back through the
+existing snippet-quality signals on unsupported pages. An explicit `none`
+still disables extraction. The Driver gives analysis and the bounded
+follow-up call the plan's required facets; it distinguishes snippet evidence
+in every phase and distributes a bounded excerpt allowance across sources
+(up to 8,000 bytes per source, with a 1,500-byte floor for wide runs).
+Publisher, edition, scope and numerical qualifiers are checked as part of
+the assertion, rather than inferred from similar document titles. Claims may
+carry an optional `qualifier` (such as "over" or "up to"); qualified figures
+remain prose evidence and cannot be exact computation inputs or chart points.
+Old claims without this field keep their existing behavior.
+
+The checked answer remains program-written: governance is not bypassed by
+an unrestricted prose rewrite. Prompts ask for at most three concise
+conclusions and keep supporting detail in claims. The opening no longer
+repeats blocked conclusion prose; the audit retains it, while the explanation
+states material limitations in reader terms. The summarizer adds explanatory
+substance without repeating the opening or narrating the pipeline.

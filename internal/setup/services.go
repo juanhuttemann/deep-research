@@ -225,6 +225,7 @@ func (m ServicesModel) scraperItems() []item {
 		none.detail = serviceName(m.s.Engine) + "'s results bring their pages' text; one without it stays a snippet"
 	}
 	return []item{
+		{id: "direct", title: "built-in page reader", detail: "free HTML extraction; PDFs and pages requiring JavaScript keep their snippets"},
 		none,
 		{id: "firecrawl", title: "Firecrawl, self-hosted",
 			detail: "free, full page text; runs from its own repository (docs/services.md)"},
@@ -245,7 +246,7 @@ func (m ServicesModel) currentScraper() string {
 		if inline(m.s.Engine) {
 			return m.s.Engine
 		}
-		return "none"
+		return "direct"
 	case "firecrawl":
 		if m.hostedFirecrawl() {
 			return "firecrawl-hosted"
@@ -263,8 +264,8 @@ func (m ServicesModel) scraperStep() (tea.Model, tea.Cmd) {
 
 func (m ServicesModel) scraperChosen(id string) (tea.Model, tea.Cmd) {
 	switch id {
-	case "none":
-		m.s.Scraper = "none"
+	case "none", "direct":
+		m.s.Scraper = id
 		return m.finish()
 	case "firecrawl":
 		prefill := m.s.FirecrawlURL

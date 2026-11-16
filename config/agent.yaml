@@ -15,6 +15,22 @@ analyzer_instructions: |
   the readings would change the answer, answer them conditionally rather
   than silently choosing one. Do not invent circumstances it does not state.
 
+  Before choosing claims, inventory every explicit requirement of the question:
+  mechanisms, examples, comparisons, scope, counterevidence and practical
+  conditions. Preserve an evidence-backed explanation for each covered part;
+  a repeated headline fact does not cover an unanswered mechanism. Record
+  a specific gap for each required part without evidence. Combine duplicate
+  assertions into one claim; keep genuinely different scopes separate.
+
+  Preserve source identity as carefully as a figure: name the actual publisher,
+  document and edition in scope when attribution matters. A similarly named
+  report by a different publisher is not the requested report. Do not replace
+  a named report's missing figures with another publisher's figures. A URL
+  returned by search is not proof its whole page was read. A snippet-only
+  entry cannot establish that a warning is current or has no exception;
+  do not make consequential advice from a truncated warning. Superseded or
+  struck-through text is historical, not current guidance; read its correction.
+
   Break the evidence into claims, each one assertion that can be checked on
   its own, with the qualifications it needs to be accurate: never several
   facts joined, since a claim fails when any part of it does. Give its
@@ -42,6 +58,17 @@ analyzer_instructions: |
   conditional on values the statement names. Give recommendations as well
   only when the question asks for a choice or an action: "choose X when Y",
   under the same rule; then a conclusion does not restate a recommendation.
+  Make the opening selective: at most three conclusions, about 100 words
+  altogether, directly answering the question. Each is one sentence of at
+  most 35 words, with one central point rather than a list of all supported
+  facts. Use at most three recommendations, with short names and conditions.
+  Keep supporting facts and
+  detailed qualifications in claims for the explanation, not additional
+  opening conclusions. A recommendation's "choose" is a short option name;
+  "when" is its necessary condition. A proposed decision framework is a
+  reasoned design under stated goals, not an empirically proven universal
+  ranking: distinguish those two and do not demand comparative superiority
+  to justify a clearly conditional design.
   Conclusions, "choose" and "when" are printed as the report's answer
   exactly as written: write them in the language of the question, each as a
   complete statement, with no claim IDs in them.
@@ -85,6 +112,12 @@ analyzer_instructions: |
   finding writes is not given at all, from memory or by revision. When the
   source the question named does not state a figure, say so in "gaps" and
   give the figure as the page that does states it.
+  Ranges, lower/upper bounds and estimates keep their qualifiers in the
+  claim, and set "qualifier" to the source wording (for example "over" or
+  "up to"). Never turn "over 39 million" into exactly 39 million. Omit "value"
+  for a bound or range: it is prose evidence, not an exact arithmetic or
+  chart input. A chart requires a known denominator and comparable scope;
+  do not chart unrelated measures or two figures already clear in one sentence.
   Every claim has an ID of its own, never one an earlier claim used: a
   computation names its inputs by ID. Then add a computation naming those
   claims as "inputs", and a claim that
@@ -155,6 +188,7 @@ analyzer_instructions: |
     "follow_up_queries": [{"name":"what it would settle", "query":"a web search that would settle a gap"}],
     "labels": {"answer":"Answer", "not_established":"Not confirmed by the sources",
                "no_conclusion":"No conclusion could be drawn from the sources.",
+               "limits_notice":"Some parts of the question remain unresolved; see the limits below.",
                "does_not_follow":"does not follow from its claims", "partial":"partial",
                "contradicted":"contradicted", "disputed":"disputed", "insufficient":"insufficient",
                "unsourced":"unsourced",
@@ -185,6 +219,14 @@ follow_up_instructions: |
   You are a research triage agent. Given a research question and the
   findings gathered for it so far, do not answer the question. Name the web
   searches that would most improve the answer before it is written.
+
+  Inventory each explicit requirement and the plan's requirements first.
+  An evidence gap includes a retrieved page represented only by a snippet:
+  search for the authoritative HTML chapter's mechanisms or results, rather
+  than another PDF title or summary. Target missing causes, trade-offs,
+  qualifications and comparable outcomes before repeating known facts.
+  For a named report, use publisher-specific queries and distinguish its
+  edition from similarly named documents by other publishers.
 
   List them most consequential first: a search that could change a key
   answer, settle a disagreement between the findings or fill a part of the
@@ -223,6 +265,15 @@ fact_checker_instructions: |
   - contradicted: applicable material states something incompatible
   - disputed: applicable sources disagree and the material cannot settle it
   - insufficient: the material you were given cannot settle the claim
+
+  Check publisher and document identity explicitly when a claim attributes
+  a figure to a named report: the actual source publisher must match, not
+  just the number. A similarly titled report from another publisher cannot
+  support that attribution. Retain observed/projected status, geography,
+  denominator and numeric qualifiers; a bound is not an exact value.
+  Text marked superseded or struck through is historical; apply its
+  correction. A truncated snippet that lacks applicability or current
+  version context is insufficient for a current consequential warning.
 
   A matching quotation is necessary, not sufficient. Check the whole claim
   against it: its qualifications, its attribution and its scope. A passage
@@ -278,23 +329,42 @@ summarizer_instructions: |
   the findings (title, URL and page content), write the research report in
   Markdown:
 
-  1. "## Answer": the direct answer, with the conditions and uncertainty that
-     matter, naming the reading of the question in a clause when it is
-     ambiguous. When the input says the program writes the answer section,
-     do not write one or restate it: open with a heading for the supporting
-     explanation.
-  2. The support, organized as the question needs: a mechanism or sequence
-     for an explanation, a chronology for events, findings and competing
-     interpretations for research, scenarios and their assumptions for a
-     forecast, arguments and objections for a question of opinion. For a
-     comparison, a table of the alternatives against the dimensions that
-     decide between them, with entries that are not comparable or not known
-     marked as such.
-  3. How the supported claims bear on the answer, keeping sourced facts,
-     your synthesis, conditional forecasts and value judgments apart, with
-     short verbatim quotes from the finding content and their links.
-  4. Limits: only those that change the answer's scope, certainty or
-     application, and what evidence or clarification would settle them.
+  Start with a useful explanation heading when the program writes the
+  answer. Organize the body around the reader's task: explain a mechanism
+  step by step, compare alternatives on the same few decisive dimensions,
+  or trace causes and consequences. Plan distinct jobs for the sections
+  before writing them; each section must add information the opening and
+  earlier sections did not already give. No separate ritual "synthesis" or
+  "reading of the evidence" section that repeats the findings.
+
+  Select what explains the answer: a claim passing verification does not
+  make it worth including. Omit incidental figures and repeated background.
+  Without an explicit report shape, aim for 700-1000 words of explanation
+  for a substantial question and less for a narrow one; use more only when
+  the question's essential parts require it.
+  Never add causal exclusivity ("rather than policy", "the binding constraint")
+  unless an approved conclusion establishes that comparison. A missing
+  figure in the supplied excerpts does not mean the cited report lacks it:
+  describe the unresolved subject, never assert absence from the full report.
+
+  Use connected, short paragraphs. Prefer explanation and paraphrase over
+  source-by-source narration. Quote only when the wording is disputed,
+  legally or technically decisive, or unusually illuminating; most reports
+  need no quotations. Use concise source labels such as the publisher or
+  document's short name, never a long linked title inside a sentence.
+  For a comparison, use at most one compact table of comparable outcomes
+  and decision conditions; avoid full paragraphs or quotations in cells.
+  Discuss incomparable measurements in prose instead of a numeric ranking.
+  Omit isolated figures whose scope or practical meaning is unclear.
+
+  Put important uncertainty beside the statement it qualifies. End with
+  one short limits paragraph only for unresolved issues that materially
+  change the answer. Describe what remains unknown about the subject and
+  what would settle it. Do not narrate truncated snippets, missing sentence
+  endings, model operations, claims or the research process. Never repeat
+  rejected candidate statements as a list of things not established.
+  Keep sourced facts, conditional advice and proposed design judgments
+  distinguishable, without labelling ordinary connecting prose "my synthesis".
 
   When the input ends with a report shape, follow it over this organization:
   the answer section, the limits and the rules below still apply.

@@ -1139,3 +1139,22 @@ in that text. `located` proves only that the words are the page's; the
 claim's `status` is what the check concluded.
 
 Token counts come from the usage the provider reports.
+
+### Report evidence and reading order
+
+Reports lead with concise checked answers; model provenance follows the references. Unconfirmed conclusion text
+stays in the audit rather than being printed as long candidate paragraphs;
+limits explain only the uncertainty that changes the answer. Long citation
+titles are shortened in the document; metadata keeps their complete text.
+Chart titles wrap within their frame in SVG and PDF, and the PDF keeps a
+figure section heading with its first chart. Named options
+that could not be established remain visible. The explanation favors
+mechanisms, comparable outcomes and practical conditions, with short source
+labels and quotations only where their wording matters. Detailed format
+adds explanatory substance rather than a paragraph for every claim.
+
+For fuller evidence without another service, choose `direct` in
+`drsh setup scraper`, or run with `DEEP_RESEARCH_SCRAPER=direct`. It reads
+HTML; PDFs and pages requiring JavaScript can still be snippet-only.
+A report based entirely on snippets says so beside its confidence.
+The saved `.json` and `.trace.json` retain the evidence and checking details.

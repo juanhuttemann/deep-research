@@ -167,7 +167,7 @@ func TestComputedRecordsLoadBesideOlderSchemas(t *testing.T) {
 	}
 	st := Open(path)
 	a := &agent.Analysis{Answer: "c",
-		Claims:       []agent.Claim{{ID: "c1", Text: "x", Value: "61,200", Unit: "containers"}},
+		Claims:       []agent.Claim{{ID: "c1", Text: "x", Value: "61,200", Unit: "containers"}, {ID: "c2", Text: "over 39 million", Value: "39", Unit: "million", Qualifier: "over"}},
 		Computations: []agent.Computation{{ID: "m1", Op: "sum", Inputs: []string{"c1", "c1"}, Result: "122400", Valid: true}},
 		Charts:       []agent.Chart{{ID: "g1", Title: "t", File: "chart-0123456789abcdef.svg", Points: []agent.ChartPoint{{Label: "Q1", Ref: "c1", Value: "61200"}}}}}
 	if err := st.Save(&ResearchResult{ID: "new", ResearchResult: agent.ResearchResult{Question: "q2", Analysis: a}}); err != nil {
@@ -181,8 +181,16 @@ func TestComputedRecordsLoadBesideOlderSchemas(t *testing.T) {
 		t.Errorf("older records = %+v, %+v", runs[0].Analysis, runs[1].Analysis)
 	}
 	got := runs[2].Analysis
+	checkQualifierHistory(t, got.Claims[1], runs[1].Analysis.Claims[0])
 	if got.Claims[0].Value != "61,200" || len(got.Computations) != 1 || !got.Computations[0].Valid ||
 		got.Charts[0].File != "chart-0123456789abcdef.svg" || got.Charts[0].Points[0].Value != "61200" {
 		t.Errorf("computed record = %+v", got)
+	}
+}
+
+func checkQualifierHistory(t *testing.T, current, older agent.Claim) {
+	t.Helper()
+	if current.Qualifier != "over" || older.Qualifier != "" {
+		t.Fatalf("numeric qualifiers lost or invented: current=%+v older=%+v", current, older)
 	}
 }

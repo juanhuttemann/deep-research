@@ -616,6 +616,9 @@ func writeClaims(sb *strings.Builder, claims []agent.Claim) {
 			src = "no retrieved source"
 		}
 		fmt.Fprintf(sb, "  - %s [%s] %s (%s)", c.ID, about, c.Text, src)
+		if c.Qualifier != "" {
+			fmt.Fprintf(sb, " [numeric qualifier: %s]", c.Qualifier)
+		}
 		if c.Value != "" && c.Computed == "" {
 			// The figure the program computes with: the check judges it too.
 			fmt.Fprintf(sb, " [value: %s]", withUnit(c.Value, c.Unit))
@@ -790,12 +793,18 @@ func renderAnswer(a *agent.Analysis) string {
 		sb.WriteString("\n")
 		sb.WriteString(label(a, "not_established"))
 		sb.WriteString(":\n\n")
-		// Only the statement: why the check held it back (the claims that
-		// failed, a premise it did not follow from) is the checker's
-		// working, and read in a report as the pipeline talking to itself.
-		// The audit and the .json keep it.
+		// Candidate wording reads like an asserted finding, even below a
+		// caution label. The limits explain the missing evidence; the audit
+		// keeps the candidate and its rejection reason.
+		seen := map[string]bool{}
 		for _, r := range blocked {
-			writeChoice(&sb, r)
+			if name := readerText(r.Choose); name != "" && !seen[name] {
+				fmt.Fprintf(&sb, "- %s\n", name)
+				seen[name] = true
+			}
+		}
+		if len(seen) == 0 {
+			sb.WriteString(label(a, "limits_notice") + "\n")
 		}
 	}
 	return sb.String()
@@ -870,6 +879,7 @@ func noApproval(a *agent.Analysis) string {
 var englishLabels = map[string]string{
 	"answer":            "Answer",
 	"not_established":   "Not confirmed by the sources",
+	"limits_notice":     "Some parts of the question remain unresolved; see the limits below.",
 	"no_conclusion":     "No conclusion could be drawn from the sources.",
 	"does_not_follow":   "does not follow from its claims",
 	statusPartial:       "partial",
@@ -1035,7 +1045,10 @@ func repairPrompt(question string, a *agent.Analysis) string {
 	sb.WriteString("\nRevise each so these claims justify it exactly as written: narrow a condition or a" +
 		" statement, split it, or drop what the claims do not support. Cite only the claims above, every one a" +
 		" revision needs; give in \"revises\" the ID it replaces, a recommendation's (r...) as a recommendation," +
-		" a conclusion's (k...) as a conclusion. Leave out one nothing above can replace. Return only JSON:\n" +
+		" a conclusion's (k...) as a conclusion. Leave out one nothing above can replace." +
+		" Each revision is one sentence of at most 35 words, preserving necessary conditions." +
+		" Keep the central answer; leave supporting examples and procedural detail in the claims for the explanation." +
+		" Never expand a rejected summary into a catalogue of all supported facts. Return only JSON:\n" +
 		`{"recommendations":[{"revises":"r1","choose":"...","when":"...","claims":["c1"]}],` +
 		`"conclusions":[{"revises":"k1","statement":"...","claims":["c2"]}]}` + "\n")
 	return sb.String()

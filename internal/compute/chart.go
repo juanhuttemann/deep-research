@@ -71,11 +71,8 @@ type Shape struct {
 
 // Layout draws c into a w by h frame.
 func Layout(c Chart, w, h float64) []Shape {
-	const left, right, top, bottom = 64.0, 16.0, 44.0, 40.0
-	out := []Shape{{Kind: ShapeText, Role: RoleTitle, X: 0, Y: 18, Text: c.Title, Anchor: "start", Size: 14}}
-	if c.Unit != "" {
-		out = append(out, Shape{Kind: ShapeText, Role: RoleUnit, X: 0, Y: 34, Text: c.Unit, Anchor: "start", Size: 10})
-	}
+	const left, right, bottom = 64.0, 16.0, 40.0
+	out, top := chartHeader(c, w)
 	if len(c.Points) == 0 {
 		return out
 	}
@@ -117,6 +114,62 @@ func Layout(c Chart, w, h float64) []Shape {
 		return append(out, lineMarks(c.Points, band, left, y)...)
 	}
 	return append(out, barMarks(c.Points, band, left, y)...)
+}
+
+// Header lines reserve plot space in both vector formats. A scope-heavy
+// model title must not extend beyond the page or overlap the unit/axis.
+func chartHeader(c Chart, width float64) ([]Shape, float64) {
+	lines := chartTitleLines(c.Title, width-16)
+	var out []Shape
+	for i, line := range lines {
+		out = append(out, Shape{Kind: ShapeText, Role: RoleTitle, X: 0, Y: 18 + 18*float64(i), Text: line, Anchor: "start", Size: 14})
+	}
+	last := 18 + 18*float64(len(lines)-1)
+	if c.Unit != "" {
+		out = append(out, Shape{Kind: ShapeText, Role: RoleUnit, X: 0, Y: last + 16, Text: c.Unit, Anchor: "start", Size: 10})
+	}
+	return out, last + 26
+}
+
+func chartTitleLines(title string, width float64) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(title) {
+		word = clip(word, max(1, int(width/14)))
+		candidate := strings.TrimSpace(line + " " + word)
+		if line != "" && chartTitleWidth(candidate) > width {
+			lines = append(lines, line)
+			line = word
+		} else {
+			line = candidate
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	if len(lines) > 5 {
+		lines = lines[:5]
+		lines[4] += "…"
+	}
+	return lines
+}
+
+func chartTitleWidth(s string) float64 {
+	width := 0.0
+	for _, r := range s {
+		switch {
+		case r == ' ':
+			width += 0.4
+		case r > 127 || strings.ContainsRune("MWmw@", r):
+			width += 1
+		default:
+			width += 0.75
+		}
+	}
+	return width * 14
 }
 
 func barMarks(pts []Point, band, left float64, y func(float64) float64) []Shape {

@@ -15,6 +15,7 @@ const (
 	EngineTavily     = "tavily"
 	ScraperFirecrawl = "firecrawl"
 	ScraperNone      = "none"
+	ScraperDirect    = "direct"
 )
 
 // Options selects the search engine and the scraper, and carries what each
@@ -23,8 +24,8 @@ type Options struct {
 	// Engine is searxng (the default when empty), exa or tavily.
 	Engine     string
 	SearXNGURL string
-	// Scraper is firecrawl, exa, tavily or none. Empty means Firecrawl when
-	// FirecrawlURL is set, else none.
+	// Scraper is direct, firecrawl, exa, tavily or none. Empty means Firecrawl when
+	// FirecrawlURL is set, else direct HTML extraction.
 	Scraper         string
 	FirecrawlURL    string
 	FirecrawlAPIKey string
@@ -65,13 +66,18 @@ func NewEngine(o Options, timeout time.Duration) (Searcher, error) {
 // NewScraper builds the configured scraper, or nil for none.
 func NewScraper(o Options, timeout time.Duration) (Scraper, error) {
 	name := strings.ToLower(strings.TrimSpace(o.Scraper))
+	if name == "" && strings.TrimSpace(o.FirecrawlURL) == "" && InlineText(o.Engine) {
+		return nil, nil
+	}
 	if name == "" {
-		name = ScraperNone
+		name = ScraperDirect
 		if strings.TrimSpace(o.FirecrawlURL) != "" {
 			name = ScraperFirecrawl
 		}
 	}
 	switch name {
+	case ScraperDirect:
+		return NewDirectClient(timeout), nil
 	case ScraperNone, "off":
 		return nil, nil
 	case ScraperFirecrawl:
@@ -92,7 +98,7 @@ func NewScraper(o Options, timeout time.Duration) (Scraper, error) {
 		}
 		return NewTavilyClient(TavilyURL, o.TavilyAPIKey, timeout), nil
 	default:
-		return nil, fmt.Errorf("%w: scraper: unknown %q (want firecrawl, exa, tavily or none)", ErrSearchConfig, name)
+		return nil, fmt.Errorf("%w: scraper: unknown %q (want direct, firecrawl, exa, tavily or none)", ErrSearchConfig, name)
 	}
 }
 

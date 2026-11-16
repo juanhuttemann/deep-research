@@ -44,7 +44,7 @@ func TestDiagnoseReportsEachDependency(t *testing.T) {
 
 	checks := Diagnose(context.Background(), Config{
 		OpenAIAPIKey: "k", OpenAIBaseURL: provider.URL, OpenAIModel: "m",
-		SearXNGURL: sx.URL, ModelCallTimeout: time.Second,
+		SearXNGURL: sx.URL, ModelCallTimeout: time.Second, Scraper: "none",
 	})
 	if c := checkNamed(t, checks, "model"); !c.OK || !strings.Contains(c.Detail, "m") {
 		t.Errorf("model check = %+v", c)
@@ -69,7 +69,7 @@ func TestDiagnoseFlagsWhatIsBroken(t *testing.T) {
 
 	checks := Diagnose(context.Background(), Config{
 		OpenAIAPIKey: "bad", OpenAIBaseURL: provider.URL, OpenAIModel: "m",
-		SearXNGURL: sx.URL, ModelCallTimeout: time.Second,
+		SearXNGURL: sx.URL, ModelCallTimeout: time.Second, Scraper: "none",
 	})
 	if c := checkNamed(t, checks, "model"); c.OK || !strings.Contains(c.Detail, "401") {
 		t.Errorf("a rejected key passed: %+v", c)
@@ -236,7 +236,7 @@ func TestDiagnoseWarnsAboutWeakSetups(t *testing.T) {
 		fmt.Fprint(w, `{"results":[]}`)
 	}))
 	defer empty.Close()
-	cfg := Config{SearXNGURL: empty.URL, ModelCallTimeout: time.Second}
+	cfg := Config{SearXNGURL: empty.URL, ModelCallTimeout: time.Second, Scraper: "none"}
 	if c := checkSearch(context.Background(), cfg); !c.OK || !c.Warn || c.Fix == "" {
 		t.Errorf("an empty search answer did not warn: %+v", c)
 	}

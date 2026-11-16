@@ -177,16 +177,10 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	}
 	writeTitle(&sb, res.Title, res.Question)
 	fmt.Fprintf(&sb, "**Confidence:** %s\n\n", sum.Confidence)
-	if res.Model != "" {
-		fmt.Fprintf(&sb, "**Model:** %s", res.Model)
-		if res.Provider != "" {
-			fmt.Fprintf(&sb, " via %s", res.Provider)
-		}
-		if len(res.ServedBy) > 0 && !slices.Equal(res.ServedBy, []string{res.Model}) {
-			fmt.Fprintf(&sb, " (served by %s)", strings.Join(res.ServedBy, ", "))
-		}
-		sb.WriteString("\n\n")
+	if onlySearchSnippets(res.Findings) {
+		sb.WriteString("**Evidence:** search snippets only; full page context was not read.\n\n")
 	}
+
 	// A report from a few chosen sites reads differently from one off the
 	// open web, and nothing else in it says which it is.
 	if len(res.Domains) > 0 {
@@ -204,7 +198,30 @@ func MarkdownReport(res *agent.ResearchResult) string {
 	// to itself, and took more pages than the answer: it is the audit's, in
 	// the .json and the serve page's Audit.
 	writeCitations(&sb, citedOnly(citations(res, condStr(res.Summary, "report"))))
+	sb.WriteString("\n")
+	if res.Model != "" {
+		fmt.Fprintf(&sb, "**Model:** %s", res.Model)
+		if res.Provider != "" {
+			fmt.Fprintf(&sb, " via %s", res.Provider)
+		}
+		if len(res.ServedBy) > 0 && !slices.Equal(res.ServedBy, []string{res.Model}) {
+			fmt.Fprintf(&sb, " (served by %s)", strings.Join(res.ServedBy, ", "))
+		}
+		sb.WriteString("\n\n")
+	}
 	return sb.String()
+}
+
+func onlySearchSnippets(findings []agent.Finding) bool {
+	if len(findings) == 0 {
+		return false
+	}
+	for _, f := range findings {
+		if f.Status != "degraded" {
+			return false
+		}
+	}
+	return true
 }
 
 // citedOnly are the sources the report body cites. A report that embeds no
@@ -264,6 +281,21 @@ func splitCited(in []MetaCitation) (cited, retrieved []MetaCitation) {
 // took a page and a half after an answer of half a page. The PDF prints
 // this list smaller and without the URLs (pdfRefs); the .md keeps them in
 // the links.
+// Social titles sometimes contain an entire post. Keep the full title in
+// metadata, but do not let one reference consume a page of the document.
+func shortCitationTitle(title string) string {
+	title = OneLine(title)
+	runes := []rune(title)
+	if len(runes) <= 140 {
+		return title
+	}
+	short := string(runes[:137])
+	if i := strings.LastIndex(short, " "); i > len(short)/2 {
+		short = short[:i]
+	}
+	return strings.TrimSpace(short) + "…"
+}
+
 func writeCitations(sb *strings.Builder, cits []MetaCitation) {
 	if len(cits) == 0 {
 		return
@@ -274,7 +306,7 @@ func writeCitations(sb *strings.Builder, cits []MetaCitation) {
 		if note := sourceNote(c.Status); note != "" {
 			meta = strings.TrimPrefix(meta+" · "+note, " · ")
 		}
-		title := strings.TrimSpace(c.Title)
+		title := shortCitationTitle(c.Title)
 		switch {
 		case c.URL == "":
 			fmt.Fprintf(sb, "%d. %s — %s\n", i+1, citeLabel.Replace(cmp.Or(title, "untitled")), strings.TrimPrefix(meta+" · no URL", " · "))

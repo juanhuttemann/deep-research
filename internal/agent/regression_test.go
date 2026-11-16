@@ -736,7 +736,7 @@ func TestSearXNGAloneEnablesWebSearch(t *testing.T) {
 		fmt.Fprint(w, `{"results":[{"title":"Go","url":"https://go.dev/","content":"The Go programming language"}]}`)
 	}))
 	defer sx.Close()
-	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, SearXNGURL: sx.URL, ModelCallTimeout: time.Second})
+	a, err := New(Config{Scraper: "none", OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, SearXNGURL: sx.URL, ModelCallTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
