@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-16
+
 ### Added
 
 - Built-in `direct` HTML/plain-text page extraction, selected when no
@@ -12,7 +14,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   only. The reader preserves corrections and table context and checks
   public destinations at connection time and on redirects.
 - Public checker regression cases for superseded SQLite WAL guidance and
-  attribution of BloombergNEF projections to an IEA report.
+  attribution of BloombergNEF projections to an IEA report, and
+  checkpoint-mode busy-handler context.
 
 ### Fixed
 
@@ -28,10 +31,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   comparisons. Long unconfirmed candidate paragraphs stay in the audit;
   limits and source labels are written for readers. Model provenance follows
   the references, long citation titles are shortened for display, and
-  qualified figures cannot become exact chart points.
-- Long chart titles wrap in both SVG and PDF, and PDF section headings
-  stay with the first chart instead of being stranded on the previous page. Detailed format adds
+  qualified figures cannot become exact chart points. Detailed format adds
   mechanisms and trade-offs rather than repeating every claim with a quote.
+- Long chart titles wrap in both SVG and PDF, and PDF section headings
+  stay with the first chart instead of being stranded on the previous page.
+- Pi extension 0.1.7 accepts optional numeric qualifiers in saved claims.
 
 ## [0.36.0] - 2026-11-15
 
