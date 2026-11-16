@@ -92,7 +92,10 @@ the screen ends it, and Ctrl-D at `ask ▸` ends `drsh` at once. Ctrl-C in
 either box clears what is typed; on an empty box it says to press it
 again, and a second press quits (an empty `ask ▸` box: ends `drsh`). Cmd-C
 on macOS is the terminal's copy and never reaches `drsh`. A run that
-fails, or that the brief cancels, returns to the screen, which says why.
+fails, or that the brief cancels, returns to the screen, which says why:
+a failure the reader can act on (no search answered, too little evidence
+because public SearXNG refused the run) is headed by the problem, with the
+cause and reason under it and each fix on its own `→` line.
 Under the box is the next run's settings row: any of `depth`,
 `sub-topics`, `pages per topic`, `follow-ups`, `format`, `words`, `tables`
 and `clarify` that the config, the flags or a command set away from its

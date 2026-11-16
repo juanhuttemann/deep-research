@@ -732,14 +732,15 @@ func (d *Driver) thinEvidence(findings []agent.Finding) error {
 	if why == "" || len(findings) >= minEvidence {
 		return nil
 	}
-	err := fmt.Errorf("too little evidence to analyse: %s, leaving %s", why, sourceCount(len(findings)))
 	d.mu.Lock()
 	public := tools.PublicSearchRefused(d.searchErr)
 	d.mu.Unlock()
-	if public {
-		err = fmt.Errorf("%w. %s", err, publicRefusalHint)
+	if !public {
+		return fmt.Errorf("too little evidence to analyse: %s, leaving %s", why, sourceCount(len(findings)))
 	}
-	return err
+	f := &Failure{Problem: "too little evidence to analyse", Cause: fmt.Errorf("%s, leaving %s", why, sourceCount(len(findings)))}
+	publicRefusal(f, "results were thin")
+	return f
 }
 
 func sourceCount(n int) string {
@@ -1235,25 +1236,39 @@ func (d *Driver) searchFailure(findings []agent.Finding) error {
 // noSearch is the error of a run that stopped because no search answered,
 // led by lead and ending on what to check for the way it failed.
 func noSearch(lead string, err error) error {
+	f := &Failure{Problem: lead, Cause: err}
 	status := tools.SearchStatus(err)
-	if status == "unreachable" && tools.UnreachableService(err) != "SearXNG" {
+	switch {
+	case status == "unreachable" && tools.UnreachableService(err) != "SearXNG":
 		// A hosted engine has a fixed address: what failed is the network.
-		return fmt.Errorf("%s: %w. Check this machine's network (drsh doctor checks it)", lead, err)
-	}
-	if status == "unreachable" {
+		f.Fix = []string{"Check this machine's network (drsh doctor checks it)"}
+	case status == "unreachable":
 		// Nothing answered at the configured address: the server is down or
 		// the setting points at the wrong place, and both are the reader's to
 		// fix.
-		return fmt.Errorf("%s: %w. Check SEARXNG_URL and that SearXNG is running (drsh doctor checks it)", lead, err)
-	}
-	if status == "unauthorized" || status == "quota" {
+		f.Fix = []string{"Check SEARXNG_URL and that SearXNG is running (drsh doctor checks it)"}
+	case status == "unauthorized" || status == "quota":
 		// Only a hosted engine takes a key, and its error already names it.
-		return fmt.Errorf("%s (%s): %w. Check the engine's API key and its credit (drsh doctor checks it)", lead, status, err)
+		f.Status, f.Fix = status, []string{"Check the engine's API key and its credit (drsh doctor checks it)"}
+	case tools.PublicSearchRefused(err):
+		f.Status = status
+		publicRefusal(f, "retrying will not help")
+	default:
+		f.Status = status
 	}
-	if tools.PublicSearchRefused(err) {
-		return fmt.Errorf("%s (%s): %w. %s", lead, status, err, publicRefusalHint)
+	return f
+}
+
+// publicRefusal says what to do when the public SearXNG instances refuse
+// the run, the same advice as publicRefusalHint, in parts. They challenge
+// scripted traffic by design, which is what then follows.
+func publicRefusal(f *Failure, so string) {
+	f.Reason = "Public SearXNG instances challenge automated queries by design, so " + so
+	f.Fix = []string{
+		"Run SearXNG in Docker: drsh setup search sets it up and prints the one command that starts it",
+		"Without Docker, choose a hosted engine there: Exa or Tavily",
 	}
-	return fmt.Errorf("%s (%s): %w", lead, status, err)
+	f.Doc = tools.ServicesDoc
 }
 
 // contributionLine says what a finished sub-agent actually added to the run.

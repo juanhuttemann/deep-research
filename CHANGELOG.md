@@ -13,6 +13,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   background; prose and plain code now use the terminal's own foreground,
   and rules and image captions the same colour dimmed, as the live frame
   already did.
+- A run that fails for want of search returns to the start screen with
+  its error laid out: the problem as a headline, the cause and reason
+  under it, and each fix (SearXNG in Docker, or Exa or Tavily) on its own
+  line with the guide's link, instead of one run-on paragraph. On stderr
+  and in JSONL it stays one line, now saying that retrying will not help
+  rather than that results will be thin, as none came back.
 
 ## [0.37.0] - 2026-11-16
 
