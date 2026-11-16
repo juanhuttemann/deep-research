@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.37.1] - 2026-11-16
+
 ### Fixed
 
 - Rendered reports, `ask` answers and update notes stay readable in
