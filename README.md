@@ -70,7 +70,7 @@ you confirm:
 | ---- | ------- |
 | Model | any provider's model; a free OpenRouter key (no card) is at <https://openrouter.ai/keys> |
 | Web search | public SearXNG (the default), a local SearXNG in Docker, your own SearXNG, Exa, Tavily |
-| Page extraction | none (search snippets only), Firecrawl, Exa, Tavily |
+| Page extraction | built-in HTML reader, Firecrawl, Exa, Tavily, or snippets only |
 
 To change one part later:
 

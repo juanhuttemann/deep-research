@@ -585,10 +585,31 @@ type pdfLayout struct {
 func layoutPDF(blocks []pdfBlock) []*pdfPage {
 	l := &pdfLayout{}
 	l.newPage()
-	for _, b := range blocks {
+	for i, b := range blocks {
+		if b.kind == blockHeading && chartFollowsHeading(blocks, i) {
+			left := pdfMargin + float64(min(b.indent, pdfMaxIndent))*pdfIndentStep
+			width := pdfPageWidth - pdfMargin - left
+			size := pdfHeadingSizes[min(b.level, 6)]
+			lines := wrapAtoms(pdfAtoms(bolded(b.runs)), width, size)
+			// A chart is indivisible: reserving three prose lines leaves
+			// the heading behind when the figure moves to the next page.
+			l.room(width*pdfChartAspect + float64(len(lines))*size*1.3 + size*1.35 + 20)
+		}
 		l.block(b)
 	}
 	return l.pages
+}
+
+// An image-only Markdown paragraph leaves an empty paragraph before the
+// chart block. It must not defeat the heading's keep-with-figure rule.
+func chartFollowsHeading(blocks []pdfBlock, index int) bool {
+	for _, b := range blocks[index+1:] {
+		if b.kind == blockPara && len(b.runs) == 0 {
+			continue
+		}
+		return b.kind == blockChart
+	}
+	return false
 }
 
 func (l *pdfLayout) newPage() {

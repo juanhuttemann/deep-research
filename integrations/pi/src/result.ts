@@ -55,7 +55,7 @@ interface RunJSON {
 	confidence?: string;
 	error?: string;
 	analysis?: {
-		claims?: { id: string; claim: string; status?: string; note?: string; computed?: string }[];
+		claims?: { id: string; claim: string; status?: string; note?: string; computed?: string; qualifier?: string }[];
 		computations?: { id: string; label?: string; result?: string; unit?: string; formula?: string; valid?: boolean; reason?: string }[];
 		recommendations?: Rec[];
 		conclusions?: Rec[];

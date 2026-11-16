@@ -224,7 +224,7 @@ func TestEngineNeedsItsKey(t *testing.T) {
 	if _, err := NewEngine(Options{Engine: "bing"}, 0); err == nil || !strings.Contains(err.Error(), "bing") {
 		t.Errorf("unknown engine: %v", err)
 	}
-	if s, err := NewScraper(Options{}, 0); s != nil || err != nil {
+	if s, err := NewScraper(Options{Scraper: "none"}, 0); s != nil || err != nil {
 		t.Errorf("no scraper configured: %v, %v", s, err)
 	}
 }

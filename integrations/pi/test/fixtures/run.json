@@ -22,7 +22,10 @@
       {
         "id": "c3",
         "claim": "Go's GC pauses stay under 1ms.",
-        "status": "insufficient"
+        "status": "insufficient",
+        "qualifier": "under",
+        "value": "1",
+        "unit": "ms"
       },
       {
         "id": "c4",

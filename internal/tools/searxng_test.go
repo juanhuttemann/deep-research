@@ -153,7 +153,9 @@ func TestSearchWithoutAScraperKeepsSnippets(t *testing.T) {
 		{"title": "T", "url": "https://a.example/x", "content": "snippet"},
 		{"title": "U", "url": "https://b.example/y", "content": ""},
 	})
-	got, err := newSearchTools(sx.URL, "", 0).Search(context.Background(), "q", nil)
+	st := newSearchTools(sx.URL, "", 0)
+	st.Scraper = nil
+	got, err := st.Search(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

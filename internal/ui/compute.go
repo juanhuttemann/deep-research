@@ -90,6 +90,8 @@ func (e *evaluator) input(ref string) (compute.Input, string) {
 	switch {
 	case c == nil:
 		return compute.Input{}, ref + " is named but is neither a claim nor a computation"
+	case strings.TrimSpace(c.Qualifier) != "":
+		return compute.Input{}, ref + " is a qualified figure, not an exact arithmetic input"
 	case c.Computed != "":
 		// It stands for its computation's exact result, once its own figure is
 		// found to state it: models name the claim ("Q2" in a chart of
@@ -710,7 +712,7 @@ func autoCharts(a *agent.Analysis) []agent.Chart {
 	charted, quantities := chartedAlready(a)
 	groups, order := map[string][]agent.Claim{}, []string{}
 	for _, c := range a.Claims {
-		if c.Computed != "" || charted[c.ID] || quantities[quantityKey(c.Criterion)] ||
+		if c.Qualifier != "" || c.Computed != "" || charted[c.ID] || quantities[quantityKey(c.Criterion)] ||
 			strings.TrimSpace(c.Criterion) == "" && strings.TrimSpace(c.Unit) == "" {
 			continue
 		}

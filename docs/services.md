@@ -1,8 +1,8 @@
 # Running SearXNG and Firecrawl
 
 Out of the box, web search uses public SearXNG instances. Running your own
-keeps queries on your machine, and adding Firecrawl gives each source its
-full page text instead of a search snippet:
+keeps queries on your machine. The built-in page reader extracts HTML;
+adding Firecrawl supports more page types, including PDFs and JavaScript:
 
 | Service | Role | URL used below | API key |
 | ------- | ---- | -------------- | ------- |
@@ -10,8 +10,10 @@ full page text instead of a search snippet:
 | Firecrawl | fetches each result page and returns Markdown | `http://localhost:3002` | none when self-hosted |
 
 Point `drsh setup search` at your SearXNG, and `drsh setup scraper` at your
-Firecrawl to scrape the pages (or set `SEARXNG_URL` and `FIRECRAWL_URL`). SearXNG alone is enough for web search — each source is then its
-search snippet, marked `snippet only`
+Firecrawl to scrape the pages (or set `SEARXNG_URL` and `FIRECRAWL_URL`). SearXNG alone is enough for web search. Without an extraction service the
+built-in reader fetches HTML; unsupported or refused pages keep their
+search snippet, marked `snippet only`. Explicit `scraper: none` keeps all
+sources as snippets
 ([configuration.md](configuration.md#research-modes)).
 
 For SearXNG alone, "local SearXNG in Docker" in `drsh setup search` (or

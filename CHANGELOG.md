@@ -5,6 +5,34 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Built-in `direct` HTML/plain-text page extraction, selected when no
+  extractor or Firecrawl address is set. Explicit `none` remains snippets
+  only. The reader preserves corrections and table context and checks
+  public destinations at connection time and on redirects.
+- Public checker regression cases for superseded SQLite WAL guidance and
+  attribution of BloombergNEF projections to an IEA report.
+
+### Fixed
+
+- Isolate the zero-allocation display-width regression from asynchronous
+  cleanup in other tests, retaining its strict zero-allocation assertion.
+
+### Changed
+
+- Evidence prompts identify snippets and give decisive pages more context
+  within a bounded budget. Research-plan requirements survive into analysis
+  and follow-ups; instructions check publisher, edition and numeric scope.
+- Reports favor concise checked answers, explanatory substance and compact
+  comparisons. Long unconfirmed candidate paragraphs stay in the audit;
+  limits and source labels are written for readers. Model provenance follows
+  the references, long citation titles are shortened for display, and
+  qualified figures cannot become exact chart points.
+- Long chart titles wrap in both SVG and PDF, and PDF section headings
+  stay with the first chart instead of being stranded on the previous page. Detailed format adds
+  mechanisms and trade-offs rather than repeating every claim with a quote.
+
 ## [0.36.0] - 2026-11-15
 
 ### Added

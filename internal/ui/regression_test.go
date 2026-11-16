@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -32,6 +33,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/juanhuttemann/deep-research/internal/agent"
+	"github.com/juanhuttemann/deep-research/internal/compute"
 	"github.com/juanhuttemann/deep-research/internal/tools"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -191,6 +193,17 @@ func TestSourceCategoriesAcceptSchemelessURLs(t *testing.T) {
 }
 
 func TestDisplayWidthDoesNotAllocate(t *testing.T) {
+	// AllocsPerRun counts the whole process. Provider and UI tests can
+	// leave asynchronous cleanup running, so measure in the same race-
+	// instrumented test binary with no unrelated tests active.
+	if os.Getenv("DRSH_WIDTH_ALLOC_CHILD") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestDisplayWidthDoesNotAllocate$")
+		cmd.Env = append(os.Environ(), "DRSH_WIDTH_ALLOC_CHILD=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated width allocation check: %v\n%s", err, out)
+		}
+		return
+	}
 	s := strings.Repeat("\x1b[31m名字 café\x1b[0m ", 50)
 	if n := testing.AllocsPerRun(100, func() { dispWidth(s) }); n != 0 {
 		t.Errorf("width scan allocated %g times", n)
@@ -3963,5 +3976,90 @@ func TestExportKeepsTheFilesMode(t *testing.T) {
 	}
 	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v, %v; want the earlier file's 0600", st.Mode().Perm(), err)
+	}
+}
+
+func TestAnswerDoesNotRepeatUnconfirmedCandidateProse(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{{ID: "c1", Status: statusSupported}}, Conclusions: []agent.Recommendation{{Statement: "An approved answer.", Claims: []string{"c1"}}, {Statement: "A rejected paragraph must stay in the audit.", Blocked: "does not follow"}}}
+	got := renderAnswer(a)
+	if !strings.Contains(got, "An approved answer.") || strings.Contains(got, "A rejected paragraph") {
+		t.Fatalf("answer repeats rejected prose: %s", got)
+	}
+	if !strings.Contains(got, "Not confirmed") {
+		t.Fatalf("answer hides remaining uncertainty: %s", got)
+	}
+}
+
+func TestFindingPromptDistinguishesSnippetFromContext(t *testing.T) {
+	var b strings.Builder
+	writeFindings(&b, []agent.Finding{{Title: "Publisher's report", URL: "https://publisher.example/report", Content: "A truncated warning.", Status: "degraded"}})
+	if !strings.Contains(b.String(), "snippet only") {
+		t.Fatalf("snippet appears to be full evidence: %s", b.String())
+	}
+}
+
+func TestDecisiveSourcesGetMoreContextWithinBudget(t *testing.T) {
+	fs := []agent.Finding{{Content: strings.Repeat("x", 20000)}, {Content: "short"}}
+	if n := findingBudget(fs); n != 8000 {
+		t.Fatalf("small source set budget %d", n)
+	}
+	fs = make([]agent.Finding, 50)
+	for i := range fs {
+		fs[i].Content = strings.Repeat("x", 20000)
+	}
+	if n := findingBudget(fs); n != maxPromptFindingChars {
+		t.Fatalf("wide source set exceeds floor budget: %d", n)
+	}
+}
+func TestPlanRequirementsSurviveIntoEvidencePrompt(t *testing.T) {
+	p := &Plan{Question: "Compare cooling options", SubTopics: []SubTopic{{Name: "Water", Notes: "Irrigation and maintenance constraints"}}}
+	got := plannedEvidencePrompt(p, nil, nil)
+	if !strings.Contains(got, "Irrigation and maintenance constraints") {
+		t.Fatalf("requirements lost: %s", got)
+	}
+}
+
+func TestQualifiedFigureCannotBecomeExactChartPoint(t *testing.T) {
+	a := &agent.Analysis{Claims: []agent.Claim{{ID: "c1", Text: "Sales exceed 39 million.", Value: "39", Unit: "million", Qualifier: "over", Status: statusSupported}}}
+	e := newEvaluator(a, func(*agent.Claim) string { return "" })
+	for _, computed := range []string{"", "m1"} {
+		a.Claims[0].Computed = computed
+		if _, why := e.input("c1"); !strings.Contains(why, "qualified") {
+			t.Fatalf("bound used as exact figure (computed=%q): %s", computed, why)
+		}
+	}
+}
+
+func TestSnippetOnlyReportDoesNotImplyFullContext(t *testing.T) {
+	res := &agent.ResearchResult{Question: "Question", Summary: &agent.Summary{Report: "Answer", Confidence: "medium"}, Findings: []agent.Finding{{URL: "https://example.com", Content: "snippet", Status: "degraded"}}}
+	if got := MarkdownReport(res); !strings.Contains(got, "full page context was not read") {
+		t.Fatalf("snippet limitation hidden: %s", got)
+	}
+	res.Findings[0].Status = "ok"
+	if got := MarkdownReport(res); strings.Contains(got, "full page context was not read") {
+		t.Fatalf("read page labelled snippet-only: %s", got)
+	}
+}
+
+func TestLongCitationTitleDoesNotPrintEntireSocialPost(t *testing.T) {
+	title := strings.Repeat("A public source title with Unicode café. ", 30)
+	var b strings.Builder
+	writeCitations(&b, []MetaCitation{{Title: title, URL: "https://public.example/post", Domain: "public.example", Status: "ok"}})
+	if strings.Contains(b.String(), strings.TrimSpace(title)) || !strings.Contains(b.String(), "https://public.example/post") || !utf8.ValidString(b.String()) {
+		t.Fatalf("reference contains an entire post or lost its link: %s", b.String())
+	}
+}
+
+func TestPDFChartHeadingStaysWithItsFigure(t *testing.T) {
+	c := compute.Chart{Title: "Plot sample", Kind: compute.KindBar, Points: []compute.Point{{Label: "A", Value: 1, Text: "1"}, {Label: "B", Value: 2, Text: "2"}}}
+	for n := 1; n <= 45; n++ {
+		md := strings.Repeat("An ordinary paragraph fills the page before this figure.\n\n", n) + "## Graph section\n\n![Plot sample](plot.svg)\n"
+		pages := layoutPDF(parsePDFBlocks(md, map[string]compute.Chart{"plot.svg": c}))
+		for _, page := range pages {
+			ops := page.ops.String()
+			if strings.Contains(ops, "Graph section") && !strings.Contains(ops, "Plot sample") {
+				t.Fatalf("heading stranded before its chart after %d paragraphs", n)
+			}
+		}
 	}
 }

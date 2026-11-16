@@ -1,0 +1,9 @@
+{
+  "about": "Public SQLite WAL documentation, Overview item 8 (https://www.sqlite.org/wal.html, reviewed 2026-11-15). The gigabyte warning is struck through and explicitly superseded by the 3.11.0 correction. A current warning must fail; historical attribution and corrected behavior are supported controls. This arose from a real snippet-only run; this case supplies the missing full context to test interpretation separately from retrieval.",
+  "findings": [{"url":"https://www.sqlite.org/wal.html","title":"Write-Ahead Logging - SQLite","status":"ok","content":"[Superseded text: WAL works best with smaller transactions. WAL does not work well for very large transactions. For transactions in excess of a gigabyte, WAL mode may fail with an I/O or disk-full error.] Beginning with version 3.11.0 (2016-02-15), WAL mode works as efficiently with large transactions as does rollback mode."}],
+  "claims": [
+    {"id":"c1","claim":"Current SQLite WAL guidance warns that transactions exceeding a gigabyte may fail and recommends rollback mode.","sources":["https://www.sqlite.org/wal.html"]},
+    {"id":"c2","claim":"Beginning with version 3.11.0, WAL mode works as efficiently with large transactions as does rollback mode.","scope":"SQLite 3.11.0 and later","sources":["https://www.sqlite.org/wal.html"]}
+  ],
+  "expect":{"supported":["c2"],"not_supported":["c1"]}
+}

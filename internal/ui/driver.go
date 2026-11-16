@@ -403,7 +403,7 @@ func (d *Driver) Run(ctx context.Context, plan *Plan) (*agent.ResearchResult, er
 	}
 
 	d.emit(Event{Type: Phase, Phase: "Analyze", Detail: "Synthesizing findings into an answer"})
-	analysis, err := d.analyze(ctx, analyzePrompt(statedQuestion(plan), findings, uncovered))
+	analysis, err := d.analyze(ctx, plannedEvidencePrompt(plan, findings, uncovered))
 	if err != nil {
 		return d.partial(ctx, plan, findings, nil, nil, nil, "analysis failed", err)
 	}
@@ -464,7 +464,7 @@ const ConfidenceUnchecked = "unchecked"
 func (d *Driver) answer(ctx context.Context, plan *Plan, findings []agent.Finding,
 	uncovered []string) (*agent.ResearchResult, error) {
 	d.emit(Event{Type: Phase, Phase: "Answer", Detail: "Answering from " + sourceCount(len(findings))})
-	summary, err := d.Agent.Answer(ctx, analyzePrompt(statedQuestion(plan), findings, uncovered)+reportShape(plan.Report))
+	summary, err := d.Agent.Answer(ctx, plannedEvidencePrompt(plan, findings, uncovered)+reportShape(plan.Report))
 	if err != nil {
 		return d.partial(ctx, plan, findings, nil, nil, nil, "answer failed", err)
 	}
@@ -934,7 +934,7 @@ func (d *Driver) followUp(ctx context.Context, plan *Plan, findings []agent.Find
 		return findings, uncovered
 	}
 	d.emit(Event{Type: Phase, Phase: "Research", Detail: "Finding what the evidence leaves open"})
-	qs, err := d.Agent.FollowUps(ctx, analyzePrompt(statedQuestion(plan), findings, uncovered))
+	qs, err := d.Agent.FollowUps(ctx, plannedEvidencePrompt(plan, findings, uncovered))
 	if err != nil {
 		d.emit(Event{Type: Error, Phase: "Research", Detail: "follow-up searches not chosen, analysing what was found: " + err.Error()})
 		return findings, uncovered
@@ -1422,8 +1422,8 @@ func queryPrefix(s string, width int) string {
 // without a cap the prompt — and the call — grow with the whole run: a wide
 // run put a quarter of a megabyte in front of the model, blew the two-minute
 // call deadline mid-analysis and retried at four minutes, throwing away the
-// two already spent. What fills the cap is chosen by the queries that found the
-// source (see clipPromptContent), not taken from the page's opening.
+// two already spent. findingBudget shares a bounded allowance across pages;
+// the passages come from matching queries or claims rather than the opening.
 const maxPromptFindingChars = 1500
 
 // writeFindings lists findings as numbered, content-bounded prompt entries.
@@ -1443,6 +1443,8 @@ func writeFindingsFor(sb *strings.Builder, findings []agent.Finding, claims []ag
 		mark := ""
 		if !fetched(f) {
 			mark = " " + neverFetched
+		} else if f.Status == "degraded" {
+			mark = " [snippet only: full context not read]"
 		}
 		first, second := excerptQueries(f, claims)
 		sb.WriteString("  ")
@@ -1454,7 +1456,7 @@ func writeFindingsFor(sb *strings.Builder, findings []agent.Finding, claims []ag
 		sb.WriteString(")")
 		sb.WriteString(mark)
 		sb.WriteString("\n    ")
-		sb.WriteString(clipPromptContent(f.Content, first, second))
+		sb.WriteString(clipPromptContent(f.Content, first, second, findingBudget(findings)))
 		sb.WriteString("\n")
 	}
 	if n := countFetched(findings); n > 0 && n < len(findings) {
@@ -1463,15 +1465,44 @@ func writeFindingsFor(sb *strings.Builder, findings []agent.Finding, claims []ag
 	}
 }
 
-// clipPromptContent caps one source at maxPromptFindingChars, keeping the
-// passages that match query, and marks the cut so the model reads the source
-// as excerpted rather than complete. The prefix it used to keep was, on a
-// documentation page, its cookie dialog and navigation.
-func clipPromptContent(s string, first, second []string) string {
-	if len(s) <= maxPromptFindingChars {
+// A small set of decisive sources gets more context, without making a wide
+// run grow linearly in full-page size. Unused allocations are redistributed.
+func findingBudget(findings []agent.Finding) int {
+	const total, ceiling = 48000, 8000
+	low, high := maxPromptFindingChars, ceiling
+	for low < high {
+		mid := (low + high + 1) / 2
+		used := 0
+		for _, f := range findings {
+			used += min(len(f.Content), mid)
+		}
+		if used <= total {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return low
+}
+
+func clipPromptContent(s string, first, second []string, budget int) string {
+	if len(s) <= budget {
 		return s
 	}
-	return tools.ExcerptFor(s, first, second, maxPromptFindingChars) + " …[truncated]"
+	return tools.ExcerptFor(s, first, second, budget) + " …[truncated]"
+}
+
+// Planned requirements remain visible after retrieval: a nonempty stream is
+// not proof that its mechanism, caveats or comparison were actually answered.
+func plannedEvidencePrompt(plan *Plan, findings []agent.Finding, uncovered []string) string {
+	var b strings.Builder
+	b.WriteString(analyzePrompt(statedQuestion(plan), findings, uncovered))
+	b.WriteString("\nAnswer requirements from the research plan; check each against the evidence, including every explicit part of the question:\n")
+	for _, sub := range plan.SubTopics {
+		fmt.Fprintf(&b, "- %s: %s\n", sub.Name, sub.Notes)
+	}
+	b.WriteString("Track coverage by substance, not by number of URLs. Prefer missing mechanisms, conditions, counterevidence and requested comparisons over repeated headline facts.\n")
+	return b.String()
 }
 
 // excerptQueries chooses what a page shows: the texts of the claims that cite

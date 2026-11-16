@@ -1622,7 +1622,7 @@ func TestAnswerNamesTheOptionsNotEstablished(t *testing.T) {
 	// The blocked option is named, in the reader's words; why the check
 	// held it back is the audit's.
 	if !strings.Contains(got, "Not confirmed by the sources") ||
-		!strings.Contains(got, "- **Node-based**: traffic is steady\n") || strings.Contains(got, "partial") {
+		!strings.Contains(got, "- Node-based\n") || strings.Contains(got, "partial") {
 		t.Errorf("answer does not name the blocked option alone:\n%s", got)
 	}
 	governAll(a, nil, errors.New("timeout"), findings)
@@ -1695,7 +1695,7 @@ func TestApprovedRevisionReplacesItsOriginal(t *testing.T) {
 		t.Errorf("answer does not show the revision in place of the original:\n%s", got)
 	}
 	a.Recommendations[2].Blocked = "it does not follow from its claims: r"
-	if got := renderAnswer(a); !strings.Contains(got, "Not confirmed") || !strings.Contains(got, "traffic is steady") {
+	if got := renderAnswer(a); !strings.Contains(got, "Not confirmed") || !strings.Contains(got, "Node-based") {
 		t.Errorf("with the revision blocked the original should be named as not established:\n%s", got)
 	}
 }
@@ -1840,7 +1840,7 @@ func TestConclusionsAreGovernedLikeRecommendations(t *testing.T) {
 	if !strings.Contains(got, "- An election starts on a follower's timeout and is won with a majority of votes.") {
 		t.Errorf("the approved conclusion is not the answer:\n%s", got)
 	}
-	if !strings.Contains(got, "Not confirmed by the sources") || !strings.Contains(got, "always settles") {
+	if !strings.Contains(got, "Not confirmed by the sources") || strings.Contains(got, "always settles") {
 		t.Errorf("the blocked conclusion is not named as not established:\n%s", got)
 	}
 	if p := claimsToCheck(a); !strings.Contains(p, "k1: conclude: An election starts") || !strings.Contains(p, "premise c2:") {
