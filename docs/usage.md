@@ -1067,8 +1067,10 @@ quotes, links, syntax-highlighted code blocks — using
 [Glamour](https://github.com/charmbracelet/glamour), the renderer behind Glow;
 no separate Glow installation is needed. Rendering also applies to `--silent`
 and wraps to the terminal width. Pipes, redirected output, saved reports and
-JSONL stay unstyled. The default style is `dark`; set `GLAMOUR_STYLE=light`
-for a light terminal, or point `GLAMOUR_STYLE` at a Glamour JSON stylesheet.
+JSONL stay unstyled. The default style is `dark`, drawing prose in the
+terminal's own foreground colour so a theme that repaints the 256-colour
+greys cannot dim it; set `GLAMOUR_STYLE=light` for a light terminal, or
+point `GLAMOUR_STYLE` at a Glamour JSON stylesheet.
 
 Each run writes `.md`, `.pdf` and `.json` artifacts into `--reports`.
 Markdown and PDF exports include one executive summary. The PDF is typeset

@@ -5,6 +5,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Rendered reports, `ask` answers and update notes stay readable in
+  terminals whose theme repaints the 256-colour greys. The dark style drew
+  prose in grey 252, which one desktop theme sets to #46464f, dark on a dark
+  background; prose and plain code now use the terminal's own foreground,
+  and rules and image captions the same colour dimmed, as the live frame
+  already did.
+
 ## [0.37.0] - 2026-11-16
 
 ### Added

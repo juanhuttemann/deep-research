@@ -4063,3 +4063,21 @@ func TestPDFChartHeadingStaysWithItsFigure(t *testing.T) {
 		}
 	}
 }
+
+// A desktop theme repainted 256-colour index 252 to #46464f, and the
+// report's body text, drawn in 252 by Glamour's dark style, came out dark
+// grey on a dark background. Prose and muted elements must use the
+// terminal's own foreground (plain or dim), never an index on the grey ramp.
+func TestMarkdownBodyAvoidsThemeRepaintedGreys(t *testing.T) {
+	t.Setenv("GLAMOUR_STYLE", "")
+	body := "Plain prose.\n\n---\n\n![chart](https://example.com/c.png)\n\n```\nplain code\n```\n"
+	out := renderMarkdown(body, 60)
+	for n := 232; n <= 255; n++ {
+		if strings.Contains(out, fmt.Sprintf("38;5;%dm", n)) {
+			t.Errorf("rendered text uses grey-ramp foreground %d: %q", n, out)
+		}
+	}
+	if !strings.Contains(stripANSI(out), "Plain prose.") {
+		t.Errorf("prose lost: %q", out)
+	}
+}
