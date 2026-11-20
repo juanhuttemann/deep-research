@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.37.2] - 2026-11-20
+
 ### Changed
 
 - Building from source needs Go 1.27 (was 1.26). CI builds and lints with
