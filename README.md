@@ -41,7 +41,7 @@ Both fetch the latest release binary and verify its checksum; see
 [releases](https://github.com/juanhuttemann/deep-research/releases). After
 that, `drsh update` replaces it with each new release.
 
-From source (Go 1.26+):
+From source (Go 1.27+):
 
 ```sh
 git clone https://github.com/juanhuttemann/deep-research.git

@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.4'
           cache: true
       - name: Download dependencies
         run: go mod download
@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.4'
           cache: true
       - uses: actions/setup-node@v5
         with:
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.4'
           cache: true
       # golangci-lint runs the config in .golangci.yml, which covers
       # errcheck/govet/ineffassign/staticcheck/unused (≈ make verify's
@@ -123,7 +123,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.11.2
+          version: v2.15.0
       # The two make-verify linters not bundled with golangci.
       - name: gocyclo & deadcode
         run: |
@@ -163,7 +163,7 @@ jobs:
           fetch-depth: 0 # goreleaser needs full history (previous tags)
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.4'
           cache: true
       - name: GoReleaser
         uses: goreleaser/goreleaser-action@v6

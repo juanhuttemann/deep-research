@@ -670,7 +670,7 @@ func TestNamesLeaveURLsUnitsAndQuotedWordsAlone(t *testing.T) {
 	}
 	for in, want := range map[string]string{
 		"Q1 was 61,200 (c2). The total (m1, c3) is set [c4] (finding 3).": "Q1 was 61,200. The total is set.",
-		"Measured in (cm) and [k]":                                        "Measured in (cm) and [k]",
+		"Measured in (cm) and [k]": "Measured in (cm) and [k]",
 	} {
 		if got := readerText(in); got != want {
 			t.Errorf("readerText(%q) = %q, want %q", in, got, want)
