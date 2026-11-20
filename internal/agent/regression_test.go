@@ -1459,3 +1459,45 @@ func TestChatSendsOnlyTheLatestTurns(t *testing.T) {
 		t.Errorf("request is %d bytes for %d turns", len(last), len(chat.Turns))
 	}
 }
+
+// TestEveryCallCarriesTodaysDate: no prompt said what day it was, so the
+// model took its training cutoff for the present. The clarifier asked which
+// paper was meant by an arXiv ID from the month before, calling it "not yet
+// available" and offering last year's ID with the same number instead. The
+// date goes on the call itself, so every phase and the reader's own prompts
+// get it.
+func TestEveryCallCarriesTodaysDate(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop",
+				"message": map[string]any{"role": "assistant", "content": `{"questions":[]}`}}},
+		})
+	}))
+	defer srv.Close()
+
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a.(*impl).now = func() time.Time { return time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC) }
+	if _, err := a.Clarify(context.Background(), "Summarize arXiv 2610.05517"); err != nil {
+		t.Fatalf("Clarify: %v", err)
+	}
+	if _, err := a.Analyze(context.Background(), "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	// Analyze streams; this server does not, so it is asked again unstreamed.
+	if len(bodies) < 2 {
+		t.Fatalf("%d requests, want one per call", len(bodies))
+	}
+	for i, b := range bodies {
+		if !strings.Contains(b, "Today's date is Friday, 20 November 2026.") {
+			t.Errorf("request %d does not carry today's date:\n%s", i+1, b)
+		}
+	}
+}

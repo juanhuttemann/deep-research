@@ -694,6 +694,8 @@ type impl struct {
 	noEffortFlag atomic.Bool
 	timeout      time.Duration
 	retries      int
+	// now dates every call (dated); nil is the wall clock.
+	now func() time.Time
 	// tokens is the provider-reported usage summed across every call. Model
 	// calls run in parallel across sub-agents, so it is updated atomically.
 	tokens      atomic.Int64
@@ -742,6 +744,24 @@ func (a *impl) callStreaming(ctx context.Context, ag *agent.Agent, prompt, effor
 	return out, err
 }
 
+// dated opens a prompt with today's date. A model knows only the world up
+// to its training cutoff and takes that for the present: without the date
+// the clarifier called an arXiv ID from the month before "not yet
+// available" and offered last year's paper in its place, and every later
+// phase can as easily take a recent release for speculation or a correctly
+// sourced recent claim for an error. It goes on every call, not into the
+// instructions, so a long-running serve still has the right day after
+// midnight and a reader's own prompts in config.yaml get it too.
+func (a *impl) dated(prompt string) string {
+	now := time.Now
+	if a.now != nil {
+		now = a.now
+	}
+	return "Today's date is " + now().Format("Monday, 2 January 2006") +
+		". What you know may end earlier: something dated after it but no later than today" +
+		" (a release, a paper, an event, a version) is not in the future and may well exist.\n\n" + prompt
+}
+
 // call runs one model call at effort, collecting the response in one step.
 func (a *impl) call(ctx context.Context, ag *agent.Agent, prompt, effort string, opts ...agent.Option) (string, error) {
 	return a.callWith(ctx, ag, prompt, nil, slices.Concat(a.params(effort, false), opts)...)
@@ -756,6 +776,7 @@ func (a *impl) call(ctx context.Context, ag *agent.Agent, prompt, effort string,
 // When progress is non-nil the response stream is drained update by update so
 // the partial text can be reported; otherwise it is collected in one step.
 func (a *impl) callWith(ctx context.Context, ag *agent.Agent, prompt string, progress func(string), opts ...agent.Option) (string, error) {
+	prompt = a.dated(prompt)
 	budget, err := a.timeout, error(nil)
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 {

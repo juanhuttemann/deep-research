@@ -90,10 +90,11 @@ drshTest("drsh's clarify and plan calls run on the bridge", async () => {
 	const b = await startBridge({
 		model,
 		stream: fakeStream((c) => {
-			// The clarifier is asked "Question: ..." alone; the planner's
-			// prompt is longer.
+			// The clarifier is asked "Question: ..." alone after the date
+			// line every call opens with; the planner's prompt is longer.
 			const last = c.context.messages.at(-1);
-			const prompt = last?.role === "user" && typeof last.content === "string" ? last.content : "";
+			const text = last?.role === "user" && typeof last.content === "string" ? last.content : "";
+			const prompt = text.replace(/^Today's date is [^\n]*\n\n/, "");
 			if (prompt.startsWith("Question:")) {
 				return { text: JSON.stringify({ questions: [{ text: "Which workload?", options: ["web servers", "CLI tools"] }] }) };
 			}
