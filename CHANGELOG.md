@@ -5,6 +5,11 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Building from source needs Go 1.27 (was 1.26). CI builds and lints with
+  1.27.4 and golangci-lint v2.15.0.
+
 ### Fixed
 
 - Every model call is told today's date. None was, so the model took its

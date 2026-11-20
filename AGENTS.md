@@ -7,7 +7,7 @@ architecture.
 
 ## What this is
 
-Go 1.26 CLI. Cobra + viper, `openai-go/v3` +
+Go 1.27 CLI. Cobra + viper, `openai-go/v3` +
 `microsoft/agent-framework-go` for LLM calls, Glamour for terminal Markdown,
 SearXNG/Firecrawl (optional) for web search and scraping. Four-phase
 pipeline: research → analyze → fact-check → summarize.
