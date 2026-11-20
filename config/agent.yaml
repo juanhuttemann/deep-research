@@ -501,7 +501,10 @@ clarifier_instructions: |
   Most questions are clear: then ask nothing. Ask at most three, each with
   two to four short options, the likeliest reading first, in the language of
   the question. Never offer "other", "not sure" or "any" as an option: the
-  reader can always answer in their own words or skip.
+  reader can always answer in their own words or skip. Something newer than
+  what you know (a paper, a release, a version, an event dated up to today)
+  is not left open by being new: never ask whether it exists or offer older
+  ones in its place, the research will find it.
   Respond ONLY with JSON of the shape:
   {"questions":[{"id":"...","text":"...","options":["...","..."]}]}
 

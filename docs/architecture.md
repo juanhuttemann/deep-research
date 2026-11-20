@@ -109,7 +109,10 @@ makes no call.
 
 `ui.Driver` is the only thing that sequences the pipeline: it plans the
 sub-topics, fans them out as parallel sub-agents, and composes the prompt for
-each phase. The planner is given a breadth (`agent.Breadth`): by default a
+each phase. One thing goes on every call below it: `agent` opens each
+prompt with today's date (`impl.dated`, in `callWith`), since a model
+otherwise takes its training cutoff for the present and doubts anything
+newer. The planner is given a breadth (`agent.Breadth`): by default a
 ceiling, the depth tier's sub-topic count. Under it the planner first
 judges the question's scope (`agent.Outline.Scope`): `narrow` (one thing
 about one subject, one or two sub-topics), `multi-part` (one per part) or

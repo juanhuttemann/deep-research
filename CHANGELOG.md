@@ -5,6 +5,14 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Every model call is told today's date. None was, so the model took its
+  training cutoff for the present: the clarifying check called an arXiv ID
+  from the month before "not yet available" and offered last year's paper
+  with the same number in its place. The clarifier is also told never to
+  doubt something only for being newer than it knows.
+
 ## [0.37.1] - 2026-11-16
 
 ### Fixed
