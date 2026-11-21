@@ -142,6 +142,18 @@ invariants:
   on purpose for existing scripts; don't remove them without reading the
   inline deprecation comment.
 - `PENDING.md` and `ISSUES.md` are local working notes, never committed.
+- Never put the user's own research in anything committed or published:
+  code, comments, tests, testdata, docs, `CHANGELOG.md`, commit messages,
+  tags, release notes, PRs or issues. That means the questions they ran
+  (`reports/`, `~/.deep-research/research.jsonl`, a pasted screenshot or
+  log), the subjects, products, IDs and URLs in them, and quotes from
+  their results. Describe the failure in general terms ("a comparison
+  planned a project archived after the model's cutoff") and give tests
+  invented subjects. A fixture that needs real data uses a public case
+  chosen for it, never a run the user made. Before committing, check the
+  diff and the message for the subjects of the user's recent runs and of
+  the question that prompted the change. Removing a leak after it is pushed
+  means rewriting history.
 - User-facing behaviour changes need the matching doc updated in the same
   commit: flags and keys in `docs/usage.md`, config keys in
   `docs/configuration.md`, package or layering changes in
