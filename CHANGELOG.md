@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.37.3] - 2026-11-21
+
 ### Fixed
 
 - The planner plans from today's web, not only the model's memory. It
