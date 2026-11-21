@@ -112,7 +112,20 @@ sub-topics, fans them out as parallel sub-agents, and composes the prompt for
 each phase. One thing goes on every call below it: `agent` opens each
 prompt with today's date (`impl.dated`, in `callWith`), since a model
 otherwise takes its training cutoff for the present and doubts anything
-newer. The planner is given a breadth (`agent.Breadth`): by default a
+newer. Today's date does not tell it what changed since then, so with web
+search on, the plan call also carries one search of the question
+(`impl.planLeadsBlock`, `tools.SearchTools.Leads`): up to eight titles and
+snippets, no page fetched, and the instruction to choose the alternatives
+they show as current and leave out one they report archived or
+superseded, unless one as recent says it is still maintained.
+Before it the planner named a comparison's options from memory alone, and
+planned a project archived since its cutoff while missing what replaced
+it. The search sits inside `Plan`, as `ResearchDetail`'s does, before the
+one model call and bounded to 20 seconds; it is cached per question and
+source list, so the brief's replans reuse it, and one that fails plans
+from memory as before. A trace records the plan, not the results it was
+made from, so a replay cannot show why a plan chose what it did.
+The planner is given a breadth (`agent.Breadth`): by default a
 ceiling, the depth tier's sub-topic count. Under it the planner first
 judges the question's scope (`agent.Outline.Scope`): `narrow` (one thing
 about one subject, one or two sub-topics), `multi-part` (one per part) or

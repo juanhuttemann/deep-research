@@ -5,6 +5,18 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The planner plans from today's web, not only the model's memory. It
+  named a comparison's options from what the model knew, so it could plan
+  a project archived after the model's training cutoff and miss what
+  replaced it. With search on, the plan call is now shown one search of the
+  question (titles and snippets; no page is fetched) and told to plan the
+  alternatives they show as current and leave out one they report archived
+  or replaced, unless one as recent says it is still maintained. The search
+  is reused when the brief replans the same question, and a failed or slow
+  one plans from memory as before.
+
 ## [0.37.2] - 2026-11-20
 
 ### Changed

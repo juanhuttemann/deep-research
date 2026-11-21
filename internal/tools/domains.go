@@ -368,3 +368,22 @@ func (s *SearchTools) engineName() string {
 	}
 	return s.Engine.Name()
 }
+
+// Leads is a search of query without fetching a page: the engine's titles and
+// snippets, deduplicated and kept to the source list, at most n of them in
+// the engine's order. It is what the planner is shown of today's web before
+// it names what to research, so it costs one search and no scrape.
+func (s *SearchTools) Leads(ctx context.Context, query string, n int) ([]SearchResult, error) {
+	res, err := searchIn(ctx, s.Engine, query, s.Domains)
+	if err != nil {
+		return nil, err
+	}
+	res = s.inScope(ctx, dedupeResults(res))
+	res = res[:min(len(res), n)]
+	for i := range res {
+		// Exa and Tavily send the page with the result; the planner is shown
+		// the snippet, and the cache need not keep the rest.
+		res[i].Body = ""
+	}
+	return res, nil
+}

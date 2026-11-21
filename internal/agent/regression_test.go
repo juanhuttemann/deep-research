@@ -1501,3 +1501,115 @@ func TestEveryCallCarriesTodaysDate(t *testing.T) {
 		}
 	}
 }
+
+// planWithSearch runs Plan once per reading against a model double and a
+// SearXNG double answering with results, and returns each call's user
+// message and how many searches were made.
+func planWithSearch(t *testing.T, results string, readings ...[]Clarification) ([]string, int) {
+	t.Helper()
+	var mu sync.Mutex
+	var users []string
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		for _, m := range req.Messages {
+			if m.Role == "user" {
+				users = append(users, string(m.Content))
+			}
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{\\\"subtopics\\\":[{\\\"name\\\":\\\"A\\\"}]}\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer model.Close()
+	var searches atomic.Int32
+	sx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		searches.Add(1)
+		if results == "" {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, results)
+	}))
+	defer sx.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, OpenAIModel: "m",
+		SearXNGURL: sx.URL, Scraper: "none", ModelCallTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range readings {
+		if _, err := a.Plan(context.Background(), "Which static site generator is best?", Breadth{Max: 4}, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return users, int(searches.Load())
+}
+
+// The planner named a comparison's alternatives from the model's memory,
+// before any search, so it could plan a project archived after its
+// training cutoff and leave out what replaced it. The plan call now carries
+// the question's search results, with the instruction to plan from what
+// they show as current.
+func TestPlannerIsShownTodaysSearchResults(t *testing.T) {
+	results := `{"results":[` +
+		`{"title":"OldGen is archived","url":"https://github.com/example/oldgen","content":"This project is no longer maintained.\nUse NewGen instead."},` +
+		`{"title":"NewGen 3.0 released","url":"https://newgen.example/blog","content":"Markdown site builds"}]}`
+	users, searches := planWithSearch(t, results, nil)
+	if searches != 1 {
+		t.Errorf("searches = %d, want one for the plan", searches)
+	}
+	u := users[0]
+	for _, want := range []string{"OldGen is archived", "github.com", "no longer maintained. Use NewGen", "NewGen 3.0 released", "superseded"} {
+		if !strings.Contains(u, want) {
+			t.Errorf("plan prompt lacks %q:\n%s", want, u)
+		}
+	}
+}
+
+// A replan for a new reading of the same question (the brief's
+// clarifying answers changed) must not search again; a failed search
+// still plans, from memory, as before.
+func TestPlanLeadsAreReusedAndOptional(t *testing.T) {
+	results := `{"results":[{"title":"NewGen","url":"https://newgen.example","content":"x"}]}`
+	users, searches := planWithSearch(t, results, nil, []Clarification{{Question: "OS?", Answer: "Linux"}})
+	if searches != 1 || len(users) != 2 || !strings.Contains(users[1], "NewGen") {
+		t.Errorf("replan: %d searches, prompts %q; want one search shown to both", searches, users)
+	}
+	users, _ = planWithSearch(t, "", nil)
+	if len(users) != 1 || strings.Contains(users[0], "today's web") {
+		t.Errorf("failed search: prompts %q, want a plan without results", users)
+	}
+}
+
+type countingEngine struct{ n atomic.Int32 }
+
+func (e *countingEngine) Search(context.Context, string) ([]tools.SearchResult, error) {
+	e.n.Add(1)
+	return []tools.SearchResult{{Title: "t", URL: "https://go.dev/x", Content: "c", Body: "the page"}}, nil
+}
+func (e *countingEngine) Name() string { return "test" }
+
+// Leads cached for the open web planned a run confined to other sites when
+// the same question was planned again under a source list. The cache is
+// for the question on one list.
+func TestPlanLeadsAreSearchedAgainForANewSourceList(t *testing.T) {
+	eng := &countingEngine{}
+	a := &impl{searchTools: &tools.SearchTools{Engine: eng}}
+	a.planLeadsBlock(context.Background(), "q")
+	a.planLeadsBlock(context.Background(), "q")
+	a.ScopeTo([]string{"go.dev"})
+	block := a.planLeadsBlock(context.Background(), "q")
+	if n := eng.n.Load(); n != 2 {
+		t.Errorf("searches = %d, want one per source list", n)
+	}
+	if strings.Contains(block, "the page") {
+		t.Errorf("the planner was shown a page body: %s", block)
+	}
+}

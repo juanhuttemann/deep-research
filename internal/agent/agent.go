@@ -708,6 +708,11 @@ type impl struct {
 	plan        runFunc
 	clarify     runFunc
 	searchTools *tools.SearchTools // non-nil when real search+scrape is available
+	// leads are the last plan's search results and the question they were
+	// for (planLeadsBlock).
+	leadsMu  sync.Mutex
+	leadsFor string
+	leads    []tools.SearchResult
 	// served is every model the provider reported serving, which differs
 	// from model when model is a router alias.
 	servedMu sync.Mutex
@@ -1836,10 +1841,13 @@ const defaultSubTopicCount = 4
 
 // Plan implements the planning phase of the pipeline.
 func (a *impl) Plan(ctx context.Context, question string, b Breadth, reading []Clarification) (Outline, error) {
+	// The search comes first so the line below is true when it shows: the
+	// deadline it names is the model call's, not the search's.
+	leads := a.planLeadsBlock(ctx, question)
 	// The deadline is part of the answer to "how long will this sit here":
 	// planning is one call with nothing on screen behind it.
 	a.log(fmt.Sprintf("asking %s for sub-topics (up to %s)", a.model, roundDuration(a.timeout)))
-	out, err := a.plan(ctx, planPrompt(question, b)+ClarifiedBlock(reading))
+	out, err := a.plan(ctx, planPrompt(question, b)+ClarifiedBlock(reading)+leads)
 	if err != nil {
 		return Outline{}, err
 	}

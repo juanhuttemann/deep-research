@@ -236,3 +236,23 @@ func TestSearXNGReceivesTheSiteOperator(t *testing.T) {
 		t.Errorf("q = %q", q)
 	}
 }
+
+// Leads is the planner's look at the web: it must not read pages, must keep
+// to the source list, and must stop at n.
+func TestLeadsReadsNoPageAndKeepsToTheList(t *testing.T) {
+	eng := &recordingEngine{results: []SearchResult{
+		{Title: "a", URL: "https://go.dev/a"},
+		{Title: "a again", URL: "https://go.dev/a"},
+		{Title: "off", URL: "https://blog.example.net/b"},
+		{Title: "b", URL: "https://go.dev/b"},
+		{Title: "c", URL: "https://go.dev/c"},
+	}}
+	st := &SearchTools{Engine: eng, Domains: []string{"go.dev"}}
+	got, err := st.Leads(context.Background(), "go", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].URL != "https://go.dev/a" || got[1].URL != "https://go.dev/b" {
+		t.Errorf("leads = %+v, want a and b", got)
+	}
+}
