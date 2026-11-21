@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-21
+
 ### Added
 
 - Up in the start screen's empty box brings back the questions you ran
