@@ -11,6 +11,18 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   before, newest first, as at a shell; Down goes the other way and past
   the last empties the box. They come from the history, each once.
 
+### Fixed
+
+- The planner still planned research on archived projects: 0.37.3 showed
+  it the question's search results, but those are mostly guides that keep
+  recommending a project long after it is archived, and a planner at low
+  effort followed them. It now gets a second search for archived,
+  deprecated or discontinued projects, and for each GitHub repository in
+  the results whether it is archived and when it last received commits.
+  It must write down each option's status before planning and plans only
+  the current ones, unless the question names one. On the same results the
+  archived project went from six plans in eight to none.
+
 ## [0.37.3] - 2026-11-21
 
 ### Fixed

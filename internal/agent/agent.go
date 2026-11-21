@@ -577,9 +577,10 @@ func New(cfg Config) (Assistant, error) {
 		reported := 0
 		return impl.callStreaming(ctx, planner, prompt, cfg.Effort.Plan, func(partial, _ string) {
 			// Report on whole sub-topics, not on every chunk: a counter that
-			// moves once per token is noise, and the name key is the first
-			// thing complete enough to count.
-			if n := strings.Count(partial, `"name"`); n > reported {
+			// moves once per token is noise. The notes key is counted, not
+			// the name: the options the planner judges first have names too,
+			// and counted, a plan of four read "9 sub-topics so far".
+			if n := strings.Count(partial, `"notes"`); n > reported {
 				reported = n
 				impl.log(fmt.Sprintf("%d sub-topics so far", n))
 			}
@@ -598,6 +599,7 @@ func New(cfg Config) (Assistant, error) {
 			return nil, err
 		}
 		impl.searchTools = st
+		impl.github = tools.NewGitHubClient(impl.timeout)
 	}
 	return impl, nil
 }
@@ -712,7 +714,10 @@ type impl struct {
 	// for (planLeadsBlock).
 	leadsMu  sync.Mutex
 	leadsFor string
-	leads    []tools.SearchResult
+	leads    *leads
+	// github says which repositories in the plan's search results are
+	// archived and when each last received commits; nil without web search.
+	github *tools.GitHubClient
 	// served is every model the provider reported serving, which differs
 	// from model when model is a router alias.
 	servedMu sync.Mutex

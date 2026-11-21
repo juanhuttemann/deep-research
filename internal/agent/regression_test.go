@@ -1502,10 +1502,12 @@ func TestEveryCallCarriesTodaysDate(t *testing.T) {
 	}
 }
 
-// planWithSearch runs Plan once per reading against a model double and a
-// SearXNG double answering with results, and returns each call's user
-// message and how many searches were made.
-func planWithSearch(t *testing.T, results string, readings ...[]Clarification) ([]string, int) {
+// planWithSearch runs Plan once per reading against a model double, a
+// SearXNG double answering the question's search with results and its
+// status search with status ("" fails that search), and a GitHub double
+// answering with repos by owner/name. It returns each call's user message
+// and how many searches were made.
+func planWithSearch(t *testing.T, results, status string, repos map[string]string, readings ...[]Clarification) ([]string, int) {
 	t.Helper()
 	var mu sync.Mutex
 	var users []string
@@ -1520,7 +1522,11 @@ func planWithSearch(t *testing.T, results string, readings ...[]Clarification) (
 		mu.Lock()
 		for _, m := range req.Messages {
 			if m.Role == "user" {
-				users = append(users, string(m.Content))
+				var text string
+				if json.Unmarshal(m.Content, &text) != nil {
+					text = string(m.Content)
+				}
+				users = append(users, text)
 			}
 		}
 		mu.Unlock()
@@ -1531,19 +1537,33 @@ func planWithSearch(t *testing.T, results string, readings ...[]Clarification) (
 	var searches atomic.Int32
 	sx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		searches.Add(1)
-		if results == "" {
+		body := results
+		if strings.Contains(r.URL.Query().Get("q"), "archived deprecated") {
+			body = status
+		}
+		if body == "" {
 			http.Error(w, "down", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, results)
+		fmt.Fprint(w, body)
 	}))
 	defer sx.Close()
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := repos[strings.TrimPrefix(r.URL.Path, "/repos/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, body)
+	}))
+	defer gh.Close()
 	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, OpenAIModel: "m",
 		SearXNGURL: sx.URL, Scraper: "none", ModelCallTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
+	a.(*impl).github.BaseURL = gh.URL
 	for _, r := range readings {
 		if _, err := a.Plan(context.Background(), "Which static site generator is best?", Breadth{Max: 4}, r); err != nil {
 			t.Fatal(err)
@@ -1554,37 +1574,58 @@ func planWithSearch(t *testing.T, results string, readings ...[]Clarification) (
 
 // The planner named a comparison's alternatives from the model's memory,
 // before any search, so it could plan a project archived after its
-// training cutoff and leave out what replaced it. The plan call now carries
-// the question's search results, with the instruction to plan from what
-// they show as current.
+// training cutoff and leave out what replaced it. Shown only the
+// question's results, mostly guides still recommending the project, it
+// planned it anyway. The plan call now carries the question's results, a
+// status search's, and what GitHub says of each repository among them
+// (archived, last commit), for the model to judge with.
 func TestPlannerIsShownTodaysSearchResults(t *testing.T) {
 	results := `{"results":[` +
-		`{"title":"OldGen is archived","url":"https://github.com/example/oldgen","content":"This project is no longer maintained.\nUse NewGen instead."},` +
-		`{"title":"NewGen 3.0 released","url":"https://newgen.example/blog","content":"Markdown site builds"}]}`
-	users, searches := planWithSearch(t, results, nil)
-	if searches != 1 {
-		t.Errorf("searches = %d, want one for the plan", searches)
+		`{"title":"Best site generators","url":"https://guides.example/ssg","content":"OldGen and NewGen both build Markdown sites."},` +
+		`{"title":"example/new-gen","url":"https://github.com/example/new-gen","content":"NewGen 3.0"}]}`
+	status := `{"results":[` +
+		`{"title":"example/old-gen","url":"https://github.com/example/old-gen","content":"A static site generator."},` +
+		`{"title":"OldGen is no longer maintained","url":"https://news.example/oldgen","content":"Use NewGen instead."}]}`
+	repos := map[string]string{
+		"example/old-gen": `{"archived":true,"pushed_at":"2025-01-02T10:00:00Z"}`,
+		"example/new-gen": `{"archived":false,"pushed_at":"2026-11-19T08:00:00Z"}`,
+	}
+	users, searches := planWithSearch(t, results, status, repos, nil)
+	if searches != 2 {
+		t.Errorf("searches = %d, want the question's and its status search", searches)
 	}
 	u := users[0]
-	for _, want := range []string{"OldGen is archived", "github.com", "no longer maintained. Use NewGen", "NewGen 3.0 released", "superseded"} {
+	for _, want := range []string{"Best site generators", "Status reports", "OldGen is no longer maintained",
+		"[GitHub: archived, last commit 2025-01-02] example/old-gen (github.com)",
+		"[GitHub: last commit 2026-11-19] example/new-gen",
+		"GitHub repositories in these results:\n- example/new-gen: last commit 2026-11-19\n- example/old-gen: archived, last commit 2025-01-02",
+		"\"options\" beside \"subtopics\"", "none on an archived or unmaintained one"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("plan prompt lacks %q:\n%s", want, u)
 		}
 	}
 }
 
-// A replan for a new reading of the same question (the brief's
-// clarifying answers changed) must not search again; a failed search
-// still plans, from memory, as before.
+// A replan for a new reading of the same question (the brief's clarifying
+// answers changed) must not search again; either search alone plans; a
+// repository GitHub does not answer for is shown without a status; both
+// searches failing still plans, from memory, as before.
 func TestPlanLeadsAreReusedAndOptional(t *testing.T) {
-	results := `{"results":[{"title":"NewGen","url":"https://newgen.example","content":"x"}]}`
-	users, searches := planWithSearch(t, results, nil, []Clarification{{Question: "OS?", Answer: "Linux"}})
-	if searches != 1 || len(users) != 2 || !strings.Contains(users[1], "NewGen") {
-		t.Errorf("replan: %d searches, prompts %q; want one search shown to both", searches, users)
+	results := `{"results":[{"title":"NewGen","url":"https://github.com/example/gone","content":"x"}]}`
+	users, searches := planWithSearch(t, results, results, nil, nil, []Clarification{{Question: "OS?", Answer: "Linux"}})
+	if searches != 2 || len(users) != 2 || !strings.Contains(users[1], "NewGen") {
+		t.Errorf("replan: %d searches, prompts %q; want one pair shown to both", searches, users)
 	}
-	users, _ = planWithSearch(t, "", nil)
+	if strings.Contains(users[0], "[GitHub:") {
+		t.Errorf("a repository GitHub did not answer for has a status: %s", users[0])
+	}
+	users, _ = planWithSearch(t, "", results, nil, nil)
+	if !strings.Contains(users[0], "NewGen") {
+		t.Errorf("status search alone: prompt %q, want its results", users[0])
+	}
+	users, _ = planWithSearch(t, "", "", nil, nil)
 	if len(users) != 1 || strings.Contains(users[0], "today's web") {
-		t.Errorf("failed search: prompts %q, want a plan without results", users)
+		t.Errorf("failed searches: prompts %q, want a plan without results", users)
 	}
 }
 
@@ -1606,8 +1647,8 @@ func TestPlanLeadsAreSearchedAgainForANewSourceList(t *testing.T) {
 	a.planLeadsBlock(context.Background(), "q")
 	a.ScopeTo([]string{"go.dev"})
 	block := a.planLeadsBlock(context.Background(), "q")
-	if n := eng.n.Load(); n != 2 {
-		t.Errorf("searches = %d, want one per source list", n)
+	if n := eng.n.Load(); n != 4 {
+		t.Errorf("searches = %d, want one pair per source list", n)
 	}
 	if strings.Contains(block, "the page") {
 		t.Errorf("the planner was shown a page body: %s", block)

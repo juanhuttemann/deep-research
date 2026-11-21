@@ -1446,3 +1446,40 @@ func TestCompactTablesKeepRowsAlignedAndSubHeaders(t *testing.T) {
 		t.Errorf("the heading was kept without its table:\n%s", got)
 	}
 }
+
+// A planner shown guides that still recommended an archived project planned
+// research on it. What the repository itself says (archived, last push) is
+// asked of GitHub, for a repository URL only, never GitHub's own pages.
+func TestGitHubRepoStatus(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://github.com/example/old-gen":           "example/old-gen",
+		"https://www.github.com/example/old-gen.git":   "example/old-gen",
+		"https://github.com/example/old-gen/issues/12": "example/old-gen",
+		"https://github.com/topics/static-site":        "",
+		"https://github.com/example":                   "",
+		"https://gitlab.com/example/old-gen":           "",
+		"https://github.com.evil.example/example/repo": "",
+	} {
+		owner, repo, ok := GitHubRepo(raw)
+		if got := owner + "/" + repo; ok != (want != "") || ok && got != want {
+			t.Errorf("GitHubRepo(%q) = %q %v, want %q", raw, got, ok, want)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/example/old-gen" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"archived":true,"pushed_at":"2025-01-02T10:00:00Z"}`)
+	}))
+	defer srv.Close()
+	c := NewGitHubClient(time.Second)
+	c.BaseURL = srv.URL
+	st, err := c.Repo(context.Background(), "example", "old-gen")
+	if err != nil || !st.Archived || st.PushedAt.Format("2006-01-02") != "2025-01-02" {
+		t.Errorf("Repo = %+v, %v; want archived, pushed 2025-01-02", st, err)
+	}
+	if _, err := c.Repo(context.Background(), "example", "gone"); err == nil {
+		t.Error("a missing repository was not an error")
+	}
+}

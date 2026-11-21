@@ -66,16 +66,20 @@ replaces a word, or alters a word with a digit in it or one of three letters
 or fewer ("not"), is ignored, the progress log says so, and the question runs
 as typed. Grammar is left as typed.
 
-With web search on, the planner first searches the question once, fetching
-no page, and is shown the results' titles and snippets with the instruction
-to plan from what is current: to include options they name that the model
-does not know, and to leave out one they report archived or replaced,
-unless one as recent says it is still maintained (a guide that only uses
-it does not) or you asked about it. It is an
-instruction to a model, not a filter, so check the brief before launching.
+With web search on, the planner first searches the question twice,
+fetching no page: as asked, and for archived, deprecated or discontinued
+projects. For each GitHub repository in the results (up to six) it asks
+GitHub whether the repository is archived and when it last received
+commits; this sends GitHub only the repository's name. Shown all of it,
+the model writes down the status of each option it considers (current,
+archived, unmaintained or unknown), from the results and today's date, not
+from memory, then plans only on the current ones and those it cannot
+judge, unless you named one in the question. It is the model's judgement,
+not a filter, so check the brief before launching.
 The progress log says "searching the question to plan from today's web"; a
 search that fails, or takes over 20 seconds, is logged and the plan is made
-without it. The search is made again only for a new question or source list.
+without it. The searches are made again only for a new question or source
+list.
 
 The planner also gives the run a short title, a headline of eight words or
 fewer naming its subject ("EU Wind and Solar Share 2024"), asked for in the
