@@ -372,10 +372,10 @@ func (pl *Planner) Breadth() agent.Breadth {
 func (pl *Planner) MaxSourcesFor(n int) int { return maxSourcesFor(pl.Depth, n) }
 
 // trimSharedSubject drops the words every sub-topic name opens with while they
-// only restate the question. A planner that titled each sub-topic "Northwind Volt
-// Pro N70 vs Brightwave Radiant AI Pro X900 …" left rows that all read the same,
-// cut off before the part that differs, and anchored searches that sent the
-// subject twice and clipped the facet off the end.
+// only restate the question. A planner that titled each sub-topic
+// "Northwind Volt Pro N70 vs Brightwave Radiant AI Pro X900 …" left rows that
+// all read the same, cut off before the part that differs, and anchored
+// searches that sent the subject twice and clipped the facet off the end.
 //
 // ponytail: a word prefix only; a subject restated at the end of each name,
 // or a shared prefix that leaves a stray connector ("vs Brightwave …"), stays as is.

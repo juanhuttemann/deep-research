@@ -1690,8 +1690,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   benchmarks"), not after their query, which was cut off at the name
   column beside the same query in full. A query given without a name, as
   older analyses and custom instructions do, is still its own name.
-- Sub-topic names that all open with the question's subject ("Northwind Volt
-  Pro N70 vs Brightwave Radiant AI Pro X900 …") lose it. The live rows were cut
+- Sub-topic names that all open with the question's subject ("Northwind
+  Volt Pro N70 vs Brightwave Radiant AI Pro X900 …") lose it. The live rows were cut
   off before the part that differs and all read the same, and the search
   anchored on each name sent the subject twice and lost the facet to the
   query length limit.
