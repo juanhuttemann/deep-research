@@ -43,7 +43,12 @@ type box struct {
 // more. docs/architecture.md has the rest.
 var (
 	question = box{user, "Question", "", []string{"drsh -p, or", "drsh serve"}}
-	plan     = box{model, "Plan", "1 call", []string{subTopicRange() + " sub-topics,", "as many as needed"}}
+	// The clarifying call asks only when the question leaves something open
+	// that would change the research, and only where someone can answer.
+	clarify = box{model, "Clarify", "0–1 call", []string{"asks what the", "question leaves open"}}
+	// The plan reads the web before its call: the question searched as
+	// asked and for archived projects, and GitHub on the repositories found.
+	plan     = box{model, "Plan", "1 call", []string{"searches the web,", subTopicRange() + " sub-topics"}}
 	group    = "Sub-agents, in parallel"
 	lanes    = []string{"sub-topic 1", "sub-topic 2", "sub-topic n"}
 	laneWork = "search · rank · read"
@@ -192,19 +197,27 @@ func (c *canvas) gather(l *layout) error {
 	}
 	laneW += 2 * pad
 	groupW, groupH := laneW+2*14, 34+len(lanes)*laneStep+4
-	nodes := []box{question, plan, {}, followUp}
-	xs, err := spread([]int{boxW(question), boxW(plan), groupW, boxW(followUp)})
+	// The boxes before the sub-agents' group lead one into the next; the
+	// last of them fans out to the lanes.
+	before := []box{question, clarify, plan}
+	ws := make([]int, 0, len(before)+2)
+	for _, b := range before {
+		ws = append(ws, boxW(b))
+	}
+	xs, err := spread(append(ws, groupW, boxW(followUp)))
 	if err != nil {
 		return err
 	}
 	mid := groupTop + groupH/2
-	for i, b := range nodes {
-		if i != 2 {
-			c.box(xs[i], mid-boxH/2, boxW(b), b)
+	for i, b := range before {
+		c.box(xs[i], mid-boxH/2, ws[i], b)
+		if i > 0 {
+			c.arrow(xs[i-1]+ws[i-1], mid, xs[i]-2, mid)
 		}
 	}
-	c.arrow(xs[0]+boxW(question), mid, xs[1]-2, mid)
-	gx := xs[2]
+	last, gi, fi := len(before)-1, len(before), len(before)+1
+	c.box(xs[fi], mid-boxH/2, boxW(followUp), followUp)
+	gx := xs[gi]
 	c.printf(`<rect class="group" x="%d" y="%d" width="%d" height="%d" rx="10"/>`+"\n", gx, groupTop, groupW, groupH)
 	c.text("title", gx+14, groupTop+22, "", group)
 	for i, n := range lanes {
@@ -212,10 +225,10 @@ func (c *canvas) gather(l *layout) error {
 		c.printf(`<rect class="web" x="%d" y="%d" width="%d" height="%d" rx="6"/>`+"\n", gx+14, y, laneW, laneH)
 		c.printf(`<text class="lane" x="%d" y="%d"><tspan font-weight="600">%s</tspan><tspan class="detail" dx="8">%s</tspan></text>`+"\n",
 			gx+14+pad, y+16, html.EscapeString(n), html.EscapeString(laneWork))
-		c.arrow(xs[1]+boxW(plan), mid, gx+12, y+laneH/2)
-		c.arrow(gx+14+laneW, y+laneH/2, xs[3]-2, mid)
+		c.arrow(xs[last]+ws[last], mid, gx+12, y+laneH/2)
+		c.arrow(gx+14+laneW, y+laneH/2, xs[fi]-2, mid)
 	}
-	l.handoffX, l.handoffY = xs[3]+boxW(followUp), mid
+	l.handoffX, l.handoffY = xs[fi]+boxW(followUp), mid
 	l.joinY = groupTop + groupH + 36
 	l.decideY = l.joinY + 40
 	return nil
@@ -297,7 +310,8 @@ func header(height int) string {
 `, width, height, width, height, html.EscapeString(summary), style, width, height)
 }
 
-const summary = "A deep-research run: the question is planned into as many sub-topics as it needs, each researched by a parallel " +
+const summary = "A deep-research run: an optional call asks what the question leaves open; the plan searches the question, " +
+	"for archived projects too, and splits it into as many sub-topics as it needs, each researched by a parallel " +
 	"sub-agent that searches, ranks by its terms and reads pages; an optional follow-up round adds a few searches. " +
 	"The analysis states claims and the answer, the fact-check judges them against the pages, code keeps only " +
 	"what passed and blocked statements get one repair, then the summary is written from the checked result " +

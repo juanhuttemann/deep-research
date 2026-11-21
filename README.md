@@ -1,6 +1,6 @@
 # deep-research
 
-![A run: the question is planned into as many sub-topics as it needs, researched by parallel sub-agents and an optional follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
+![A run: an optional call asks what the question leaves open; the plan searches the web, then splits the question into as many sub-topics as it needs, researched by parallel sub-agents and an optional follow-up round; then analyzed, fact-checked against the pages, kept only where it passed, summarized and saved](docs/images/pipeline.svg)
 
 An AI-powered deep research agent for the terminal and the browser. Its
 answer states only what passed a fact-check against the pages it read, and
