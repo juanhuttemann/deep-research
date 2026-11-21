@@ -92,7 +92,12 @@ On a terminal, `drsh` with no question opens a start screen, the
 terminal's side of what [`serve`](#serve)'s page offers, headed as the
 live frame is: the title with the model and search the runs will use, as
 the page's top bar names them, and the page's `research ▸` box for the
-question, with an example in it that Tab takes. It is drawn in place,
+question, with an example in it that Tab takes. Up in the empty box
+brings back the last question you ran, and each Up the one before, as at a
+shell; Down goes the other way, and past the last empties the box. They
+come from the history (`data_file`), newest first and each once. Once you
+type, or edit a question brought back, Up and Down are the box's own again.
+It is drawn in place,
 under what the terminal already shows, as the `ask ▸` box and the
 `/resume` and `/model` lists are, so the three sit alike. Enter runs it as `-p` would, the brief and the
 live frame included, and then takes questions about its report in an

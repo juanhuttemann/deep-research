@@ -183,3 +183,24 @@ func (s *Store) Each(fn func(ResearchResult)) (skipped int, err error) {
 		}
 	}
 }
+
+// Questions are the questions of the runs in the history, newest first,
+// each once, at most n: what the start screen's Up brings back. A history
+// that cannot be read has none.
+func (s *Store) Questions(n int) []string {
+	var all []string
+	_, _ = s.Each(func(r ResearchResult) {
+		if q := strings.TrimSpace(r.Question); q != "" {
+			all = append(all, q)
+		}
+	})
+	seen := map[string]bool{}
+	var out []string
+	for i := len(all) - 1; i >= 0 && len(out) < n; i-- {
+		if !seen[all[i]] {
+			seen[all[i]] = true
+			out = append(out, all[i])
+		}
+	}
+	return out
+}

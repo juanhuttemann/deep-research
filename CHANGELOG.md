@@ -5,6 +5,12 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Up in the start screen's empty box brings back the questions you ran
+  before, newest first, as at a shell; Down goes the other way and past
+  the last empties the box. They come from the history, each once.
+
 ## [0.37.3] - 2026-11-21
 
 ### Fixed

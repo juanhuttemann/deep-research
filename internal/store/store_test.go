@@ -1,8 +1,10 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -192,5 +194,25 @@ func checkQualifierHistory(t *testing.T, current, older agent.Claim) {
 	t.Helper()
 	if current.Qualifier != "over" || older.Qualifier != "" {
 		t.Fatalf("numeric qualifiers lost or invented: current=%+v older=%+v", current, older)
+	}
+}
+
+// Up in the start screen's empty box brings back the questions asked
+// before: the newest first, each once, at most as many as asked for.
+func TestQuestionsAreNewestFirstAndOnce(t *testing.T) {
+	s := Open(filepath.Join(t.TempDir(), "h.jsonl"))
+	for i, q := range []string{"first?", "second?", "first?", " third? ", ""} {
+		if err := s.Save(&ResearchResult{ID: fmt.Sprint(i), ResearchResult: agent.ResearchResult{Question: q}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.Questions(10); !slices.Equal(got, []string{"third?", "first?", "second?"}) {
+		t.Errorf("Questions = %q", got)
+	}
+	if got := s.Questions(2); !slices.Equal(got, []string{"third?", "first?"}) {
+		t.Errorf("Questions(2) = %q", got)
+	}
+	if got := Open(filepath.Join(t.TempDir(), "none.jsonl")).Questions(5); len(got) != 0 {
+		t.Errorf("no history: %q", got)
 	}
 }

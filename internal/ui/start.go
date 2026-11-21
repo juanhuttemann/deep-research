@@ -31,20 +31,21 @@ var examples = []string{
 // is, so the two look and answer keys alike, and drawn in place, under what
 // the terminal shows (see region). note, when set, says why the last step
 // ended, on the screen where it is read. It returns "" when the reader quit
-// (Esc, Ctrl-C).
-func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup, settings []Setting, note string) string {
+// (Esc, Ctrl-C). history is the questions asked before, newest first, which
+// Up brings back into the empty box.
+func AskQuestion(stdin io.Reader, stdout io.Writer, noColor bool, s agent.Setup, settings []Setting, note string, history []string) string {
 	sig := catchSignals(true)
 	in := NewInput(stdin, nil)
 	r := NewRenderer(stdout, Theme{Enabled: !noColor})
 	defer guardTerminal(sig, in, r)()
 	keys := &keptInput{Input: in}
 	defer r.Inline(keys)()
-	return askQuestion(keys, r, s, settings, examples[rand.IntN(len(examples))], note)
+	return askQuestion(keys, r, s, settings, examples[rand.IntN(len(examples))], note, history)
 }
 
-func askQuestion(in Input, r *Renderer, s agent.Setup, settings []Setting, example, note string) string {
+func askQuestion(in Input, r *Renderer, s agent.Setup, settings []Setting, example, note string, history []string) string {
 	r.RenderStart(s, settings, example, note)
-	e := &commandEditor{example: example, paint: r.SetCommand, quit: r.armQuit("press Ctrl-C again to quit")}
+	e := &commandEditor{example: example, paint: r.SetCommand, quit: r.armQuit("press Ctrl-C again to quit"), history: history}
 	q, _ := e.read(in, true)
 	return q
 }

@@ -25,7 +25,7 @@ func TestQuestionBoxTakesSeveralLines(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := NewRenderer(&bytes.Buffer{}, Theme{})
-		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "an example?", "")
+		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "an example?", "", nil)
 		if got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
@@ -90,7 +90,7 @@ func (cooked) Raw() bool { return false }
 func TestCookedTerminalSendsOnLF(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	in := cooked{NewByteReader([]byte("why?\nmore"))}
-	if got := askQuestion(in, r, agent.Setup{}, nil, "an example?", ""); got != "why?" {
+	if got := askQuestion(in, r, agent.Setup{}, nil, "an example?", "", nil); got != "why?" {
 		t.Errorf("got %q, want the question sent at the LF", got)
 	}
 }

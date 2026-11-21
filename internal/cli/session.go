@@ -14,6 +14,7 @@ import (
 	"github.com/juanhuttemann/deep-research/internal/auth"
 	"github.com/juanhuttemann/deep-research/internal/config"
 	"github.com/juanhuttemann/deep-research/internal/setup"
+	"github.com/juanhuttemann/deep-research/internal/store"
 	"github.com/juanhuttemann/deep-research/internal/ui"
 )
 
@@ -96,6 +97,9 @@ func (s *session) loop() error {
 	}
 }
 
+// questionHistory is how many past questions Up steps back through.
+const questionHistory = 200
+
 // read is the next line at the research box or, with a report open, at its
 // ask prompt; ok is false when the reader is done. On a terminal the ask
 // prompt is read a key at a time, as the research box is, so its commands
@@ -105,8 +109,10 @@ func (s *session) read() (string, bool) {
 		if !s.home {
 			return "", false
 		}
+		// Read again each time the box opens, so the run just finished is
+		// the first Up brings back.
 		q := ui.AskQuestion(s.cmd.InOrStdin(), s.cmd.OutOrStdout(), s.noColor(), s.d.Config.Describe(),
-			ui.Settings(runSettings(s.cmd, s.d)), s.note)
+			ui.Settings(runSettings(s.cmd, s.d)), s.note, store.Open(s.d.Config.DataFile).Questions(questionHistory))
 		s.note = ""
 		return q, q != ""
 	}

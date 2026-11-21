@@ -3443,7 +3443,7 @@ func TestReadPlanKeepsTheReportShape(t *testing.T) {
 func TestPasteIsTextNotKeys(t *testing.T) {
 	r := NewRenderer(&bytes.Buffer{}, Theme{})
 	keys := "why \x1b[200~line one\r\n\tline two\r\n\x1b[201~?\r"
-	got := askQuestion(NewByteReader([]byte(keys)), r, agent.Setup{}, nil, "an example?", "")
+	got := askQuestion(NewByteReader([]byte(keys)), r, agent.Setup{}, nil, "an example?", "", nil)
 	if want := "why line one\n line two?"; got != want {
 		t.Errorf("pasted question = %q, want %q", got, want)
 	}
@@ -3487,7 +3487,7 @@ func TestCtrlCClearsThenQuitsOnSecondPress(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := NewRenderer(&bytes.Buffer{}, Theme{})
-		if got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "an example?", ""); got != c.want {
+		if got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "an example?", "", nil); got != c.want {
 			t.Errorf("%s: askQuestion = %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -4127,6 +4127,30 @@ func TestRefusedSearchFailureIsLaidOutOnTheStartScreen(t *testing.T) {
 	for _, row := range rows {
 		if w := utf8.RuneCountInString(stripANSI(row)); w > 100 {
 			t.Errorf("row exceeds width (%d): %q", w, row)
+		}
+	}
+}
+
+// Up in the start screen's empty box brings back the questions asked
+// before, as at a shell; it never replaces what is typed, and while a
+// command is typed the arrows still move its menu.
+func TestUpRecallsPastQuestions(t *testing.T) {
+	history := []string{"newest?", "two\nlines?", "oldest?"}
+	for _, c := range []struct{ name, keys, want string }{
+		{"up takes the newest", "\x1b[A\r", "newest?"},
+		{"up again goes back", "\x1b[A\x1b[A\r", "two\nlines?"},
+		{"past a question of several lines", "\x1b[A\x1b[A\x1b[A\r", "oldest?"},
+		{"the oldest stays", "\x1b[A\x1b[A\x1b[A\x1b[A\r", "oldest?"},
+		{"down comes forward", "\x1b[A\x1b[A\x1b[B\r", "newest?"},
+		{"down past the newest empties the box", "\x1b[A\x1b[Bmine?\r", "mine?"},
+		{"typed text is never replaced", "mine\x1b[A?\r", "mine?"},
+		{"an edited question is kept", "\x1b[A!\x1b[A\r", "newest?!"},
+		{"the command menu keeps the arrows", "/re\x1b[B\r", completions("/re")[min(1, len(completions("/re"))-1)].Title},
+	} {
+		var buf bytes.Buffer
+		r := NewRenderer(&buf, Theme{})
+		if got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "an example?", "", history); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
 	}
 }

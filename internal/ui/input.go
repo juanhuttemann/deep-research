@@ -619,7 +619,11 @@ func readPromptEdit(in Input, current string, echo func(text string, cursor int)
 type promptOpts struct {
 	tab   func(string) string
 	arrow func(byte)
-	quit  *twice
+	// recall, when set, is offered Up and Down before the line uses them:
+	// it returns the text to put in the box, or false to leave the keys to
+	// the line and to arrow.
+	recall func(up bool, text string) (string, bool)
+	quit   *twice
 	// multi lets the text hold line breaks: Ctrl-J, or Enter after a
 	// backslash, starts a new line, and a paste keeps its own.
 	multi bool
@@ -637,7 +641,7 @@ type promptOpts struct {
 // does.
 func readPromptRaw(in Input, buf []byte, echo func(text string, cursor int), o promptOpts) (string, bool) {
 	tab, arrow, quit := o.tab, o.arrow, o.quit
-	l := &lineEdit{buf: buf, cur: len(buf), multi: o.multi}
+	l := &lineEdit{buf: buf, cur: len(buf), multi: o.multi, recall: o.recall}
 	show := func() {
 		if echo != nil {
 			echo(string(l.buf), l.cur)
@@ -698,6 +702,7 @@ func (l *lineEdit) midRune() bool {
 func (l *lineEdit) afterEsc(in Input, arrow func(byte)) bool {
 	lead, final, params := escapeAfter(in)
 	switch {
+	case l.recalled(lead, final, params):
 	case lead != 0 && l.escape(lead, final, params):
 	case isPasteStart(lead, final, params) && l.multi:
 		l.insert(pastedLines(readPaste(in)))
@@ -749,9 +754,26 @@ func (t *twice) disarm() {
 // lineEdit is a line being typed and the cursor in it, a byte offset on a
 // rune boundary. multi lets it hold line breaks (see promptOpts).
 type lineEdit struct {
-	buf   []byte
-	cur   int
-	multi bool
+	buf    []byte
+	cur    int
+	multi  bool
+	recall func(up bool, text string) (string, bool)
+}
+
+// recalled is a plain Up or Down that recall took: the box holds what it
+// returned, the cursor at its end. It comes before the line's own use of
+// the keys, so a recalled question of several lines is stepped past, not
+// into.
+func (l *lineEdit) recalled(lead, final byte, params string) bool {
+	if l.recall == nil || lead != '[' && lead != 'O' || final != 'A' && final != 'B' || params != "" {
+		return false
+	}
+	t, ok := l.recall(final == 'A', string(l.buf))
+	if !ok {
+		return false
+	}
+	l.buf, l.cur = []byte(t), len(t)
+	return true
 }
 
 // enter handles a CR or an LF and reports whether it ends the text. Raw

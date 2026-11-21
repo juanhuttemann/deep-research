@@ -57,6 +57,10 @@ type commandEditor struct {
 	// quit, when set, is told when a Ctrl-C has armed the next to leave
 	// (see twice); without it one Ctrl-C leaves.
 	quit func(armed bool)
+	// history is the questions asked before, newest first, which Up brings
+	// back into an empty box; hist is the one shown, -1 for none.
+	history []string
+	hist    int
 }
 
 // read takes a line, its keys handled as the menu needs; an empty line is
@@ -72,7 +76,8 @@ func (e *commandEditor) read(in Input, wait bool) (string, bool) {
 	// would not go raw maps Enter to LF, the new-line key here, and its
 	// question could never be sent.
 	for ok {
-		if q, ok = readPromptRaw(in, nil, e.echo, promptOpts{tab: e.tab, arrow: e.arrow, quit: quit, multi: in.Raw()}); q != "" || !wait {
+		e.hist = -1
+		if q, ok = readPromptRaw(in, nil, e.echo, promptOpts{tab: e.tab, arrow: e.arrow, recall: e.recall, quit: quit, multi: in.Raw()}); q != "" || !wait {
 			break
 		}
 	}
@@ -95,6 +100,35 @@ func (e *commandEditor) arrow(k byte) {
 		e.at = max(min(e.at+1, len(completions(e.text))-1), 0)
 	}
 	e.paint(e.text, e.at, e.cursor)
+}
+
+// recall is Up and Down over the questions asked before, as at a shell: Up
+// in an empty box brings back the last, again the one before; Down goes
+// the other way, and past the last back to an empty box. Once the text is
+// typed, or edited away from the question brought back, the keys are the
+// line's and the command menu's again.
+func (e *commandEditor) recall(up bool, text string) (string, bool) {
+	browsing := e.hist >= 0 && e.hist < len(e.history) && text == e.history[e.hist]
+	if len(e.history) == 0 || !browsing && text != "" || len(completions(text)) > 0 {
+		return "", false
+	}
+	if !browsing {
+		e.hist = -1
+	}
+	switch {
+	case up && e.hist+1 < len(e.history):
+		e.hist++
+	case up:
+		return text, true // the oldest stays
+	case e.hist < 0:
+		return "", false
+	default:
+		e.hist--
+	}
+	if e.hist < 0 {
+		return "", true
+	}
+	return e.history[e.hist], true
 }
 
 // pick is t, or the highlighted command when t is the start of one: Enter

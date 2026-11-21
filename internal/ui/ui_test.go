@@ -2252,7 +2252,7 @@ func TestAskQuestion(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := NewRenderer(&bytes.Buffer{}, Theme{})
-		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "what is inside a neutron star?", "")
+		got := askQuestion(NewByteReader([]byte(c.keys)), r, agent.Setup{}, nil, "what is inside a neutron star?", "", nil)
 		if got != c.want {
 			t.Errorf("%s: askQuestion = %q, want %q", c.name, got, c.want)
 		}
