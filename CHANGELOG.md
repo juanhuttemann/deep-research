@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-21
+
 ### Fixed
 
 - An OpenAI-compatible endpoint that caps answers at 4096 tokens when
