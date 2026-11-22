@@ -645,7 +645,7 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 		// unreachable. Retry policy lives in impl.call, which knows the
 		// difference between a server that never answered and one that did.
 		option.WithMaxRetries(0),
-		option.WithMiddleware(impl.effortFallback, impl.sniffServedModel),
+		option.WithMiddleware(impl.effortFallback, impl.outputLimitFallback, impl.sniffServedModel),
 	)
 	return impl, func(name, instructions string, tools []tool.Tool) *agent.Agent {
 		return openaiprovider.NewChatCompletionsAgent(client, openaiprovider.AgentConfig{
@@ -657,7 +657,8 @@ func connect(cfg Config, withTools bool) (*impl, newAgentFunc, error) {
 }
 
 type impl struct {
-	logf func(string)
+	outputLimit outputLimit
+	logf        func(string)
 	// early holds what was logged before a logger was set, as connecting
 	// does: SetProgress hands it to the first logger.
 	early []string

@@ -829,11 +829,13 @@ func TestPartLabelsEachParallelCall(t *testing.T) {
 
 // effortServer is an OpenAI-compatible double that keeps every request body
 // and refuses, as Gemini does "none", any request whose reasoning_effort is
-// refuse.
+// refuse. A request carrying max_completion_tokens is refused with the status
+// and body refuseLimit gives for that limit, and answered when it gives 0.
 type effortServer struct {
 	*httptest.Server
-	mu     sync.Mutex
-	bodies []map[string]any
+	mu          sync.Mutex
+	bodies      []map[string]any
+	refuseLimit func(limit int) (status int, body string)
 }
 
 func newEffortServer(t *testing.T, refuse string) *effortServer {
@@ -850,6 +852,14 @@ func newEffortServer(t *testing.T, refuse string) *effortServer {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400}}`)
 			return
+		}
+		if limit, ok := body["max_completion_tokens"].(float64); ok && s.refuseLimit != nil {
+			if status, msg := s.refuseLimit(int(limit)); status != 0 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				fmt.Fprint(w, msg)
+				return
+			}
 		}
 		if body["stream"] == true {
 			w.Header().Set("Content-Type", "text/event-stream")

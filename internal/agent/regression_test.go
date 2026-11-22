@@ -1654,3 +1654,150 @@ func TestPlanLeadsAreSearchedAgainForANewSourceList(t *testing.T) {
 		t.Errorf("the planner was shown a page body: %s", block)
 	}
 }
+
+// An OpenAI-compatible call sent no output limit, and a server behind a
+// gateway then capped every answer at 4096 tokens: a reasoning model spent
+// them thinking, and the analysis was cut off at the limit on every run. Each
+// call now asks for the room a Claude call gets.
+func TestOpenAICallsStateTheirOutputLimit(t *testing.T) {
+	srv := newEffortServer(t, "")
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if _, err := a.ResearchDetail(ctx, "q", nil); err != nil {
+		t.Fatalf("ResearchDetail: %v", err)
+	}
+	if got := srv.body(0)["max_completion_tokens"]; got != float64(streamedMaxTokens) {
+		t.Errorf("the streamed analysis asked for %v output tokens, want %d", got, streamedMaxTokens)
+	}
+	if got := srv.body(1)["max_completion_tokens"]; got != float64(unstreamedMaxTokens) {
+		t.Errorf("the unstreamed search asked for %v output tokens, want %d", got, unstreamedMaxTokens)
+	}
+}
+
+// limitServer is an effortServer whose output limit refusal is refuse.
+// The third result is the progress so far, joined.
+func limitServer(t *testing.T, refuse func(limit int) (int, string)) (*effortServer, Assistant, func() string) {
+	t.Helper()
+	srv := newEffortServer(t, "")
+	srv.refuseLimit = refuse
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test", ModelCallRetries: 0})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var mu sync.Mutex
+	var lines []string
+	a.SetProgress(func(msg string) { mu.Lock(); lines = append(lines, msg); mu.Unlock() })
+	return srv, a, func() string { mu.Lock(); defer mu.Unlock(); return strings.Join(lines, "\n") }
+}
+
+// A context-window refusal is about one request: the first fix dropped the
+// limit for the rest of the run after a long analysis did not fit, and a
+// shorter fact-check that fitted it went back to the server's 4096. The
+// refused call is asked again for what the error says fits, and the next
+// call still asks for the full limit.
+func TestContextWindowRefusalIsPerRequest(t *testing.T) {
+	srv, a, progress := limitServer(t, func(limit int) (int, string) {
+		if limit > 30000 {
+			return http.StatusBadRequest, `{"error":{"message":"This model's maximum context length is 40000 tokens. However, you requested 74000 tokens (10000 in the messages, 64000 in the completion).","code":"context_length_exceeded"}}`
+		}
+		return 0, ""
+	})
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if n := srv.requests(); n != 2 || srv.body(1)["max_completion_tokens"] != float64(30000) || srv.body(1)["stream"] != true {
+		t.Fatalf("want the refused request and one streamed for the 30000 that fit, got %d requests, last %v", n, srv.body(n-1))
+	}
+	if _, err := a.FactCheck(ctx, "claims"); err != nil {
+		t.Fatalf("FactCheck: %v", err)
+	}
+	if got := srv.body(2)["max_completion_tokens"]; got != float64(streamedMaxTokens) {
+		t.Errorf("the next call asked for %v output tokens, want the full %d", got, streamedMaxTokens)
+	}
+	if joined := progress(); !strings.Contains(joined, "asked again for the 30000 output tokens that fit") {
+		t.Errorf("progress does not say what was asked for:\n%s", joined)
+	}
+}
+
+// The gateway's wording names the reply tokens that fit outright; a refusal
+// that names nothing is asked again without a limit.
+func TestReplyTokensThatFit(t *testing.T) {
+	for msg, want := range map[string]int{
+		"Reduce the prompt to at most 0 prompt tokens or request at most 139251 reply tokens":                                                      139251,
+		"This model's maximum context length is 32768 tokens and your request has 30000 input tokens (64000 > 32768 - 30000)":                      2768,
+		"This model's maximum context length is 8192 tokens. However, you requested 70000 tokens (9000 in the messages, 61000 in the completion).": 0,
+		"context length exceeded": 0,
+	} {
+		if got := replyTokensThatFit(msg); got != want {
+			t.Errorf("replyTokensThatFit(%q) = %d, want %d", msg, got, want)
+		}
+	}
+}
+
+// An endpoint that knows no max_completion_tokens refuses every request
+// carrying it, so it is left out for the rest of the run.
+func TestUnsupportedOutputLimitIsDroppedAndRemembered(t *testing.T) {
+	srv, a, progress := limitServer(t, func(int) (int, string) {
+		return http.StatusBadRequest, `{"error":{"message":"Unrecognized request argument supplied: max_completion_tokens"}}`
+	})
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if _, err := a.FactCheck(ctx, "claims"); err != nil {
+		t.Fatalf("FactCheck: %v", err)
+	}
+	if n := srv.requests(); n != 3 || srv.body(1)["max_completion_tokens"] != nil || srv.body(2)["max_completion_tokens"] != nil {
+		t.Errorf("want one refusal, then every request without the limit: %d requests", n)
+	}
+	if joined := progress(); !strings.Contains(joined, "asking without it from now on") {
+		t.Errorf("progress does not say the limit was dropped:\n%s", joined)
+	}
+}
+
+// OpenRouter prices a request at its output limit, and refuses one whose
+// estimate exceeds the account's per-request budget with a 402 that no retry
+// of the same request gets past. It is asked again without the limit, as it
+// was before the limit was sent; the next call keeps it.
+func TestOverBudgetOutputLimitIsAskedAgainWithout(t *testing.T) {
+	srv, a, _ := limitServer(t, func(limit int) (int, string) {
+		if limit > 20000 {
+			return http.StatusPaymentRequired, `{"error":{"code":402,"message":"This request is too expensive for your in-flight budget.","metadata":{"reason":"weight_exceeds_budget","limit_source":"openrouter_credits"}}}`
+		}
+		return 0, ""
+	})
+	ctx := context.Background()
+	if _, err := a.Analyze(ctx, "p"); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if n := srv.requests(); n != 2 || srv.body(1)["max_completion_tokens"] != nil {
+		t.Fatalf("want the refused request and one without the limit, got %d requests", n)
+	}
+	if _, err := a.ResearchDetail(ctx, "q", nil); err != nil {
+		t.Fatalf("ResearchDetail: %v", err)
+	}
+	if got := srv.body(2)["max_completion_tokens"]; got != float64(unstreamedMaxTokens) {
+		t.Errorf("the next call asked for %v output tokens, want %d", got, unstreamedMaxTokens)
+	}
+}
+
+// Credits that ran out are a 402 too, without weight_exceeds_budget: no limit
+// fixes that, so it is reported as it was, not asked again.
+func TestOutOfCreditsIsNotAnOutputLimitRefusal(t *testing.T) {
+	srv, a, _ := limitServer(t, func(int) (int, string) {
+		return http.StatusPaymentRequired, `{"error":{"code":402,"message":"Insufficient credits"}}`
+	})
+	if _, err := a.Analyze(context.Background(), "p"); err == nil {
+		t.Fatal("want the 402 reported")
+	}
+	if n := srv.requests(); n != 1 {
+		t.Errorf("a 402 for credits was sent %d times", n)
+	}
+}

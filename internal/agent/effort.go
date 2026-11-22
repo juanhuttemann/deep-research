@@ -52,12 +52,19 @@ func ParseEffort(s string) (string, error) {
 // They are one option because the framework keeps only the last of a kind: a
 // second ChatCompletionNewParams for the effort would drop include_usage and,
 // with it, every streamed phase's tokens from the run total.
+//
+// Every call states its output limit, as a Claude call does. Sent nothing, a
+// server picks its own, and some pick 4096 (a vLLM behind a gateway did): a
+// reasoning model spent that thinking, and the analysis came back cut off at
+// the limit on every run. outputLimitFallback drops the limit for a server
+// whose context window cannot take it.
 func openAIParams(effort string, streamed bool) []agent.Option {
-	if !streamed && effort == "" {
-		return nil
+	p := openai.ChatCompletionNewParams{
+		ReasoningEffort:     shared.ReasoningEffort(effort),
+		MaxCompletionTokens: openai.Int(unstreamedMaxTokens),
 	}
-	p := openai.ChatCompletionNewParams{ReasoningEffort: shared.ReasoningEffort(effort)}
 	if streamed {
+		p.MaxCompletionTokens = openai.Int(streamedMaxTokens)
 		// An OpenAI-compatible API reports tokens for a streamed call only when
 		// stream_options.include_usage is set, so streaming without it would
 		// quietly drop the streamed phases' tokens from the run total.
@@ -257,20 +264,30 @@ func unquote(raw json.RawMessage) string {
 // settings, with the provider's reason. The body is put back for the caller
 // when it is not.
 func refusesEffort(resp *http.Response, err error) (reason string, refused bool) {
+	head, ok := peekRefusal(resp, err)
+	if !ok {
+		return "", false
+	}
+	msg := strings.ToLower(string(head))
+	if !strings.Contains(msg, "reasoning") && !strings.Contains(msg, "effort") && !strings.Contains(msg, "thinking") {
+		return "", false
+	}
+	return clip(errorMessage(head), 160), true
+}
+
+// peekRefusal is the start of a 400 or 422 response's body, read without
+// taking it from the caller: the body is put back whole.
+func peekRefusal(resp *http.Response, err error) ([]byte, bool) {
 	if err != nil || resp == nil || resp.Body == nil ||
 		resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnprocessableEntity {
-		return "", false
+		return nil, false
 	}
 	head, _ := io.ReadAll(io.LimitReader(resp.Body, maxRefusal))
 	resp.Body = struct {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
-	msg := strings.ToLower(string(head))
-	if !strings.Contains(msg, "reasoning") && !strings.Contains(msg, "effort") && !strings.Contains(msg, "thinking") {
-		return "", false
-	}
-	return clip(errorMessage(head), 160), true
+	return head, true
 }
 
 // clip cuts s to at most n runes.

@@ -340,6 +340,27 @@ without it, and left out for the rest of the run once that worked; the run
 says so. Claude cannot turn thinking off, so it is sent `low` for `none` and
 `minimal`. `drsh doctor` does not check effort.
 
+Reasoning counts against the output limit, so every call states one: an
+OpenAI-compatible endpoint is sent `max_completion_tokens` of 64000 for a
+streamed phase (the analysis, the fact-check, the summary) and 16000 for the
+rest, the room a Claude call gets. Left to pick its own, a server may pick
+4096, which a reasoning model spends thinking before the report begins.
+A refused limit is handled per request:
+
+- A server whose context window cannot hold the prompt and the limit
+  refuses with a 400. The call is asked again for the reply tokens the
+  error says fit (vLLM's messages say), or without a limit when it does
+  not say. Later calls still ask for the full limit, since a shorter
+  prompt fits it.
+- OpenRouter prices a request at its limit, and refuses one priced above
+  the account's per-request budget with a 402 (`weight_exceeds_budget`).
+  The call is asked again without the limit. A 402 for credits that ran
+  out is reported as before.
+- An endpoint that does not know `max_completion_tokens` refuses every
+  request carrying it, so it is left out for the rest of the run.
+
+The run says so the first time.
+
 Every `config.yaml` key can also be set from the environment as
 `DEEP_RESEARCH_<KEY>` in uppercase — `DEEP_RESEARCH_SOURCES_PER_TOPIC=9`, `DEEP_RESEARCH_PARALLELISM=6` — and the
 environment wins over the file. This is a per-key override channel, so a

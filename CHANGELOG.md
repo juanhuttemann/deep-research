@@ -5,6 +5,19 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- An OpenAI-compatible endpoint that caps answers at 4096 tokens when
+  none is asked for cut every analysis off: a reasoning model spent the
+  cap thinking, and the run ended with "the model's answer was cut off at
+  its output limit". Calls now ask for 64000 output tokens in the
+  streamed phases and 16000 elsewhere, as Claude calls do. A call whose
+  prompt and limit exceed a server's context window is asked again for the
+  tokens the error says fit, and one OpenRouter refuses as over the
+  account's per-request budget is asked again without the limit; later
+  calls keep it. Only an endpoint that does not know the parameter has it
+  left out for the rest of the run.
+
 ## [0.38.0] - 2026-11-21
 
 ### Added
