@@ -4154,3 +4154,27 @@ func TestUpRecallsPastQuestions(t *testing.T) {
 		}
 	}
 }
+
+// Nested emphasis took one pass of visibleText per level, each over the
+// whole page: a scraped page of " *a" nested thousands deep held a
+// fact-check's quote location for 20 seconds, once per form of the page,
+// out of reach of Esc. Text that does not settle within maxEmphasisPasses is
+// no visible text, and a quote in it is only located exactly; nesting a few
+// levels deep, as real pages do, still reads as its words.
+func TestNestedEmphasisIsBounded(t *testing.T) {
+	deep := strings.Repeat(" *a", 200) + " x " + strings.Repeat("a* ", 200)
+	if got := visibleText(deep); got != "" {
+		t.Errorf("unsettled emphasis read as visible text: %.40q…", got)
+	}
+	page := newPageText(deep)
+	if !page.locate("a* a* a*") {
+		t.Error("a passage of the page as written was not located")
+	}
+	if page.locate("*a a a") {
+		t.Error("a quote matched the markers an unsettled page kept")
+	}
+	shallow := strings.Repeat(" *a", 3) + " x " + strings.Repeat("a* ", 3)
+	if got, want := visibleText(shallow), "a a a x a a a"; got != want {
+		t.Errorf("shallow nesting: got %q, want %q", got, want)
+	}
+}

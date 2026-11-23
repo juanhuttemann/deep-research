@@ -368,13 +368,36 @@ func visibleText(s string) string {
 	// Emphasis rules are applied until nothing changes: a match takes the
 	// space after it, so in "_subprime_ _mortgages_" one pass freed only the
 	// first word.
-	for prev := ""; prev != s; {
-		prev = s
+	s, settled := stripEmphasis(s)
+	if !settled {
+		return ""
+	}
+	return strings.Join(strings.Fields(plainPunct.Replace(s)), " ")
+}
+
+// maxEmphasisPasses bounds stripEmphasis. A pass frees only the innermost
+// level of nested emphasis, so the passes grew with the nesting: a 40 KB
+// scraped page of " *a" nested 6,666 deep took 6,667 passes over the whole
+// page, 20 seconds of a fact-check's quote location and as long again for
+// each other form of the page, where Esc could not stop it. The pages of
+// real runs settle by the fourth pass, the one that changes nothing.
+const maxEmphasisPasses = 10
+
+// stripEmphasis is s with its emphasis markers removed, and whether that
+// settled within maxEmphasisPasses. Text that has not settled is not taken as
+// visible text: the markers left in it held a quote of "*a" that the settled
+// text does not, so only the exact match can locate a quote in it.
+func stripEmphasis(s string) (string, bool) {
+	for range maxEmphasisPasses {
+		prev := s
 		s = mdStrong.ReplaceAllString(s, "$2")
 		s = mdStar.ReplaceAllString(s, "$1$2")
 		s = mdUnder.ReplaceAllString(s, "$1$2$3")
+		if s == prev {
+			return s, true
+		}
 	}
-	return strings.Join(strings.Fields(plainPunct.Replace(s)), " ")
+	return s, false
 }
 
 // unit is one statement of the answer the fact-check governs: a

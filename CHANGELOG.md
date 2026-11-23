@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- A scraped page with deeply nested emphasis markers could hold a run's
+  fact-check and quote check for tens of seconds, where Esc could not stop
+  it: each pass that strips emphasis frees one level, and a 40 KB page
+  nested thousands deep took thousands of passes over all of it, once per
+  form of the page. The stripping now stops after ten passes, which every
+  page measured settles well within; a page that has not settled by then
+  has its quotes located only as written.
+
 ## [0.38.1] - 2026-11-21
 
 ### Fixed
