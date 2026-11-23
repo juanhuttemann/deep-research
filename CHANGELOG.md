@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.38.2] - 2026-11-23
+
 ### Fixed
 
 - A scraped page with deeply nested emphasis markers could hold a run's
