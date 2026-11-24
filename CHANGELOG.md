@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-24
+
 ### Added
 
 - When a search fails or finds nothing on the subject, the model suggests
