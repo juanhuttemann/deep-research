@@ -97,7 +97,8 @@ func TestSearchLeavesAWorkingScraperAlone(t *testing.T) {
 	}
 }
 
-// TestSearchOffSkipsTheScraper: with no search nothing reads pages, so the
+// TestSearchOffSkipsTheScraper: with no search the URLs the model suggests
+// are fetched by the scraper already set, the built-in reader by default, so the
 // full setup does not ask, and the scraper setting is left as it was.
 func TestSearchOffSkipsTheScraper(t *testing.T) {
 	cur := Services{Engine: "searxng", SearXNGURL: "auto", Scraper: "firecrawl", FirecrawlURL: "http://fc:3002"}

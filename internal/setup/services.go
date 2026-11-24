@@ -140,7 +140,7 @@ func (m ServicesModel) engineItems() []item {
 			detail: "hosted, about $0.007 a search, page text included; needs a key"},
 		{id: "tavily", title: "Tavily", mark: m.opts.KeyMark("tavily", m.opts.TavilyURL),
 			detail: "hosted, one credit a search, page text included; needs a key"},
-		{id: "off", title: "no web search", detail: "the model answers from memory; every source is unverified"},
+		{id: "off", title: "no web search", detail: "the model suggests URLs and drsh fetches them; weaker than a search"},
 	}
 }
 

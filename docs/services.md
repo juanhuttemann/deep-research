@@ -268,9 +268,10 @@ The summary line at the end of a run counts how sources were obtained:
 sources  9 (9 fetched)      tokens  18.1k
 ```
 
-`fetched` means Firecrawl returned the page. `snippet only` means the search
-result was used without the page. `unverified` means the run used LLM search
-and fetched nothing — if you see that, `SEARXNG_URL` is `off`.
+`fetched` means the page was read. `snippet only` means the search
+result was used without the page. `unverified` means the model suggested the
+URL with search off and it could not be fetched — if you see
+that, `SEARXNG_URL` is `off`.
 `drsh doctor` checks both services directly.
 
 While a run is in progress each result is reported as it is handled, marked
@@ -316,7 +317,7 @@ company and spends its credit; costs are in
 | `permission denied` when editing `settings.yml` | The container took ownership. Edit with `sudo`, or recreate the container with `-e FORCE_OWNERSHIP=false` |
 | Firecrawl API container exits; logs show `EAI_AGAIN nuq-postgres` | It was started without its database. Run `docker compose up -d` for the whole stack |
 | Firecrawl API container exits; logs show `password authentication failed for user "postgres"` | Another stack with the same Compose project name supplied the database. Stop it (`docker compose -p firecrawl stop`), set `COMPOSE_PROJECT_NAME` in Firecrawl's `.env` as in section 2, then `docker compose up -d` |
-| Every source is `unverified` | The run used LLM search: `SEARXNG_URL` is `off` |
+| Every source is `unverified` | Search is off (`SEARXNG_URL` is `off`) and no URL the model suggested could be fetched: check the network |
 | `no search answered: cannot reach SearXNG at …` | Nothing is listening at `SEARXNG_URL`. Start it (`docker compose up -d`, or `docker start searxng`) or fix the URL; `drsh doctor` checks it |
 | `no search answered (rate-limited)` | Every instance refused. With `auto`, public instances limit bursts; retry later, or run your own SearXNG |
 | Every source is `snippet only` | Search works, scraping does not. Check Firecrawl with the curl in section 2; if hosted, check `FIRECRAWL_API_KEY` |

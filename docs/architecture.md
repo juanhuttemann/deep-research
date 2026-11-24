@@ -153,6 +153,26 @@ mention none of them are reported off-topic and never fetched. A plan without
 query or terms (the planner's fallback) searches the anchored question and
 keeps the engines' order.
 
+A search that fails, or answers with nothing on the subject, is followed
+inside the same `ResearchDetail` by URLs the model suggests
+(`agent/pages.go`): one call with `search_instructions`, its URLs fetched by
+`tools.SearchTools.Read` within the branch's budget, the source list and
+`Skip`, never with the model's text as a snippet, so a URL that does not
+load is dropped. With no scraper (`scraper: none`, or Exa and Tavily, which
+bring their own text) they are fetched by the built-in reader
+(`SearchTools.Named`), since a snippet-only search keeps nothing of a URL
+with no snippet. The method still makes one model call. The pages come back
+even when none loaded, since each was announced as its fetch began, with
+the search's error on `ResearchDetail.SearchErr`; the Driver counts that
+search as failed when nothing usable came back (`noteSearch`). With search
+off the same call suggests every query's URLs and a reader
+(`tools.NewReader`, the scraper with no engine) fetches them; there, a page
+that cannot be fetched for a reason other than a `404` or `410` keeps the
+model's description, `unverified`, as every such finding was before pages
+were fetched. The built-in reader writes a page as Markdown through
+html-to-markdown, after pruning what is not the page's text
+(`tools.extractHTML`).
+
 A run given `--domains` checks its sites first, before the plan
 (`ui.Options.checkSources`, through the optional `agent.SourceScoper` the
 live assistant and the replay recorder and resumer implement). Each site is

@@ -556,7 +556,8 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   `start` on each model call's first. They carry the `phase` like any other
   event, and the fact-check's, whose calls run at once and interleave, carry
   the call they belong to in `part` ("claims c1-c6", "inferences k1-k4"). Retries and which model is asked are `info` lines too,
-  planning included. LLM-search calls are unstreamed: they emit a start line
+  planning included. The calls where the model suggests URLs (search off,
+  or a search that failed) are unstreamed: they emit a start line
   and can stay silent until the per-call timeout (doubled on retry). Search
   and scraping also have no periodic heartbeat; silence alone does not
   establish that the process is stuck.
@@ -848,7 +849,11 @@ The choices:
 - **Model**: any provider's model, searchable; it asks for the key when the
   provider needs one, and checks it with one free request.
 - **Web search**: public SearXNG instances (free, the default), a local
-  SearXNG in Docker, your own SearXNG, Exa, Tavily, or none.
+  SearXNG in Docker, your own SearXNG, Exa, Tavily, or none. With none, the
+  model suggests URLs and drsh fetches them; with any of the
+  others, a search that fails or finds nothing on the subject is followed
+  the same way (`model suggesting URLs to fetch` in the activity log, see
+  [When search fails](configuration.md#when-search-fails)).
 - **Page extraction**: none (search snippets only), Firecrawl self-hosted,
   Firecrawl hosted, Exa or Tavily.
 

@@ -296,6 +296,9 @@ func TestLLMSearchSignalsAreUnverified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	// With no reader nothing is fetched: the case this pins, kept off the
+	// network (TestSearchOffFetchesURLsTheModelSuggests covers the fetch).
+	a.(*impl).reader = nil
 	det, err := a.ResearchDetail(context.Background(), "q", nil)
 	if err != nil {
 		t.Fatalf("ResearchDetail: %v", err)

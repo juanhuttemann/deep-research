@@ -125,3 +125,14 @@ func NewSearchToolsFrom(o Options, timeout time.Duration) (*SearchTools, error) 
 	}
 	return &SearchTools{Engine: engine, Scraper: scraper, MaxURLsPerQuery: 3, ScrapeParallelism: 4}, nil
 }
+
+// NewReader builds the tools that fetch the URLs a model suggests with web
+// search off: the scraper, or with none the built-in reader (see Read). It
+// has no Engine; only Read is called on it.
+func NewReader(o Options) (*SearchTools, error) {
+	scraper, err := NewScraper(o, scrapeWait)
+	if err != nil {
+		return nil, err
+	}
+	return &SearchTools{Scraper: scraper, MaxURLsPerQuery: 3, ScrapeParallelism: 4}, nil
+}

@@ -754,11 +754,22 @@ func TestSearXNGAloneEnablesWebSearch(t *testing.T) {
 
 // A search backend that refused (rate limit, challenge, outage) was replaced
 // by the model inventing findings, URLs and all — which then counted as
-// sources. With public instances a refusal is routine, so it is an error the
-// run reports, never a silent switch to recollection.
+// sources. With public instances a refusal is routine. The model may now name
+// URLs to fetch instead, but what it says of them is never a finding: when
+// none can be read, the refusal is the run's error, as before.
 func TestFailedSearchIsNotReplacedByTheModel(t *testing.T) {
 	var modelCalls atomic.Int32
-	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { modelCalls.Add(1) }))
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modelCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{
+				"role":    "assistant",
+				"content": `{"findings":[{"title":"T","content":"invented","url":"https://127.0.0.1/"}]}`,
+			}}},
+		})
+	}))
 	defer model.Close()
 	sx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -768,15 +779,15 @@ func TestFailedSearchIsNotReplacedByTheModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = a.ResearchDetail(context.Background(), "q", nil)
+	det, err := a.ResearchDetail(context.Background(), "q", nil)
 	if err == nil {
-		t.Fatal("a refused search returned findings")
+		t.Fatalf("a refused search returned findings: %+v", det)
 	}
 	if got := tools.SearchStatus(err); got != "rate-limited" {
 		t.Errorf("SearchStatus = %q, want rate-limited (err: %v)", got, err)
 	}
-	if modelCalls.Load() != 0 {
-		t.Errorf("the model was asked to invent findings %d times", modelCalls.Load())
+	if modelCalls.Load() != 1 {
+		t.Errorf("the model was asked %d times, want once, for URLs to fetch", modelCalls.Load())
 	}
 }
 

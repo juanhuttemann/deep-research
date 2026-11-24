@@ -5,6 +5,30 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- When a search fails or finds nothing on the subject, the model suggests
+  URLs and drsh fetches them, as it does for every query with
+  search off. The activity log says so (`searxng unreachable · model
+  suggesting URLs to fetch`). A run whose SearXNG was down or refusing
+  used to end with nothing. Only a page that loads is evidence: what the
+  model writes about a page is never kept as the page, a URL that does not
+  load is dropped, and when none loads the search fails as before. With
+  search off, a URL that cannot be fetched for a reason other than not
+  existing stays an unverified source, so a run without network access
+  still answers. The URLs are fetched in Go, by the scraper or, with
+  `scraper: none`, the built-in reader, so nothing has to be installed
+  (`curl` included, which Windows may lack). Each request lists the pages
+  already suggested in the run and asks mostly for others, so every topic
+  no longer ends with the same one page and nothing new.
+
+### Changed
+
+- The built-in page reader writes each page as Markdown: tables with their
+  header row, which the excerpts score row by row, nested lists, and code
+  blocks as the page has them. It used to write a table's cells with no
+  header row or separator, so no page it read had a table to score.
+
 ## [0.38.2] - 2026-11-23
 
 ### Fixed

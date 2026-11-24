@@ -316,6 +316,26 @@ type SearchTools struct {
 	// scrapeShared).
 	flightsMu sync.Mutex
 	flights   map[string]*flight
+
+	// Named fetches the URLs a model suggested when Scraper is nil: they have no
+	// snippet to keep, so with scraper none every one was dropped, and a run
+	// whose search failed ended as if nothing had been tried. Nil means the
+	// built-in reader, made on first use (namedReader).
+	Named     Scraper
+	namedOnce sync.Once
+}
+
+// namedReader is what reads a page a model named.
+func (s *SearchTools) namedReader() Scraper {
+	if s.Scraper != nil {
+		return s.Scraper
+	}
+	s.namedOnce.Do(func() {
+		if s.Named == nil {
+			s.Named = NewDirectClient(0)
+		}
+	})
+	return s.Named
 }
 
 // flight is one scrape in progress that other searches can wait on.
@@ -353,6 +373,11 @@ type searchLogKey struct{}
 func WithSearchLog(ctx context.Context, logf func(string)) context.Context {
 	return context.WithValue(ctx, searchLogKey{}, logf)
 }
+
+// LogIn reports msg among the lines of the search running under ctx (see
+// WithSearchLog), so a caller's line about a search sits with the search's
+// own under its topic: logged to the run, it was printed below every topic.
+func (s *SearchTools) LogIn(ctx context.Context, msg string) { s.logIn(ctx, msg) }
 
 // logIn reports msg for the search running under ctx.
 func (s *SearchTools) logIn(ctx context.Context, msg string) {
@@ -593,10 +618,16 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 		}
 	}
 
-	// Scraping dominates a search's wall-clock time, so pages are fetched
-	// concurrently. Results are written into fixed slots and assembled after
-	// the wait, which keeps findings and signals in search-result order and
-	// index-aligned with each other regardless of completion order.
+	fs, sg, us := s.fetchAll(ctx, candidates)
+	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped, Known: known}, nil
+}
+
+// fetchAll reads each candidate's page. Scraping dominates a search's
+// wall-clock time, so pages are fetched concurrently. Results are written
+// into fixed slots and assembled after the wait, which keeps findings and
+// signals in candidate order and index-aligned with each other regardless of
+// completion order.
+func (s *SearchTools) fetchAll(ctx context.Context, candidates []SearchResult) ([]SearchFinding, []SourceSignal, []string) {
 	findings := make([]SearchFinding, len(candidates))
 	signals := make([]SourceSignal, len(candidates))
 	urls := make([]string, len(candidates))
@@ -639,7 +670,54 @@ func (s *SearchTools) Search(ctx context.Context, query string, terms []string) 
 		us = append(us, urls[i])
 	}
 
-	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Skipped: skipped, Known: known}, nil
+	return fs, sg, us
+}
+
+// EngineModel is the Engine a page carries when a model suggested it
+// rather than a search engine returning it (see Read).
+const EngineModel = "model"
+
+// Read fetches URLs a model suggested for query, with no search
+// engine: the one used when there is none, or when it refused. Each is read
+// as a search's result would be, within the same budget, the domain list and
+// Skip, but it carries no snippet: whatever the model wrote about the page is
+// not the page, so one that does not load is dropped, never kept on the
+// model's word. What to make of a dropped page is the caller's. With no
+// scraper each is fetched by Named, since a snippet-only search keeps nothing
+// of a page that has no snippet.
+func (s *SearchTools) Read(ctx context.Context, query string, named []SearchResult) *SearchResults {
+	var pages []SearchResult
+	for _, r := range s.inScope(ctx, dedupeResults(named)) {
+		if checkScrapeTarget(r.URL) == nil {
+			pages = append(pages, SearchResult{Title: r.Title, URL: r.URL, Engine: EngineModel})
+		}
+	}
+	scored := make([]ScoredResult, len(pages))
+	for i, r := range pages {
+		scored[i] = ScoredResult{SearchResult: r, Score: 1}
+	}
+	fresh, known := s.splitKnown(scored)
+	if len(fresh) > s.MaxURLsPerQuery {
+		fresh = fresh[:s.MaxURLsPerQuery]
+	}
+	candidates := make([]SearchResult, len(fresh))
+	for i, r := range fresh {
+		candidates[i] = r.SearchResult
+	}
+	unit := "URLs"
+	if len(candidates) == 1 {
+		unit = "URL"
+	}
+	s.logIn(ctx, fmt.Sprintf("  %-9s suggested %d %s", EngineModel, len(candidates), unit))
+	fs, sg, us := s.fetchAll(ctx, candidates)
+	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Known: known}
+}
+
+// PageGone reports a signal for a page whose server answered that it does not
+// exist. A model that suggests such a URL misremembered or invented
+// it, and nothing about the page is worth keeping.
+func PageGone(sig SourceSignal) bool {
+	return sig.Code == strconv.Itoa(http.StatusNotFound) || sig.Code == strconv.Itoa(http.StatusGone)
 }
 
 // fetchStartKey carries the function WithFetchStart gives a search.
@@ -692,6 +770,9 @@ func (s *SearchTools) splitKnown(ranked []ScoredResult) (fresh []ScoredResult, k
 func (s *SearchTools) body(ctx context.Context, r SearchResult) (*ScrapedContent, error) {
 	if strings.TrimSpace(r.Body) != "" {
 		return &ScrapedContent{URL: r.URL, Content: r.Body}, nil
+	}
+	if r.Engine == EngineModel && s.Scraper == nil {
+		return s.namedReader().ScrapeURL(ctx, r.URL)
 	}
 	return s.scrapeShared(ctx, r.URL)
 }

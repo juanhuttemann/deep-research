@@ -487,6 +487,11 @@ search_instructions: |
   Return exactly this JSON, no other text:
   {"findings": [{"title":"page title", "content":"what the page likely covers, from memory", "url":"https://..."}]}
   Return up to three; fewer or none is right when you are not confident.
+  Each URL is fetched and its page read, so give the page's own address (a
+  documentation page, a paper's abstract page, a standard's text, a
+  reference article), never a site's home page or a search URL; a page that
+  does not load counts for nothing. When the query names sites, name pages
+  on those sites only.
   "content" describes the page's relevance as you recall it: it is never a
   quotation or an excerpt, and makes no claim about the page's current text.
   Never invent a URL.

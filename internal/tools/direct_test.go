@@ -90,3 +90,27 @@ func TestExtractedCorrectionSurvivesQueryExcerpt(t *testing.T) {
 		t.Fatalf("warning lost correction: %s", excerpt)
 	}
 }
+
+// The built-in reader wrote a table's cells with no header row or separator,
+// so the excerpts, which score a Markdown table by its header and answering
+// rows, never saw a table on a page it read. It now writes Markdown: tables,
+// nested lists and code as the page has them, and a link as its words alone.
+func TestHTMLExtractionWritesMarkdown(t *testing.T) {
+	p, err := extractHTML(`<title>Guide</title><main><p>See <a href="https://x.example/a">the guide</a> for C++ <img src="a.png" alt="chart"></p>` +
+		`<ul><li>one<ul><li>nested</li></ul></li></ul><pre><code>go build ./...
+  indented</code></pre>` +
+		`<table><thead><tr><th>Region</th><th>Share</th></tr></thead><tbody><tr><td>Europe</td><td>25%</td></tr></tbody></table></main>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"See the guide for C++", "- one\n", "  - nested", "```\ngo build ./...\n  indented\n```", "| Region | Share |\n|---|---|\n| Europe | 25% |"} {
+		if !strings.Contains(p.Content, want) {
+			t.Errorf("missing %q in:\n%s", want, p.Content)
+		}
+	}
+	for _, bad := range []string{"x.example", "a.png", `C\+\+`} {
+		if strings.Contains(p.Content, bad) {
+			t.Errorf("kept %q in:\n%s", bad, p.Content)
+		}
+	}
+}

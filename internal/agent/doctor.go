@@ -277,7 +277,7 @@ func getJSON(ctx context.Context, u, key string) ([]byte, error) {
 func checkSearch(ctx context.Context, cfg Config) Check {
 	c := Check{Name: "search"}
 	if !cfg.SearchEnabled() {
-		c.OK, c.Detail = true, "off — the model supplies findings from memory; every source is unverified"
+		c.OK, c.Detail = true, "off — the model suggests URLs and each is fetched; one that cannot be fetched is unverified"
 		return c
 	}
 	engine, err := tools.NewEngine(cfg.SearchOptions(), cfg.ModelCallTimeout)
@@ -350,14 +350,15 @@ func searchEndpoint(e tools.Searcher) string {
 // checkScraper reads one well-known page through the configured scraper.
 func checkScraper(ctx context.Context, cfg Config) Check {
 	c := Check{Name: "scraper"}
-	if !cfg.SearchEnabled() {
-		c.OK, c.Detail = true, "not used — search is off"
-		return c
-	}
 	scraper, err := tools.NewScraper(cfg.SearchOptions(), diagnoseTimeout)
 	if err != nil {
 		c.Detail = err.Error()
 		return c
+	}
+	if scraper == nil && !cfg.SearchEnabled() {
+		// The URLs the model suggests have no snippet: the built-in reader
+		// fetches them (tools.SearchTools.Named).
+		scraper = tools.NewDirectClient(diagnoseTimeout)
 	}
 	if scraper == nil {
 		c.OK = true

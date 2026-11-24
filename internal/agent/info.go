@@ -46,10 +46,20 @@ func (c Config) describeModel() (model, provider string) {
 // A setting the run would refuse says so here too: the page showed a healthy
 // setup for a search_engine it did not know, and every launch then failed.
 func (c Config) describeSearch() (search, pages string) {
-	if !c.SearchEnabled() {
-		return "off (model memory, unverified)", "none"
-	}
 	o := c.SearchOptions()
+	if !c.SearchEnabled() {
+		// The model suggests URLs; the scraper fetches them, and
+		// with none the built-in reader does.
+		const off = "off (model suggests URLs)"
+		switch scraper, err := tools.NewScraper(o, 0); {
+		case err != nil:
+			return off, "not usable: " + err.Error()
+		case scraper == nil:
+			return off, tools.ScraperDirect
+		default:
+			return off, shownScraper(c, scraper)
+		}
+	}
 	engine, err := tools.NewEngine(o, 0)
 	if err != nil {
 		return "not usable: " + err.Error(), "none"
@@ -66,16 +76,23 @@ func (c Config) describeSearch() (search, pages string) {
 	switch {
 	case err != nil:
 		pages = "not usable: " + err.Error()
-	case scraper != nil && scraper.Name() == tools.ScraperFirecrawl:
-		pages = "firecrawl (" + host(c.FirecrawlURL) + ")"
 	case scraper != nil:
-		pages = scraper.Name()
+		pages = shownScraper(c, scraper)
 	case tools.InlineText(engine.Name()):
 		pages = "page text included"
 	default:
 		pages = "snippets only"
 	}
 	return search, pages
+}
+
+// shownScraper is the scraper for display: Firecrawl, which runs anywhere,
+// with its address.
+func shownScraper(c Config, s tools.Scraper) string {
+	if s.Name() == tools.ScraperFirecrawl {
+		return "firecrawl (" + host(c.FirecrawlURL) + ")"
+	}
+	return s.Name()
 }
 
 // host is the address's host for display, never its userinfo.

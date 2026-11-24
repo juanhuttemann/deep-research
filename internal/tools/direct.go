@@ -9,6 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
 	"golang.org/x/net/html"
 )
 
@@ -130,13 +134,72 @@ func extractHTML(body string) (*ScrapedContent, error) {
 			break
 		}
 	}
+	prunePage(content)
+	md, err := pageConverter.ConvertNode(content)
+	if err != nil {
+		return nil, err
+	}
 	var b strings.Builder
 	if page.Title != "" {
 		fmt.Fprintf(&b, "# %s\n\n", page.Title)
 	}
-	renderPage(&b, content)
+	b.Write(md)
 	page.Content = cleanPageText(b.String())
 	return page, nil
+}
+
+// pageConverter turns a page's content into Markdown. Tables matter most:
+// the excerpts score a Markdown table by its header and answering rows (see
+// ExcerptFor), and the hand-written renderer this replaced wrote cells with no
+// header row or separator, so no page it read had a table to score. Escaping
+// is off because the page text is evidence quoted back against itself: a
+// "C\+\+" the page never wrote would fail the quote check.
+var pageConverter = converter.NewConverter(
+	converter.WithEscapeMode(converter.EscapeModeDisabled),
+	converter.WithPlugins(
+		base.NewBasePlugin(),
+		commonmark.NewCommonmarkPlugin(),
+		table.NewTablePlugin(table.WithCellPaddingBehavior(table.CellPaddingBehaviorMinimal)),
+		pagePlugin{},
+	),
+)
+
+// pagePlugin keeps a link's words and drops its target, and drops images. A
+// source reaches a prompt as 1500 characters of excerpt, and a documentation
+// page's link targets would spend most of them on URLs no claim cites.
+type pagePlugin struct{}
+
+func (pagePlugin) Name() string { return "deep-research-page" }
+
+func (pagePlugin) Init(conv *converter.Converter) error {
+	conv.Register.RendererFor("a", converter.TagTypeInline, func(ctx converter.Context, w converter.Writer, n *html.Node) converter.RenderStatus {
+		ctx.RenderChildNodes(ctx, w, n)
+		return converter.RenderSuccess
+	}, converter.PriorityEarly)
+	conv.Register.TagType("img", converter.TagTypeRemove, converter.PriorityEarly)
+	return nil
+}
+
+// prunePage removes what is not the page's text (scripts, navigation, hidden
+// elements) and spells out struck text. A struck sentence is usually a
+// correction the page made, and as Markdown's ~~ it read as current text to a
+// model that skims the markers.
+func prunePage(n *html.Node) {
+	for c := n.FirstChild; c != nil; {
+		next := c.NextSibling
+		switch {
+		case c.Type != html.ElementNode:
+		case skipPageNode(c):
+			n.RemoveChild(c)
+		case c.Data == "del" || c.Data == "s" || c.Data == "strike":
+			text := " [Superseded text: " + strings.Join(strings.Fields(nodeText(c)), " ") + "] "
+			n.InsertBefore(&html.Node{Type: html.TextNode, Data: text}, c)
+			n.RemoveChild(c)
+		default:
+			prunePage(c)
+		}
+		c = next
+	}
 }
 
 func firstElement(n *html.Node, tag string) *html.Node {
@@ -175,46 +238,28 @@ func skipPageNode(n *html.Node) bool {
 	return false
 }
 
-func renderPage(b *strings.Builder, n *html.Node) {
-	if n.Type == html.TextNode {
-		b.WriteString(n.Data)
-		return
-	}
-	if n.Type != html.ElementNode && n.Type != html.DocumentNode || skipPageNode(n) {
-		return
-	}
-	switch n.Data {
-	case "del", "s", "strike":
-		fmt.Fprintf(b, " [Superseded text: %s] ", strings.Join(strings.Fields(nodeText(n)), " "))
-		return
-	case "br":
-		b.WriteString("\n")
-	case "h1", "h2", "h3", "h4", "h5", "h6":
-		fmt.Fprintf(b, "\n\n%s ", strings.Repeat("#", int(n.Data[1]-'0')))
-	case "p", "div", "section", "li", "ul", "ol", "table":
-		b.WriteString("\n\n")
-	case "tr":
-		b.WriteString("\n")
-	case "td", "th":
-		b.WriteString(" | ")
-	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		renderPage(b, c)
-	}
-	switch n.Data {
-	case "p", "div", "section", "li", "ul", "ol", "table", "h1", "h2", "h3", "h4", "h5", "h6":
-		b.WriteString("\n\n")
-	}
-}
-
+// cleanPageText collapses the blank-line runs and the spacing inside each
+// line that page markup leaves, keeping a line's indentation, which nests a
+// Markdown list, and a fenced code block as the page wrote it.
 func cleanPageText(s string) string {
 	var lines []string
+	fenced := false
 	for _, line := range strings.Split(s, "\n") {
-		line = strings.Join(strings.Fields(line), " ")
-		if line == "" && (len(lines) == 0 || lines[len(lines)-1] == "") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			fenced = !fenced
+		} else if fenced {
+			lines = append(lines, strings.TrimRight(line, " \t"))
 			continue
 		}
-		lines = append(lines, line)
+		if trimmed == "" {
+			if len(lines) > 0 && lines[len(lines)-1] != "" {
+				lines = append(lines, "")
+			}
+			continue
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+		lines = append(lines, indent+strings.Join(strings.Fields(trimmed), " "))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

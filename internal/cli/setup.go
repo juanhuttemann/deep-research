@@ -131,7 +131,7 @@ func runSetup(cmd *cobra.Command, sec sections) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "note: the current configuration does not load (%v); setup starts from the defaults\n", st.loadErr)
 	}
 	if sec.scraper && !sec.search && currentServices(st).Engine == "off" {
-		return errors.New("search is off, so nothing reads pages; turn search on first: drsh setup search")
+		return errors.New("search is off: the URLs the model suggests are fetched with the scraper already set, the built-in reader by default; to choose one, turn search on first: drsh setup search")
 	}
 	if sec.model && sec.search {
 		fmt.Fprintln(out, setup.Title("setup"))
@@ -388,7 +388,7 @@ func serviceTitle(name string) string {
 func engineLine(s setup.Services) string {
 	switch {
 	case s.Engine == "off":
-		return "no web search (model memory, unverified)"
+		return "no web search (model suggests URLs)"
 	case s.Engine != "searxng":
 		return serviceTitle(s.Engine)
 	case s.Docker:
@@ -432,7 +432,8 @@ func checkServices(ctx context.Context, out io.Writer, st loginState, d setupDra
 		return false
 	}
 	if !cfg.SearchEnabled() {
-		// Nothing searches, so nothing reads pages: there is nothing to ask.
+		// Nothing searches, so there is no query to check; drsh doctor reads
+		// a page as the URLs the model suggests are fetched.
 		return true
 	}
 	fmt.Fprintln(out, setup.Dim("checking: one search query and one page read…"))
@@ -624,7 +625,7 @@ func scriptedScraper(cmd *cobra.Command) error {
 	addr, _ := cmd.Flags().GetString("url")
 	s := currentServices(st)
 	if s.Engine == "off" {
-		return errors.New("search is off, so nothing reads pages; turn search on first: drsh setup search --engine <name>")
+		return errors.New("search is off: the URLs the model suggests are fetched with the scraper already set, the built-in reader by default; to choose one, turn search on first: drsh setup search --engine <name>")
 	}
 	s.ScraperAsked, s.Scraper = true, strings.ToLower(strings.TrimSpace(name))
 	switch s.Scraper {

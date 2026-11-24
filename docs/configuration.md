@@ -116,10 +116,10 @@ choice made later in setup, which is why setup's review lists them.
 | `OPENAI_API_KEY` | LLM API key, when `drsh setup` stored none for the endpoint; free at <https://openrouter.ai/keys> | — (required) |
 | `OPENAI_BASE_URL` | LLM endpoint (any OpenAI-compatible API) | `https://openrouter.ai/api/v1` |
 | `OPENAI_MODEL` | model to use | `openrouter/free` |
-| `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (LLM search) | `auto` |
+| `SEARXNG_URL` | SearXNG for web search: one URL, a comma-separated list, `auto` (public instances) or `off` (the model suggests URLs to fetch) | `auto` |
 | `FIRECRAWL_URL` | Firecrawl instance for page scraping | — (empty: built-in HTML reader) |
 | `FIRECRAWL_API_KEY` | bearer token for hosted Firecrawl (self-hosted needs none), when `setup` stored none for that address | — |
-| `DEEP_RESEARCH_SEARCH_ENGINE` | `searxng`, `exa`, `tavily` or `off` (LLM search) | `searxng` |
+| `DEEP_RESEARCH_SEARCH_ENGINE` | `searxng`, `exa`, `tavily` or `off` (the model suggests URLs to fetch) | `searxng` |
 | `DEEP_RESEARCH_SCRAPER` | `firecrawl`, `exa`, `tavily` or `none` | `firecrawl` when `FIRECRAWL_URL` is set, else `none` |
 | `EXA_API_KEY` | key for [Exa](https://exa.ai), as engine or scraper, when `setup` stored none | — |
 | `TAVILY_API_KEY` | key for [Tavily](https://tavily.com), as engine or scraper, when `setup` stored none | — |
@@ -136,9 +136,14 @@ are unset; a Firecrawl address still selects Firecrawl. Set
 `DEEP_RESEARCH_SCRAPER=direct` to override a saved `scraper: none`.
 `none` explicitly keeps search snippets. `setup scraper` offers both.
 
-The reader preserves headings, table rows and superseded-text markers,
-checks public addresses at connection time and on redirects, and bounds
-response size and time. It does not execute JavaScript or extract PDFs;
+The reader writes each page as Markdown
+([html-to-markdown](https://github.com/JohannesKaufmann/html-to-markdown)):
+headings, tables with their header row, nested lists and code blocks as the
+page has them, a link as its words without its target, and struck text as
+`[Superseded text: …]`. It leaves out navigation, headers, footers, forms,
+scripts and hidden elements and reads the page's `main` or `article` when it
+has one. It checks public addresses at connection time and on redirects, and
+bounds response size and time. It does not execute JavaScript or extract PDFs;
 those and refused pages keep their snippets, marked as such. Choose
 Firecrawl, Exa or Tavily for broader extraction support. Snippet evidence
 is explicitly identified to analysis and checking, not represented as a
@@ -163,7 +168,9 @@ October 2026: Exa charged a flat $0.007 per search, the ten results' text and
 highlights included, and about $0.001 per extracted page; Tavily charges one credit per basic search and one
 per five extracted pages. An engine chosen without its key fails at start, and
 a rejected key or exhausted credit is reported as `unauthorized` or `quota`
-rather than falling back to SearXNG or to the model.
+rather than falling back to SearXNG. Like any failed search, it is followed
+by URLs the model suggests (see [When search fails](#when-search-fails)),
+and the error stands when none of them loads.
 
 ### The default model
 
@@ -184,8 +191,10 @@ when OpenRouter retires it. Two consequences:
   `clarify: off`. The fact-check
   runs as parallel calls: one per share of six or more claims, at most four,
   and one per four recommendations and conclusions, at most three, so a run
-  with many of both spends up to seven requests on it at once. LLM search
-  adds up to 2 queries per sub-topic and per follow-up. Worst-case totals are
+  with many of both spends up to seven requests on it at once. With search
+  off, the model suggesting URLs adds up to 2 queries per sub-topic and per
+  follow-up; with search on, each search that fails or finds nothing on
+  the subject adds one. Worst-case totals are
   quick 26, standard 28 and deep 32 before retries.
   `drsh doctor` prints these worst-case budgets (14 with web
   search) and, for an OpenRouter key, its usage, tier and today's free-model requests (used, limit, left). A per-minute 429 is retried after the `Retry-After`
@@ -446,16 +455,47 @@ Which mode a run uses is decided by what is configured:
   - A search that every instance refuses fails with its reason —
     `rate-limited`, `challenge`, `blocked`, `unreachable` (nothing answers at
     the address), `unauthorized` or `quota` (a hosted engine's key) or
-    `unavailable` — on the event and in the error. It is never replaced by the model inventing findings,
-    and a run whose every search failed stops before analysing nothing.
-- **LLM search** — `searxng_url: off` or `search_engine: off`. The model itself proposes the findings
-  and their URLs. Nothing is fetched, so every source is labelled
-  `~ unverified` and exported with that status. The fact-check phase says so
-  too: with no retrieved page to check an answer against, it runs as a
-  self-consistency pass ("Checking self-consistency (no page was retrieved)")
-  and the report presents its claims as unverified recollection. When a run
-  holds both kinds, every prompt marks each unfetched finding `[never
-  fetched]` and the phase line says how many there are.
+    `unavailable` — on the event and in the error. The model then suggests
+    URLs to fetch instead ([When search fails](#when-search-fails)),
+    and the error stands when none of them loads. It is never replaced by
+    the model inventing findings, and a run whose every search failed stops
+    before analysing nothing.
+- **No web search** — `searxng_url: off` or `search_engine: off`. The model
+  suggests up to three URLs per query, and each is fetched with
+  the scraper, or the built-in reader when `scraper` is unset or `none`. A
+  page that loads is a source like any search's (`✓ fetched`). A URL whose
+  server answers `404` or `410` is dropped: the model misremembered or
+  invented it. One that cannot be fetched for another reason (a timeout, a
+  challenge, a PDF, no network) is kept as the model described it,
+  labelled `~ unverified` and exported with that status, so a run with no
+  network beyond the model still answers. When no source was fetched, the fact-check says so: with no
+  retrieved page to check an answer against, it runs as a self-consistency
+  pass ("Checking self-consistency (no page was retrieved)") and the report
+  presents its claims as unverified recollection. When a run holds both
+  kinds, every prompt marks each unfetched finding `[never fetched]` and the
+  phase line says how many there are.
+
+### When search fails
+
+A configured search that fails (refused, rate-limited, unreachable, out of
+credit) or answers with nothing on the subject is followed by one more
+model call: the model suggests up to three URLs that would
+answer the query, on the run's `--domains` sites when it has some, and
+they are fetched as a search's results are, within the same budget and
+skipping pages the run already has. The activity log says so, under the
+topic (`searxng unreachable · model suggesting URLs to fetch`, then
+`model suggested 3 URLs`). Each request lists the pages the model already
+suggested in the run: one may be named again when it is among the best for
+the topic (it is not fetched again, and its excerpt then covers this topic
+too), but most must be pages not on the list, other pages on the same sites
+included. Asked for each topic alone, the model suggested the same
+best-known page and nothing else for every one, and no topic after the
+first added evidence. Only a page that loads is kept; a
+URL that does not is shown `✗ dropped`, and nothing the model wrote about
+a page is evidence. When none loads, the search counts as failed, as it
+did before. The URLs are fetched with the scraper, or the built-in reader
+when `scraper` is `none` (a suggested URL has no snippet to fall back on),
+in Go: nothing needs installing, `curl` included.
 A missing API key is an error that says where to get one. It used to fall
 back to a stub assistant with a warning, which produced a complete-looking
 run that had researched nothing.

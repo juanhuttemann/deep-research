@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2103,6 +2104,47 @@ func TestPublicSearchRefusalIsExplainedOnce(t *testing.T) {
 	}
 }
 
+// A refused search the model's suggested URLs stood in for is a failed search
+// when none of them loaded: counted as answered, a run whose every search was
+// refused and every named page dropped went on to analyse nothing. One whose
+// pages loaded is an answer, and the advice on public instances still comes.
+func TestSuggestedURLsStandInForARefusedSearchOnlyWhenOneLoads(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><title>Making sure you're not a bot!</title></html>`)
+	}))
+	defer srv.Close()
+	c := tools.NewSearXNGClient(srv.URL+","+srv.URL+"/x", 0)
+	c.Public = true
+	_, searchErr := c.Search(context.Background(), "q")
+
+	sink := &MultiSink{}
+	d := NewDriver(nil, sink, nil, 1)
+	dropped := &agent.ResearchDetail{SearchErr: searchErr,
+		Findings: []agent.Finding{{URL: "https://a.example/gone"}},
+		Signals:  []agent.SourceSignal{{URL: "https://a.example/gone", Status: "dropped", Code: "404"}}}
+	d.noteSearch(time.Now(), nil, dropped)
+	if d.searchesFailed != 1 || d.searchesOK != 0 {
+		t.Errorf("failed=%d ok=%d, want the search counted as failed", d.searchesFailed, d.searchesOK)
+	}
+	read := &agent.ResearchDetail{SearchErr: searchErr,
+		Findings: []agent.Finding{{URL: "https://a.example/doc", Content: "text"}},
+		Signals:  []agent.SourceSignal{{URL: "https://a.example/doc", Status: "ok"}}}
+	d.noteSearch(time.Now(), nil, read)
+	if d.searchesOK != 1 {
+		t.Errorf("ok=%d, want the read pages counted as an answer", d.searchesOK)
+	}
+	hints := 0
+	for _, e := range sink.TimelineSnapshot() {
+		if strings.Contains(e.Detail, "docs/services.md") {
+			hints++
+		}
+	}
+	if hints != 1 {
+		t.Errorf("the refusal advice was given %d times, want once", hints)
+	}
+}
+
 // refusedPool answers its first answered queries and sends every later one
 // to a pool of public instances that all challenge: the shape of a run
 // whose public SearXNG instances turned on it early.
@@ -2135,6 +2177,47 @@ func (r *refusedPool) ResearchDetail(ctx context.Context, q string, terms []stri
 
 func (r *refusedPool) FollowUps(context.Context, string) ([]agent.FollowUpQuery, error) {
 	return queries("what the first search missed"), nil
+}
+
+// suggestedNothing is a refused search whose suggested URLs all failed to
+// load, as the agent returns it: the dropped pages, the refusal beside them.
+type suggestedNothing struct{ *refusedPool }
+
+func (r *suggestedNothing) ResearchDetail(ctx context.Context, q string, _ []string) (*agent.ResearchDetail, error) {
+	r.queries.Add(1)
+	_, err := r.pool.Search(ctx, q)
+	u := "https://a.example/" + url.PathEscape(q)
+	return &agent.ResearchDetail{SearchErr: err,
+		Findings: []agent.Finding{{URL: u}},
+		Signals:  []agent.SourceSignal{{URL: u, Domain: "a.example", Status: "dropped", Code: "404"}}}, nil
+}
+
+// A refused search whose suggested URLs all failed came back as a result,
+// not an error: the topic showed no error, and the sub-agent sent its next
+// query, and another model call, into the same refusal. It is the search's
+// failure again, with each URL tried shown as dropped.
+func TestRefusedSearchWithNoSuggestedURLLoadedIsAFailure(t *testing.T) {
+	a := &suggestedNothing{newRefusedPool(t, 0)}
+	sink := &MultiSink{}
+	_, err := NewDriver(a, sink, nil, 1).Run(context.Background(), newTestPlan("quick", refusedTopics))
+	if err == nil {
+		t.Fatal("a run whose every search was refused and every suggested URL dropped succeeded")
+	}
+	if n := a.queries.Load(); n > int32(len(refusedTopics)) {
+		t.Errorf("%d queries sent, want each sub-agent to stop at its refusal", n)
+	}
+	var errs, dropped int
+	for _, e := range sink.TimelineSnapshot() {
+		switch {
+		case e.Type == Error && e.SubID != "":
+			errs++
+		case e.Type == Verify && e.Status == "dropped":
+			dropped++
+		}
+	}
+	if errs == 0 || dropped == 0 {
+		t.Errorf("topic errors %d, dropped URLs shown %d: want both", errs, dropped)
+	}
 }
 
 var refusedTopics = []agent.SubTopic{{ID: "1", Name: "A", Query: "a"}, {ID: "2", Name: "B", Query: "b"}, {ID: "3", Name: "C", Query: "c"}}

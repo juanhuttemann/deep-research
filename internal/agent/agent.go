@@ -444,6 +444,11 @@ type ResearchDetail struct {
 	// Known are relevant results the run already had in full, not fetched
 	// again (see SkipSources).
 	Known []SkippedSource `json:"known,omitempty"`
+	// SearchErr is the search's failure when these are the URLs the model
+	// suggested instead. They are returned even when none loaded, since each was
+	// announced as it began and the run settles it; the run counts the
+	// search as failed then. Not recorded: a replay has no search to fail.
+	SearchErr error `json:"-"`
 }
 
 // SkippedSource is a search result rejected as off-topic before any fetch.
@@ -600,7 +605,13 @@ func New(cfg Config) (Assistant, error) {
 		}
 		impl.searchTools = st
 		impl.github = tools.NewGitHubClient(impl.timeout)
+		return impl, nil
 	}
+	reader, err := tools.NewReader(cfg.SearchOptions())
+	if err != nil {
+		return nil, err
+	}
+	impl.reader = reader
 	return impl, nil
 }
 
@@ -711,6 +722,14 @@ type impl struct {
 	plan        runFunc
 	clarify     runFunc
 	searchTools *tools.SearchTools // non-nil when real search+scrape is available
+	// reader fetches the URLs the model suggests with web search off; nil
+	// with search on, where searchTools fetches them.
+	reader *tools.SearchTools
+	// suggested are the URLs the model suggested, which later requests list
+	// as already in the research (suggestPrompt). An assistant is built per run, so
+	// they are this run's, follow-up round included.
+	suggestedMu sync.Mutex
+	suggested   []string
 	// leads are the last plan's search results and the question they were
 	// for (planLeadsBlock).
 	leadsMu  sync.Mutex
@@ -1587,9 +1606,23 @@ func (a *impl) TokensUsed() int { return int(a.tokens.Load()) }
 
 // SetSourceBudget sets how many pages one search may fetch.
 func (a *impl) SetSourceBudget(perQuery int) {
-	if a.searchTools != nil && perQuery > 0 {
-		a.searchTools.MaxURLsPerQuery = perQuery
+	for _, st := range a.pageTools() {
+		if perQuery > 0 {
+			st.MaxURLsPerQuery = perQuery
+		}
 	}
+}
+
+// pageTools are the tools that read pages for the run: the search's, or the
+// reader of the URLs the model suggests with search off.
+func (a *impl) pageTools() []*tools.SearchTools {
+	var out []*tools.SearchTools
+	for _, st := range []*tools.SearchTools{a.searchTools, a.reader} {
+		if st != nil {
+			out = append(out, st)
+		}
+	}
+	return out
 }
 
 // CheckDomains runs the preflight on the configured search and scraper.
@@ -1612,8 +1645,8 @@ func (a *impl) ScopeTo(domains []string) {
 }
 
 func (a *impl) SkipSources(skip func(url string) bool) {
-	if a.searchTools != nil {
-		a.searchTools.Skip = skip
+	for _, st := range a.pageTools() {
+		st.Skip = skip
 	}
 }
 
@@ -1628,8 +1661,8 @@ func (a *impl) SetProgress(logf func(string)) {
 		}
 		a.early = nil
 	}
-	if a.searchTools != nil {
-		a.searchTools.SetLogger(logf)
+	for _, st := range a.pageTools() {
+		st.SetLogger(logf)
 	}
 }
 
@@ -1671,46 +1704,20 @@ func (a *impl) status(msg string) {
 }
 
 // ResearchDetail performs a web search and enriches results with scrape
-// signals when search tools are configured; otherwise it uses the LLM search
-// agent, whose findings are marked unverified because no URL in them was ever
-// fetched.
+// signals when search tools are configured; otherwise the model suggests URLs
+// and each is fetched (recall).
 //
-// A configured search that fails is an error, not a cue to ask the model
-// instead. The fallback turned every rate limit and outage into invented
-// findings that counted as sources, and with public instances a refusal is
-// routine: "it ran and produced a report" has to mean the same thing whether
-// or not the search answered.
+// A configured search that fails, or finds nothing on the subject, is
+// followed by URLs the model suggests, fetched as a search's
+// results are (searchOrNamed). Only a page that loads is kept: the fallback
+// this replaced took the model's account of each page as the page, and
+// turned every rate limit and outage into invented findings that counted as
+// sources. When no suggested URL loads, the search's own error is the answer.
 func (a *impl) ResearchDetail(ctx context.Context, query string, terms []string) (*ResearchDetail, error) {
 	if a.searchTools != nil {
-		res, err := a.searchTools.Search(ctx, query, terms)
-		if err != nil {
-			return nil, err
-		}
-		det := &ResearchDetail{
-			Findings: make([]Finding, len(res.Findings)),
-			Signals:  res.Signals,
-			Skipped:  res.Skipped,
-			Known:    res.Known,
-		}
-		for i, f := range res.Findings {
-			det.Findings[i] = Finding{Query: query, Title: f.Title, Content: f.Content, URL: f.URL, Confidence: f.Confidence}
-		}
-		return det, nil
+		return a.searchOrNamed(ctx, query, terms)
 	}
-	a.log("  llm agent searching · " + a.effortLabel(a.effort.Search))
-	out, err := a.search(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	findings := parseSearchResults(out, query)
-	signals := make([]SourceSignal, len(findings))
-	for i, f := range findings {
-		// Nothing was fetched here: the model supplied both the finding and
-		// its URL. Claiming "ok" made the UI render "✓ domain 200 OK" for a
-		// page that was never requested, and might not exist.
-		signals[i] = SourceSignal{URL: f.URL, Domain: tools.DomainOf(f.URL), Status: "unverified"}
-	}
-	return &ResearchDetail{Findings: findings, Signals: signals}, nil
+	return a.recall(ctx, query)
 }
 
 // FollowUpQuery is a search the findings so far call for, and the few words

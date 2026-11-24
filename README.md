@@ -150,7 +150,7 @@ Choose with `drsh setup search`:
 | Local SearXNG in Docker | free | **recommended**: private and more reliable; setup writes the files, you start it with one `docker compose` command |
 | Your own SearXNG | free | one address or several |
 | Exa, Tavily | per search | hosted; each result comes with its page text |
-| No search | free | the model answers from memory, and every source is marked unverified |
+| No search | free | the model suggests URLs and drsh fetches them; a page that cannot be fetched is marked unverified |
 
 Page extraction (`drsh setup scraper`) reads each result's full page, so a
 claim is checked against the page and not just its search snippet: Firecrawl

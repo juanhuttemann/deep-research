@@ -662,3 +662,38 @@ func TestStoppedScrapeIsRetriedOnce(t *testing.T) {
 		t.Errorf("scrapes = %d, want the stopped one and a single retry", n)
 	}
 }
+
+// Read is a search's fetch for pages a model named: within the budget, the
+// source list and Skip, and with no snippet to fall back on, so a page that
+// does not load is dropped rather than kept on the model's word.
+func TestReadNamedPagesKeepsOnlyWhatLoads(t *testing.T) {
+	s := &SearchTools{
+		Scraper:         pageScraper{"https://a.example/doc": "the page's text"},
+		MaxURLsPerQuery: 2,
+		Domains:         []string{"a.example"},
+		Skip:            func(u string) bool { return u == "https://a.example/read" },
+	}
+	res := s.Read(context.Background(), "q", []SearchResult{
+		{Title: "Doc", URL: "https://a.example/doc", Content: "the model's account"},
+		{URL: "https://a.example/doc/"},
+		{URL: "https://b.example/doc"},
+		{URL: "https://127.0.0.1/"},
+		{URL: "https://a.example/read"},
+		{URL: "https://a.example/missing"},
+		{URL: "https://a.example/past-the-budget"},
+	})
+	var got []string
+	for i, f := range res.Findings {
+		got = append(got, res.Signals[i].Status+" "+f.URL+" "+f.Content)
+	}
+	want := []string{"ok https://a.example/doc the page's text", "dropped https://a.example/missing "}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("read %q, want %q", got, want)
+	}
+	if len(res.Known) != 1 || res.Known[0].URL != "https://a.example/read" {
+		t.Errorf("known = %+v, want the page the run already has", res.Known)
+	}
+	if !PageGone(res.Signals[1]) || PageGone(res.Signals[0]) {
+		t.Errorf("PageGone wrong for %+v", res.Signals)
+	}
+}

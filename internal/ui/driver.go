@@ -1025,23 +1025,9 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 
 		det, err := d.search(sctx, q, sub.Terms)
 		if err != nil {
-			// A limiter or a challenge is a state of the run, so it travels on
-			// the event rather than only inside the message text.
-			status := tools.SearchStatus(err)
-			if tools.SearchResting(err) {
-				// No instance would be asked for the remaining queries either:
-				// sending them only stacked up identical failures.
-				d.emit(Event{Type: Error, Detail: err.Error(), SubID: id, Status: status, Line: "no search available"})
+			if d.searchFailed(det, err, id) {
 				break
 			}
-			if searchRefused(err) {
-				// The next query would meet the same limiter, and add to it.
-				d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
-					Status: status, Line: "search " + status + "; not trying another query"})
-				break
-			}
-			d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
-				Status: status, Line: "search " + status})
 			continue
 		}
 		// Results the search judged off-topic were never fetched, so they cost
@@ -1191,14 +1177,66 @@ func (d *Driver) search(ctx context.Context, query string, terms []string) (*age
 		// as a result, it was dereferenced.
 		det = &agent.ResearchDetail{}
 	}
+	err = searchOutcome(det, err)
 	d.noteSearch(started, err, det)
 	return det, err
 }
 
+// searchFailed reports a sub-agent's failed search on its topic, and
+// whether the sub-agent should send no further query.
+func (d *Driver) searchFailed(det *agent.ResearchDetail, err error, id string) (stop bool) {
+	d.settleTried(det, id)
+	// A limiter or a challenge is a state of the run, so it travels on
+	// the event rather than only inside the message text.
+	status := tools.SearchStatus(err)
+	if tools.SearchResting(err) {
+		// No instance would be asked for the remaining queries either:
+		// sending them only stacked up identical failures.
+		d.emit(Event{Type: Error, Detail: err.Error(), SubID: id, Status: status, Line: "no search available"})
+		return true
+	}
+	if searchRefused(err) {
+		// The next query would meet the same limiter, and add to it.
+		d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
+			Status: status, Line: "search " + status + "; not trying another query"})
+		return true
+	}
+	d.emit(Event{Type: Error, Detail: "search failed: " + err.Error(), SubID: id,
+		Status: status, Line: "search " + status})
+	return false
+}
+
+// searchOutcome is err, or the search's own failure when the URLs the model
+// suggested in its place gave nothing either. Passed on as a result, it left
+// the topic with no error to show, and a sub-agent whose search was refusing
+// sent its next query, and a model call, into the same refusal.
+func searchOutcome(det *agent.ResearchDetail, err error) error {
+	if err == nil && det != nil && det.SearchErr != nil && !det.Usable() {
+		return det.SearchErr
+	}
+	return err
+}
+
+// settleTried reports how each URL tried for a failed search went: each was
+// announced as its fetch began, and the reader sees why none was kept.
+func (d *Driver) settleTried(det *agent.ResearchDetail, id string) {
+	if det == nil {
+		return
+	}
+	for _, s := range det.Signals {
+		d.emit(Event{Type: Verify, URL: s.URL, Domain: s.Domain, Status: s.Status, Code: s.Code, SubID: id, Line: verifyLabel(s)})
+	}
+}
+
 // noteSearch records the outcome of one search.
 func (d *Driver) noteSearch(started time.Time, err error, det *agent.ResearchDetail) {
+	var bypassed error
+	if det != nil {
+		bypassed = det.SearchErr
+	}
+	err = searchOutcome(det, err)
 	d.mu.Lock()
-	hint := tools.PublicSearchRefused(err) && !d.refusalHinted
+	hint := tools.PublicSearchRefused(cmp.Or(err, bypassed)) && !d.refusalHinted
 	switch {
 	case err != nil:
 		d.searchErr = err
