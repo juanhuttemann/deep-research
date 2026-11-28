@@ -17,6 +17,10 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 - Pi extension: a sub-agent's row in the live view ran past a narrow
   terminal and wrapped, its search continuing mid-word on a line of its
   own. The view's rows are now cut to the terminal's width.
+- Pi extension: a run's card, and the text the agent gets, listed every
+  blocked recommendation and conclusion in the `.json`, including the
+  originals an approved revision had replaced in the report. They now name
+  only what the report names as not established, as drsh picks it.
 
 ## [0.41.0] - 2026-11-28
 

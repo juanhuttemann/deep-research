@@ -73,6 +73,7 @@ interface Rec {
 	statement?: string;
 	blocked?: string;
 	failed?: string[];
+	revises?: string;
 }
 
 function recText(r: Rec): string {
@@ -102,6 +103,24 @@ function decided(j: RunJSON): Unconfirmed[] {
 	return out;
 }
 
+// notEstablished is what the run's answer names as not established, as
+// drsh's notEstablishedUnits picks it. The repair pass revises a blocked unit
+// and an approved revision replaces it in the answer, but the original stays
+// in the .json, blocked: listing every blocked unit showed the card and the
+// agent drafts the report had already replaced. A revision that was blocked
+// too is not named; its original stands for it. Units are numbered by
+// position, r1… then k1…, as drsh numbers them.
+function notEstablished(j: RunJSON): Blocked[] {
+	const units = [
+		...(j.analysis?.recommendations ?? []).map((r, i) => ({ id: `r${i + 1}`, kind: "recommendation" as const, r })),
+		...(j.analysis?.conclusions ?? []).map((r, i) => ({ id: `k${i + 1}`, kind: "conclusion" as const, r })),
+	];
+	const replaced = new Set(units.filter((u) => u.r.revises && !u.r.blocked).map((u) => u.r.revises));
+	return units
+		.filter((u) => u.r.blocked && !u.r.revises && !replaced.has(u.id))
+		.map((u) => ({ kind: u.kind, text: recText(u.r), failed: u.r.failed ?? [] }));
+}
+
 const statusOrder = ["supported", "partial", "disputed", "contradicted", "insufficient", "unsourced"];
 
 export function digest(raw: unknown): Digest {
@@ -119,15 +138,7 @@ export function digest(raw: unknown): Digest {
 			? { id: m.id, label: m.label ?? "", value: [m.result, m.unit].filter(Boolean).join(" "), formula: m.formula }
 			: { id: m.id, label: m.label ?? "", reason: m.reason || "not computed" },
 	);
-	const blocked: Blocked[] = [];
-	for (const [kind, list] of [
-		["recommendation", j.analysis?.recommendations],
-		["conclusion", j.analysis?.conclusions],
-	] as const) {
-		for (const r of list ?? []) {
-			if (r.blocked) blocked.push({ kind, text: recText(r), failed: r.failed ?? [] });
-		}
-	}
+	const blocked = notEstablished(j);
 	const citations = j.citations ?? [];
 	return {
 		question: j.question ?? "",

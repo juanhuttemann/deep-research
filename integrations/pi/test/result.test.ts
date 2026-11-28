@@ -19,6 +19,33 @@ test("the digest lists what the fact-check did not confirm, and what was blocked
 	assert.equal(d.cited, 1);
 });
 
+// The card listed every blocked unit in the .json, where the repair pass
+// keeps the originals its approved revisions replaced: a run whose report
+// named two conclusions as not established showed eight blocked rows.
+test("the digest leaves out blocked units an approved revision replaced, and blocked revisions", () => {
+	const j = load("run.json");
+	j.analysis.recommendations = [
+		{ choose: "Alpha", when: "you want everything", blocked: "it names no claim to rest on" },
+		{ choose: "Beta", when: "you want the fastest", blocked: "it does not follow from its claims" },
+		{ choose: "Alpha", when: "you want search and fetch", claims: ["c1"], revises: "r1" },
+		{ choose: "Beta", when: "you want speed", claims: ["c2"], revises: "r2", blocked: "it does not follow from its claims" },
+	];
+	j.analysis.conclusions = [
+		{ statement: "Alpha is the most adopted.", claims: ["c1"], blocked: "it does not follow from its claims" },
+		{ statement: "Gamma is the lighter option.", claims: ["c3"], blocked: "c3 insufficient", failed: ["c3"] },
+		{ statement: "Alpha is widely used.", claims: ["c1"], revises: "k1" },
+	];
+	const d = digest(j);
+	assert.deepEqual(
+		d.blocked.map((b) => [b.kind, b.text]),
+		[
+			["recommendation", "Beta when you want the fastest"],
+			["conclusion", "Gamma is the lighter option."],
+		],
+	);
+	assert.deepEqual(d.blocked[1].failed, ["c3"]);
+});
+
 // The card and the agent counted the checker's verdicts: a run whose claims
 // drsh made insufficient after the check (a quote not in its page) counted
 // them supported, beside the conclusions those claims had failed.
