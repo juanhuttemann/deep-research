@@ -329,24 +329,27 @@ test("/research-resume continues the last stopped run from its checkpoint", asyn
 				ui: {
 					...f.ctx.ui,
 					theme: { fg: (_c: string, t: string) => t, bold: (t: string) => t },
-					setWidget: () => {},
+					setWidget: (key: string, lines?: string[]) => void (key === "deep-research" && (widget = lines?.join("\n") ?? "")),
 					input: async () => "a question",
 					select: async (title: string, options: string[]) => (title === "Review the plan" ? options[0] : "▶ Start"),
 				},
 			};
+			let widget = "";
 			const stop = f.commands.get("research-stop")!.handler;
 			const resume = f.commands.get("research-resume")!.handler;
 			await resume("", ctx);
 			assert.ok(f.notes.some((n) => /No research run in this session yet/.test(n)), JSON.stringify(f.notes));
-			// Each run hangs until stopped; wait for drsh to have started it.
+			// Each run hangs until stopped. Wait for its phase on the view: the
+			// fake takes SIGINT only from then, and a stop before it (on a
+			// slow runner) killed it with no checkpoint saved.
 			const runs = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]) : []);
 			const started = async (n: number) => {
-				const deadline = Date.now() + 5000;
-				while (runs().filter((a) => !a.includes("--plan-only") && !a.includes("--clarify-only")).length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
-				await new Promise((r) => setTimeout(r, 100));
+				const deadline = Date.now() + 10000;
+				const ran = () => runs().filter((a) => !a.includes("--plan-only") && !a.includes("--clarify-only")).length;
+				while ((ran() < n || !widget.includes("Research")) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
 			};
 			const ended = async (n: number) => {
-				const deadline = Date.now() + 5000;
+				const deadline = Date.now() + 10000;
 				while (sent.length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
 			};
 			try {
@@ -420,7 +423,7 @@ test("/research-resume after a stop while planning asks the same question again"
 				ui: {
 					...f.ctx.ui,
 					theme: { fg: (_c: string, t: string) => t, bold: (t: string) => t },
-					setWidget: () => {},
+					setWidget: (key: string, lines?: string[]) => void (key === "deep-research" && (widget = lines?.join("\n") ?? "")),
 					input: async () => "how fast is it",
 					select: async () => "▶ Start",
 				},
@@ -429,15 +432,16 @@ test("/research-resume after a stop while planning asks the same question again"
 				existsSync(log)
 					? readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]).filter((a) => a.includes("--plan-only"))
 					: [];
+			let widget = "";
 			const until = async (ok: () => boolean) => {
-				const deadline = Date.now() + 5000;
+				const deadline = Date.now() + 10000;
 				while (!ok() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
-				await new Promise((r) => setTimeout(r, 100));
 			};
 			const stop = f.commands.get("research-stop")!.handler;
 			try {
 				await f.commands.get("research")!.handler("--topics 3", ctx);
-				await until(() => plans().length === 1);
+				// Planning's phase on the view: the fake takes SIGINT from then.
+				await until(() => plans().length === 1 && widget.includes("Plan"));
 				// The stop and the resume at once: the resume waits for the stop.
 				await stop("", ctx);
 				await f.commands.get("research-resume")!.handler("", ctx);
