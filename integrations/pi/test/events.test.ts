@@ -21,9 +21,33 @@ test("a run's events fold into what the progress view shows", () => {
 	assert.equal(s.tokens, 1200);
 	assert.deepEqual(s.errors, ["search failed: rate-limited"]);
 	assert.deepEqual(s.domains.map((d) => d.domain), ["go.dev"]);
-	// The status keeps the first line of a transient info: in drsh 0.39 and
-	// earlier the rest is the reasoning, which has its own event.
-	assert.equal(s.status, "asking provider/model");
+	// The report event moved the run on: the last call's line went with it.
+	assert.equal(s.status, "");
+});
+
+test("the status keeps the first line of a transient info, until the phase changes", () => {
+	// In drsh 0.39 and earlier the rest is the reasoning, which has its own event.
+	let s = reduce(initialState(), { type: "phase", phase: "Analyze" });
+	s = reduce(s, { type: "info", transient: true, detail: "analyzing — listing what the sources show\nreasoning" });
+	assert.equal(s.status, "analyzing — listing what the sources show");
+	// The fact-check showed the analysis's last line under its own header.
+	s = reduce(s, { type: "phase", phase: "Fact-Check" });
+	assert.equal(s.status, "");
+});
+
+test("the fact-check's own notes are kept, the last three", () => {
+	let s = initialState();
+	for (const d of ["checking 4 claims in 2 calls at once", "3 of 4 claims supported", "1 of 2 revisions approved", "late"]) {
+		s = reduce(s, { type: "info", phase: "Fact-Check", detail: d });
+	}
+	s = reduce(s, { type: "info", phase: "Research", detail: "follow-up round off" });
+	// The agent's log of the call it makes, sent as an info in the phase.
+	s = reduce(s, { type: "info", phase: "Fact-Check", detail: "fact-check  prov/model · provider's default effort claims c1-c7" });
+	s = reduce(s, { type: "info", phase: "Fact-Check", detail: "analyze     prov/model · high" });
+	assert.deepEqual(s.checked, ["3 of 4 claims supported", "1 of 2 revisions approved", "late"]);
+	// A retry's notes push out the others, not the tally.
+	s = reduce(s, { type: "info", phase: "Fact-Check", detail: "the fact-check returned no verdicts; asking once more" });
+	assert.deepEqual(s.checked, ["3 of 4 claims supported", "late", "the fact-check returned no verdicts; asking once more"]);
 });
 
 // The streaming reasoning was shown as a line of its latest words, replaced

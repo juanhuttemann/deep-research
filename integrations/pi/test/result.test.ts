@@ -11,12 +11,37 @@ test("the digest lists what the fact-check did not confirm, and what was blocked
 	assert.equal(d.confidence, "medium");
 	assert.equal(d.title, "Go vs Rust Web Server Speed");
 	assert.ok(d.factChecked);
-	assert.deepEqual(d.verdicts, { supported: 2, partial: 1, insufficient: 1 });
+	assert.deepEqual(Object.entries(d.verdicts), [["supported", 2], ["partial", 1], ["contradicted", 1], ["insufficient", 1]]);
 	assert.deepEqual(d.unconfirmed.map((u) => [u.id, u.status]), [["c2", "partial"], ["c3", "insufficient"], ["c5", "contradicted"]]);
 	assert.equal(d.unconfirmed[0].claim, "Go uses twice the memory of Rust for the same service.", "a verdict with no claim text takes the claim's");
 	assert.deepEqual(d.blocked.map((b) => b.kind), ["recommendation", "conclusion"]);
 	assert.equal(d.sources, 2);
 	assert.equal(d.cited, 1);
+});
+
+// The card and the agent counted the checker's verdicts: a run whose claims
+// drsh made insufficient after the check (a quote not in its page) counted
+// them supported, beside the conclusions those claims had failed.
+test("the digest counts claims as the run concluded them, not the checker's verdicts", () => {
+	const j = load("run.json");
+	j.analysis.claims[0].status = "insufficient";
+	j.analysis.claims[0].note = "quote_not_located: a quoted passage is not in the page it cites; …";
+	const d = digest(j);
+	assert.equal(j.fact_check.verdicts[0].status, "supported", "the checker supported it");
+	assert.deepEqual(d.verdicts, { supported: 1, partial: 1, insufficient: 2, contradicted: 1 });
+	const c1 = d.unconfirmed.find((u) => u.id === "c1");
+	assert.equal(c1?.status, "insufficient");
+	assert.match(c1?.reason ?? "", /^quote_not_located/);
+	const text = content({ status: "complete", artifacts: [], digest: d, report: "# R" });
+	assert.match(text, /Claims, as the run concluded them after the fact-check: 1 supported, 1 partial, 1 contradicted, 2 insufficient\./);
+});
+
+test("a run whose claims carry no status is counted by its verdicts", () => {
+	const j = load("run.json");
+	for (const c of j.analysis.claims) delete c.status;
+	assert.deepEqual(digest(j).verdicts, { supported: 2, partial: 1, insufficient: 1 });
+	delete j.analysis.claims;
+	assert.deepEqual(digest(j).verdicts, { supported: 2, partial: 1, insufficient: 1 });
 });
 
 test("an instant run is said to be not fact-checked", () => {
@@ -63,11 +88,29 @@ test("the model is told the rules, the unconfirmed claims and where the files ar
 // research_ask": the agent's tool names, which mean nothing to its user.
 test("the offers after a report are in the Pi user's terms", () => {
 	const text = content({ status: "complete", artifacts: [], digest: digest(load("run.json")), report: "# Report" });
-	assert.ok(text.includes(`End with this sentence, as written: "${closingOffer}"`));
-	assert.match(closingOffer, /\/research --mode deep/);
-	assert.match(closingOffer, /includes a fact-check step/);
-	assert.doesNotMatch(closingOffer, /deep_research|research_ask/);
+	const d = digest(load("run.json"));
+	assert.ok(text.includes(`End with this sentence, as written: "${closingOffer(d)}"`));
+	for (const offer of [closingOffer(d), closingOffer({ ...d, instant: true }), closingOffer({ ...d, depth: "deep" })]) {
+		assert.doesNotMatch(offer, /deep_research|research_ask/);
+	}
 	assert.doesNotMatch(text, /offer research_ask/);
+});
+
+// A standard run, fact-checked, closed offering a deep run as the one that
+// "includes a fact-check step".
+test("the closing offer is the run this one was not", () => {
+	const d = digest(load("run.json"));
+	assert.match(closingOffer(d), /\/research --mode deep\`\), which plans more sub-topics and reads more pages/);
+	assert.doesNotMatch(closingOffer(d), /fact-check step/);
+	assert.match(closingOffer({ ...d, instant: true }), /fact-checked answer.*\/research --mode standard/);
+	const deep = closingOffer({ ...d, depth: "deep" });
+	assert.doesNotMatch(deep, /--mode deep/);
+	assert.match(deep, /^I can answer follow-ups/);
+});
+
+test("the model is told to name the run's folder once, not every full path", () => {
+	const text = content({ status: "complete", artifacts: ["/r/a.md"], digest: digest(load("run.json")), report: "# R" });
+	assert.match(text, /folder the run's files are in, once, then the file names/);
 });
 
 test("a stopped run says how to resume, or that it cannot", () => {

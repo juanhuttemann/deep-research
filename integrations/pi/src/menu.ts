@@ -68,10 +68,20 @@ export class Menu extends Container {
 			const text = i === this.selected ? this.theme.fg("accent", `→ ${l}`) : `  ${this.theme.fg("text", l)}`;
 			this.list.addChild(new Text(text, 1, 0));
 		});
+		const about = this.notice ? undefined : this.about();
 		if (this.notice) {
 			this.list.addChild(new Spacer(1));
 			this.list.addChild(new Text(this.theme.fg("warning", this.notice), 1, 0));
+		} else if (about) {
+			this.list.addChild(new Spacer(1));
+			this.list.addChild(new Text(this.theme.fg("muted", about), 1, 0));
 		}
+	}
+
+	// about is a line on the line under the cursor, shown under the list
+	// when there is no warning; none by default.
+	protected about(): string | undefined {
+		return undefined;
 	}
 
 	// warn shows why under the list, until the next move.
@@ -155,6 +165,9 @@ export interface MenuOptions {
 	// it), or undefined when it can. A held row's ←/→ and Enter show that
 	// under the list instead of changing it.
 	held?: (row: number) => string | undefined;
+	// describe says what setting row `row` does, at its current value,
+	// shown under the list while the cursor is on it.
+	describe?: (row: number) => string | undefined;
 	// selected is the line the cursor starts on: 0 is Start, 1 the first row.
 	selected?: number;
 }
@@ -170,6 +183,14 @@ export class SettingsMenu extends Menu {
 			done(line === undefined ? { kind: "cancel" } : line === 0 ? { kind: "start" } : { kind: "edit", row: line - 1 }),
 		);
 		this.opts = opts;
+		// The first draw ran in Menu's constructor, before opts was set.
+		this.draw();
+	}
+
+	// A setting's help was only in the list Enter opens: the screen showed
+	// "words: auto" and "clarify: auto" with nothing on what they do.
+	protected override about(): string | undefined {
+		return this.selected > 0 ? this.opts?.describe?.(this.selected - 1) : undefined;
 	}
 
 	// refused shows why the row under the cursor is held, if it is.

@@ -33,10 +33,13 @@ setup, while Exa, Tavily and Firecrawl use their keys from `drsh setup`.
 
 - **`deep_research` tool.** Ask Pi to research something.
   - While the run goes, the call shows the phase with a spinner and how
-    long it has taken, each sub-agent, and the searches, pages and sources
-    so far.
+    long it has taken, what the model is doing, each sub-agent (follow-ups
+    marked), and the searches, pages and sources so far. Once the search
+    is over, its sub-agents fold into one line, and the fact-check's tally
+    shows when it has one.
   - When it ends, the call shows the confidence, the fact-check's verdicts,
-    the claims it did not confirm, and the report's path.
+    the claims it did not confirm, and the folder the run's files are in;
+    Ctrl+O expands it to every claim and each file's full path.
   - Esc stops a run. It keeps a checkpoint, and resuming from it skips the
     searches already done.
   - When the question leaves something open, the clarifying questions open
@@ -54,9 +57,13 @@ setup, while Exa, Tavily and Firecrawl use their keys from `drsh setup`.
 - **`/research [--topics 3 --follow-ups off --domains a,b …] question`**
   runs a research yourself.
   - With no flags it opens the settings screen first: ←/→ steps the
-    setting under the cursor through its values, Enter lists them all.
-  - You answer the clarifying questions and review the plan, then the run
-    starts and the agent reports what it found. An instant run has no plan
+    setting under the cursor through its values, Enter lists them all, and
+    the line under the list says what the setting does.
+  - You answer the clarifying questions and review the plan: its depth,
+    pages per topic, follow-ups, and the search each sub-topic starts
+    from. An edit past drsh's sub-topic limit is refused there. Then the
+    run starts, ends in a card like the tool's (with the tokens it used),
+    and the agent reports what it found. An instant run has no plan
     review: it searches the question as asked.
   - `/research-stop` ends the run, keeping a checkpoint.
   - `/research-resume` continues the last stopped, failed or incomplete

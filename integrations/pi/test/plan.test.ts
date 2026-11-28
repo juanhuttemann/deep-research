@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planLines, subTopicNames, withSubTopics, type Plan } from "../src/plan.ts";
+import { planLines, subTopicNames, tooMany, withSubTopics, type Plan } from "../src/plan.ts";
 
 const plan: Plan = {
 	question: "What is the meaning of life?",
@@ -12,11 +12,35 @@ const plan: Plan = {
 	],
 };
 
-test("the review shows sub-topics, not the plan's JSON", () => {
-	const lines = planLines(plan);
+// The review showed the names alone: not the depth, the pages each topic
+// reads, the follow-up round, or what each would search for.
+test("the review shows what the plan runs at and each sub-topic's search, not its JSON", () => {
+	const lines = planLines({ ...plan, depth: { key: "standard", label: "Standard" }, max_sources: 9 });
 	assert.equal(lines[0], 'Plan: 2 sub-topics for "What is the meaning of life?"');
-	assert.deepEqual(lines.slice(1), ["  1. Abrahamic traditions", "  2. Buddhism"]);
+	assert.deepEqual(lines.slice(1), [
+		"  standard depth · 4 pages per topic · follow-ups on",
+		"  1. Abrahamic traditions",
+		"     search: meaning of life judaism christianity islam",
+		"  2. Buddhism",
+		"     search: buddhism meaning of life",
+	]);
 	assert.ok(!lines.join("\n").includes("{"), "no JSON on screen");
+});
+
+test("an edit that changes the count says the budget is worked out again; a new topic has no search yet", () => {
+	const edited = withSubTopics({ ...plan, max_sources: 8, no_follow_ups: true }, "Buddhism\nStoicism\nAbsurdism");
+	const lines = planLines(edited, 2);
+	assert.equal(lines[1], "  pages per topic recalculated when the run starts · follow-ups off");
+	assert.ok(lines.includes("     search worded when the run starts"), lines.join("\n"));
+});
+
+// drsh refuses a plan past its topics setting's maximum, and said so only
+// after the review, once the run had started.
+test("a plan past drsh's sub-topic limit is refused in the review", () => {
+	const nine = withSubTopics(plan, Array.from({ length: 9 }, (_, i) => `Topic ${i}`).join("\n"));
+	assert.equal(tooMany(nine, 8), "A plan has at most 8 sub-topics; this one has 9");
+	assert.equal(tooMany(plan, 8), undefined);
+	assert.equal(tooMany(nine, undefined), undefined, "no limit known, none applied");
 });
 
 test("an unchanged line keeps its planned query; a new or changed one is a name alone", () => {

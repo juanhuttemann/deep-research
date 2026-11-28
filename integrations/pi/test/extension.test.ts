@@ -15,12 +15,14 @@ import { fakeDrsh, settings } from "./helpers.ts";
 
 type Tool = { name: string; parameters: { properties: Record<string, unknown> }; execute: (...a: unknown[]) => Promise<any> };
 type Handler = (event: unknown, ctx: unknown) => Promise<void>;
+type Renderer = (message: unknown, options: unknown, theme: unknown) => { render(width: number): string[] } | undefined;
 
 function fakePi() {
 	const tools = new Map<string, Tool>();
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
 	const handlers = new Map<string, Handler>();
 	const notes: string[] = [];
+	const renderers = new Map<string, Renderer>();
 	const entries = [{ type: "custom", customType: "deep-research-model", data: { kind: "drsh" } }];
 	const pi = {
 		registerTool: (t: Tool) => tools.set(t.name, t),
@@ -28,6 +30,7 @@ function fakePi() {
 		on: (name: string, h: Handler) => handlers.set(name, h),
 		appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data: data as { kind: "drsh" } }),
 		sendMessage: (_message: unknown, _options?: unknown) => {},
+		registerMessageRenderer: (type: string, r: Renderer) => renderers.set(type, r),
 	};
 	const ctx = {
 		hasUI: false,
@@ -35,7 +38,7 @@ function fakePi() {
 		sessionManager: { getBranch: () => entries },
 		modelRegistry: {},
 	};
-	return { pi, ctx, tools, commands, handlers, notes };
+	return { pi, ctx, tools, commands, handlers, notes, renderers };
 }
 
 // load imports the extension with DRSH_BIN set, which it reads when loaded.
@@ -488,4 +491,32 @@ test("/research-resume after a stop while planning asks the same question again"
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+// The run's message was drawn as its text: the model's instructions and the
+// whole report, which the agent then said again. It is drawn as the run's
+// card, the text left for the model.
+test("a /research run's message is drawn as its card, not the text the model reads", async () => {
+	const f = await load(fakeDrsh);
+	const render = f.renderers.get("deep-research");
+	assert.ok(render, "no renderer for the run's message");
+	const theme = { fg: (_c: string, t: string) => t, bg: (_c: string, t: string) => t, bold: (t: string) => t };
+	const details = {
+		question: "Which is faster?",
+		stage: "done",
+		outcome: { status: "cancelled", detail: "the plan was declined; web research did not start", artifacts: [] },
+		usage: { tokens: 2300, cost: 0 },
+	};
+	const message = { customType: "deep-research", content: "How to report it:\n- Answer from this report", details };
+	const hint = (_k: string, d: string) => `ctrl+o ${d}`;
+	const shown = render(message, { expanded: false, outputPad: 1, keyHint: hint, keyText: () => "ctrl+o" }, theme)!
+		.render(100)
+		.map((l) => l.trim())
+		.join("\n");
+	assert.match(shown, /deep research Which is faster\?/);
+	assert.match(shown, /web research did not start/);
+	assert.match(shown, /used 2\.3K tokens$/m, "a zero cost is not shown as $0.0000");
+	assert.match(shown, /ctrl\+o to expand/);
+	assert.doesNotMatch(shown, /How to report it/);
+	assert.equal(render({ ...message, details: undefined }, { expanded: false }, theme), undefined, "no details: Pi's own drawing");
 });

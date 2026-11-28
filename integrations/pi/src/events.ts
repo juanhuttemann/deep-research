@@ -52,6 +52,9 @@ export interface SubAgent {
 	state: string;
 	progress: number;
 	line: string;
+	// errors counts the errors drsh sent for this sub-agent: a failed search
+	// is an error event naming it, and the sub-agent still ends "done".
+	errors?: number;
 }
 
 // RunState is what the live view shows. It is a tool result's details, so it
@@ -65,7 +68,14 @@ export interface RunState {
 	sources: number;
 	tokens: number;
 	// status is the latest transient line: which model is asked, a retry.
+	// A phase change clears it: the line belongs to the call that sent it,
+	// and the fact-check showed the analysis's last line under its own
+	// header for minutes.
 	status: string;
+	// checked is what the fact-check has said of its own progress, in
+	// drsh's words: how it split the check, the tally once its verdicts are
+	// applied ("11 of 12 claims supported…"), the revisions it approved.
+	checked: string[];
 	errors: string[];
 	domains: DomainCheck[];
 }
@@ -80,6 +90,7 @@ export function initialState(): RunState {
 		sources: 0,
 		tokens: 0,
 		status: "",
+		checked: [],
 		errors: [],
 		domains: [],
 	};
@@ -88,6 +99,30 @@ export function initialState(): RunState {
 // maxErrors bounds the non-fatal errors kept for the view; the full list is
 // in the run's timeline.
 const maxErrors = 5;
+
+// agentLog is a line of the agent's own log, which drsh sends as an info
+// stamped with the phase it is in: the call it makes, in a column
+// ("fact-check  provider/model · effort"), or indented. Kept as the
+// fact-check's notes, the model's name pushed out the tally.
+const agentLog = /^(\s|\S+ {2,})/;
+
+// maxChecked bounds the fact-check's notes.
+const maxChecked = 3;
+
+// tally is the fact-check's count of what it supported: of its notes the one
+// to keep. A retry's notes (no verdicts, asking again) pushed it out.
+const tally = /^\d+ of \d+ claims supported/;
+
+// note adds a fact-check note, dropping the oldest past maxChecked, the
+// tally last.
+function note(notes: string[], n: string): string[] {
+	const out = [...notes, n];
+	while (out.length > maxChecked) {
+		const i = out.findIndex((x) => !tally.test(x));
+		out.splice(i < 0 ? 0 : i, 1);
+	}
+	return out;
+}
 
 export function parseLine(line: string): DrshEvent | undefined {
 	const s = line.trim();
@@ -123,6 +158,7 @@ export function reduce(s: RunState, e: DrshEvent): RunState {
 		case "phase":
 			s.phase = e.phase ?? s.phase;
 			s.phaseDetail = e.detail ?? "";
+			s.status = "";
 			break;
 		case "subagent":
 			subagent(s, e);
@@ -137,6 +173,7 @@ export function reduce(s: RunState, e: DrshEvent): RunState {
 		case "report":
 			s.phase = e.phase || "Report";
 			s.phaseDetail = e.detail ?? "";
+			s.status = "";
 			if (e.sources) s.sources = e.sources;
 			break;
 		case "citation":
@@ -146,10 +183,14 @@ export function reduce(s: RunState, e: DrshEvent): RunState {
 			break;
 		case "info":
 			if (e.transient && e.detail) s.status = e.detail.split("\n")[0];
+			else if (e.phase === "Fact-Check" && e.detail && !agentLog.test(e.detail)) s.checked = note(s.checked, e.detail.split("\n")[0]);
 			break;
-		case "error":
+		case "error": {
 			if (e.detail) s.errors = [...s.errors, e.detail].slice(-maxErrors);
+			const a = e.sub_id ? s.subagents.find((x) => x.id === e.sub_id) : undefined;
+			if (a) a.errors = (a.errors ?? 0) + 1;
 			break;
+		}
 		case "source":
 			if (e.check) s.domains.push(e.check);
 			break;

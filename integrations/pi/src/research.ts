@@ -73,8 +73,11 @@ async function stage(c: Call, details: ResearchDetails, args: string[]): Promise
 
 function stopped(details: ResearchDetails, why: string): Result {
 	details.stage = "done";
-	details.outcome = { status: "cancelled", detail: why, artifacts: [] };
-	return { text: `deep-research run cancelled: ${why}. Nothing more was spent.`, details, isError: false };
+	details.outcome = { status: "cancelled", detail: `${why}; web research did not start`, artifacts: [] };
+	// Every stop here is before the run: the clarifier or the planner was
+	// paid for, the searches were not. "Nothing more was spent" read as
+	// nothing spent at all, beside the tokens the planning had used.
+	return { text: `deep-research run cancelled: ${why}. Web research did not start.`, details, isError: false };
 }
 
 // failedStage is a stage that ended without the output it exists for.
@@ -164,7 +167,7 @@ async function planned(c: Call, run: NewRun, review: boolean, details: ResearchD
 	waiting(c, details);
 	const plan = await c.hooks.review(r.plan);
 	if (plan === "stop") {
-		return stopped(details, "the plan was not confirmed");
+		return stopped(details, "the plan was declined");
 	}
 	run.plan = plan;
 	return withPlan(c, run, plan);

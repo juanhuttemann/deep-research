@@ -10,13 +10,13 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Box, Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { checkAnswers, clip, maxAnswerChars, maxAnswers, type Answer } from "./args.ts";
 import { startBridge, type Bridge } from "./bridge.ts";
 import type { Question } from "./events.ts";
-import { planLines, subTopicNames, withSubTopics, type Plan } from "./plan.ts";
-import { count, outcomeLines, progressLines, type ResearchDetails, tickMs } from "./render.ts";
+import { planLines, subTopicNames, tooMany, withSubTopics, type Plan } from "./plan.ts";
+import { outcomeLines, progressLines, type ResearchDetails, statusLabel, tickMs } from "./render.ts";
 import { research, type Hooks, type Request, type Result, type RunRecord } from "./research.ts";
 import { runPlain } from "./runner.ts";
 import {
@@ -114,6 +114,20 @@ function untilAborted<T>(p: Promise<T>, signal?: AbortSignal): Promise<T | undef
 			},
 		);
 	});
+}
+
+// showLines puts lines in a widget above the editor. Pi cuts a widget given
+// as lines at ten, and a run's view (the sub-agents of a deep plan and its
+// follow-ups, the counts, the fact-check's notes) runs past that, losing
+// its last lines; the plan of a review the same. In the terminal they go in
+// as a component, which is not cut; elsewhere as lines.
+function showLines(ctx: ExtensionContext, key: string, lines: string[] | undefined): void {
+	if (lines === undefined || ctx.mode !== "tui") {
+		ctx.ui.setWidget(key, lines);
+		return;
+	}
+	const text = lines.join("\n");
+	ctx.ui.setWidget(key, () => new Text(text, 1, 0));
 }
 
 export default function deepResearch(pi: ExtensionAPI) {
@@ -236,11 +250,13 @@ export default function deepResearch(pi: ExtensionAPI) {
 		const edit = "Edit sub-topics";
 		const stop = "Cancel";
 		let plan = (raw ?? {}) as Plan;
+		const planned = subTopicNames(plan).length;
+		const max = settings.find((x) => x.key === "topics")?.max;
 		// notice is why the last edit was not taken, shown under the options.
 		let notice: string | undefined;
 		try {
 			for (;;) {
-				ctx.ui.setWidget("deep-research-plan", planLines(plan));
+				showLines(ctx, "deep-research-plan", planLines(plan, planned));
 				const pick = await pickWithNotice(ctx, "Review the plan", [run, edit, stop], { notice, signal });
 				notice = undefined;
 				if (pick === undefined || pick === stop) return "stop";
@@ -255,10 +271,12 @@ export default function deepResearch(pi: ExtensionAPI) {
 					notice = "A plan needs at least one sub-topic";
 					continue;
 				}
+				notice = tooMany(edited, max);
+				if (notice) continue;
 				plan = edited;
 			}
 		} finally {
-			ctx.ui.setWidget("deep-research-plan", undefined);
+			showLines(ctx, "deep-research-plan", undefined);
 		}
 	}
 
@@ -470,6 +488,21 @@ export default function deepResearch(pi: ExtensionAPI) {
 		}
 	}
 
+	// A /research run's message is drawn as its card: what it found,
+	// collapsed to the confidence, the claims the fact-check did not confirm
+	// and where the files are. Drawn as its text, it was the model's
+	// instructions and the whole report, which the agent's answer then said
+	// again. The text still goes to the model as it was.
+	pi.registerMessageRenderer<ResearchDetails>("deep-research", (message, { expanded, keyHint }, theme) => {
+		const d = message.details;
+		if (!d?.outcome) return undefined;
+		const lines = [theme.fg("toolTitle", theme.bold("deep research ")) + theme.fg("accent", d.question), ...outcomeLines(d, expanded, theme)];
+		lines.push(keyHint("app.tools.expand", expanded ? "to collapse" : "to expand"));
+		const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+		box.addChild(new Text(lines.join("\n"), 0, 0));
+		return box;
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		session++;
 		restoreBranch(ctx);
@@ -512,6 +545,13 @@ export default function deepResearch(pi: ExtensionAPI) {
 			const depth = by ? `${valueLabel(by, values[by.key] ?? by.value)} ${name}` : "the depth";
 			return `${depth} holds every option at its least: pick another ${name} to change ${x.label}`;
 		};
+		// describe is the row's help and the note on its value ("≤3").
+		const describe = (row: number) => {
+			const x = s[row];
+			const v = effective(s, values)[x.key];
+			const note = x.choices.find((o) => o.value === v)?.note;
+			return note ? `${x.help} (${valueLabel(x, v)}: ${note})` : x.help;
+		};
 		// The menu checks heldWhy before stepping; this is the select's guard.
 		const stepRow = (row: number, dir: 1 | -1) => {
 			const x = s[row];
@@ -529,7 +569,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 		const viaMenu = () =>
 			ctx.ui.custom<MenuResult | undefined>((_tui, theme, kb, done) => {
 				const held = (row: number) => heldWhy(s[row]);
-				const menu = new SettingsMenu(theme, kb, { title, rows, step: stepRow, held, selected }, (r) => {
+				const menu = new SettingsMenu(theme, kb, { title, rows, step: stepRow, held, describe, selected }, (r) => {
 					selected = menu.selectedLine;
 					done(r);
 				});
@@ -554,13 +594,13 @@ export default function deepResearch(pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("research", {
-		description: "Research a question: settings, clarifying questions and plan review, then a live run",
+		description: "Research a question, with settings and plan review",
 		getArgumentCompletions: (prefix) => (settings.length ? completions(settings, prefix) : null),
 		handler: (args, ctx) => commandRunWith(ctx, (abort) => researchCommand(args, ctx, abort)),
 	});
 
 	pi.registerCommand("research-resume", {
-		description: "Resume the last stopped, failed or incomplete research run from its checkpoint (or the checkpoint path given); one stopped before its plan starts again",
+		description: "Resume the last stopped research run, or the checkpoint given",
 		handler: (args, ctx) =>
 			commandRunWith(ctx, async (abort) => {
 				const checkpoint = args.trim() || lastRun?.checkpoint;
@@ -660,9 +700,8 @@ export default function deepResearch(pi: ExtensionAPI) {
 	async function backgroundRun(ctx: ExtensionContext, abort: AbortController, req: Request): Promise<void> {
 		const status = ticker(() => {
 			if (!latest) return;
-			const lines = progressLines(latest, ctx.ui.theme);
-			ctx.ui.setWidget("deep-research", lines);
-			ctx.ui.setStatus("deep-research", `research: ${latest.state?.phase || latest.stage}`);
+			showLines(ctx, "deep-research", progressLines(latest, ctx.ui.theme));
+			ctx.ui.setStatus("deep-research", `research: ${statusLabel(latest)}`);
 		}, tickMs, () => latest?.started !== undefined);
 		let latest: ResearchDetails | undefined;
 		try {
@@ -674,24 +713,26 @@ export default function deepResearch(pi: ExtensionAPI) {
 				ask: (qs) => askQuestions(ctx, qs, abort.signal),
 				review: (plan) => reviewPlan(ctx, plan, abort.signal),
 			});
+			// The usage goes on the run's card: a notice of it passed in a
+			// moment, apart from the run it was for.
+			if (bridge?.usage.totalTokens) {
+				result.details.usage = { tokens: bridge.usage.totalTokens, cost: bridge.usage.cost.total };
+			}
 			pi.sendMessage(
 				{ customType: "deep-research", content: result.text, display: true, details: result.details },
 				{ triggerTurn: result.details.outcome !== undefined && result.details.outcome.status !== "cancelled" },
 			);
-			if (bridge?.usage.totalTokens) {
-				ctx.ui.notify(`research used ${count(bridge.usage.totalTokens)} tokens ($${bridge.usage.cost.total.toFixed(4)}) on ${bridge.modelName}`, "info");
-			}
 		} catch (err) {
 			ctx.ui.notify(`research failed: ${(err as Error).message}`, "error");
 		} finally {
 			status.cancel();
-			ctx.ui.setWidget("deep-research", undefined);
+			showLines(ctx, "deep-research", undefined);
 			ctx.ui.setStatus("deep-research", undefined);
 		}
 	}
 
 	pi.registerCommand("research-stop", {
-		description: "Stop the research run /research started; it keeps a checkpoint /research-resume continues from",
+		description: "Stop the /research run, keeping a checkpoint to resume from",
 		handler: async (_args, ctx) => {
 			if (!commandRun) {
 				ctx.ui.notify("No /research run is going (a run the agent started stops with Esc)", "info");
@@ -702,7 +743,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("research-model", {
-		description: "Choose the model research runs use: Pi's current model, another of Pi's models, or drsh's own",
+		description: "Choose the model research runs use",
 		handler: async (_args, ctx) => {
 			const current = "Pi's current model (follows /model)";
 			const own = "drsh's own configured model (drsh setup)";
@@ -721,7 +762,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("research-doctor", {
-		description: "Check what a research run depends on: the model (through Pi), search and the scraper",
+		description: "Check the model, search and scraper a run needs",
 		handler: async (_args, ctx) => {
 			let model: Model<Api> | undefined;
 			try {

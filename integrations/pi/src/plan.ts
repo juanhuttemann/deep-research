@@ -6,11 +6,15 @@
 
 export interface SubTopic {
 	name: string;
+	query?: string;
 	[k: string]: unknown;
 }
 
 export interface Plan {
 	question?: string;
+	depth?: { key?: string; label?: string };
+	max_sources?: number;
+	no_follow_ups?: boolean;
 	sub_topics?: SubTopic[];
 	[k: string]: unknown;
 }
@@ -37,11 +41,36 @@ export function withSubTopics(plan: Plan, text: string): Plan {
 	return { ...plan, sub_topics: names.map((n) => old.get(n) ?? { name: n }) };
 }
 
-// planLines is the plan as the review shows it.
-export function planLines(plan: Plan): string[] {
+// tooMany is why an edited plan cannot run, or undefined when it can: drsh
+// refuses a plan of more sub-topics than its topics setting goes to
+// (ReadPlan), and said so only once the run had started. max is that
+// setting's own maximum, from drsh settings, not a copy of the number.
+export function tooMany(plan: Plan, max: number | undefined): string | undefined {
+	const n = subTopicNames(plan).length;
+	return max && n > max ? `A plan has at most ${max} sub-topics; this one has ${n}` : undefined;
+}
+
+// planLines is the plan as the review shows it: what it runs at (the depth,
+// the pages each sub-topic reads, the follow-up round), then each sub-topic
+// with the search it starts from. Names alone left what the plan would do
+// unsaid. planned is the count the planner gave: an edit that changes it
+// changes the budget, which drsh derives again when the run starts.
+export function planLines(plan: Plan, planned?: number): string[] {
 	const names = subTopicNames(plan);
-	return [
-		`Plan: ${names.length} sub-topic${names.length === 1 ? "" : "s"}${plan.question ? ` for "${plan.question}"` : ""}`,
-		...names.map((n, i) => `  ${i + 1}. ${n}`),
-	];
+	const n = names.length;
+	const budget: string[] = [];
+	if (plan.depth?.label) budget.push(`${plan.depth.label.toLowerCase()} depth`);
+	if (planned !== undefined && planned !== n) {
+		budget.push("pages per topic recalculated when the run starts");
+	} else if (plan.max_sources && n) {
+		const per = Math.max(Math.floor(plan.max_sources / n), 1);
+		budget.push(`${per} page${per === 1 ? "" : "s"} per topic`);
+	}
+	budget.push(`follow-ups ${plan.no_follow_ups ? "off" : "on"}`);
+	const lines = [`Plan: ${n} sub-topic${n === 1 ? "" : "s"}${plan.question ? ` for "${plan.question}"` : ""}`, `  ${budget.join(" · ")}`];
+	(plan.sub_topics ?? []).forEach((t, i) => {
+		lines.push(`  ${i + 1}. ${t.name}`);
+		lines.push(`     ${t.query ? `search: ${t.query}` : "search worded when the run starts"}`);
+	});
+	return lines;
 }

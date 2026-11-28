@@ -13,7 +13,12 @@ const down = "\x1b[B";
 const right = "\x1b[C";
 const left = "\x1b[D";
 
-function menu(selected = 0, kb: KeybindingsManager = getKeybindings(), held?: (row: number) => string | undefined) {
+function menu(
+	selected = 0,
+	kb: KeybindingsManager = getKeybindings(),
+	held?: (row: number) => string | undefined,
+	describe?: (row: number) => string | undefined,
+) {
 	const choices = ["quick", "standard", "deep"];
 	let depth = 1;
 	const steps: Array<[number, number]> = [];
@@ -29,6 +34,7 @@ function menu(selected = 0, kb: KeybindingsManager = getKeybindings(), held?: (r
 				if (row === 0) depth = (depth + dir + choices.length) % choices.length;
 			},
 			held,
+			describe,
 			selected,
 		},
 		(r) => results.push(r),
@@ -140,4 +146,22 @@ test("pick outside the terminal is the plain select, the warning a notice", asyn
 	} as unknown as ExtensionContext;
 	assert.equal(await pick(ctx, "t", ["a", "b", "c"], { notice: "why" }), "c");
 	assert.deepEqual(notes, ["why"]);
+});
+
+// The screen showed "words: auto" with nothing on what it does; the help was
+// only in the list Enter opens.
+test("the setting under the cursor is described under the list; a warning takes its place", () => {
+	const t = menu(0, getKeybindings(), (row) => (row === 1 ? "held by the depth" : undefined), (row) => `about row ${row}`);
+	assert.ok(!t.shown().some((l) => l.includes("about row")), "nothing on Start");
+	t.m.handleInput(down);
+	assert.ok(t.shown().includes(" about row 0"), t.shown().join("\n"));
+	t.m.handleInput(down);
+	t.m.handleInput(right);
+	assert.ok(t.shown().includes(" held by the depth"), t.shown().join("\n"));
+	assert.ok(!t.shown().some((l) => l.includes("about row")), "the warning replaces the description");
+});
+
+test("a row starting under the cursor is described from the first draw", () => {
+	const t = menu(1, getKeybindings(), undefined, (row) => `about row ${row}`);
+	assert.ok(t.shown().includes(" about row 0"), t.shown().join("\n"));
 });

@@ -5,6 +5,24 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Pi extension: a `/research` run's result is drawn as a card (status,
+  confidence, the claims the fact-check did not confirm, the tokens used,
+  the run's folder) instead of the text sent to the model, which showed the
+  model's instructions and the whole report before the agent said it again.
+  Ctrl+O expands the card.
+- Pi extension: the settings screen says what the setting under the cursor
+  does; the plan review shows the depth, pages per topic, follow-ups and
+  each sub-topic's search, and refuses an edit past drsh's sub-topic limit
+  before the run instead of after it.
+- Pi extension: the live view shows what the model is doing under the
+  phase, marks follow-up sub-topics, folds finished sub-agents into one line
+  once the search is over, shows the fact-check's tally, and counts
+  searches only once the run starts. Pi's footer names the stage in one
+  case (`research: Fact-checking`), and the agent names the run's folder
+  once instead of every full path.
+
 ### Fixed
 
 - A verbatim quote of a sentence with a link in it was not located in its
@@ -16,6 +34,20 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   full of links, could end at low confidence with nothing approved. Only
   that whitespace is dropped; a quote with any other difference is still
   not located.
+- Pi extension: the run's card and the agent counted the fact-check's raw
+  verdicts, so a run whose claims were made insufficient after the check
+  counted them supported beside the conclusions those claims had failed. They
+  now count each claim as the run concluded it, under `claims:`.
+- Pi extension: during the fact-check the live view still showed the
+  analysis's last line with a second clock; a phase change now clears it,
+  and the repair pass's call reads as revising.
+- Pi extension: after a standard run the agent offered a deep run as the
+  one that "includes a fact-check step", though the run had been checked. It
+  now offers a broader run, a checked one after an instant run, and none
+  after a deep one.
+- Pi extension: a run stopped at its plan said "Nothing more was spent"
+  beside the tokens the planning used; it now says web research did not
+  start. A zero cost is no longer shown as `$0.0000`.
 - With web search off, a page the model named on a site that refuses
   automated readers (a publisher behind a bot check, a `403`) was cited
   unread as `~ unverified`, the fact-check could only call every claim on

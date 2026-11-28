@@ -80,24 +80,40 @@ function recText(r: Rec): string {
 	return [r.choose, r.when && `when ${r.when}`].filter(Boolean).join(" ");
 }
 
+// decided is each claim as the run concluded it: the claim's own status,
+// which drsh sets after the fact-check, its governance included (a quote the
+// checker gave that is not in the page makes a supported verdict
+// insufficient; a computed claim is decided by the program). The verdicts
+// are the checker's answers before that: counted, they called claims drsh
+// had made insufficient supported, beside the conclusions they had failed. A claim with no status (an older run) takes its verdict's.
+function decided(j: RunJSON): Unconfirmed[] {
+	const verdicts = j.fact_check?.verdicts ?? [];
+	const byId = new Map(verdicts.map((v) => [v.id, v]));
+	const claims = j.analysis?.claims ?? [];
+	if (!claims.length) {
+		return verdicts.map((v) => ({ id: v.id, claim: v.claim ?? "", status: v.status, reason: v.reason }));
+	}
+	const out: Unconfirmed[] = [];
+	for (const c of claims) {
+		const v = byId.get(c.id);
+		const status = c.status || v?.status;
+		if (status) out.push({ id: c.id, claim: c.claim || v?.claim || "", status, reason: c.note || v?.reason });
+	}
+	return out;
+}
+
+const statusOrder = ["supported", "partial", "disputed", "contradicted", "insufficient", "unsourced"];
+
 export function digest(raw: unknown): Digest {
 	const j = (raw ?? {}) as RunJSON;
-	const verdicts = j.fact_check?.verdicts ?? [];
+	const all = decided(j);
+	// In one order, supported first, so the count reads the same each run.
 	const counts: Record<string, number> = {};
-	for (const v of verdicts) {
-		counts[v.status] = (counts[v.status] ?? 0) + 1;
+	const rank = (s: string) => (statusOrder.indexOf(s) + statusOrder.length + 1) % (statusOrder.length + 1);
+	for (const c of [...all].sort((a, b) => rank(a.status) - rank(b.status))) {
+		counts[c.status] = (counts[c.status] ?? 0) + 1;
 	}
-	const claims = new Map((j.analysis?.claims ?? []).map((c) => [c.id, c.claim]));
-	const unconfirmed = verdicts
-		.filter((v) => v.status !== "supported")
-		.map((v) => ({ id: v.id, claim: v.claim || claims.get(v.id) || "", status: v.status, reason: v.reason }));
-	// A computed claim has no verdict: the program decided it against its
-	// computation, and its status and note say how.
-	for (const c of j.analysis?.claims ?? []) {
-		if (c.computed && c.status && c.status !== "supported") {
-			unconfirmed.push({ id: c.id, claim: c.claim, status: c.status, reason: c.note });
-		}
-	}
+	const unconfirmed = all.filter((c) => c.status !== "supported");
 	const figures = (j.analysis?.computations ?? []).map((m) =>
 		m.valid
 			? { id: m.id, label: m.label ?? "", value: [m.result, m.unit].filter(Boolean).join(" "), formula: m.formula }
@@ -146,27 +162,43 @@ export interface Outcome {
 // maxReport bounds the report sent to the model; the whole of it is on disk.
 export const maxReport = 60_000;
 
-// closingOffer is what the agent offers after a report, in the Pi user's
-// terms: the command for a deeper run, whose fact-check is a step it may
-// not finish, and follow-ups from the saved files, which are not checked.
-export const closingOffer =
-	"For more depth, I can run a deeper research (`/research --mode deep`), which includes a fact-check step; I can also answer follow-ups from this run's saved files, though those answers aren't fact-checked.";
+const followUps = "I can also answer follow-ups from this run's saved files, though those answers aren't fact-checked.";
 
-const rules = [
-	"Answer from this report and keep its citations.",
-	"Say the confidence it gives.",
-	"Say which claims the fact-check did not confirm, and do not present an unconfirmed claim or a blocked recommendation or conclusion as fact.",
-	"State a figure only as the report or a COMPUTED line gives it; do no arithmetic of your own.",
-	// Said to a Pi user, "a new deep_research" and "via research_ask" name
-	// the agent's tools, which the user cannot call: a new run is the
-	// /research command, and a follow-up is answered from the run's files,
-	// which the agent can read. Told what not to say, the model still
-	// offered "a fact-checked version", a check a run can end without;
-	// given the sentence, it uses it.
-	"Do not add facts the run did not establish.",
-	"Give the user the artifact paths.",
-	`End with this sentence, as written: "${closingOffer}"`,
-];
+// closingOffer is what the agent offers after a report, in the Pi user's
+// terms: the command for another run, and follow-ups from the saved files,
+// which are not checked. The other run is what this one was not: a checked
+// one after an instant lookup, a broader one after a quick or standard run.
+// It once offered a deep run as the one that "includes a fact-check step",
+// after a standard run that had been fact-checked.
+export function closingOffer(d?: Digest): string {
+	if (d?.instant) {
+		return `For a fact-checked answer, I can run a standard research (\`/research --mode standard\`); ${followUps}`;
+	}
+	if (d?.depth === "deep") {
+		return `${followUps.replace(/^I can also/, "I can")} A new question is a new run (\`/research\`).`;
+	}
+	return `For a broader look, I can run a deep research (\`/research --mode deep\`), which plans more sub-topics and reads more pages; ${followUps}`;
+}
+
+function rules(d?: Digest): string[] {
+	return [
+		"Answer from this report and keep its citations.",
+		"Say the confidence it gives.",
+		"Say which claims the fact-check did not confirm, and do not present an unconfirmed claim or a blocked recommendation or conclusion as fact.",
+		"State a figure only as the report or a COMPUTED line gives it; do no arithmetic of your own.",
+		// Said to a Pi user, "a new deep_research" and "via research_ask"
+		// name the agent's tools, which the user cannot call: a new run is
+		// the /research command, and a follow-up is answered from the run's
+		// files, which the agent can read. Told what not to say, the model
+		// still offered "a fact-checked version", a check a run can end
+		// without; given the sentence, it uses it.
+		"Do not add facts the run did not establish.",
+		// The paths share a long directory and name: listed in full, the
+		// three of them took three wrapped lines of the answer.
+		"Give the user the folder the run's files are in, once, then the file names (the .md report first), not each full path.",
+		`End with this sentence, as written: "${closingOffer(d)}"`,
+	];
+}
 
 function digestLines(d: Digest): string[] {
 	if (d.instant) {
@@ -175,7 +207,7 @@ function digestLines(d: Digest): string[] {
 	const out = [`Confidence: ${d.confidence || "not stated"}.`];
 	if (d.factChecked) {
 		const counts = Object.entries(d.verdicts).map(([k, n]) => `${n} ${k}`);
-		out.push(`Fact-check: ${counts.length ? counts.join(", ") : "no claims were checked"}.`);
+		out.push(`Claims, as the run concluded them after the fact-check: ${counts.length ? counts.join(", ") : "none were checked"}.`);
 	} else {
 		// A standard or deep run whose analysis or fact-check failed: it is
 		// not an instant lookup, and what it did find is still worth saying.
@@ -245,7 +277,7 @@ export function content(o: Outcome): string {
 		lines.push(`Artifacts: ${o.artifacts.join(", ")}`);
 	}
 	if (o.report) {
-		lines.push("", "How to report it:", ...rules.map((r) => `- ${r}`));
+		lines.push("", "How to report it:", ...rules(o.digest).map((r) => `- ${r}`));
 	}
 	lines.push(...reportText(o));
 	return lines.join("\n");
