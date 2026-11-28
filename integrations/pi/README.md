@@ -6,7 +6,7 @@ runs [deep-research](https://github.com/juanhuttemann/deep-research)
 evidence, and checks every claim against the text of the pages it fetched.
 Pi's own model answers the model calls, through Pi's sign-in.
 
-![A deep_research run in Pi: sub-agents searching, with the pages and sources so far](https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research.png)
+![A research run in Pi: the planned sub-topics searched, two follow-up searches running, and the searches, pages and sources so far](https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research.png)
 
 ## Install
 
@@ -29,56 +29,73 @@ drsh's search and scraper settings still apply. SearXNG works with no
 setup, while Exa, Tavily and Firecrawl use their keys from `drsh setup`.
 `/research-doctor` checks them.
 
-## What it adds
+## Ask Pi
 
-- **`deep_research` tool.** Ask Pi to research something.
-  - While the run goes, the call shows the phase with a spinner and how
-    long it has taken, what the model is doing, each sub-agent (follow-ups
-    marked), and the searches, pages and sources so far. Once the search
-    is over, its sub-agents fold into one line, and the fact-check's tally
-    shows when it has one.
-  - When it ends, the call shows the confidence, the fact-check's verdicts,
-    the claims it did not confirm, and the folder the run's files are in;
-    Ctrl+O expands it to every claim and each file's full path.
-  - Esc stops a run. It keeps a checkpoint, and resuming from it skips the
-    searches already done.
-  - When the question leaves something open, the clarifying questions open
-    as Pi dialogs. In print or JSON mode they go back to the model, which
-    asks you.
-  - Every run setting drsh has is a tool parameter: depth (instant, quick,
-    standard, deep), sub-topics, pages per topic, follow-ups, format,
-    words, tables and clarify. `domains`, `trace` and `review_plan`
-    (review and edit the plan before any search) are parameters too. The
-    settings come from `drsh settings`, so a new setting in drsh appears
-    here with no update.
-- **`research_ask` tool.** Answers a follow-up question from the pages a
-  run already fetched, without searching again. The answer is not
-  fact-checked.
-- **`/research [--topics 3 --follow-ups off --domains a,b …] question`**
-  runs a research yourself.
-  - With no flags it opens the settings screen first: ←/→ steps the
-    setting under the cursor through its values, Enter lists them all, and
-    the line under the list says what the setting does.
-  - You answer the clarifying questions and review the plan: its depth,
-    pages per topic, follow-ups, and the search each sub-topic starts
-    from. An edit past drsh's sub-topic limit is refused there. Then the
-    run starts, ends in a card like the tool's (with the tokens it used),
-    and the agent reports what it found. An instant run has no plan
-    review: it searches the question as asked.
-  - `/research-stop` ends the run, keeping a checkpoint.
-  - `/research-resume` continues the last stopped, failed or incomplete
-    run from its checkpoint without repeating finished searches;
-    `/research-resume <checkpoint>` continues another. A run stopped
-    before drsh's first checkpoint has nothing searched: it starts again
-    with the same question, settings and answers, and with the plan you
-    approved, edits included, when you had approved one.
-- **`/research-model`** picks the model research runs use:
-  - Pi's current model, the default.
-  - Another of Pi's models, for example a cheaper one for the many calls a
-    run makes.
-  - drsh's own configured model.
-- **`/research-doctor`** checks the model (through Pi), search and the
-  scraper.
+Ask Pi to research something, and it calls the `deep_research` tool. A run
+takes minutes and makes many model calls, so Pi uses it for questions that
+need sources, not quick lookups.
+
+- **While it runs**, the call shows the phase with a spinner and its clock,
+  what the model is doing, each sub-agent and its search (follow-ups
+  marked), and the searches, pages and sources so far. Once the search is
+  over, the sub-agents fold into one line, and the fact-check shows its
+  tally when it has one.
+- **When it ends**, the call shows the result: the confidence, the claims
+  as the run concluded them, the ones the fact-check did not confirm, and
+  the folder the run's files are in. Ctrl+O expands it to every claim and
+  each file's full path. Pi then answers from the report, keeping its
+  citations.
+
+  ![The result of a run: complete, confidence high, 7 claims supported and 1 partial, with the partial claim named and the run's files](https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research-result.png)
+
+- **Esc stops a run.** It keeps a checkpoint, and resuming from it skips
+  the searches already done.
+- **Clarifying questions**, when the question leaves something open, open
+  as Pi dialogs. In print or JSON mode they go back to the model, which
+  asks you.
+
+Every run setting drsh has is a tool parameter: depth (instant, quick,
+standard, deep), sub-topics, pages per topic, follow-ups, format, words,
+tables and clarify. `domains`, `trace` and `review_plan` (review and edit
+the plan before any search) are parameters too. The settings come from
+`drsh settings`, so a new setting in drsh appears here with no update.
+
+For a follow-up, Pi uses the `research_ask` tool: it answers from the pages
+a run already fetched, without searching again. Its answers are not
+fact-checked.
+
+## Run it yourself
+
+`/research question` runs a research from the prompt.
+
+1. **Settings.** With no flags, the settings screen opens first. ←/→ steps
+   the setting under the cursor through its values, Enter lists them all,
+   and the line under the list says what the setting does. Flags skip it:
+   `/research --mode quick --follow-ups off --domains a.com,b.org question`.
+
+   ![The settings screen: Start, then depth, sub-topics, pages per topic, follow-ups, format, words, tables and clarify, with the help for depth under the list](https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research-settings.png)
+
+2. **Questions.** You answer the clarifying questions, if any.
+3. **Plan.** You review the plan: its depth, pages per topic, follow-ups,
+   and the search each sub-topic starts from. Run it, edit the sub-topics
+   (one per line), or cancel. An edit past drsh's sub-topic limit is
+   refused here. An instant run has no plan review: it searches the
+   question as asked.
+
+   ![The plan review: three sub-topics, each with its search, the depth and pages per topic above them, and Run this plan, Edit sub-topics and Cancel below](https://raw.githubusercontent.com/juanhuttemann/deep-research/main/docs/images/pi-research-plan.png)
+
+4. **Run.** The run shows above the prompt as the tool's does, and ends in
+   the same result, with the tokens it used. Pi then reports what it found.
+
+| Command | What it does |
+| --- | --- |
+| `/research [flags] question` | Runs a research, as above. |
+| `/research-stop` | Ends the `/research` run, keeping a checkpoint. |
+| `/research-resume [checkpoint]` | Continues the last stopped, failed or incomplete run, or the checkpoint given, without repeating finished searches. A run stopped before drsh's first checkpoint starts again with the same question, settings and answers, and the plan you approved, edits included. |
+| `/research-model` | Picks the model runs use: Pi's current model (the default), another of Pi's models (a cheaper one, say, for the many calls a run makes), or drsh's own configured model. Type to filter the list. |
+| `/research-doctor` | Checks the model (through Pi), search and the scraper. |
+
+## Files
 
 Each run's files (`.md`, `.pdf`, `.json`, checkpoint) go in
 `~/.cache/deep-research-pi/runs/` (`$DEEP_RESEARCH_PI_RUNS` to change it),
