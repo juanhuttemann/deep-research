@@ -6,7 +6,7 @@
 // place; Enter still hands the row back for the full option list.
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { Container, type KeybindingsManager, matchesKey, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, decodeKittyPrintable, type KeybindingsManager, matchesKey, Spacer, Text } from "@earendil-works/pi-tui";
 
 // Menu is a list of lines with a cursor and an optional warning under them.
 // Enter picks the line under the cursor, the cancel key closes it.
@@ -213,6 +213,153 @@ export class SettingsMenu extends Menu {
 		this.opts.step(this.selected - 1, matchesKey(data, "right") ? 1 : -1);
 		return true;
 	}
+}
+
+// matching is the indices of the options holding every word of filter, in
+// their order, case aside: drsh's own picker's rule (matching in
+// internal/ui/pick.go), so "fable 5" finds "anthropic/claude-fable-5.2".
+export function matching(options: string[], filter: string): number[] {
+	const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+	const out: number[] = [];
+	options.forEach((o, i) => {
+		const l = o.toLowerCase();
+		if (words.every((w) => l.includes(w))) out.push(i);
+	});
+	return out;
+}
+
+const control = (ch: string) => {
+	const c = ch.charCodeAt(0);
+	return c < 32 || c === 0x7f || (c >= 0x80 && c <= 0x9f);
+};
+
+// pasteStart and pasteEnd wrap a bracketed paste, which Pi hands on as it
+// came: rejected for its escape bytes, a pasted model name was dropped.
+const pasteStart = "\x1b[200~";
+const pasteEnd = "\x1b[201~";
+
+// typed is the text a key types, or undefined for a key that types none:
+// a Kitty CSI-u sequence decoded, a bracketed paste (its line breaks and
+// other control characters as spaces), or plain text with no control
+// character.
+function typed(data: string): string | undefined {
+	const kitty = decodeKittyPrintable(data);
+	if (kitty !== undefined) return kitty;
+	if (data.startsWith(pasteStart)) {
+		const body = data.slice(pasteStart.length).replace(pasteEnd, "");
+		return [...body].map((ch) => (control(ch) ? " " : ch)).join("");
+	}
+	return [...data].some(control) ? undefined : data;
+}
+
+// maxShown is how many rows the filtered list shows at once, as Pi's own
+// select does.
+const maxShown = 10;
+
+// FilterMenu is a list under a filter box, drawn like Pi's select: typing
+// keeps the rows holding every word typed, the arrows move, Enter picks,
+// the cancel key closes. Pi's select has no filter, and the model list it
+// showed ran to hundreds of rows, read ten at a time with the arrows.
+export class FilterMenu extends Container {
+	private filter = "";
+	private shown: number[];
+	private selected = 0;
+	private readonly box = new Text("", 1, 0);
+	private readonly list = new Container();
+	private readonly theme: Theme;
+	private readonly kb: KeybindingsManager;
+	private readonly options: string[];
+	private readonly close: (index: number | undefined) => void;
+
+	constructor(theme: Theme, kb: KeybindingsManager, o: { title: string; options: string[] }, close: (index: number | undefined) => void) {
+		super();
+		this.theme = theme;
+		this.kb = kb;
+		this.options = o.options;
+		this.shown = o.options.map((_, i) => i);
+		this.close = close;
+		this.addChild(new Border(theme));
+		this.addChild(new Spacer(1));
+		this.addChild(new Text(theme.fg("accent", theme.bold(o.title)), 1, 0));
+		this.addChild(new Spacer(1));
+		this.addChild(this.box);
+		this.addChild(new Spacer(1));
+		this.addChild(this.list);
+		this.addChild(new Spacer(1));
+		const hint = (k: string, d: string) => theme.fg("dim", k) + theme.fg("muted", ` ${d}`);
+		const keys = (k: "tui.select.confirm" | "tui.select.cancel") => kb.getKeys(k).join("/");
+		this.addChild(new Text([hint("type", "filter"), hint("↑↓", "navigate"), hint(keys("tui.select.confirm"), "select"), hint(keys("tui.select.cancel"), "cancel")].join("  "), 1, 0));
+		this.addChild(new Spacer(1));
+		this.addChild(new Border(theme));
+		this.draw();
+	}
+
+	private draw(): void {
+		const t = this.theme;
+		this.box.setText(`${t.fg("accent", "> ")}${this.filter ? t.fg("text", this.filter) : t.fg("dim", "type to filter")}`);
+		this.list.clear();
+		if (!this.shown.length) {
+			this.list.addChild(new Text(t.fg("dim", "  nothing matches"), 1, 0));
+			return;
+		}
+		// The window keeps the cursor in view, centred where it can be.
+		const start = Math.max(0, Math.min(this.selected - Math.floor(maxShown / 2), this.shown.length - maxShown));
+		this.shown.slice(start, start + maxShown).forEach((i, n) => {
+			const l = this.options[i];
+			const text = start + n === this.selected ? t.fg("accent", `→ ${l}`) : `  ${t.fg("text", l)}`;
+			this.list.addChild(new Text(text, 1, 0));
+		});
+		if (this.shown.length > maxShown) {
+			this.list.addChild(new Text(t.fg("dim", ` (${this.selected + 1}/${this.shown.length})`), 1, 0));
+		}
+	}
+
+	private refilter(text: string): void {
+		this.filter = text;
+		this.shown = matching(this.options, text);
+		this.selected = 0;
+	}
+
+	handleInput(data: string): void {
+		const kb = this.kb;
+		// Text typed goes in the filter before any binding is read: a letter
+		// bound to confirm picked the highlighted row at the first letter
+		// of a name.
+		const s = typed(data);
+		if (s !== undefined) {
+			this.refilter(this.filter + s);
+			this.draw();
+			return;
+		}
+		if (kb.matches(data, "tui.select.confirm") || data === "\n") {
+			// Enter on a filter that matches nothing does nothing.
+			if (this.shown.length) this.close(this.shown[this.selected]);
+			return;
+		}
+		if (kb.matches(data, "tui.select.cancel")) {
+			this.close(undefined);
+			return;
+		}
+		if (kb.matches(data, "tui.select.up")) {
+			this.selected = Math.max(0, this.selected - 1);
+		} else if (kb.matches(data, "tui.select.down")) {
+			this.selected = Math.min(this.shown.length - 1, this.selected + 1);
+		} else if (matchesKey(data, "backspace") || kb.matches(data, "tui.editor.deleteCharBackward")) {
+			if (!this.filter) return;
+			this.refilter([...this.filter].slice(0, -1).join(""));
+		} else {
+			return;
+		}
+		this.draw();
+	}
+}
+
+// pickFiltered is ctx.ui.select with a filter box, for a long list. Outside
+// the terminal it is the plain select.
+export async function pickFiltered(ctx: ExtensionContext, title: string, options: string[]): Promise<string | undefined> {
+	if (ctx.mode !== "tui") return ctx.ui.select(title, options);
+	const i = await ctx.ui.custom<number | undefined>((_tui, theme, kb, done) => new FilterMenu(theme, kb, { title, options }, done));
+	return i === undefined ? undefined : options[i];
 }
 
 // Border is DynamicBorder drawn with the theme Pi hands the component: Pi's

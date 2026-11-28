@@ -5,6 +5,19 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Pi extension: `/research-model` filters its list as you type, keeping
+  the models whose name holds every word typed, as drsh's own picker does.
+  The list of every model Pi knows ran to hundreds of rows, read ten at a
+  time with the arrows.
+
+### Fixed
+
+- Pi extension: a sub-agent's row in the live view ran past a narrow
+  terminal and wrapped, its search continuing mid-word on a line of its
+  own. The view's rows are now cut to the terminal's width.
+
 ## [0.41.0] - 2026-11-28
 
 ### Changed

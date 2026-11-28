@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { Box, Text } from "@earendil-works/pi-tui";
+import { Box, Container, Text, TruncatedText } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { checkAnswers, clip, maxAnswerChars, maxAnswers, type Answer } from "./args.ts";
 import { startBridge, type Bridge } from "./bridge.ts";
@@ -32,7 +32,7 @@ import {
 	valueLabel,
 	type Setting,
 } from "./settings.ts";
-import { type MenuResult, pick as pickWithNotice, SettingsMenu, startLabel } from "./menu.ts";
+import { type MenuResult, pick as pickWithNotice, pickFiltered, SettingsMenu, startLabel } from "./menu.ts";
 
 const modelEntry = "deep-research-model";
 const runEntry = "deep-research-run";
@@ -120,14 +120,25 @@ function untilAborted<T>(p: Promise<T>, signal?: AbortSignal): Promise<T | undef
 // as lines at ten, and a run's view (the sub-agents of a deep plan and its
 // follow-ups, the counts, the fact-check's notes) runs past that, losing
 // its last lines; the plan of a review the same. In the terminal they go in
-// as a component, which is not cut; elsewhere as lines.
-function showLines(ctx: ExtensionContext, key: string, lines: string[] | undefined): void {
+// as a component, which is not cut; elsewhere as lines. A run's view is
+// one line per row, cut to the terminal's width: wrapped, a sub-agent's
+// search ran onto a line of its own, mid-word. The plan wraps, its names
+// and searches whole.
+function showLines(ctx: ExtensionContext, key: string, lines: string[] | undefined, o: { cut?: boolean } = {}): void {
 	if (lines === undefined || ctx.mode !== "tui") {
 		ctx.ui.setWidget(key, lines);
 		return;
 	}
-	const text = lines.join("\n");
-	ctx.ui.setWidget(key, () => new Text(text, 1, 0));
+	if (!o.cut) {
+		const text = lines.join("\n");
+		ctx.ui.setWidget(key, () => new Text(text, 1, 0));
+		return;
+	}
+	ctx.ui.setWidget(key, () => {
+		const c = new Container();
+		for (const l of lines) c.addChild(new TruncatedText(l, 1, 0));
+		return c;
+	});
 }
 
 export default function deepResearch(pi: ExtensionAPI) {
@@ -700,7 +711,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 	async function backgroundRun(ctx: ExtensionContext, abort: AbortController, req: Request): Promise<void> {
 		const status = ticker(() => {
 			if (!latest) return;
-			showLines(ctx, "deep-research", progressLines(latest, ctx.ui.theme));
+			showLines(ctx, "deep-research", progressLines(latest, ctx.ui.theme), { cut: true });
 			ctx.ui.setStatus("deep-research", `research: ${statusLabel(latest)}`);
 		}, tickMs, () => latest?.started !== undefined);
 		let latest: ResearchDetails | undefined;
@@ -748,7 +759,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 			const current = "Pi's current model (follows /model)";
 			const own = "drsh's own configured model (drsh setup)";
 			const models = ctx.modelRegistry.getAvailable().map((m) => `${m.provider}/${m.id}`);
-			const pick = await ctx.ui.select("Model for research runs", [current, own, ...models]);
+			const pick = await pickFiltered(ctx, "Model for research runs", [current, own, ...models]);
 			if (pick === undefined) return;
 			if (pick === current) choice = { kind: "pi" };
 			else if (pick === own) choice = { kind: "drsh" };

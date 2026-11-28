@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
-import { type MenuResult, pick, SettingsMenu } from "../src/menu.ts";
+import { FilterMenu, matching, type MenuResult, pick, SettingsMenu } from "../src/menu.ts";
 
 // The settings screen's keys, on a stand-in for Pi's theme that leaves text
 // uncoloured, so the drawn lines read as plain text.
@@ -164,4 +164,71 @@ test("the setting under the cursor is described under the list; a warning takes 
 test("a row starting under the cursor is described from the first draw", () => {
 	const t = menu(1, getKeybindings(), undefined, (row) => `about row ${row}`);
 	assert.ok(t.shown().includes(" about row 0"), t.shown().join("\n"));
+});
+
+// The model list ran to hundreds of rows with no way to search them, where
+// drsh's own picker filters as you type.
+function filterMenu(options: string[]) {
+	const picked: Array<number | undefined> = [];
+	const m = new FilterMenu(plain, getKeybindings(), { title: "Model", options }, (i) => picked.push(i));
+	const shown = () => m.render(80).map((l) => l.trimEnd());
+	const type = (s: string) => [...s].forEach((c) => m.handleInput(c));
+	return { m, picked, shown, type };
+}
+
+const models = ["Pi's current model", "prov/claude-fable-5", "prov/claude-fable-5.2", "prov/claude-haiku-4.5", "other/fable-mini"];
+
+test("the filter keeps the rows holding every word typed, in any order and case", () => {
+	assert.deepEqual(matching(models, "FABLE 5"), [1, 2]);
+	assert.deepEqual(matching(models, "5.2 fable"), [2]);
+	assert.deepEqual(matching(models, ""), [0, 1, 2, 3, 4]);
+	assert.deepEqual(matching(models, "gpt"), []);
+});
+
+test("typing filters the list, the arrows move in it, and enter picks from it", () => {
+	const t = filterMenu(models);
+	assert.ok(t.shown().some((l) => l.includes("type to filter")));
+	t.type("fable 5");
+	assert.ok(t.shown().includes(" > fable 5"), t.shown().join("\n"));
+	assert.ok(!t.shown().some((l) => l.includes("haiku") || l.includes("fable-mini")), t.shown().join("\n"));
+	t.m.handleInput("\x1b[B");
+	t.m.handleInput("\r");
+	assert.deepEqual(t.picked, [2], "the index is the option's, not the filtered row's");
+});
+
+test("backspace widens the filter; a filter matching nothing picks nothing", () => {
+	const t = filterMenu(models);
+	t.type("gptx");
+	assert.ok(t.shown().some((l) => l.includes("nothing matches")));
+	t.m.handleInput("\r");
+	assert.deepEqual(t.picked, []);
+	for (let i = 0; i < 4; i++) t.m.handleInput("\x7f");
+	t.m.handleInput("\x7f");
+	assert.ok(t.shown().some((l) => l.includes("→ Pi's current model")));
+	t.m.handleInput("\x1b");
+	assert.deepEqual(t.picked, [undefined]);
+});
+
+test("a long list shows ten rows around the cursor and where it is", () => {
+	const t = filterMenu(Array.from({ length: 40 }, (_, i) => `model-${i}`));
+	for (let i = 0; i < 20; i++) t.m.handleInput("\x1b[B");
+	const rows = t.shown().filter((l) => /model-\d+$/.test(l));
+	assert.equal(rows.length, 10);
+	assert.ok(rows.some((l) => l.includes("→ model-20")));
+	assert.ok(t.shown().includes("  (21/40)"), t.shown().join("\n"));
+});
+
+test("a bracketed paste filters; a letter bound to a key still types", () => {
+	const t = filterMenu(models);
+	t.m.handleInput("\x1b[200~haiku\x1b[201~");
+	assert.ok(t.shown().includes(" > haiku"), t.shown().join("\n"));
+	t.m.handleInput("\r");
+	assert.deepEqual(t.picked, [3]);
+	const kb = new KeybindingsManager(TUI_KEYBINDINGS, { "tui.select.confirm": ["enter", "f"], "tui.editor.deleteCharBackward": ["backspace", "ctrl+g"] });
+	const picked: Array<number | undefined> = [];
+	const m = new FilterMenu(plain, kb, { title: "Model", options: models }, (i) => picked.push(i));
+	for (const c of "fable") m.handleInput(c);
+	assert.deepEqual(picked, [], "typing f did not pick a row");
+	m.handleInput("\x07");
+	assert.ok(m.render(80).some((l) => l.trimEnd() === " > fabl"), "ctrl+g deletes as Pi's input does");
 });
