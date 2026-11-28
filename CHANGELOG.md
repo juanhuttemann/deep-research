@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-28
+
 ### Added
 
 - Pi extension: on the `/research` settings screen, ←/→ steps the setting
