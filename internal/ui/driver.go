@@ -1050,6 +1050,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 			// The depth tier's whole effect is this budget: stop once the
 			// sub-agent has taken its share of sources.
 			if kept >= perSource {
+				d.settleSpare(det, si, id, read)
 				break
 			}
 			// A finding with no signal was never confirmed fetched. Defaulting
@@ -1346,8 +1347,12 @@ func verifyLabel(s agent.SourceSignal) string {
 	case "dropped":
 		return "✗ " + s.Code + " dropped"
 	case "unverified":
-		// LLM-search mode never fetches anything, so the URL is
-		// only as good as the model that produced it. Say so.
+		// The URL is only as good as the model that produced it. Say so,
+		// and why its fetch failed when there was one: a 403 is a site
+		// that refuses readers, not a page nobody asked for.
+		if s.Code != "" {
+			return "~ " + s.Domain + " unverified (" + s.Code + ")"
+		}
 		return "~ " + s.Domain + " unverified"
 	case "offtopic":
 		// The engines returned this page for the query, but nothing in it

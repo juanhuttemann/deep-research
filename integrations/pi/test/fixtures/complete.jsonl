@@ -11,6 +11,8 @@
 {"type":"read","time":"2026-10-31T16:08:58Z","phase":"Research","url":"https://go.dev/a","domain":"go.dev","sub_id":"1","line":"read go.dev"}
 {"type":"verify","time":"2026-10-31T16:08:58Z","phase":"Research","url":"https://go.dev/a","status":"ok","code":"200","sub_id":"1","line":"ok go.dev"}
 {"type":"citation","time":"2026-10-31T16:08:58Z","phase":"Research","source_title":"Go benchmarks","source_url":"https://go.dev/a","sources":1,"sub_id":"1"}
+{"type":"read","time":"2026-10-31T16:08:58Z","phase":"Research","url":"https://walled.example/paper","domain":"walled.example","sub_id":"1","line":"read walled.example"}
+{"type":"verify","time":"2026-10-31T16:08:58Z","phase":"Research","url":"https://walled.example/paper","domain":"walled.example","status":"unused","code":"403","sub_id":"1","line":"~ walled.example unverified (403) · not used: budget full"}
 {"type":"token","time":"2026-10-31T16:08:58Z","phase":"Research","tokens":1200,"sources":1}
 {"type":"info","time":"2026-10-31T16:08:58Z","detail":"asking provider/model\nlatest reasoning","transient":true}
 {"type":"error","time":"2026-10-31T16:08:58Z","detail":"search failed: rate-limited","sub_id":"2"}

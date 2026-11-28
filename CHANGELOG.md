@@ -21,6 +21,19 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
   rejected with `401`, was reported as the page's status, so a `404` from
   the service read as a page that does not exist. It is now coded
   `scraper_<status>`.
+- Pages a search returned past a sub-topic's source budget never said how
+  their fetch went: their rows spun and then vanished when the topic ended,
+  a refused page or a replacement that loaded alike. They now settle as
+  `not used: budget full`, naming the fetch's outcome, in the terminal and
+  on the serve page. Pages read are also given the budget before pages
+  kept unread, so an unread page no longer takes the last slot from one
+  that loaded.
+- An unverified source's row said only `~ unverified`, the same for a page
+  refused with `403` as for one never fetched. It now names the fetch's
+  code: `~ unverified (403)`.
+- The built-in reader took a not-found page served with `200` (a "soft
+  404", titled "404 - Page not found") as the page and cited it. It is now
+  read as the page's `404`.
 
 ## [0.40.2] - 2026-11-28
 

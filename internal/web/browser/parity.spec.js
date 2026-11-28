@@ -119,6 +119,21 @@ test("[read-rows] settled reads show their outcome in place; reads never verifie
   await expect(page.locator("#log")).not.toContainText("example.net");
 });
 
+test("[read-rows] a page fetched past the budget says how its fetch went, as text, not as a source", async ({ page }) => {
+  const at = before(e => e.type === "verify"), time = run[at - 1].time;
+  const url = "https://spare.example.com/paper";
+  await serve(page, at, [
+    { type: "read", time, phase: "Research", url, domain: "spare.example.com", sub_id: "1", line: "read spare.example.com" },
+    { type: "verify", time, phase: "Research", url, status: "unused", code: "403", sub_id: "1",
+      line: "~ spare.example.com unverified (403) · not used: budget full" },
+  ]);
+  await openActivity(page);
+  await head(page, 0).click();
+  const row = page.locator("#log .act.sub", { hasText: "spare.example.com unverified (403) · not used: budget full" });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".dot, .spin, a")).toHaveCount(0);
+});
+
 test("[row-styles] rows are told apart by kind: phase, error, search, the run's notes", async ({ page }) => {
   await serve(page);
   await openActivity(page);

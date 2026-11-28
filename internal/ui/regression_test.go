@@ -4551,4 +4551,57 @@ func TestReadPagesTakeTheBudgetBeforeUnreadOnes(t *testing.T) {
 	if want := []string{"https://open.example/1", "https://open.example/2"}; fmt.Sprint(cited) != fmt.Sprint(want) || len(fake.asked) != 0 {
 		t.Errorf("cited %q, asked %d times; want %q and no replacement", cited, len(fake.asked), want)
 	}
+	// Past the budget, the refused page still says how its fetch went, and
+	// is not presented as a source.
+	var spare []Event
+	for _, e := range sink.Timeline {
+		if e.Type == Verify && e.URL == "https://walled.example/paper" {
+			spare = append(spare, e)
+		}
+	}
+	if len(spare) != 1 || spare[0].Status != "unused" || spare[0].Code != "403" ||
+		spare[0].Line != "~ walled.example unverified (403) · not used: budget full" {
+		t.Errorf("verify events for the page past the budget = %+v, want one unused, naming its outcome", spare)
+	}
+}
+
+// With no reader the model's URLs are never fetched. One past the budget
+// was given a read event, and the read count named pages nobody asked for.
+func TestUnfetchedPagesPastTheBudgetHaveNoRead(t *testing.T) {
+	q := "How will solid-state batteries commercialize by 2030? Alpha"
+	fake := &fakeAssistant{
+		planTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}},
+		findings: map[string][]agent.Finding{q: {
+			{Title: "One", Content: "remembered", URL: "https://a.example/1"},
+			{Title: "Two", Content: "remembered", URL: "https://b.example/2"},
+		}},
+		signals: map[string][]agent.SourceSignal{q: {
+			{URL: "https://a.example/1", Domain: "a.example", Status: "unverified"},
+			{URL: "https://b.example/2", Domain: "b.example", Status: "unverified"},
+		}},
+	}
+	sink := &MultiSink{}
+	d := NewDriver(fake, sink, nil, 1)
+	d.now = time.Now
+	plan := newTestPlan("quick", fake.planTopics)
+	plan.MaxSources = 1
+	if _, err := d.Run(context.Background(), plan); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var reads []string
+	var spare *Event
+	for _, e := range sink.Timeline {
+		if e.Type == Read {
+			reads = append(reads, e.URL)
+		}
+		if e.Type == Verify && e.URL == "https://b.example/2" {
+			spare = &e
+		}
+	}
+	if fmt.Sprint(reads) != "[https://a.example/1]" {
+		t.Errorf("reads = %q, want the cited page's alone", reads)
+	}
+	if spare == nil || spare.Status != "unused" {
+		t.Errorf("page past the budget = %+v, want it reported unused", spare)
+	}
 }

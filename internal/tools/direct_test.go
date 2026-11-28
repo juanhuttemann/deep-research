@@ -56,6 +56,30 @@ func TestDirectPageReaderPreservesBodyAndRejectsPrivateTargets(t *testing.T) {
 	}
 }
 
+// A not-found page served with 200 was cited as a source titled "404 - Page
+// not found". It is the page's 404 now; a title that only names 404 is not,
+// and nor is an article with an error page's title and an article's text.
+func TestSoftNotFoundIsThePages404(t *testing.T) {
+	article := "<title>Page Not Found — How to Fix It</title><main><p>" + strings.Repeat("Check the link, the redirect and the server logs. ", 60) + "</p></main>"
+	if _, err := extractHTML(article); err != nil {
+		t.Errorf("an article titled as an error page was dropped: %v", err)
+	}
+	for _, title := range []string{"404 - Page not found | Animal Web", "Page Not Found", "Error 404", "Not Found (404)",
+		"Example Site | Page not found", "404", "Error 404 | Example Site"} {
+		_, err := extractHTML("<title>" + title + "</title><main><p>Sorry.</p></main>")
+		if sig := (SourceSignal{Code: scrapeCode(err)}); !PageGone(sig) {
+			t.Errorf("%q: code %q, want a 404", title, sig.Code)
+		}
+	}
+	for _, title := range []string{"404 Media", "Not found in the archive: a history", "HTTP status codes explained",
+		"How to Fix Error 404", "Error 404 pages that work | UX Blog", "Error | Example",
+		"404 - What the HTTP status code means", "404 | Media Site"} {
+		if _, err := extractHTML("<title>" + title + "</title><main><p>Article text.</p></main>"); err != nil {
+			t.Errorf("%q taken for a not-found page: %v", title, err)
+		}
+	}
+}
+
 func TestHTMLChallengeIsNotSourceEvidence(t *testing.T) {
 	_, err := extractHTML(`<title>Just a moment...</title><p>Checking your browser</p>`)
 	if err == nil {

@@ -665,6 +665,15 @@ func TestReadSettlesInPlace(t *testing.T) {
 		t.Errorf("settled rows = %q, want %q", got, want)
 	}
 
+	// Fetched past the budget: the row says how the fetch went and that the
+	// page was not used, with no dot or link a source would have.
+	read("1", "spare.example")
+	verify("1", "spare.example", "unused", "~ spare.example unverified · not used: budget full")
+	want = append(want, "~ spare.example unverified · not used: budget full")
+	if got := rows(); !slices.Equal(got, want) {
+		t.Errorf("rows = %q, want the unused page as its line", got)
+	}
+
 	// Fetched past the budget, never verified: gone once the branch is done.
 	r.Emit(Event{Type: SubAgent, SubID: "1", SubState: "done"})
 	if got := rows(); !slices.Equal(got, slices.Delete(want, 3, 4)) {

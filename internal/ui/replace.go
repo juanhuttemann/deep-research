@@ -112,3 +112,31 @@ func pagesNoun(n int) string {
 	}
 	return "pages"
 }
+
+// settleSpare reports how each of det's pages from the from-th on went: the
+// search returned them past the sub-agent's budget, so none is cited. Their
+// reads were left spinning and then removed when the topic ended, so a page
+// refused with 403 there, or a replacement that loaded but did not fit, left
+// no trace of what happened to it. A dropped page says so as anywhere else;
+// any other is "unused", a row that names its fetch's outcome and is not
+// presented as a source.
+func (d *Driver) settleSpare(det *agent.ResearchDetail, from int, id string, read func(url, domain string)) {
+	for i := from; i < len(det.Findings); i++ {
+		f := det.Findings[i]
+		s := agent.SourceSignal{URL: f.URL, Domain: tools.DomainOf(f.URL), Status: "unverified"}
+		if i < len(det.Signals) {
+			s = det.Signals[i]
+		}
+		// A URL never fetched (no reader: unverified with no code) had no
+		// read and is given none: counted as one, a run read pages nobody
+		// asked for.
+		if s.Status != "unverified" || s.Code != "" {
+			read(f.URL, s.Domain)
+		}
+		line := verifyLabel(s)
+		if s.Status != "dropped" {
+			s.Status, line = "unused", line+" · not used: budget full"
+		}
+		d.emit(Event{Type: Verify, URL: f.URL, Domain: s.Domain, Status: s.Status, Code: s.Code, SubID: id, Line: line})
+	}
+}

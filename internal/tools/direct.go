@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -112,6 +113,36 @@ func (c *DirectClient) ScrapeURL(ctx context.Context, target string) (*ScrapedCo
 	return page, nil
 }
 
+// errorTitle matches one part of a title that is nothing but a not-found
+// page's words ("404", "Page not found", "Error 404", "Not Found (404)").
+// A title that only mentions them, "How to fix error 404" or "404 Media",
+// is an article's.
+var errorTitle = regexp.MustCompile(`(?i)^(?:(?:error|404|page not found|file not found|not found)[\s\-–—:()]*)+$`)
+
+// titleParts splits a page title at the separators sites put between the
+// page's name and theirs.
+var titleParts = regexp.MustCompile(`\s+[|\-–—·:]+\s+`)
+
+// softNotFound reports a title naming a not-found page: the whole title is
+// "404", or one of its parts is nothing but a not-found page's words and
+// says "not found" or "error 404". A lone "404" part is not enough, since an
+// article titled "404 - what the status code means" opens with one, nor is
+// a lone "Error", which may be any error.
+func softNotFound(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "404" {
+		return true
+	}
+	for _, part := range titleParts.Split(title, -1) {
+		lower := strings.ToLower(part)
+		named := strings.Contains(lower, "not found") || strings.Contains(lower, "404") && strings.Contains(lower, "error")
+		if named && errorTitle.MatchString(part) {
+			return true
+		}
+	}
+	return false
+}
+
 func extractHTML(body string) (*ScrapedContent, error) {
 	root, err := html.Parse(strings.NewReader(body))
 	if err != nil {
@@ -145,8 +176,22 @@ func extractHTML(body string) (*ScrapedContent, error) {
 	}
 	b.Write(md)
 	page.Content = cleanPageText(b.String())
+	// Nor is a not-found page served with 200, a "soft 404": one was cited
+	// as a source titled "404 - Page not found". It is the page's 404, so a
+	// model-named URL that lands on one is dropped like any missing page.
+	// The title alone is not enough, since an article can be titled "Page
+	// not found: how to fix it"; a not-found page also has next to no text.
+	if softNotFound(page.Title) && len(md) < softNotFoundText {
+		return nil, &httpError{Code: http.StatusNotFound, Body: page.Title}
+	}
 	return page, nil
 }
+
+// softNotFoundText is the most text, in bytes of Markdown, that a page with
+// a not-found title can hold and still be taken for a not-found page. Such a
+// page is a sentence and a few links once its navigation is pruned; an
+// article about the error runs to thousands.
+const softNotFoundText = 1500
 
 // pageConverter turns a page's content into Markdown. Tables matter most:
 // the excerpts score a Markdown table by its header and answering rows (see

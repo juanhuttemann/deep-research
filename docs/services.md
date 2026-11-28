@@ -276,7 +276,9 @@ named in its place loaded either — if you see that, `SEARXNG_URL` is `off`.
 
 While a run is in progress each result is reported as it is handled, marked
 `ok`, `snippet`, `off-topic` (the result mentioned none of the terms the
-planner named for its sub-topic, so it was not fetched) or `dropped`.
+planner named for its sub-topic, so it was not fetched), `dropped`, or
+`not used: budget full` (fetched after the sub-topic had all the sources
+its budget allows, so not cited however the fetch went).
 
 ## Using hosted Firecrawl instead
 

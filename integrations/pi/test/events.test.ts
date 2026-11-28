@@ -14,7 +14,9 @@ test("a run's events fold into what the progress view shows", () => {
 		],
 	);
 	assert.equal(s.searches, 1);
-	assert.equal(s.reads, 1);
+	// The second read was fetched past the budget (verify status "unused"):
+	// a read, never a source.
+	assert.equal(s.reads, 2);
 	assert.equal(s.sources, 1);
 	assert.equal(s.tokens, 1200);
 	assert.deepEqual(s.errors, ["search failed: rate-limited"]);
