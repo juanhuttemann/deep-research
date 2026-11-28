@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.40.2] - 2026-11-28
+
 ### Fixed
 
 - The clarifying questions were asked from the model's memory alone, before
