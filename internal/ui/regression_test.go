@@ -4515,3 +4515,40 @@ func TestNoReplacementWhenReadPagesFillTheBudget(t *testing.T) {
 		t.Errorf("asked = %+v, want none: eight read pages fill a budget of three", fake.asked)
 	}
 }
+
+// With the budget too short for a replacement, the search's pages stood in
+// the model's order: a refused page named before a read one took the topic's
+// last slot, and the read page was never cited. Read pages go first always.
+func TestReadPagesTakeTheBudgetBeforeUnreadOnes(t *testing.T) {
+	q := "How will solid-state batteries commercialize by 2030? Alpha"
+	fake := &replacingAssistant{fakeAssistant: &fakeAssistant{
+		planTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}},
+		findings: map[string][]agent.Finding{q: {
+			{Title: "Read", Content: "text", URL: "https://open.example/1"},
+			{Title: "Walled", Content: "remembered", URL: "https://walled.example/paper"},
+			{Title: "Read too", Content: "text", URL: "https://open.example/2"},
+		}},
+		signals: map[string][]agent.SourceSignal{q: {
+			{URL: "https://open.example/1", Domain: "open.example", Status: "ok"},
+			{URL: "https://walled.example/paper", Domain: "walled.example", Status: "unverified", Code: "403"},
+			{URL: "https://open.example/2", Domain: "open.example", Status: "ok"},
+		}},
+	}}
+	sink := &MultiSink{}
+	d := NewDriver(fake, sink, nil, 1)
+	d.now = time.Now
+	plan := newTestPlan("quick", fake.planTopics)
+	plan.MaxSources = 2
+	if _, err := d.Run(context.Background(), plan); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var cited []string
+	for _, e := range sink.Timeline {
+		if e.Type == Citation {
+			cited = append(cited, e.URL)
+		}
+	}
+	if want := []string{"https://open.example/1", "https://open.example/2"}; fmt.Sprint(cited) != fmt.Sprint(want) || len(fake.asked) != 0 {
+		t.Errorf("cited %q, asked %d times; want %q and no replacement", cited, len(fake.asked), want)
+	}
+}

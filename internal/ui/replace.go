@@ -22,9 +22,16 @@ import (
 //
 // room is what is left of the sub-agent's budget. When the pages read fill
 // it, a replacement would be fetched and never used, so none is asked for.
+// The read pages go first even then: in the model's order, a refused page
+// named second took the topic's last slot and the page read after it was
+// never cited.
 func (d *Driver) replaceUnread(ctx context.Context, query string, det *agent.ResearchDetail, id string, room int) *agent.ResearchDetail {
+	if det == nil {
+		return det
+	}
+	det = mergeReplacements(det, &agent.ResearchDetail{})
 	r, ok := d.Agent.(agent.Replacer)
-	if !ok || det == nil || d.readNew(det) >= room {
+	if !ok || d.readNew(det) >= room {
 		return det
 	}
 	unread := unreadSignals(det)
