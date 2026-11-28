@@ -371,6 +371,18 @@ type Contradiction struct {
 
 // Assistant is a single LLM phase of the pipeline. ui.Driver sequences the
 // four phases; each method is one model call.
+// Replacer is an assistant that can ask again for pages that could not be
+// read. With web search off a page the model names that does not load is
+// kept on the model's word (recall), so a site that refuses readers, like a
+// publisher behind a bot check, left cited sources nobody read and claims
+// the fact-check could only call insufficient. One call asks for other
+// pages with the same evidence, and only those that load are returned. The
+// Driver decides when to ask (see ui's replaceUnread); a nil result means
+// nothing new loaded.
+type Replacer interface {
+	ReplaceUnread(ctx context.Context, query string, unread []SourceSignal) (*ResearchDetail, error)
+}
+
 type Assistant interface {
 	// ResearchDetail runs a query and returns findings together with
 	// per-source verification signals, so the UI can render source-quality
@@ -733,6 +745,9 @@ type impl struct {
 	// they are this run's, follow-up round included.
 	suggestedMu sync.Mutex
 	suggested   []string
+	// refusedSites are the sites that turned the reader away this run
+	// (tools.Refused), which later suggestions are told to avoid.
+	refusedSites []string
 	// leads are the last plan's search results and the question they were
 	// for (planLeadsBlock).
 	leadsMu  sync.Mutex

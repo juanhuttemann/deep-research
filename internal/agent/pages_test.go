@@ -15,13 +15,17 @@ import (
 )
 
 // namedPageReader is the built-in reader answering every public-looking URL
-// from pages by its path: a path missing from it is a 404, and "/slow" never
-// answers before the reader gives up.
+// from pages by its path: a path missing from it is a 404, one under
+// "/walled" is a 403, and "/slow" never answers before the reader gives up.
 func namedPageReader(t *testing.T, pages map[string]string) *tools.DirectClient {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slow" {
 			<-r.Context().Done()
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/walled") {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		body, ok := pages[r.URL.Path]
@@ -211,5 +215,77 @@ func TestSuggestionsListThePagesAlreadySuggested(t *testing.T) {
 	if !strings.Contains(prompts[1], "these pages:\n- http://public.example/study\n") || strings.Count(prompts[1], "public.example/study") != 1 ||
 		!strings.Contains(prompts[1], "pages not in this list") {
 		t.Errorf("second prompt = %q, want the suggested URL listed once and new pages asked for", prompts[1])
+	}
+}
+
+// With search off, two papers named on a publisher behind a bot check were
+// cited unread, and the model went on naming pages on the same site. A
+// replacement asks once for other pages, saying which could not be read and
+// why; only what loads comes back; and every later suggestion is told the
+// site refused. A page on that site is still tried: it may be an abstract.
+func TestUnreadPagesAreReplacedFromOtherSites(t *testing.T) {
+	var prompts []string
+	a := &impl{
+		reader: &tools.SearchTools{Scraper: namedPageReader(t, map[string]string{"/copy": tidalPage}), MaxURLsPerQuery: 3},
+		search: namingModel(&prompts, "http://walled.example/walled/paper"),
+	}
+	det, err := a.ResearchDetail(context.Background(), "tidal storage", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := det.Signals[0]; s.Status != "unverified" || s.Code != "403" {
+		t.Fatalf("signal = %+v, want the refused page kept unverified with its code", s)
+	}
+	a.search = namingModel(&prompts, "http://walled.example/other", "http://copies.example/copy", "http://copies.example/missing")
+	rep, err := a.ReplaceUnread(context.Background(), "tidal storage", det.Signals)
+	if err != nil || rep == nil {
+		t.Fatalf("rep=%+v err=%v", rep, err)
+	}
+	if !strings.Contains(prompts[1], "http://walled.example/walled/paper (403)") || !strings.Contains(prompts[1], "open copy") {
+		t.Errorf("replacement prompt = %q, want the unread page, its code, and an open copy asked for", prompts[1])
+	}
+	var got []string
+	for i, s := range rep.Signals {
+		got = append(got, s.URL+" "+s.Status)
+		if strings.Contains(rep.Findings[i].Content, "invented evidence") {
+			t.Errorf("the model's description of %s became evidence", s.URL)
+		}
+	}
+	want := []string{"http://walled.example/other dropped", "http://copies.example/copy ok", "http://copies.example/missing dropped"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if _, err := a.ResearchDetail(context.Background(), "tidal history", nil); err != nil {
+		t.Fatal(err)
+	}
+	if last := prompts[len(prompts)-1]; !strings.Contains(last, "refused automated reading of pages this research named: walled.example") {
+		t.Errorf("later prompt = %q, want the refusing site named", last)
+	}
+}
+
+// A replacement with nothing that loads is nothing, not an empty result.
+func TestReplacementWithNothingReadableIsNil(t *testing.T) {
+	a := &impl{
+		reader: &tools.SearchTools{Scraper: namedPageReader(t, nil), MaxURLsPerQuery: 3},
+		search: namingModel(nil, "http://walled.example/again"),
+	}
+	unread := []SourceSignal{{URL: "http://walled.example/walled/x", Domain: "walled.example", Status: "unverified", Code: "403"}}
+	if rep, err := a.ReplaceUnread(context.Background(), "q", unread); rep != nil || err != nil {
+		t.Errorf("rep=%+v err=%v, want nil", rep, err)
+	}
+}
+
+// A resumed run is served its recorded searches, so the sites they found
+// refusing reach the assistant through NoteSignals instead.
+func TestNotedSignalsNameTheRefusingSites(t *testing.T) {
+	var prompts []string
+	a := &impl{reader: &tools.SearchTools{Scraper: namedPageReader(t, nil), MaxURLsPerQuery: 3}, search: namingModel(&prompts)}
+	a.NoteSignals([]SourceSignal{
+		{URL: "https://walled.example/x", Domain: "walled.example", Status: "unverified", Code: "challenge"},
+		{URL: "https://keyless.example/x", Domain: "keyless.example", Status: "unverified", Code: "scraper_401"},
+	})
+	_, _ = a.ResearchDetail(context.Background(), "q", nil)
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "named: walled.example.") {
+		t.Errorf("prompts = %q, want the refusing site alone named (a scraper's own 401 is no word on the site)", prompts)
 	}
 }

@@ -1483,3 +1483,21 @@ func TestGitHubRepoStatus(t *testing.T) {
 		t.Error("a missing repository was not an error")
 	}
 }
+
+// A Firecrawl key rejected with 401 was reported as the page's 401, and with
+// search off the page's site was taken for one that refuses readers. The
+// service's own status carries its own code.
+func TestScraperServiceStatusIsNotThePages(t *testing.T) {
+	fc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "invalid key", http.StatusUnauthorized)
+	}))
+	defer fc.Close()
+	r, err := NewReader(Options{Engine: "off", FirecrawlURL: fc.URL})
+	if err != nil || r == nil {
+		t.Fatalf("reader = %v, err = %v", r, err)
+	}
+	got := r.Read(context.Background(), "q", []SearchResult{{Title: "t", URL: "https://public.example/page"}})
+	if len(got.Signals) != 1 || got.Signals[0].Code != "scraper_401" || Refused(got.Signals[0]) || PageGone(got.Signals[0]) {
+		t.Errorf("signals = %+v, want the scraper's own code, neither refused nor gone", got.Signals)
+	}
+}

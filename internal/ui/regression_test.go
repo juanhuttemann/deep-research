@@ -4413,3 +4413,105 @@ func TestClarifyOnlySearchesTheRunsSites(t *testing.T) {
 		t.Errorf("the clarify stage checked %q; the plan's stage does", a.checked)
 	}
 }
+
+// replacingAssistant is fakeAssistant with a Replacer that answers every
+// replacement with replacements, recording what it was asked.
+type replacingAssistant struct {
+	*fakeAssistant
+	replacements *agent.ResearchDetail
+	asked        [][]agent.SourceSignal
+}
+
+func (r *replacingAssistant) ReplaceUnread(_ context.Context, _ string, unread []agent.SourceSignal) (*agent.ResearchDetail, error) {
+	r.asked = append(r.asked, unread)
+	return r.replacements, nil
+}
+
+// With web search off, a page the model named on a site behind a bot check
+// was kept unverified, cited and never read, and every claim on it came back
+// insufficient. The Driver now asks once for readable pages with the same
+// evidence, and gives the budget to what was read before what was not.
+func TestUnreadPagesAreReplacedByReadableOnes(t *testing.T) {
+	q := "How will solid-state batteries commercialize by 2030? Alpha"
+	fake := &replacingAssistant{
+		fakeAssistant: &fakeAssistant{
+			planTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}},
+			findings: map[string][]agent.Finding{q: {
+				{Title: "Walled paper", Content: "remembered", URL: "https://walled.example/paper"},
+				{Title: "Read page", Content: "text", URL: "https://open.example/page"},
+				{Title: "Timed out", Content: "remembered", URL: "https://slow.example/page"},
+			}},
+			signals: map[string][]agent.SourceSignal{q: {
+				{URL: "https://walled.example/paper", Domain: "walled.example", Status: "unverified", Code: "403"},
+				{URL: "https://open.example/page", Domain: "open.example", Status: "ok"},
+				{URL: "https://slow.example/page", Domain: "slow.example", Status: "unverified"},
+			}},
+		},
+		replacements: &agent.ResearchDetail{
+			Findings: []agent.Finding{{Title: "Open copy", Content: "paper text", URL: "https://copies.example/paper"}},
+			Signals:  []agent.SourceSignal{{URL: "https://copies.example/paper", Domain: "copies.example", Status: "ok"}},
+		},
+	}
+	sink := &MultiSink{}
+	d := NewDriver(fake, sink, nil, 1)
+	d.now = time.Now
+	if _, err := d.Run(context.Background(), newTestPlan("standard", fake.planTopics)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.asked) != 1 || len(fake.asked[0]) != 1 || fake.asked[0][0].URL != "https://walled.example/paper" {
+		t.Fatalf("asked = %+v, want one replacement for the refused page alone (one never fetched is not asked about)", fake.asked)
+	}
+	var cited []string
+	for _, e := range sink.Timeline {
+		if e.Type == Citation {
+			cited = append(cited, e.URL)
+		}
+	}
+	want := []string{"https://open.example/page", "https://copies.example/paper", "https://walled.example/paper", "https://slow.example/page"}
+	if fmt.Sprint(cited) != fmt.Sprint(want) {
+		t.Errorf("cited %q\nwant  %q (read pages, then replacements, then unread)", cited, want)
+	}
+}
+
+// A search whose pages all loaded asks for no replacement.
+func TestReadPagesAskForNoReplacement(t *testing.T) {
+	fake := &replacingAssistant{fakeAssistant: &fakeAssistant{planTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}}}}
+	d := NewDriver(fake, &MultiSink{}, nil, 1)
+	d.now = time.Now
+	if _, err := d.Run(context.Background(), newTestPlan("quick", fake.planTopics)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.asked) != 0 {
+		t.Errorf("asked = %+v, want none", fake.asked)
+	}
+}
+
+// A replacement would be fetched and never used when the pages read already
+// fill the budget, so none is asked for then.
+func TestNoReplacementWhenReadPagesFillTheBudget(t *testing.T) {
+	q := "How will solid-state batteries commercialize by 2030? Alpha"
+	var fs []agent.Finding
+	var ss []agent.SourceSignal
+	for i := range 8 {
+		u := fmt.Sprintf("https://open.example/%d", i)
+		fs = append(fs, agent.Finding{Title: "Read", Content: "text", URL: u})
+		ss = append(ss, agent.SourceSignal{URL: u, Domain: "open.example", Status: "ok"})
+	}
+	fs = append(fs, agent.Finding{Title: "Walled", Content: "remembered", URL: "https://walled.example/paper"})
+	ss = append(ss, agent.SourceSignal{URL: "https://walled.example/paper", Domain: "walled.example", Status: "unverified", Code: "403"})
+	fake := &replacingAssistant{fakeAssistant: &fakeAssistant{
+		planTopics: []agent.SubTopic{{ID: "1", Name: "Alpha"}},
+		findings:   map[string][]agent.Finding{q: fs},
+		signals:    map[string][]agent.SourceSignal{q: ss},
+	}}
+	d := NewDriver(fake, &MultiSink{}, nil, 1)
+	d.now = time.Now
+	plan := newTestPlan("quick", fake.planTopics)
+	plan.MaxSources = 3
+	if _, err := d.Run(context.Background(), plan); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.asked) != 0 {
+		t.Errorf("asked = %+v, want none: eight read pages fill a budget of three", fake.asked)
+	}
+}

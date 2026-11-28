@@ -176,7 +176,24 @@ off the same call suggests every query's URLs and a reader
 (`tools.NewReader`, the scraper with no engine) fetches them; there, a page
 that cannot be fetched for a reason other than a `404` or `410` keeps the
 model's description, `unverified`, as every such finding was before pages
-were fetched. The built-in reader writes a page as Markdown through
+were fetched. When a search leaves such pages (fetched, not loaded, and not
+gone), the Driver asks once more (`ui.replaceUnread`, through the optional
+`agent.Replacer` that the live assistant, the replay recorder, player and
+resumer implement): one call names the unread pages and their codes and
+asks for readable pages with the same evidence, and only those that load
+come back. The Driver puts them after the search's read pages and before
+its unverified ones, so the budget goes to what was read first, and asks
+nothing when the read pages already fill what is left of the budget. A
+site that turned the reader away (`tools.Refused`: `401`, `403`, `429`,
+`451` or a bot check) is remembered for the run and named to every later
+suggestion as one to prefer others to; a page on it is still fetched, since
+a walled article's site can serve its abstract. A status from the scraping
+service itself (a rejected Firecrawl key) is coded `scraper_<status>` and
+is no word on the site. A trace records a replacement as a search with
+`replaces` set, apart from the query's own; a resume passes the signals it
+serves to the live assistant (`NoteSignals`), so it knows the refusing
+sites too.
+The built-in reader writes a page as Markdown through
 html-to-markdown, after pruning what is not the page's text
 (`tools.extractHTML`).
 

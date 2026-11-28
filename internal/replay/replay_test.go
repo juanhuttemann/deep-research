@@ -43,6 +43,18 @@ func (l *live) Summarize(context.Context, string) (*agent.Summary, error) {
 func (l *live) Answer(context.Context, string) (*agent.Summary, error) {
 	return &agent.Summary{Report: "a"}, nil
 }
+
+// replacing is live with a Replacer that counts its calls.
+type replacing struct {
+	live
+	replaced int
+}
+
+func (r *replacing) ReplaceUnread(_ context.Context, q string, _ []agent.SourceSignal) (*agent.ResearchDetail, error) {
+	r.replaced++
+	return &agent.ResearchDetail{Findings: []agent.Finding{{Query: q, URL: "https://copy.example", Content: "open copy"}}}, nil
+}
+
 func (l *live) SetSourceBudget(int)           {}
 func (l *live) SkipSources(func(string) bool) {}
 func (l *live) SetProgress(func(string))      {}
@@ -492,5 +504,43 @@ func TestTraceKeepsThePlanTitle(t *testing.T) {
 	seeded.Seed(&r.trace)
 	if seeded.trace.Title != "Headline" {
 		t.Errorf("a resumed recording lost the title")
+	}
+}
+
+// A replacement for unread pages is evidence the run held, so a replay serves
+// it as recorded, apart from the query's own search, and a resume does not
+// ask for it again. One the recorded run never asked for is nothing.
+func TestReplacementsAreRecordedAndServedApart(t *testing.T) {
+	ctx := context.Background()
+	unread := []agent.SourceSignal{{URL: "https://walled.example/paper", Status: "unverified", Code: "403"}}
+	rec := Record(&replacing{}, "q", "standard", 4)
+	_, _ = rec.Plan(ctx, "q", agent.Breadth{Max: 4}, nil)
+	_, _ = rec.ResearchDetail(ctx, "alpha query", nil)
+	_, _ = rec.ReplaceUnread(ctx, "alpha query", unread)
+	path := filepath.Join(t.TempDir(), "run.trace.json")
+	if err := rec.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := &replacing{}
+	p := Play(fresh, tr)
+	if det, err := p.ResearchDetail(ctx, "alpha query", nil); err != nil || det.Findings[0].Content != "page text" {
+		t.Errorf("the query's own search = %+v, %v, want it, not the replacement", det, err)
+	}
+	if det, _ := p.ReplaceUnread(ctx, "alpha query", unread); det == nil || det.Findings[0].Content != "open copy" {
+		t.Errorf("replacement = %+v, want the recorded one", det)
+	}
+	if det, err := p.ReplaceUnread(ctx, "never replaced", unread); det != nil || err != nil {
+		t.Errorf("unrecorded replacement = %+v, %v, want nothing", det, err)
+	}
+	if fresh.replaced != 0 {
+		t.Errorf("the replay asked live %d times", fresh.replaced)
+	}
+	r := Resume(fresh, tr)
+	if det, _ := r.ReplaceUnread(ctx, "alpha query", unread); det == nil || fresh.replaced != 0 {
+		t.Errorf("a resume asked again for a recorded replacement")
 	}
 }

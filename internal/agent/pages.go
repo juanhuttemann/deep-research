@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/juanhuttemann/deep-research/internal/tools"
@@ -131,7 +133,9 @@ func (a *impl) recall(ctx context.Context, query string) (*ResearchDetail, error
 	if a.reader == nil {
 		return unverified(findings), nil
 	}
-	return recalled(findings, a.reader.Read(ctx, query, namedResults(findings))), nil
+	det := recalled(findings, a.reader.Read(ctx, query, namedResults(findings)))
+	a.noteRefused(det.Signals)
+	return det, nil
 }
 
 // unverified is the model's findings with nothing read: every source is the
@@ -201,7 +205,14 @@ func (a *impl) suggestPrompt(query string, domains []string) string {
 	}
 	a.suggestedMu.Lock()
 	tried := a.suggested[max(len(a.suggested)-maxAvoided, 0):]
+	refused := slices.Clone(a.refusedSites)
 	a.suggestedMu.Unlock()
+	if len(refused) > 0 {
+		// One run asked a publisher behind a bot check for four pages, each
+		// refused the same way; the site, not the page, was the problem.
+		prompt += "\n\nThese sites refused automated reading of pages this research named: " + strings.Join(refused, ", ") +
+			". Prefer pages on other sites: an open copy of the same work, or a reliable page reporting it."
+	}
 	if len(tried) > 0 {
 		prompt += "\n\nThe research already has or has tried these pages:\n- " + strings.Join(tried, "\n- ") +
 			"\nName one of them again only if it is among the best pages for this query; it is not fetched again. " +
@@ -223,4 +234,65 @@ func (a *impl) noteSuggested(findings []Finding) {
 		}
 		a.suggested = append(a.suggested, f.URL)
 	}
+}
+
+// noteRefused records the sites of the signals whose site turned the
+// reader away, once each.
+func (a *impl) noteRefused(signals []SourceSignal) {
+	a.suggestedMu.Lock()
+	defer a.suggestedMu.Unlock()
+	for _, sig := range signals {
+		if tools.Refused(sig) && sig.Domain != "" && !slices.Contains(a.refusedSites, sig.Domain) {
+			a.refusedSites = append(a.refusedSites, sig.Domain)
+		}
+	}
+}
+
+// NoteSignals tells the assistant how pages it did not fetch itself went,
+// a resumed run's recorded searches: a site they found refusing is
+// avoided by later suggestions as if this process had been refused.
+func (a *impl) NoteSignals(signals []SourceSignal) { a.noteRefused(signals) }
+
+// ReplaceUnread asks the model, in one call, for pages that carry the
+// evidence of the unread ones and can be read, and reads them. Only pages
+// that load are worth anything here: the unread pages are already kept on
+// the model's word, so a replacement that fails adds nothing. A suggestion
+// on a site that refused is still fetched: a publisher that walls an
+// article can serve its abstract, so the site is a hint to the model, never
+// a filter.
+func (a *impl) ReplaceUnread(ctx context.Context, query string, unread []SourceSignal) (*ResearchDetail, error) {
+	reader := cmp.Or(a.reader, a.searchTools)
+	if reader == nil || len(unread) == 0 {
+		return nil, nil
+	}
+	a.noteRefused(unread)
+	a.log("  llm agent replacing " + strconv.Itoa(len(unread)) + " unread pages · " + a.effortLabel(a.effort.Search))
+	out, err := a.search(ctx, a.suggestPrompt(replacePrompt(query, unread), reader.Domains))
+	if err != nil {
+		return nil, err
+	}
+	named := parseSearchResults(out, query)
+	a.noteSuggested(named)
+	if len(named) == 0 {
+		return nil, nil
+	}
+	det := searchDetail(query, reader.Read(ctx, query, namedResults(named)))
+	if !det.Usable() {
+		return nil, nil
+	}
+	return det, nil
+}
+
+// replacePrompt is query with the pages that could not be read, and why.
+func replacePrompt(query string, unread []SourceSignal) string {
+	var sb strings.Builder
+	sb.WriteString(query)
+	sb.WriteString("\n\nThese pages you named for this query could not be read:")
+	for _, s := range unread {
+		fmt.Fprintf(&sb, "\n- %s (%s)", s.URL, s.Code)
+	}
+	sb.WriteString("\nName other pages that carry the same evidence and can be read without a login or a bot check: " +
+		"an open copy of the same work (PubMed Central, Europe PMC, arXiv, the authors' or institution's page), " +
+		"or a reliable article that reports it. Do not name these pages again.")
+	return sb.String()
 }

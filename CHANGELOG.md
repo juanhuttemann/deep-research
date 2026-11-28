@@ -5,6 +5,23 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- With web search off, a page the model named on a site that refuses
+  automated readers (a publisher behind a bot check, a `403`) was cited
+  unread as `~ unverified`, the fact-check could only call every claim on
+  it insufficient, and the model kept naming pages on the same site. Now a
+  search that leaves such pages asks the model once for readable pages
+  with the same evidence, such as an open copy or an article reporting it,
+  and reads those ahead of the unverified ones; it asks nothing when the
+  pages read already fill the budget. A site that refused is named to every
+  later suggestion as one to prefer other sites to. A bot-check page now
+  reports its own code, `challenge`, instead of `scrape_failed`.
+- A status from the scraping service itself, such as a Firecrawl key
+  rejected with `401`, was reported as the page's status, so a `404` from
+  the service read as a page that does not exist. It is now coded
+  `scraper_<status>`.
+
 ## [0.40.2] - 2026-11-28
 
 ### Fixed

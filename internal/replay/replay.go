@@ -79,6 +79,40 @@ type Search struct {
 	Result   *agent.ResearchDetail `json:"result,omitempty"`
 	PageKeys []string              `json:"page_keys,omitempty"`
 	Error    string                `json:"error,omitempty"`
+	// Replaces are the unread pages a replacement asked about
+	// (agent.Replacer): such a search is the query asked again for other
+	// pages, not the query's own search, and is told apart by them.
+	Replaces []string `json:"replaces,omitempty"`
+}
+
+// key is what tells s apart from the other recorded searches.
+func (s Search) key() string {
+	if len(s.Replaces) > 0 {
+		return replaceKey(s.Query, s.Replaces)
+	}
+	return searchKey(s.Query, s.Terms)
+}
+
+// replaceKey is a replacement's key: its query and the pages it replaced.
+func replaceKey(query string, unread []string) string {
+	return "\x00replace\x00" + query + "\x00" + strings.Join(unread, "\x1f")
+}
+
+// unreadURLs are the URLs of signals.
+func unreadURLs(signals []agent.SourceSignal) []string {
+	out := make([]string, len(signals))
+	for i, s := range signals {
+		out[i] = s.URL
+	}
+	return out
+}
+
+// replaceUnread asks a for replacements when it can, and for none when not.
+func replaceUnread(ctx context.Context, a agent.Assistant, query string, unread []agent.SourceSignal) (*agent.ResearchDetail, error) {
+	if r, ok := a.(agent.Replacer); ok {
+		return r.ReplaceUnread(ctx, query, unread)
+	}
+	return nil, nil
 }
 
 // Phase is one model phase's input and output. The output is serialized when
@@ -130,7 +164,24 @@ func (r *Recorder) Plan(ctx context.Context, question string, b agent.Breadth, r
 
 func (r *Recorder) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
 	det, err := r.Assistant.ResearchDetail(ctx, query, terms)
-	s := Search{Query: query, Terms: terms, Result: det}
+	r.record(ctx, Search{Query: query, Terms: terms, Result: det}, err)
+	return det, err
+}
+
+// ReplaceUnread is recorded beside the searches, so a replay serves the
+// pages that replaced the unread ones as the run had them. One that found
+// nothing is recorded too: a replay asks the same and must get nothing.
+func (r *Recorder) ReplaceUnread(ctx context.Context, query string, unread []agent.SourceSignal) (*agent.ResearchDetail, error) {
+	det, err := replaceUnread(ctx, r.Assistant, query, unread)
+	if det == nil && err == nil {
+		det = &agent.ResearchDetail{}
+	}
+	r.record(ctx, Search{Query: query, Replaces: unreadURLs(unread), Result: det}, err)
+	return det, err
+}
+
+// record keeps s, a search's or a replacement's outcome.
+func (r *Recorder) record(ctx context.Context, s Search, err error) {
 	switch {
 	case err != nil:
 		s.Error = err.Error()
@@ -140,18 +191,17 @@ func (r *Recorder) ResearchDetail(ctx context.Context, query string, terms []str
 		s.Error = "cancelled before the search finished"
 	}
 	r.mu.Lock()
-	if s.Error != "" || !r.finished[searchKey(query, terms)] {
+	if s.Error != "" || !r.finished[s.key()] {
 		r.trace.Searches = append(r.trace.Searches, s)
 	}
 	if s.Error == "" {
 		if r.finished == nil {
 			r.finished = map[string]bool{}
 		}
-		r.finished[searchKey(query, terms)] = true
+		r.finished[s.key()] = true
 	}
 	r.mu.Unlock()
 	r.save()
-	return det, err
 }
 
 // Seed starts the recording from what an interrupted run saved: its plan and
@@ -169,7 +219,7 @@ func (r *Recorder) Seed(t *Trace) {
 		r.finished = map[string]bool{}
 	}
 	for _, s := range t.Searches {
-		if k := searchKey(s.Query, s.Terms); s.Error == "" && s.Result != nil && !r.finished[k] {
+		if k := s.key(); s.Error == "" && s.Result != nil && !r.finished[k] {
 			r.trace.Searches = append(r.trace.Searches, s)
 			r.finished[k] = true
 		}
@@ -459,8 +509,11 @@ func Play(live agent.Assistant, t *Trace) *Player {
 	// replay failed on a search the run had recovered from. A success wins;
 	// a failure only stands for a search that never got one.
 	for _, s := range t.Searches {
-		keep(p.byKey, searchKey(s.Query, s.Terms), s)
-		keep(p.byQuery, s.Query, s)
+		keep(p.byKey, s.key(), s)
+		// A replacement is never the query's own search.
+		if len(s.Replaces) == 0 {
+			keep(p.byQuery, s.Query, s)
+		}
 	}
 	return p
 }
@@ -501,7 +554,7 @@ func (p *Player) FollowUps(context.Context, string) ([]agent.FollowUpQuery, erro
 func (p *Player) searchedFollowUp(query string) bool {
 	query = strings.TrimSpace(query)
 	for _, s := range p.trace.Searches {
-		if len(s.Terms) == 0 && s.Query != "" && (s.Query == query || strings.HasPrefix(query, s.Query+" ")) {
+		if len(s.Terms) == 0 && len(s.Replaces) == 0 && s.Query != "" && (s.Query == query || strings.HasPrefix(query, s.Query+" ")) {
 			return true
 		}
 	}
@@ -555,6 +608,17 @@ func (p *Player) ResearchDetail(_ context.Context, query string, terms []string)
 	return s.Result, nil
 }
 
+// ReplaceUnread serves the replacement the recorded run got. One it never
+// asked for, as in a trace from before replacements, is nothing rather than
+// a failure: the run it reproduces went on with the unread pages alone.
+func (p *Player) ReplaceUnread(_ context.Context, query string, unread []agent.SourceSignal) (*agent.ResearchDetail, error) {
+	s, ok := p.byKey[replaceKey(query, unreadURLs(unread))]
+	if !ok || s.Error != "" || s.Result == nil {
+		return nil, nil
+	}
+	return s.Result, nil
+}
+
 // Resumer serves the searches a checkpoint recorded and goes live for the
 // rest: a search the interrupted run never finished, or one that failed,
 // often the failure being recovered from (a search server that was down).
@@ -569,7 +633,7 @@ type Resumer struct {
 func Resume(live agent.Assistant, t *Trace) *Resumer {
 	r := &Resumer{Assistant: live, bySearch: map[string]Search{}}
 	for _, s := range t.Searches {
-		if k := searchKey(s.Query, s.Terms); s.Error == "" && s.Result != nil {
+		if k := s.key(); s.Error == "" && s.Result != nil {
 			if _, seen := r.bySearch[k]; !seen {
 				r.bySearch[k] = s
 			}
@@ -580,9 +644,28 @@ func Resume(live agent.Assistant, t *Trace) *Resumer {
 
 func (r *Resumer) ResearchDetail(ctx context.Context, query string, terms []string) (*agent.ResearchDetail, error) {
 	if s, ok := r.bySearch[searchKey(query, terms)]; ok {
+		r.noteSignals(s.Result)
 		return s.Result, nil
 	}
 	return r.Assistant.ResearchDetail(ctx, query, terms)
+}
+
+// ReplaceUnread serves a replacement the checkpoint recorded, else asks live.
+func (r *Resumer) ReplaceUnread(ctx context.Context, query string, unread []agent.SourceSignal) (*agent.ResearchDetail, error) {
+	if s, ok := r.bySearch[replaceKey(query, unreadURLs(unread))]; ok {
+		r.noteSignals(s.Result)
+		return s.Result, nil
+	}
+	return replaceUnread(ctx, r.Assistant, query, unread)
+}
+
+// noteSignals passes a served search's signals to the live assistant, which
+// learns from them which sites refuse readers. Served from the checkpoint,
+// they never reached it, and the resumed run went on naming those sites.
+func (r *Resumer) noteSignals(det *agent.ResearchDetail) {
+	if n, ok := r.Assistant.(interface{ NoteSignals([]agent.SourceSignal) }); ok && det != nil {
+		n.NoteSignals(det.Signals)
+	}
 }
 
 func (r *Resumer) ModelInfo() (string, string)              { return modelInfo(r.Assistant) }

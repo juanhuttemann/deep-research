@@ -270,8 +270,8 @@ sources  9 (9 fetched)      tokens  18.1k
 
 `fetched` means the page was read. `snippet only` means the search
 result was used without the page. `unverified` means the model suggested the
-URL with search off and it could not be fetched — if you see
-that, `SEARXNG_URL` is `off`.
+URL with search off and it could not be fetched, and no page the model
+named in its place loaded either — if you see that, `SEARXNG_URL` is `off`.
 `drsh doctor` checks both services directly.
 
 While a run is in progress each result is reported as it is handled, marked

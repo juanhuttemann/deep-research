@@ -89,7 +89,7 @@ func (c *hostedClient) post(ctx context.Context, path string, body, out any) err
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("%s: %w", c.service, &httpError{Code: resp.StatusCode, Body: strings.TrimSpace(string(msg)), Keyed: true})
+		return fmt.Errorf("%s: %w", c.service, &httpError{Code: resp.StatusCode, Body: strings.TrimSpace(string(msg)), Keyed: true, Service: true})
 	}
 	if err := json.NewDecoder(cappedJSON(resp.Body, maxJSONString, hostedBodyLimit)).Decode(out); err != nil {
 		return fmt.Errorf("decode %s response: %w", c.service, err)

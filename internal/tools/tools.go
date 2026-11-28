@@ -78,6 +78,11 @@ var errEmptyScrape = errors.New("scrape returned no content")
 // search snippet is all there is, and the source is labelled that way.
 var errNoScraper = errors.New("no scrape service configured")
 
+// errPageChallenge marks a bot check served in place of the page. Its code
+// is "challenge", not "scrape_failed": a site that challenges one page
+// challenges every page, and asking it again wastes the fetch (Refused).
+var errPageChallenge = errors.New("page challenge")
+
 // checkScrapeTarget vets a URL before it is handed to Firecrawl.
 //
 // The URLs come from search results — and, in LLM-search mode, from a model —
@@ -199,7 +204,7 @@ func (c *FirecrawlClient) ScrapeURL(ctx context.Context, fetchURL string) (*Scra
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("scrape failed: %w", &httpError{Code: resp.StatusCode, Body: string(b)})
+		return nil, fmt.Errorf("scrape failed: %w", &httpError{Code: resp.StatusCode, Body: string(b), Service: true})
 	}
 
 	// Firecrawl v2 reports the page title under data.metadata.title; older
@@ -400,6 +405,11 @@ type httpError struct {
 	// there is a 401 a key to fix or a 402 credit to buy: a public SearXNG
 	// instance behind basic auth answers 401 too, and has no key of yours.
 	Keyed bool
+	// Service is set when the status is the scraping service's own answer
+	// (Firecrawl, Exa, Tavily), not the page's: a Firecrawl key rejected
+	// with 401 is no word on the page, and taken for one it named an
+	// unrelated site as refusing readers (Refused) or a page as gone.
+	Service bool
 }
 
 func (e *httpError) Error() string {
@@ -426,8 +436,14 @@ func scrapeCode(err error) string {
 	if errors.Is(err, errNoScraper) {
 		return "noservice"
 	}
+	if errors.Is(err, errPageChallenge) {
+		return "challenge"
+	}
 	var he *httpError
 	if errors.As(err, &he) {
+		if he.Service {
+			return "scraper_" + strconv.Itoa(he.Code)
+		}
 		return strconv.Itoa(he.Code)
 	}
 	return "scrape_failed"
@@ -711,6 +727,18 @@ func (s *SearchTools) Read(ctx context.Context, query string, named []SearchResu
 	s.logIn(ctx, fmt.Sprintf("  %-9s suggested %d %s", EngineModel, len(candidates), unit))
 	fs, sg, us := s.fetchAll(ctx, candidates)
 	return &SearchResults{Query: query, Findings: fs, URLsFound: us, Signals: sg, Known: known}
+}
+
+// Refused reports a signal for a page whose site turned the reader away: an
+// authentication wall, a block, a rate limit or a bot check. Unlike a page
+// that timed out, another page on that site would most likely be refused
+// too, so the model is asked for pages elsewhere (see agent.Replacer).
+func Refused(sig SourceSignal) bool {
+	switch sig.Code {
+	case "401", "403", "429", "451", "challenge":
+		return true
+	}
+	return false
 }
 
 // PageGone reports a signal for a page whose server answered that it does not

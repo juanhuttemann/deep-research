@@ -1030,6 +1030,7 @@ func (d *Driver) runSubAgent(ctx context.Context, question string, sub agent.Sub
 			}
 			continue
 		}
+		det = d.replaceUnread(sctx, q, det, id, perSource-kept)
 		// Results the search judged off-topic were never fetched, so they cost
 		// no budget and are never cited. They are still reported: a run that
 		// silently discarded most of what the engines returned would look

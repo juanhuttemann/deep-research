@@ -57,8 +57,19 @@ func TestDirectPageReaderPreservesBodyAndRejectsPrivateTargets(t *testing.T) {
 }
 
 func TestHTMLChallengeIsNotSourceEvidence(t *testing.T) {
-	if _, err := extractHTML(`<title>Just a moment...</title><p>Checking your browser</p>`); err == nil {
+	_, err := extractHTML(`<title>Just a moment...</title><p>Checking your browser</p>`)
+	if err == nil {
 		t.Fatal("challenge treated as evidence")
+	}
+	// Its own code, so the site is taken for one that refuses readers and
+	// the model is asked for pages elsewhere.
+	if code := scrapeCode(err); code != "challenge" || !Refused(SourceSignal{Code: code}) {
+		t.Errorf("code = %q, want a refusal", code)
+	}
+	for _, code := range []string{"404", "scrape_failed", "empty", "blocked"} {
+		if Refused(SourceSignal{Code: code}) {
+			t.Errorf("%s taken for a site that refuses readers", code)
+		}
 	}
 }
 

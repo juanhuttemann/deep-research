@@ -124,7 +124,7 @@ func extractHTML(body string) (*ScrapedContent, error) {
 	// A challenge page is not article evidence even when the server says 200.
 	for _, s := range []string{"just a moment", "access denied", "verify you are human"} {
 		if strings.Contains(strings.ToLower(page.Title), s) {
-			return nil, fmt.Errorf("page challenge: %s", page.Title)
+			return nil, fmt.Errorf("%w: %s", errPageChallenge, page.Title)
 		}
 	}
 	content := root

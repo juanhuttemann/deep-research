@@ -468,7 +468,12 @@ Which mode a run uses is decided by what is configured:
   invented it. One that cannot be fetched for another reason (a timeout, a
   challenge, a PDF, no network) is kept as the model described it,
   labelled `~ unverified` and exported with that status, so a run with no
-  network beyond the model still answers. When no source was fetched, the fact-check says so: with no
+  network beyond the model still answers. When a search leaves such pages,
+  the model is asked once for other pages with the same evidence (an open
+  copy, or an article reporting it), and those that load are read ahead of
+  the unverified ones. A site that refused the reader (`401`, `403`, `429`,
+  `451` or a bot check) is named to every later suggestion as one to
+  prefer other sites to. When no source was fetched, the fact-check says so: with no
   retrieved page to check an answer against, it runs as a self-consistency
   pass ("Checking self-consistency (no page was retrieved)") and the report
   presents its claims as unverified recollection. When a run holds both
