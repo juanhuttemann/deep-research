@@ -344,8 +344,12 @@ var lineHyphen = regexp.MustCompile(`(\p{L})-\n[ \t]*(\p{Ll})`)
 var (
 	// A link's target may hold one level of parentheses (a_(b)), and its
 	// label one pair of brackets: a citation link is "[[43]](...)".
-	mdLink    = regexp.MustCompile(`!?\[((?:[^\[\]]|\[[^\]]*\])*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`)
-	htmlBreak = regexp.MustCompile(`(?i)<br\s*/?>`)
+	mdLink = regexp.MustCompile(`!?\[((?:[^\[\]]|\[[^\]]*\])*)\]\((?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?\)`)
+	// mdLinkBreak is a link and the whitespace after it up to punctuation
+	// or an emphasis marker; joinLinkBreaks decides whether that whitespace
+	// is the scraper's line break, to drop.
+	mdLinkBreak = regexp.MustCompile(mdLink.String() + `(\s+)([,.;:!?)]|[_*]+)`)
+	htmlBreak   = regexp.MustCompile(`(?i)<br\s*/?>`)
 	// A numbered citation marker ("[43]") sits inside the sentence it cites,
 	// and a quote of that sentence leaves it out.
 	mdCite     = regexp.MustCompile(`\[\d{1,4}\]`)
@@ -363,6 +367,7 @@ func visibleText(s string) string {
 	s = html.UnescapeString(htmlBreak.ReplaceAllString(s, " "))
 	// NFKC also makes a PDF's ligature characters ("ﬁ") the letters they are.
 	s = norm.NFKC.String(mdEscape.ReplaceAllString(s, "$1"))
+	s = joinLinkBreaks(s)
 	s = mdCite.ReplaceAllString(mdLink.ReplaceAllString(s, "$1"), "")
 	s = mdCode.ReplaceAllString(s, "$1")
 	// Emphasis rules are applied until nothing changes: a match takes the
@@ -373,6 +378,41 @@ func visibleText(s string) string {
 		return ""
 	}
 	return strings.Join(strings.Fields(plainPunct.Replace(s)), " ")
+}
+
+// joinLinkBreaks drops the line break a scraper writes after a link when
+// punctuation or the emphasis around the link comes next ("[Zorblax](url)\n,
+// built by", "_[Journal](url)\n_ and"). Made a space, the break put
+// "Zorblax , built by" between the page and a verbatim quote of it. Only
+// that whitespace goes, and only where it cannot join what was apart:
+// punctuation before a digit stays apart ("1[[2]](url)\n.5" is not 1.5), and
+// a marker joins only the same marker opening right before the link.
+func joinLinkBreaks(s string) string {
+	ms := mdLinkBreak.FindAllStringSubmatchIndex(s, -1)
+	if ms == nil {
+		return s
+	}
+	var sb strings.Builder
+	last := 0
+	for _, m := range ms {
+		gap, mark := m[4], s[m[6]:m[7]]
+		if !breakJoins(s, m[0], m[1], mark) {
+			continue
+		}
+		sb.WriteString(s[last:gap])
+		last = m[5]
+	}
+	sb.WriteString(s[last:])
+	return sb.String()
+}
+
+// breakJoins is whether the whitespace before mark, after the link at
+// start, is a scraper's break to drop; end is where mark ends.
+func breakJoins(s string, start, end int, mark string) bool {
+	if mark[0] != '_' && mark[0] != '*' {
+		return end == len(s) || s[end] < '0' || s[end] > '9'
+	}
+	return strings.HasSuffix(s[:start], mark) && (end == len(s) || s[end] == ' ' || s[end] == '\n' || strings.ContainsRune(",.;:!?)", rune(s[end])))
 }
 
 // maxEmphasisPasses bounds stripEmphasis. A pass frees only the innermost

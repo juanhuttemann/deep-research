@@ -7,6 +7,15 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- A verbatim quote of a sentence with a link in it was not located in its
+  page when the scraper had written a line break after the link before
+  punctuation or a closing emphasis marker ("[Name](url)\n, built by"):
+  made visible, the break was a space before the comma. The claim the
+  checker had supported was made insufficient, the conclusions resting on
+  it were blocked, and a run on encyclopedia pages, whose sentences are
+  full of links, could end at low confidence with nothing approved. Only
+  that whitespace is dropped; a quote with any other difference is still
+  not located.
 - With web search off, a page the model named on a site that refuses
   automated readers (a publisher behind a bot check, a `403`) was cited
   unread as `~ unverified`, the fact-check could only call every claim on

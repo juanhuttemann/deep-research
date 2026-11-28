@@ -4605,3 +4605,47 @@ func TestUnfetchedPagesPastTheBudgetHaveNoRead(t *testing.T) {
 		t.Errorf("page past the budget = %+v, want it reported unused", spare)
 	}
 }
+
+// A scraper writes a line break after each link, punctuation included:
+// "[Zorblax](url "Zorblax")\n, built by". Made visible, the break was a
+// space, "Zorblax , built by", and a verbatim quote of the sentence was not
+// located. Every supported claim quoting such a sentence was made
+// insufficient, and the conclusions resting on them blocked: a run whose
+// check had supported all its claims ended at low confidence.
+func TestQuoteAcrossLinkLineBreakIsLocated(t *testing.T) {
+	page := newPageText("The first frobnicator was [Zorblax](https://example.org/wiki/Zorblax \"Zorblax\")\n" +
+		", built by [Ada Quill](https://example.org/wiki/Ada_Quill \"Ada Quill\")\n between 1901 and 1903." +
+		"[\\[2\\]](https://example.org/wiki/Frob#cite_note-2)\n It ran on [steam](https://example.org/wiki/Steam)\n; nothing else did." +
+		" Ada wrote in the _[Frob Annals](https://example.org/wiki/Frob_Annals \"Frob Annals\")\n_ and in [Gears](https://example.org/g)\n _weekly_.")
+	for _, q := range []string{
+		"The first frobnicator was Zorblax, built by Ada Quill between 1901 and 1903.",
+		"It ran on steam; nothing else did.",
+		"Ada wrote in the Frob Annals and in Gears weekly.",
+	} {
+		if !page.locate(q) {
+			t.Errorf("verbatim quote %q not located", q)
+		}
+	}
+	// Only the break's space goes: words, numbers and punctuation still count.
+	for _, q := range []string{
+		"The first frobnicator was Zorblax, built by Ada Quill between 1901 and 1904.",
+		"The first frobnicator was Zorblax; built by Ada Quill",
+		"The first frobnicator was, built by Ada Quill",
+		"It ran on steam, nothing else did.",
+		"and in Gearsweekly",
+	} {
+		if page.locate(q) {
+			t.Errorf("altered quote %q located", q)
+		}
+	}
+	// What the break kept apart is not joined into something the page does
+	// not say: a decimal across a citation, or emphasis the link does not
+	// sit in.
+	page = newPageText("Dose: 1[[2]](https://example.org/cite)\n.5 mg daily. " +
+		"It is **[2](https://example.org/x)\n__ units, and [Bolt](https://example.org/b)\n_ alone.")
+	for _, q := range []string{"Dose: 1.5 mg", "It is 2 units", "Bolt alone"} {
+		if page.locate(q) {
+			t.Errorf("altered quote %q located", q)
+		}
+	}
+}
