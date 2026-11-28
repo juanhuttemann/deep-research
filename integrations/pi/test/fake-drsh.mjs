@@ -40,12 +40,20 @@ if (args.includes("--clarify-only")) {
 	replay(process.env.FAKE_QUESTIONS === "none" ? "clarify-none.jsonl" : "clarify.jsonl");
 	process.exit(0);
 }
-if (args.includes("--plan-only")) {
+// FAKE_HANG_PLAN makes planning wait for SIGINT and end as a cancellation
+// with no checkpoint, as drsh does before a plan exists.
+if (args.includes("--plan-only") && process.env.FAKE_HANG_PLAN) {
+	process.stdout.write(JSON.stringify({ type: "phase", phase: "Plan" }) + "\n");
+	process.on("SIGINT", () => {
+		process.stdout.write(JSON.stringify({ type: "done", status: "cancelled" }) + "\n");
+		process.exit(0);
+	});
+	setInterval(() => {}, 1000);
+} else if (args.includes("--plan-only")) {
 	process.stdout.write(JSON.stringify({ type: "plan", plan: { question: "q", sub_topics: [{ id: "1", name: "Benchmarks" }] } }) + "\n");
 	process.stdout.write(JSON.stringify({ type: "done", status: "complete" }) + "\n");
 	process.exit(0);
-}
-if (["kill", "torn", "empty"].includes(process.env.FAKE_HANG)) {
+} else if (["kill", "torn", "empty"].includes(process.env.FAKE_HANG)) {
 	const saved = { kill: '{"question": "q", "plan": [{"name": "Benchmarks"}]}', torn: '{"question": "q", "plan": [', empty: '{"question": "q", "plan": []}' };
 	if (!flag("resume")) writeFileSync(join(reports, "run.def.partial.json"), saved[process.env.FAKE_HANG]);
 	process.stdout.write(JSON.stringify({ type: "phase", phase: "Research", detail: "Running sub-agents" }) + "\n");

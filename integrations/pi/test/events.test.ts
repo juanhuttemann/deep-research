@@ -19,19 +19,18 @@ test("a run's events fold into what the progress view shows", () => {
 	assert.equal(s.tokens, 1200);
 	assert.deepEqual(s.errors, ["search failed: rate-limited"]);
 	assert.deepEqual(s.domains.map((d) => d.domain), ["go.dev"]);
-	// The status keeps the first line of a transient info: the rest is the
-	// reasoning, which has its own event.
+	// The status keeps the first line of a transient info: in drsh 0.39 and
+	// earlier the rest is the reasoning, which has its own event.
 	assert.equal(s.status, "asking provider/model");
 });
 
-test("a call's reasoning restarts on its first piece and is joined after", () => {
-	let s = initialState();
-	s = reduce(s, { type: "thinking", status: "start", detail: "old" });
-	s = reduce(s, { type: "thinking", status: "start", detail: "Weighing" });
-	s = reduce(s, { type: "thinking", detail: " the options" });
-	assert.equal(s.thinking, "Weighing the options");
-	s = reduce(s, { type: "phase", phase: "Analyze" });
-	assert.equal(s.thinking, "", "a new phase clears the last call's reasoning");
+// The streaming reasoning was shown as a line of its latest words, replaced
+// as they streamed: too hard to read, as drsh's own frame found. It is not
+// kept, so no view can draw it.
+test("a call's reasoning is not kept for the view", () => {
+	const before = JSON.stringify(initialState());
+	const s = reduce(initialState(), { type: "thinking", status: "start", detail: "Weighing the options" });
+	assert.equal(JSON.stringify(s), before);
 });
 
 test("only JSON objects with a type are events", () => {

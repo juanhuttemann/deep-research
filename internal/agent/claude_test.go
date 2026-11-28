@@ -187,8 +187,10 @@ func TestClaudeUsesTheSubscriptionFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
-	var lines []string
-	a.(interface{ SetStatus(func(string)) }).SetStatus(func(msg string) { mu.Lock(); lines = append(lines, msg); mu.Unlock() })
+	var thought []string
+	a.(interface {
+		SetThinking(func(string, string, bool))
+	}).SetThinking(func(text, _ string, _ bool) { mu.Lock(); thought = append(thought, text); mu.Unlock() })
 
 	sum, err := a.Summarize(context.Background(), "the findings")
 	if err != nil {
@@ -228,8 +230,8 @@ func TestClaudeUsesTheSubscriptionFirst(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "Weigh c3 against c5") }) {
-		t.Errorf("the thinking never reached the status line:\n%s", strings.Join(lines, "\n"))
+	if got := strings.Join(thought, ""); !strings.Contains(got, "Weigh c3 against c5") {
+		t.Errorf("the thinking never reached the thinking events: %q", got)
 	}
 }
 

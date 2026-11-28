@@ -489,7 +489,8 @@ func TestStreamedCallFallsBackWhenServerDoesNotStream(t *testing.T) {
 // scale, no rate, and no way to tell a stalled stream from a slow one. It now
 // counts something a reader can judge (words, or completed JSON entries),
 // shows the delta, waits for the first token with a ticking clock, and says
-// when the stream has stopped growing.
+// when the stream has stopped growing. A line is due each second: at five,
+// the clock each line carries jumped five seconds at a time on every view.
 func TestStreamProgressSpeaksInUnitsWithDeltaAndStall(t *testing.T) {
 	var got []string
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -511,10 +512,14 @@ func TestStreamProgressSpeaksInUnitsWithDeltaAndStall(t *testing.T) {
 
 	want := []string{
 		"writing the report — waiting for the model to start (0s)",
+		"writing the report — waiting for the model to start (3s)",
 		"writing the report — waiting for the model to start (6s)",
 		"writing the report — 3 words · 0:07",
-		"writing the report — 10 words (+7 in 5s) · 0:12",
+		"writing the report — 4 words (+1 in 1s) · 0:08",
+		"writing the report — 10 words (+6 in 4s) · 0:12",
+		// Still at 0:17: a five-second pause is not yet a stall.
 		"writing the report — no new output for 10s · 0:22",
+		"writing the report — no new output for 11s · 0:23",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("progress lines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -548,10 +553,13 @@ func TestStreamProgressShowsThinking(t *testing.T) {
 	step(7*time.Second, "", thought)
 	step(9*time.Second, `{"interpretation":"x","answer":"y","claims":[{"id":"c1","claim":"z"`, thought)
 
+	// The status is the line alone: the reasoning goes out as Thinking
+	// events, and a copy in every status filled the timeline.
 	want := []string{
 		"analyzing — waiting for the model to start (0s)",
-		"analyzing — thinking · 0:02\nCheck c3",
-		"analyzing — thinking · 0:07\n" + thought,
+		"analyzing — thinking · 0:02",
+		"analyzing — thinking · 0:04",
+		"analyzing — thinking · 0:07",
 		"analyzing — listing what the sources show · 1 claim · 0:09",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -560,8 +568,11 @@ func TestStreamProgressShowsThinking(t *testing.T) {
 }
 
 // The framework keeps only the content delta of a streamed event, so the
-// reasoning has to be read off the body on its way through.
-func TestStreamedReasoningReachesTheStatusLine(t *testing.T) {
+// reasoning has to be read off the body on its way through. It reaches the
+// views as Thinking events; the status says the model is thinking, and no
+// longer carries a copy of the reasoning, which every view dropped and the
+// timeline kept once per status.
+func TestStreamedReasoningReachesTheThinkingEvents(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning\":\"Weigh c3 against c5\"}}]}\n\n")
@@ -574,8 +585,11 @@ func TestStreamedReasoningReachesTheStatusLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
-	var lines []string
+	var lines, thought []string
 	a.(interface{ SetStatus(func(string)) }).SetStatus(func(msg string) { mu.Lock(); lines = append(lines, msg); mu.Unlock() })
+	a.(interface {
+		SetThinking(func(string, string, bool))
+	}).SetThinking(func(text, _ string, _ bool) { mu.Lock(); thought = append(thought, text); mu.Unlock() })
 
 	sum, err := a.Summarize(context.Background(), "p")
 	if err != nil {
@@ -586,8 +600,16 @@ func TestStreamedReasoningReachesTheStatusLine(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !slices.Contains(lines, "writing the report — thinking · 0:00\nWeigh c3 against c5") {
-		t.Errorf("no status carried the reasoning:\n%s", strings.Join(lines, "\n"))
+	if got := strings.Join(thought, ""); got != "Weigh c3 against c5" {
+		t.Errorf("reasoning sent = %q, want it whole", got)
+	}
+	if !slices.Contains(lines, "writing the report — thinking · 0:00") {
+		t.Errorf("no status said the model was thinking:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, l := range lines {
+		if strings.Contains(l, "\n") {
+			t.Errorf("a status carried more than its line: %q", l)
+		}
 	}
 	if got := streamedReasoning([]byte(`data: {"choices":[{"delta":{"reasoning_content":"x"}}]}`)); got != "x" {
 		t.Errorf("reasoning_content = %q, want x", got)
@@ -1810,5 +1832,39 @@ func TestOutOfCreditsIsNotAnOutputLimitRefusal(t *testing.T) {
 	}
 	if n := srv.requests(); n != 1 {
 		t.Errorf("a 402 for credits was sent %d times", n)
+	}
+}
+
+// The views learned the token total only with each new source, so it froze
+// when the research phase ended and the analysis, fact-check and report
+// added nothing until the run was over. The total now goes out after each
+// call that reports usage.
+func TestEachCallSendsTheTokenTotal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "1", "object": "chat.completion", "model": "test",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": `{"findings":[]}`}}},
+			"usage":   map[string]any{"prompt_tokens": 100, "completion_tokens": 25, "total_tokens": 125},
+		})
+	}))
+	defer srv.Close()
+	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: srv.URL, OpenAIModel: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var totals []int
+	a.(interface{ SetUsage(func(int)) }).SetUsage(func(n int) { mu.Lock(); totals = append(totals, n); mu.Unlock() })
+	if _, err := a.ResearchDetail(context.Background(), "q", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Analyze(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(totals, []int{125, 250}) {
+		t.Errorf("totals sent = %v, want the running total after each call: [125 250]", totals)
 	}
 }

@@ -2226,6 +2226,44 @@ func TestJSONLCarriesThinking(t *testing.T) {
 	}
 }
 
+// usageDuringAnalyze reports a call's usage from inside Analyze, as the real
+// assistant does when a call after the research phase ends.
+type usageDuringAnalyze struct {
+	*fakeAssistant
+	usage func(int)
+}
+
+func (s *usageDuringAnalyze) SetUsage(f func(int)) { s.usage = f }
+
+func (s *usageDuringAnalyze) Analyze(ctx context.Context, prompt string) (*agent.Analysis, error) {
+	if s.usage != nil {
+		s.usage(4321)
+	}
+	return s.fakeAssistant.Analyze(ctx, prompt)
+}
+
+// The token count froze when research ended: Token events went out only
+// with each new source, and the phases after it sent none until the run's
+// end. A call's usage is a Token event now, in the phase that spent it.
+func TestTokenTotalMovesAfterResearch(t *testing.T) {
+	fa := &usageDuringAnalyze{fakeAssistant: &fakeAssistant{}}
+	var stdout bytes.Buffer
+	if _, err := Run(context.Background(), Options{Question: "q", Assistant: fa, DepthMode: "quick",
+		JSONL: true, OutDir: t.TempDir(), Stdout: &stdout, Stderr: io.Discard}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, ln := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		var ev Event
+		if err := json.Unmarshal([]byte(ln), &ev); err == nil && ev.Type == Token && ev.Tokens == 4321 {
+			if ev.Phase != "Analyze" {
+				t.Errorf("the total went out in phase %q, want Analyze", ev.Phase)
+			}
+			return
+		}
+	}
+	t.Errorf("no token event carried the analysis's total:\n%s", stdout.String())
+}
+
 // ---- start screen ---------------------------------------------------------
 
 func TestAskQuestion(t *testing.T) {

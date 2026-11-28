@@ -209,7 +209,7 @@ function recovery(o: Outcome): string[] {
 	}
 	const limited = /rate.?limit|challenge/i.test(o.detail ?? "");
 	return [
-		`Checkpoint: ${o.checkpoint}. Call deep_research with resume set to it to continue without repeating finished searches.` +
+		`Checkpoint: ${o.checkpoint}. Call deep_research with resume set to it (or the user runs /research-resume) to continue without repeating finished searches.` +
 			(limited ? " The searches were rate-limited: offer to resume in about ten minutes, not right away." : ""),
 	];
 }

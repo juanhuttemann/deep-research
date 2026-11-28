@@ -42,6 +42,10 @@ export interface RunRecord {
 	md?: string;
 	checkpoint?: string;
 	status: string;
+	// request is a run that ended before its plan was made, when drsh
+	// keeps no checkpoint: nothing was spent, so resuming it is asking it
+	// again, with the settings and answers it had.
+	request?: NewRun;
 }
 
 export interface Result {
@@ -87,11 +91,24 @@ function failedStage(details: ResearchDetails, r: JsonlResult, what: string): Re
 	return { text: `deep-research run failed while ${what}: ${detail}`, details, isError: true };
 }
 
+// enter starts a stage of the call: the view's clock counts from here.
+function enter(details: ResearchDetails, stage: "clarify" | "plan" | "run"): void {
+	details.stage = stage;
+	details.started = Date.now();
+}
+
+// waiting is the view while the user answers the questions or reviews the
+// plan: nothing is working, so no spinner and no clock counting their time.
+function waiting(c: Call, details: ResearchDetails): void {
+	details.started = undefined;
+	c.hooks.update(details);
+}
+
 async function clarify(c: Call, run: NewRun, details: ResearchDetails): Promise<Result | undefined> {
 	if (run.answers) {
 		return undefined;
 	}
-	details.stage = "clarify";
+	enter(details, "clarify");
 	c.hooks.update(details);
 	const r = await stage(c, details, newRunArgs(c.settings, run, c.reports, "clarify"));
 	const failed = failedStage(details, r, "asking the clarifying questions");
@@ -101,7 +118,9 @@ async function clarify(c: Call, run: NewRun, details: ResearchDetails): Promise<
 		return undefined;
 	}
 	if (!c.hooks.ask) {
-		details.stage = "clarify";
+		// A finished call: Pi redraws it from these details, and a clock
+		// left set would spin there.
+		details.started = undefined;
 		const list = qs.map((q, i) => `${i + 1}. ${q.text}${q.options?.length ? ` (for example: ${q.options.join(" / ")})` : ""}`);
 		return {
 			text: [
@@ -113,6 +132,7 @@ async function clarify(c: Call, run: NewRun, details: ResearchDetails): Promise<
 			isError: false,
 		};
 	}
+	waiting(c, details);
 	const answers = await c.hooks.ask(qs);
 	if (answers === "stop") {
 		return stopped(details, "the clarifying questions were dismissed");
@@ -127,11 +147,12 @@ async function planned(c: Call, run: NewRun, review: boolean, details: ResearchD
 	if (!review || !c.hooks.review) {
 		return newRunArgs(c.settings, run, c.reports, "run");
 	}
-	details.stage = "plan";
+	enter(details, "plan");
 	c.hooks.update(details);
 	const r = await stage(c, details, newRunArgs(c.settings, run, c.reports, "plan"));
 	const failed = failedStage(details, r, "planning");
 	if (failed) return failed;
+	waiting(c, details);
 	const plan = await c.hooks.review(r.plan);
 	if (plan === "stop") {
 		return stopped(details, "the plan was not confirmed");
@@ -229,6 +250,16 @@ function finish(details: ResearchDetails, o: Outcome, question: string): Pick<Re
 	};
 }
 
+// beforeRun records a run that ended before its plan, stopped or failed,
+// with the request that asks it again. It recorded nothing, and
+// /research-resume after a stop while planning said no run had happened.
+// Questions handed back to the agent are not an end: they record nothing.
+function beforeRun(r: Result, run: NewRun): Result {
+	const status = r.details.outcome?.status;
+	if (!status) return r;
+	return { ...r, record: { question: run.question, status, request: structuredClone(run) } };
+}
+
 export async function research(c: Call): Promise<Result> {
 	const details: ResearchDetails = { question: questionOf(c.req), model: c.model, stage: "run" };
 	let args: string[];
@@ -236,12 +267,12 @@ export async function research(c: Call): Promise<Result> {
 		args = resumeArgs(c.req.checkpoint, c.reports);
 	} else {
 		const asked = await clarify(c, c.req.run, details);
-		if (asked) return asked;
+		if (asked) return beforeRun(asked, c.req.run);
 		const p = await planned(c, c.req.run, c.req.review, details);
-		if (!Array.isArray(p)) return p;
+		if (!Array.isArray(p)) return beforeRun(p, c.req.run);
 		args = p;
 	}
-	details.stage = "run";
+	enter(details, "run");
 	details.state = initialState();
 	c.hooks.update(details);
 	const r = await stage(c, details, args);

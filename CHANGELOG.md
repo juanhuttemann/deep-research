@@ -5,6 +5,64 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Pi extension: on the `/research` settings screen, ←/→ steps the setting
+  under the cursor through its values in place, wrapping at the ends.
+  Enter still opens the setting's full list, and the cursor now stays on
+  that setting afterwards instead of going back to Start.
+- Pi extension: `/research-resume` continues the last stopped, failed or
+  incomplete run in the session from its checkpoint, or the checkpoint
+  path given. A run stopped during its questions or planning, which drsh
+  keeps no checkpoint for, starts again with the same question, settings
+  and answers. Typed while a stopped run is still winding down, it waits
+  for it instead of saying a run is already going. Only the agent could
+  resume before, through `deep_research`'s `resume`.
+- Pi extension: token counts past a thousand are abbreviated, `10.1K`,
+  `1.5M`, in the live view and the usage notice after a run.
+- Pi extension: a running research shows a spinner and the time the
+  current stage has taken (m:ss), as drsh's own live frame does, and
+  running sub-agents spin. Through a long model call with no events the
+  view used to stand still and look hung.
+
+### Changed
+
+- The status of a streamed model call (`waiting for the model to start`,
+  `thinking · 0:12`, `15 claims (+2 in 1s) · 2:11`…) is sent every second
+  instead of every five, so the clock it carries counts in seconds on the
+  terminal frame, the serve page and in Pi, where it jumped five at a time.
+  "No new output" still waits ten seconds of silence. The status is now
+  one line: a reasoning model's latest 150 words no longer follow it after
+  a newline. Every view showed the first line only, the reasoning comes
+  whole as `thinking` events, and the `--jsonl` stream and the run's
+  `.json` timeline keep every status, so at one a second the copies would
+  have filled them.
+- Pi extension: the live view no longer shows the model's streaming
+  reasoning. Its latest words, replaced as they streamed, were too hard to
+  read; drsh's own frame dropped it for the same reason.
+
+### Fixed
+
+- Pi extension: `/research-stop` did not stop a run. Pi runs one submitted
+  command at a time and `/research` held it for the whole run, so the stop
+  waited behind the run it was meant to end. `/research` now returns once
+  the run has started.
+- The token count stopped when the research phase ended: drsh sent the
+  total only with each new source, so the analysis, fact-check and report,
+  most of a run's tokens, added nothing on the terminal frame, the serve
+  page or in Pi until the run was over. Each model call's usage is now a
+  `token` event, sent when the call ends (providers report usage then, so
+  the count moves per call, not during one).
+- Pi extension: on the `/research` settings screen with depth at instant,
+  changing a setting instant holds (with Enter, or now ←/→) dropped its
+  "(held by the depth)" mark while the value stayed held. The change did
+  nothing for that run and came into force unseen once depth was changed.
+  A held setting now stays held, and a warning under the list says to pick
+  another depth, as drsh's own `/mode` does. The plan review's "A plan
+  needs at least one sub-topic" now shows the same way, under its options,
+  instead of at the top of the screen. The "(held by the depth)" mark
+  is gone from every row: the warning says it when you try to change one.
+
 ## [0.39.0] - 2026-11-24
 
 ### Added

@@ -73,6 +73,21 @@ export function valueLabel(s: Setting, v: string): string {
 	return s.choices.find((o) => o.value === v)?.label ?? v;
 }
 
+// step is the choice next to v, forward (1) or back (-1), wrapping round
+// from the last to the first. A count at a number not among its choices
+// (topics 5 from a flag, with no 5 offered) steps to the nearest choice on
+// that side.
+export function step(s: Setting, v: string, dir: 1 | -1): string {
+	const values = s.choices.map((o) => o.value);
+	const i = values.indexOf(v);
+	if (i >= 0) {
+		return values[(i + dir + values.length) % values.length];
+	}
+	const n = Number(v);
+	const side = dir > 0 ? values.find((c) => Number(c) > n) : values.findLast((c) => Number(c) < n);
+	return side ?? (dir > 0 ? values[0] : values[values.length - 1]);
+}
+
 // implied is what the chosen values imply for the other settings, by key:
 // what instant holds at its least.
 export function implied(settings: Setting[], values: Record<string, string>): Record<string, string> {

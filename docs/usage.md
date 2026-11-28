@@ -547,10 +547,11 @@ tail -n 1 "$dir/events.jsonl"   # progress, and at the end the outcome
   background jobs do. (The terminal UI handles signals its own way, and
   `serve` is stopped by them, not its runs.)
 - During streamed planning, analysis, fact-check and summarization calls,
-  a `transient` `info` line arrives at least every five seconds — waiting
-  for the model to start, thinking, the count so far, or "no new output for Ns". While a reasoning
-  model thinks, `detail` holds the status line, a newline, and the latest
-  of its reasoning. The reasoning itself comes as `thinking` events, at most
+  a `transient` `info` line arrives every second — waiting for the model
+  to start, thinking, the count so far, or "no new output for Ns" after ten
+  seconds without any — each with the call's clock. `detail` is that one
+  line (in 0.39 and earlier, a reasoning model's status also carried its
+  latest reasoning after a newline). The reasoning itself comes as `thinking` events, at most
   one a second: `detail` is the text added since the last one, line breaks
   kept, so the `detail`s joined are the whole reasoning, and `status` is
   `start` on each model call's first. They carry the `phase` like any other
@@ -574,7 +575,9 @@ planning, with the check's result in `check` (`domain`, `status`, `pages`,
 `sample`, `chars`, `detail`).
 The other event types are `phase`, `subagent`, `search`, `read`, `verify`,
 `citation`, `token`, `report`, `thinking` and `error`; their fields are the
-`Event` struct in `internal/ui/events.go`. The `.json` artifact carries the
+`Event` struct in `internal/ui/events.go`. A `token` event carries the
+run's token total in `tokens`, sent after each model call that reports its
+usage. The `.json` artifact carries the
 structured result: analysis, fact-check, sources and the whole timeline.
 
 `drsh settings` prints the run settings as JSON: each setting's `key`,

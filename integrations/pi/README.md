@@ -32,8 +32,9 @@ setup, while Exa, Tavily and Firecrawl use their keys from `drsh setup`.
 ## What it adds
 
 - **`deep_research` tool.** Ask Pi to research something.
-  - While the run goes, the call shows the phase, each sub-agent, the
-    searches, pages and sources so far, and the model's reasoning.
+  - While the run goes, the call shows the phase with a spinner and how
+    long it has taken, each sub-agent, and the searches, pages and sources
+    so far.
   - When it ends, the call shows the confidence, the fact-check's verdicts,
     the claims it did not confirm, and the report's path.
   - Esc stops a run. It keeps a checkpoint, and resuming from it skips the
@@ -52,10 +53,16 @@ setup, while Exa, Tavily and Firecrawl use their keys from `drsh setup`.
   fact-checked.
 - **`/research [--topics 3 --follow-ups off --domains a,b …] question`**
   runs a research yourself.
-  - With no flags it opens the settings screen first.
+  - With no flags it opens the settings screen first: ←/→ steps the
+    setting under the cursor through its values, Enter lists them all.
   - You answer the clarifying questions and review the plan, then the run
     starts and the agent reports what it found.
-  - `/research-stop` ends the run.
+  - `/research-stop` ends the run, keeping a checkpoint.
+  - `/research-resume` continues the last stopped, failed or incomplete
+    run from its checkpoint without repeating finished searches;
+    `/research-resume <checkpoint>` continues another. A run stopped
+    before its plan was made has no checkpoint and nothing spent: it
+    starts again with the same question, settings and answers.
 - **`/research-model`** picks the model research runs use:
   - Pi's current model, the default.
   - Another of Pi's models, for example a cheaper one for the many calls a

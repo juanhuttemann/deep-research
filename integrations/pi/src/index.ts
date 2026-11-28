@@ -16,7 +16,7 @@ import { checkAnswers, clip, maxAnswerChars, maxAnswers, type Answer } from "./a
 import { startBridge, type Bridge } from "./bridge.ts";
 import type { Question } from "./events.ts";
 import { planLines, subTopicNames, withSubTopics, type Plan } from "./plan.ts";
-import { outcomeLines, progressLines, type ResearchDetails } from "./render.ts";
+import { count, outcomeLines, progressLines, type ResearchDetails, tickMs } from "./render.ts";
 import { research, type Hooks, type Request, type Result, type RunRecord } from "./research.ts";
 import { runPlain } from "./runner.ts";
 import {
@@ -28,9 +28,11 @@ import {
 	paramName,
 	parseCommandArgs,
 	parseSettings,
+	step,
 	valueLabel,
 	type Setting,
 } from "./settings.ts";
+import { type MenuResult, pick as pickWithNotice, SettingsMenu, startLabel } from "./menu.ts";
 
 const modelEntry = "deep-research-model";
 const runEntry = "deep-research-run";
@@ -67,27 +69,26 @@ async function newReportsDir(question: string): Promise<string> {
 	return mkdtemp(join(reportsRoot(), `${stamp}-${slug}-`));
 }
 
-// throttle limits f to once per ms. cancel drops a pending call: one firing
-// after the run ended would redraw progress the run already cleared.
-function throttle(f: () => void, ms: number): { call(): void; cancel(): void } {
-	let last = 0;
+// ticker draws the live view every ms while live() holds, not only when
+// drsh sends an event: a model call is a minute with no events, and the
+// spinner and clock must keep moving through it. While the view is still
+// (the user answering or reviewing) it draws on each update only, so a
+// tool call does not send the same view ten times a second. cancel stops
+// it: one firing after the run ended would redraw progress the run already
+// cleared.
+function ticker(f: () => void, ms: number, live: () => boolean): { call(): void; cancel(): void } {
 	let timer: NodeJS.Timeout | undefined;
 	return {
 		call() {
-			const wait = last + ms - Date.now();
-			if (wait <= 0) {
-				last = Date.now();
+			if (!timer) {
+				timer = setInterval(() => live() && f(), ms);
 				f();
-			} else if (!timer) {
-				timer = setTimeout(() => {
-					timer = undefined;
-					last = Date.now();
-					f();
-				}, wait);
+			} else if (!live()) {
+				f();
 			}
 		},
 		cancel() {
-			if (timer) clearTimeout(timer);
+			if (timer) clearInterval(timer);
 			timer = undefined;
 		},
 	};
@@ -124,7 +125,16 @@ export default function deepResearch(pi: ExtensionAPI) {
 	// by default: a run stopped or failed after it leaves none, and must not
 	// hide the one before.
 	let lastReport: RunRecord | undefined;
+	// lastRun is the last run of any outcome: /research-resume continues it
+	// when it left a checkpoint.
+	let lastRun: RunRecord | undefined;
 	let commandRun: AbortController | undefined;
+	// commandEnded settles when commandRun's run has wound down.
+	let commandEnded: Promise<void> = Promise.resolve();
+	// session counts session starts. A run stopped by a session switch ends
+	// after the next session has started; recorded there, it became that
+	// session's last run, the one /research-resume picks.
+	let session = 0;
 
 	async function loadSettings(): Promise<Setting[]> {
 		try {
@@ -197,6 +207,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 	function remember(rec: RunRecord | undefined): void {
 		if (!rec) return;
 		if (rec.json) lastReport = rec;
+		lastRun = rec;
 		pi.appendEntry(runEntry, rec);
 	}
 
@@ -225,10 +236,13 @@ export default function deepResearch(pi: ExtensionAPI) {
 		const edit = "Edit sub-topics";
 		const stop = "Cancel";
 		let plan = (raw ?? {}) as Plan;
+		// notice is why the last edit was not taken, shown under the options.
+		let notice: string | undefined;
 		try {
 			for (;;) {
 				ctx.ui.setWidget("deep-research-plan", planLines(plan));
-				const pick = await ctx.ui.select("Review the plan", [run, edit, stop], { signal });
+				const pick = await pickWithNotice(ctx, "Review the plan", [run, edit, stop], { notice, signal });
+				notice = undefined;
 				if (pick === undefined || pick === stop) return "stop";
 				if (pick === run) return plan;
 				const text = await untilAborted(
@@ -238,7 +252,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 				if (text === undefined) continue;
 				const edited = withSubTopics(plan, text);
 				if (!edited.sub_topics?.length) {
-					ctx.ui.notify("A plan needs at least one sub-topic", "warning");
+					notice = "A plan needs at least one sub-topic";
 					continue;
 				}
 				plan = edited;
@@ -255,13 +269,14 @@ export default function deepResearch(pi: ExtensionAPI) {
 		signal: AbortSignal | undefined,
 		hooks: Hooks,
 	): Promise<{ result: Result; bridge?: Bridge }> {
+		const started = session;
 		const s = await ensureSettings();
 		const { model, label } = resolveModel(ctx, modelName);
 		const reports = await newReportsDir(req.kind === "new" ? req.run.question : "resume");
 		const { value, bridge } = await withEndpoint(ctx, model, signal, (env) =>
 			research({ bin, settings: s, env, signal, reports, model: label, req, hooks }),
 		);
-		remember(value.record);
+		if (started === session) remember(value.record);
 		return { result: value, bridge };
 	}
 
@@ -348,9 +363,9 @@ export default function deepResearch(pi: ExtensionAPI) {
 				const p = params as Record<string, unknown>;
 				const req = requestOf(await ensureSettings(), p);
 				let latest: ResearchDetails | undefined;
-				const push = throttle(() => {
+				const push = ticker(() => {
 					if (latest) onUpdate?.({ content: [{ type: "text", text: progressLines(latest, plainTheme).join("\n") }], details: latest });
-				}, 250);
+				}, tickMs, () => latest?.started !== undefined);
 				const hooks: Hooks = {
 					update: (d) => {
 						latest = d;
@@ -441,11 +456,14 @@ export default function deepResearch(pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
+		session++;
 		choice = { kind: "pi" };
 		lastReport = undefined;
+		lastRun = undefined;
 		for (const e of ctx.sessionManager.getBranch()) {
 			if (e.type !== "custom") continue;
 			if (e.customType === modelEntry && e.data) choice = e.data as ModelChoice;
+			if (e.customType === runEntry && e.data) lastRun = e.data as RunRecord;
 			if (e.customType === runEntry && (e.data as RunRecord | undefined)?.json) lastReport = e.data as RunRecord;
 		}
 		try {
@@ -459,21 +477,62 @@ export default function deepResearch(pi: ExtensionAPI) {
 		commandRun?.abort();
 	});
 
-	// settingsScreen is the start screen: each setting at its value, what
-	// instant holds shown as held, Start first.
+	// settingsScreen is the start screen: each setting at its value, Start
+	// first.
+	// ←/→ step a row through its choices in place; Enter opens its full
+	// option list, and the cursor comes back to that row. A row the depth
+	// holds (instant) is not changed under it, as drsh's own /mode refuses:
+	// the depth wins, so a value chosen there would do nothing for this run
+	// and come into force unseen if the depth were changed after.
 	async function settingsScreen(ctx: ExtensionContext, s: Setting[], values: Record<string, string>): Promise<Record<string, string> | undefined> {
-		const start = "▶ Start";
-		for (;;) {
+		let selected = 0;
+		const rows = () => {
 			const eff = effective(s, values);
-			const held = implied(s, values);
-			const rows = s.map((x) => {
-				const mark = held[x.key] !== undefined && values[x.key] === undefined ? " (held by the depth)" : "";
-				return `${x.label}: ${valueLabel(x, eff[x.key])}${mark}`;
+			return s.map((x) => `${x.label}: ${valueLabel(x, eff[x.key])}`);
+		};
+		// heldWhy is why x cannot change now, or undefined when it can.
+		const heldWhy = (x: Setting) => {
+			if (implied(s, values)[x.key] === undefined) return undefined;
+			const by = s.find((y) => y.choices.find((o) => o.value === (values[y.key] ?? y.value))?.implies?.[x.key] !== undefined);
+			const name = by?.label ?? "depth";
+			const depth = by ? `${valueLabel(by, values[by.key] ?? by.value)} ${name}` : "the depth";
+			return `${depth} holds every option at its least: pick another ${name} to change ${x.label}`;
+		};
+		// The menu checks heldWhy before stepping; this is the select's guard.
+		const stepRow = (row: number, dir: 1 | -1) => {
+			const x = s[row];
+			if (heldWhy(x) === undefined) values = { ...values, [x.key]: step(x, effective(s, values)[x.key], dir) };
+		};
+		const title = "deep-research settings";
+		// Outside the terminal (Pi's RPC mode) custom components are not
+		// drawn and custom() answers undefined: the plain select, no arrows.
+		const viaSelect = async (): Promise<MenuResult> => {
+			const r = rows();
+			const pick = await ctx.ui.select(title, [startLabel, ...r]);
+			if (pick === undefined) return { kind: "cancel" };
+			return pick === startLabel ? { kind: "start" } : { kind: "edit", row: r.indexOf(pick) };
+		};
+		const viaMenu = () =>
+			ctx.ui.custom<MenuResult | undefined>((_tui, theme, kb, done) => {
+				const held = (row: number) => heldWhy(s[row]);
+				const menu = new SettingsMenu(theme, kb, { title, rows, step: stepRow, held, selected }, (r) => {
+					selected = menu.selectedLine;
+					done(r);
+				});
+				return menu;
 			});
-			const pick = await ctx.ui.select("deep-research settings", [start, ...rows]);
-			if (pick === undefined) return undefined;
-			if (pick === start) return values;
-			const x = s[rows.indexOf(pick)];
+		for (;;) {
+			const pick = (ctx.mode === "tui" ? await viaMenu() : undefined) ?? (await viaSelect());
+			if (pick.kind === "cancel") return undefined;
+			if (pick.kind === "start") return values;
+			const x = s[pick.row];
+			// Only the select lets Enter through on a held row: it has no
+			// line of its own to say why.
+			const why = heldWhy(x);
+			if (why !== undefined) {
+				ctx.ui.notify(why, "warning");
+				continue;
+			}
 			const opts = x.choices.map((o) => `${o.label}${o.note ? ` — ${o.note}` : ""}`);
 			const v = await ctx.ui.select(`${x.label}: ${x.help}`, opts);
 			if (v !== undefined) values = { ...values, [x.key]: x.choices[opts.indexOf(v)].value };
@@ -483,27 +542,72 @@ export default function deepResearch(pi: ExtensionAPI) {
 	pi.registerCommand("research", {
 		description: "Research a question: settings, clarifying questions and plan review, then a live run",
 		getArgumentCompletions: (prefix) => (settings.length ? completions(settings, prefix) : null),
-		handler: async (args, ctx) => {
-			if (commandRun) {
-				ctx.ui.notify("A research run is already going; /research-stop ends it", "warning");
-				return;
-			}
-			// Taken before the first await: the settings and the prompts wait
-			// on the user, and a second /research in that time passed the
-			// check above and started a run of its own; the first to end then
-			// cleared this while the other went on, past /research-stop.
-			const abort = new AbortController();
-			commandRun = abort;
-			try {
-				await researchCommand(args, ctx, abort);
-			} finally {
-				commandRun = undefined;
-			}
-		},
+		handler: (args, ctx) => commandRunWith(ctx, (abort) => researchCommand(args, ctx, abort)),
 	});
 
-	// researchCommand is /research once it holds commandRun.
-	async function researchCommand(args: string, ctx: ExtensionContext, abort: AbortController): Promise<void> {
+	pi.registerCommand("research-resume", {
+		description: "Resume the last stopped, failed or incomplete research run from its checkpoint (or the checkpoint path given); one stopped before its plan starts again",
+		handler: (args, ctx) =>
+			commandRunWith(ctx, async (abort) => {
+				const checkpoint = args.trim() || lastRun?.checkpoint;
+				if (checkpoint) return { running: backgroundRun(ctx, abort, { kind: "resume", checkpoint }) };
+				// Stopped before its plan: nothing was spent and drsh kept no
+				// checkpoint, so it is asked again as it was, settings and
+				// answers included, with the plan to review.
+				if (lastRun?.request) {
+					return { running: backgroundRun(ctx, abort, { kind: "new", run: structuredClone(lastRun.request), review: true }) };
+				}
+				// Only the last run is resumed: one that ended after a
+				// stopped run superseded it.
+				const why = lastRun ? `The last research run (${lastRun.status}) left nothing to resume` : "No research run in this session yet";
+				ctx.ui.notify(`${why}; /research-resume <checkpoint path> resumes another`, "info");
+				return undefined;
+			}),
+	});
+
+	// commandRunWith runs start holding commandRun, the one /research run
+	// /research-stop ends. start awaits its prompts and hands back the run
+	// it started, unawaited; undefined when it ended before a run.
+	async function commandRunWith(ctx: ExtensionContext, start: (abort: AbortController) => Promise<{ running: Promise<void> } | undefined>): Promise<void> {
+		// A stopped run takes a moment to wind down (drsh's exit, the
+		// bridge closing): a command typed in it was refused as "already
+		// going". Wait for it instead.
+		if (commandRun?.signal.aborted) await commandEnded;
+		if (commandRun) {
+			ctx.ui.notify("A research run is already going; /research-stop ends it", "warning");
+			return;
+		}
+		// Taken before the first await: the settings and the prompts wait
+		// on the user, and a second /research in that time passed the
+		// check above and started a run of its own; the first to end then
+		// cleared this while the other went on, past /research-stop.
+		const abort = new AbortController();
+		commandRun = abort;
+		let running: Promise<void> | undefined;
+		try {
+			running = (await start(abort))?.running;
+		} finally {
+			if (!running) commandRun = undefined;
+		}
+		// The run goes on after the handler returns: Pi runs one submitted
+		// command at a time, and a handler that awaited the whole run left
+		// /research-stop queued behind it until the run had ended on its own.
+		// backgroundRun catches its own failures; the catch is for one in
+		// its cleanup, which would otherwise be an unhandled rejection.
+		if (running) {
+			commandEnded = running
+				.catch((err) => ctx.ui.notify(`research failed: ${(err as Error).message}`, "error"))
+				.finally(() => {
+					if (commandRun === abort) commandRun = undefined;
+				});
+		}
+	}
+
+	// researchCommand is /research once it holds commandRun: the prompts,
+	// awaited, then the run, started and handed back unawaited (in an
+	// object: await would unwrap a promise returned bare, and wait for the
+	// whole run again); undefined when the prompts ended it before a run.
+	async function researchCommand(args: string, ctx: ExtensionContext, abort: AbortController): Promise<{ running: Promise<void> } | undefined> {
 		let s: Setting[];
 		try {
 			s = await ensureSettings();
@@ -532,15 +636,22 @@ export default function deepResearch(pi: ExtensionAPI) {
 		}
 		// /research-stop while the prompts were open.
 		if (abort.signal.aborted) return;
-		const status = throttle(() => {
+		const req: Request = { kind: "new", run: { question, values, domains: parsed.domains }, review: true };
+		return { running: backgroundRun(ctx, abort, req) };
+	}
+
+	// backgroundRun is a /research run from its clarifying questions on (or
+	// a resumed one), with its live view; every failure ends in a notice, so
+	// the promise never rejects.
+	async function backgroundRun(ctx: ExtensionContext, abort: AbortController, req: Request): Promise<void> {
+		const status = ticker(() => {
 			if (!latest) return;
 			const lines = progressLines(latest, ctx.ui.theme);
 			ctx.ui.setWidget("deep-research", lines);
 			ctx.ui.setStatus("deep-research", `research: ${latest.state?.phase || latest.stage}`);
-		}, 250);
+		}, tickMs, () => latest?.started !== undefined);
 		let latest: ResearchDetails | undefined;
 		try {
-			const req: Request = { kind: "new", run: { question, values, domains: parsed.domains }, review: true };
 			const { result, bridge } = await run(ctx, req, undefined, abort.signal, {
 				update: (d) => {
 					latest = d;
@@ -554,7 +665,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 				{ triggerTurn: result.details.outcome !== undefined && result.details.outcome.status !== "cancelled" },
 			);
 			if (bridge?.usage.totalTokens) {
-				ctx.ui.notify(`research used ${bridge.usage.totalTokens} tokens ($${bridge.usage.cost.total.toFixed(4)}) on ${bridge.modelName}`, "info");
+				ctx.ui.notify(`research used ${count(bridge.usage.totalTokens)} tokens ($${bridge.usage.cost.total.toFixed(4)}) on ${bridge.modelName}`, "info");
 			}
 		} catch (err) {
 			ctx.ui.notify(`research failed: ${(err as Error).message}`, "error");
@@ -566,7 +677,7 @@ export default function deepResearch(pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("research-stop", {
-		description: "Stop the research run /research started; it keeps a checkpoint to resume from",
+		description: "Stop the research run /research started; it keeps a checkpoint /research-resume continues from",
 		handler: async (_args, ctx) => {
 			if (!commandRun) {
 				ctx.ui.notify("No /research run is going (a run the agent started stops with Esc)", "info");

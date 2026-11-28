@@ -66,9 +66,6 @@ export interface RunState {
 	tokens: number;
 	// status is the latest transient line: which model is asked, a retry.
 	status: string;
-	// thinking is the tail of the reasoning streaming now, for a model that
-	// thinks for minutes before its first word.
-	thinking: string;
 	errors: string[];
 	domains: DomainCheck[];
 }
@@ -83,14 +80,10 @@ export function initialState(): RunState {
 		sources: 0,
 		tokens: 0,
 		status: "",
-		thinking: "",
 		errors: [],
 		domains: [],
 	};
 }
-
-// thinkingTail bounds the reasoning kept: the view shows a line or two of it.
-const thinkingTail = 240;
 
 // maxErrors bounds the non-fatal errors kept for the view; the full list is
 // in the run's timeline.
@@ -130,7 +123,6 @@ export function reduce(s: RunState, e: DrshEvent): RunState {
 		case "phase":
 			s.phase = e.phase ?? s.phase;
 			s.phaseDetail = e.detail ?? "";
-			s.thinking = "";
 			break;
 		case "subagent":
 			subagent(s, e);
@@ -145,7 +137,6 @@ export function reduce(s: RunState, e: DrshEvent): RunState {
 		case "report":
 			s.phase = e.phase || "Report";
 			s.phaseDetail = e.detail ?? "";
-			s.thinking = "";
 			if (e.sources) s.sources = e.sources;
 			break;
 		case "citation":
@@ -155,10 +146,6 @@ export function reduce(s: RunState, e: DrshEvent): RunState {
 			break;
 		case "info":
 			if (e.transient && e.detail) s.status = e.detail.split("\n")[0];
-			break;
-		case "thinking":
-			s.thinking = (e.status === "start" ? "" : s.thinking) + (e.detail ?? "");
-			s.thinking = s.thinking.slice(-thinkingTail);
 			break;
 		case "error":
 			if (e.detail) s.errors = [...s.errors, e.detail].slice(-maxErrors);

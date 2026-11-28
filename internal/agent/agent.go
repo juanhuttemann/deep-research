@@ -677,9 +677,12 @@ type impl struct {
 	// history: the live UI shows it in one row replaced in place. Unset, it
 	// falls back to logf.
 	statusf func(string)
-	// thinkf receives a streamed call's reasoning as it grows, whole rather
-	// than the tail a status carries; first marks a call's first piece.
+	// thinkf receives a streamed call's reasoning as it grows, whole; first
+	// marks a call's first piece.
 	thinkf func(text, part string, first bool)
+	// usagef receives the run's token total each time a call reports its
+	// usage.
+	usagef func(total int)
 	model  string
 	// baseURL is kept so a transport failure can name the endpoint that was
 	// actually tried, which is the one thing the reader has to check.
@@ -1084,14 +1087,23 @@ func providerUnreachable(baseURL, setting string, err error) error {
 }
 
 // progressInterval throttles streamed progress. The first update always
-// reports — that is the one that proves the model has started answering —
-// and later ones are spaced so a long phase does not flood the activity feed.
-const progressInterval = 5 * time.Second
+// reports — that is the one that proves the model has started answering.
+// Each line carries the call's clock, and every view shows it as sent: at
+// five seconds the clock on the status row jumped 0:05, 0:10, … while the
+// view's own clock beside it ticked each second. The lines are short (a
+// status, no reasoning), so one a second costs the timeline little.
+const progressInterval = time.Second
+
+// stallAfter is how long a stream may stop growing before the status says
+// so. It is its own constant, not a multiple of progressInterval: at one
+// second, twice the interval called a two-second pause a stall.
+const stallAfter = 10 * time.Second
 
 // progressTick is how often a silent stream is re-checked. It is finer than
 // progressInterval so the reporter's own throttle, not the tick phase,
-// decides when a line is due: at a 5s tick a 12s stall could pass unreported.
-const progressTick = time.Second
+// decides when a line is due: at a tick equal to the interval, a tick
+// landing just short of it skipped a second.
+const progressTick = 250 * time.Millisecond
 
 // progressUnit measures a partial response in something a reader can judge.
 // Characters were the old unit: comparable across nothing, and for the JSON
@@ -1206,7 +1218,7 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 			if strings.TrimSpace(partial) == "" {
 				if !thought || due {
 					thought = true
-					say(thinkingStatus(thinking, t.Sub(start)))
+					say(thinkingStatus(t.Sub(start)))
 				}
 				return
 			}
@@ -1222,7 +1234,7 @@ func newStreamReporter(label string, unit progressUnit, now func() time.Time, lo
 			}
 			texted, shown = true, n
 			say(fmt.Sprintf("%s%s · %s", text, delta, clockTime(t.Sub(start))))
-		case due && t.Sub(lastGrowth) >= 2*progressInterval:
+		case due && t.Sub(lastGrowth) >= stallAfter:
 			say(fmt.Sprintf("no new output for %ds · %s", int(t.Sub(lastGrowth).Seconds()), clockTime(t.Sub(start))))
 		}
 	}
@@ -1236,18 +1248,15 @@ func blank(partial, thinking string) bool {
 	return strings.TrimSpace(partial) == "" && strings.TrimSpace(thinking) == ""
 }
 
-// thinkingStatus is the status while the model reasons: one status line, then
-// the latest of the reasoning after a newline, for the live frame to wrap
-// under it. Quoted on the status row itself, it was cut to a fragment too
-// short to read.
-func thinkingStatus(thinking string, elapsed time.Duration) string {
-	words := strings.Fields(thinking)
-	return "thinking · " + clockTime(elapsed) + "\n" + strings.Join(words[max(0, len(words)-thinkingTailWords):], " ")
+// thinkingStatus is the status while the model reasons: the line alone. It
+// used to carry the latest 150 words of the reasoning after a newline, but
+// every view (the terminal frame, the serve page, the Pi extension) shows
+// the first line only, the reasoning reaches them whole as Thinking events,
+// and each status is kept in the timeline: once a second, the copies would
+// have filled the run's .json.
+func thinkingStatus(elapsed time.Duration) string {
+	return "thinking · " + clockTime(elapsed)
 }
-
-// thinkingTailWords is how much reasoning a status carries: more than the
-// few rows a frame shows under the status, whatever the terminal's width.
-const thinkingTailWords = 150
 
 // clockTime renders elapsed time as m:ss.
 func clockTime(d time.Duration) string {
@@ -1400,7 +1409,10 @@ func (a *impl) addUsage(resp *agent.Response) {
 		// two halves.
 		n = u.InputTokenCount + u.OutputTokenCount
 	}
-	a.tokens.Add(n)
+	total := a.tokens.Add(n)
+	if n > 0 && a.usagef != nil {
+		a.usagef(int(total))
+	}
 }
 
 // ModelInfo names the configured model and the provider's host. The host is
@@ -1681,10 +1693,19 @@ func (a *impl) SetStatus(f func(string)) { a.statusf = f }
 
 // SetThinking wires the channel for a streamed call's reasoning, sent whole
 // as it grows. Like SetStatus it is not part of Assistant: unset, the
-// reasoning shows only as the tail each status carries. part names the call
+// reasoning is not shown. part names the call
 // when the Driver runs a phase as several at once (see WithPart): their
 // reasoning streams interleaved, and only the part keeps each call's whole.
 func (a *impl) SetThinking(f func(text, part string, first bool)) { a.thinkf = f }
+
+// SetUsage wires the channel for the token total, sent after each call
+// that reports usage. The views learned the total only with each new
+// source, so it froze when the research phase ended: analysis, fact-check
+// and report, most of a run's tokens, showed only once it was over. A
+// provider reports usage once a call ends (stream_options.include_usage
+// puts it in the last chunk), so the total moves per call, never estimated
+// in between. Like SetStatus it is not part of Assistant.
+func (a *impl) SetUsage(f func(total int)) { a.usagef = f }
 
 func (a *impl) thinking(text, part string, first bool) {
 	if text != "" && a.thinkf != nil {
@@ -1697,8 +1718,8 @@ func (a *impl) status(msg string) {
 		a.statusf(msg)
 		return
 	}
-	// Only a frame that replaces the status in place can show the reasoning
-	// after its first line; a log would repeat most of it every five seconds.
+	// A log keeps the first line only: a status is one line, and a log
+	// has no row to replace, so anything after it would repeat each time.
 	line, _, _ := strings.Cut(msg, "\n")
 	a.log(line)
 }

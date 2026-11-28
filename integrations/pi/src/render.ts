@@ -1,6 +1,8 @@
 // How a research call looks in Pi's transcript: the run's progress while it
-// goes (phase, one line per sub-agent, counts, the latest status or
-// reasoning), then what it found.
+// goes (phase with a spinner and its clock, one line per sub-agent, counts,
+// the latest status), then what it found. As in drsh's own live frame, the
+// streaming reasoning is not shown: its latest words, replaced as they
+// streamed, were too hard to read and follow.
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RunState, SubAgent } from "./events.ts";
@@ -20,18 +22,52 @@ export interface ResearchDetails {
 	question: string;
 	model?: string;
 	stage: "clarify" | "plan" | "run" | "done";
+	// started is when the stage began, in ms since the epoch: the clock
+	// beside the spinner counts from it. Unset, nothing is working (the
+	// user is answering or reviewing): no spinner and no clock.
+	started?: number;
 	state?: RunState;
 	outcome?: OutcomeDetails;
 }
 
-function glyph(a: SubAgent, t: Theme): string {
+// spinnerFrames and tickMs are drsh's (spinnerFrames, tickInterval in
+// internal/ui/render.go): the frame is the time over tickMs, so every view
+// drawn at the same moment shows the same one.
+const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+export const tickMs = 120;
+
+function spinner(now: number, t: Theme): string {
+	return t.fg("accent", spinnerFrames[Math.floor(now / tickMs) % spinnerFrames.length]);
+}
+
+// clock is a duration as drsh writes it (formatDuration): m:ss, and h:mm:ss
+// past an hour.
+export function clock(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	const s = String(total % 60).padStart(2, "0");
+	return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+// count abbreviates a large count: 10063 is 10.1K, 1500000 is 1.5M, and
+// below a thousand the number as is. One decimal, as drsh's formatCount,
+// dropped when it is .0 (1K, not 1.0K).
+export function count(n: number): string {
+	// From 999,950 the thousands round to 1000.0: that is 1M, not 1000K.
+	const [div, unit] = n >= 999_950 ? [1e6, "M"] : n >= 1_000 ? [1e3, "K"] : [1, ""];
+	if (!unit) return String(n);
+	return `${(n / div).toFixed(1).replace(/\.0$/, "")}${unit}`;
+}
+
+function glyph(a: SubAgent, t: Theme, now: number): string {
 	switch (a.state) {
 		case "done":
 			return t.fg("success", "●");
 		case "error":
 			return t.fg("error", "✗");
 		case "running":
-			return t.fg("accent", "◐");
+			return spinner(now, t);
 		default:
 			return t.fg("dim", "○");
 	}
@@ -49,11 +85,15 @@ const stageLabel: Record<ResearchDetails["stage"], string> = {
 	done: "Done",
 };
 
-export function progressLines(d: ResearchDetails, t: Theme): string[] {
+// progressLines is the live view at now: the spinner's frame and the clock
+// are read from it, so a view redrawn with no new event still moves.
+export function progressLines(d: ResearchDetails, t: Theme, now = Date.now()): string[] {
 	const s = d.state;
 	const lines: string[] = [];
 	const phase = s?.phase || stageLabel[d.stage];
-	lines.push(`${t.fg("accent", phase)}${s?.phaseDetail ? t.fg("muted", ` · ${s.phaseDetail}`) : ""}`);
+	const time = d.started ? t.fg("muted", ` · ${clock(now - d.started)}`) : "";
+	const spin = d.started ? `${spinner(now, t)} ` : "";
+	lines.push(`${spin}${t.fg("accent", phase)}${s?.phaseDetail ? t.fg("muted", ` · ${s.phaseDetail}`) : ""}${time}`);
 	if (!s) {
 		return lines;
 	}
@@ -64,14 +104,12 @@ export function progressLines(d: ResearchDetails, t: Theme): string[] {
 	for (const a of s.subagents) {
 		const pct = a.progress ? t.fg("muted", ` ${a.progress}%`) : "";
 		const line = a.line && a.state !== "done" ? t.fg("dim", ` ${oneLine(a.line, 70)}`) : "";
-		lines.push(`  ${glyph(a, t)} ${oneLine(a.name, 50)}${pct}${line}`);
+		lines.push(`  ${glyph(a, t, now)} ${oneLine(a.name, 50)}${pct}${line}`);
 	}
 	const counts = [`${s.searches} searches`, `${s.reads} pages`, `${s.sources} sources`];
-	if (s.tokens) counts.push(`${s.tokens} tokens`);
+	if (s.tokens) counts.push(`${count(s.tokens)} tokens`);
 	lines.push(t.fg("muted", counts.join(" · ")));
-	if (s.thinking) {
-		lines.push(t.fg("dim", t.italic(`… ${oneLine(s.thinking, 110)}`)));
-	} else if (s.status) {
+	if (s.status) {
 		lines.push(t.fg("dim", oneLine(s.status, 110)));
 	}
 	for (const e of s.errors.slice(-2)) {

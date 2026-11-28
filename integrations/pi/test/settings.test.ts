@@ -10,6 +10,7 @@ import {
 	paramName,
 	parseCommandArgs,
 	settingArg,
+	step,
 } from "../src/settings.ts";
 import { settings } from "./helpers.ts";
 
@@ -78,4 +79,25 @@ test("/research reads a setting named by its CLI flag as drsh reads the flag", (
 	assert.throws(() => parseCommandArgs(s, "--no-follow-ups on q"), /takes no value; use --follow-ups/);
 	assert.throws(() => parseCommandArgs(s, "--no-follow-ups=off q"), /not true or false/);
 	assert.equal(fu("--follow-ups on q"), "on", "the setting's own name keeps on/off");
+});
+
+test("step walks a setting's choices both ways and wraps at the ends", () => {
+	const mode = get("mode");
+	const values = mode.choices.map((o) => o.value);
+	const last = values[values.length - 1];
+	assert.equal(step(mode, values[0], 1), values[1]);
+	assert.equal(step(mode, values[1], -1), values[0]);
+	assert.equal(step(mode, last, 1), values[0], "past the last comes the first");
+	assert.equal(step(mode, values[0], -1), last, "before the first comes the last");
+	const fu = get("follow-ups");
+	assert.equal(step(fu, step(fu, "on", 1), 1), "on", "a two-way setting flips back");
+});
+
+test("step from a count no choice offers goes to the nearest choice on that side", () => {
+	const words = get("words");
+	const n = words.choices.map((o) => Number(o.value));
+	const between = String(n[1] + 1);
+	assert.equal(step(words, between, 1), String(n[2]));
+	assert.equal(step(words, between, -1), String(n[1]));
+	assert.equal(step(words, String(n[n.length - 1] + 1), 1), String(n[0]), "past every choice wraps to the first");
 });

@@ -41,7 +41,8 @@ test("with no one to ask, the questions go back to the model and nothing is sear
 	assert.equal(r.isError, false);
 	assert.match(r.text, /Which workload\? \(for example: web servers \/ CLI tools\)/);
 	assert.match(r.text, /answers set to/);
-	assert.deepEqual(c.argv().map((a) => a.includes("--clarify-only")), [true], "only the clarify stage ran");
+	assert.deepEqual(c.argv().map((a) => a.includes("--clarify-only")), [true], "only the clarify stage ran");	// Pi redraws a finished call from its details: a clock left there spun.
+	assert.equal(r.details.started, undefined, "the handed-back questions kept a running clock");
 });
 
 test("answers asked in Pi reach the run, and the run's report comes back", async () => {
@@ -169,4 +170,32 @@ test("the runner does not start a run already cancelled", async () => {
 	const r = await runJsonl(fakeDrsh, [], { signal: abort.signal });
 	assert.equal(r.aborted, true);
 	assert.equal(r.done, undefined);
+});
+
+// The view kept a running clock while the user answered the questions or
+// reviewed the plan, as if the model were still working.
+test("while the user answers or reviews, the view's clock is stopped, and each stage restarts it", async () => {
+	let c: ReturnType<typeof call>;
+	const seen: Array<[string, number | undefined]> = [];
+	const last = () => c.updates.at(-1)!;
+	c = call(
+		{ ...fresh(), review: true },
+		{
+			ask: async (qs) => {
+				seen.push(["ask", last().started]);
+				return qs.map((q) => ({ question: q.text, answer: "web servers" }));
+			},
+			review: async (plan) => {
+				seen.push(["review", last().started]);
+				return plan;
+			},
+		},
+	);
+	await c.run;
+	assert.deepEqual(seen, [
+		["ask", undefined],
+		["review", undefined],
+	]);
+	const started = (stage: string) => c.updates.find((u) => u.stage === stage && u.started !== undefined)?.started;
+	for (const stage of ["clarify", "plan", "run"]) assert.ok(started(stage), `the ${stage} stage had no clock`);
 });

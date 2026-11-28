@@ -1116,10 +1116,11 @@ func (r *Renderer) agentLines() []string {
 	// a minute. This row is what says the run is still working, and on what.
 	if r.statusShown() {
 		text := r.detail
-		// The status's first line only. The reasoning after it was wrapped
-		// in rows under this one, and its latest words, replaced as they
-		// streamed, were too hard to read and follow; the serve page shows
-		// it whole, from the thinking events.
+		// The status's first line only. A run recorded by drsh 0.39 or
+		// earlier carries the latest reasoning after it, which was wrapped
+		// in rows under this one and, replaced as it streamed, too hard to
+		// read and follow; the serve page shows it whole, from the thinking
+		// events.
 		if r.status != "" {
 			text, _, _ = strings.Cut(r.status, "\n")
 		}

@@ -960,9 +960,9 @@ function status(text) {
   // The status row is for the phases after the research, whose single model
   // calls leave the tree still (statusShown, render.go).
   if (!text || phase.toLowerCase() === "research") { $("status").hidden = true; return; }
-  // A thinking model's status is a line, a newline, then its latest reasoning:
-  // the terminal's only view of it. Here the thinking block holds it whole,
-  // so the row keeps the line.
+  // A status is one line. A run recorded by drsh 0.39 or earlier has a
+  // thinking model's latest reasoning after a newline; the thinking block
+  // holds it whole, so the row keeps the line.
   $("status-now").textContent = text.split("\n")[0];
   $("status").hidden = false;
 }
