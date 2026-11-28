@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-28
+
 ### Changed
 
 - Pi extension: a `/research` run's result is drawn as a card (status,
