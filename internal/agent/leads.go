@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,8 @@ type leads struct {
 	// owner/name, in the order found.
 	repos     []string
 	repoState map[string]tools.RepoStatus
+	// checked is whether GitHub has been asked about them (checkRepos).
+	checked bool
 }
 
 // planLeadsBlock is today's search results for the question, for the
@@ -67,30 +70,68 @@ type leads struct {
 // A replan of the same question on the same source list (new clarifying
 // answers) reuses the results, so cycling the reading in the brief does not
 // search again; a changed --domains list searches anew, or open-web results
-// would plan a run confined to other sites.
+// would plan a run confined to other sites. The clarifier's search is the
+// same one, so a plan after it searches nothing more.
 func (a *impl) planLeadsBlock(ctx context.Context, question string) string {
+	return leadsBlock(a.checkedLeads(ctx, question))
+}
+
+// questionLeads are the question's search results, from the cache or
+// searched now within leadsWait with status shown; nil when there is no web search or both
+// searches failed. GitHub is not asked here: the clarifier does not need it,
+// and a --clarify-only process would spend the API's hourly allowance on
+// lookups its plan, a process of its own, makes again.
+func (a *impl) questionLeads(ctx context.Context, question, status string) *leads {
 	if a.searchTools == nil {
-		return ""
+		return nil
 	}
-	key := question + "\x00" + strings.Join(a.searchTools.Domains, ",")
-	l, ok := a.cachedLeads(key)
-	if !ok {
-		sctx, cancel := context.WithTimeout(ctx, leadsWait)
-		defer cancel()
-		a.log("searching the question to plan from today's web")
-		var err error
-		l, err = a.gatherLeads(sctx, flat(question))
-		if err != nil {
-			// A plan from memory is what every run had before; a search
-			// that fails is no reason to have none.
-			a.log(fmt.Sprintf("planning without search results: %v", err))
-			return ""
-		}
-		a.leadsMu.Lock()
-		a.leadsFor, a.leads = key, l
-		a.leadsMu.Unlock()
+	key := leadsKey(question, a.searchTools.Domains)
+	if l, ok := a.cachedLeads(key); ok {
+		return l
 	}
-	return leadsBlock(l)
+	sctx, cancel := context.WithTimeout(ctx, leadsWait)
+	defer cancel()
+	a.log(status)
+	l, err := a.gatherLeads(sctx, flat(question))
+	if err != nil {
+		// A plan or a check from memory is what every run had before; a
+		// search that fails is no reason to have none.
+		a.log(fmt.Sprintf("going on without search results: %v", err))
+		return nil
+	}
+	a.storeLeads(key, l)
+	return l
+}
+
+// checkedLeads are questionLeads with what GitHub says of the repositories
+// among them, asked once per set of results.
+// The searches and the lookups share one leadsWait, as they did when the
+// plan made both: the plan must not wait twice as long when nothing was
+// searched before it.
+func (a *impl) checkedLeads(ctx context.Context, question string) *leads {
+	sctx, cancel := context.WithTimeout(ctx, leadsWait)
+	defer cancel()
+	l := a.questionLeads(sctx, question, "searching the question to plan from today's web")
+	if l == nil || l.checked {
+		return l
+	}
+	// The cached results are the clarifier's too: checked on a copy, so a
+	// reader of the cache never sees them half-annotated.
+	c := &leads{found: slices.Clone(l.found), status: slices.Clone(l.status)}
+	a.checkRepos(sctx, c)
+	c.checked = true
+	a.storeLeads(leadsKey(question, a.searchTools.Domains), c)
+	return c
+}
+
+func leadsKey(question string, domains []string) string {
+	return question + "\x00" + strings.Join(domains, ",")
+}
+
+func (a *impl) storeLeads(key string, l *leads) {
+	a.leadsMu.Lock()
+	a.leadsFor, a.leads = key, l
+	a.leadsMu.Unlock()
 }
 
 func (a *impl) cachedLeads(key string) (*leads, bool) {
@@ -99,9 +140,8 @@ func (a *impl) cachedLeads(key string) (*leads, bool) {
 	return a.leads, a.leads != nil && a.leadsFor == key
 }
 
-// gatherLeads runs the question's search and its status search at once,
-// then asks GitHub about the repositories they turned up. Either search
-// alone is enough to plan from.
+// gatherLeads runs the question's search and its status search at once.
+// Either search alone is enough to plan from.
 func (a *impl) gatherLeads(ctx context.Context, question string) (*leads, error) {
 	var found, status []tools.SearchResult
 	var errFound, errStatus error
@@ -113,9 +153,7 @@ func (a *impl) gatherLeads(ctx context.Context, question string) (*leads, error)
 		return nil, errFound
 	}
 	seen := map[string]bool{}
-	l := &leads{found: newLeads(found, seen), status: newLeads(status, seen)}
-	a.checkRepos(ctx, l)
-	return l, nil
+	return &leads{found: newLeads(found, seen), status: newLeads(status, seen)}, nil
 }
 
 // newLeads are res without the pages seen holds, which it then holds.

@@ -246,6 +246,8 @@ func (o Options) scopedPlan(ctx context.Context, sink *MultiSink, ask askFunc) (
 	if o.ClarifyOnly {
 		// The sites are the plan's to check: the stage after this one runs
 		// the same check, and fetched twice each would take twice as long.
+		// The clarifier's search still keeps to them, unchecked.
+		o.scopeUnchecked()
 		return nil, nil, o.clarifyOnly(ctx, sink)
 	}
 	domains := o.Domains

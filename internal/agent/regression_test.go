@@ -1542,34 +1542,68 @@ func TestEveryCallCarriesTodaysDate(t *testing.T) {
 // and how many searches were made.
 func planWithSearch(t *testing.T, results, status string, repos map[string]string, readings ...[]Clarification) ([]string, int) {
 	t.Helper()
-	var mu sync.Mutex
-	var users []string
+	d := newSearchDoubles(t, results, status, repos)
+	for _, r := range readings {
+		if _, err := d.a.Plan(context.Background(), "Which static site generator is best?", Breadth{Max: 4}, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return d.userMessages(), int(d.searches.Load())
+}
+
+// searchDoubles is an assistant on a model double that answers every call
+// with one sub-topic, a SearXNG double and a GitHub double, as
+// planWithSearch describes them, counting what each was asked.
+type searchDoubles struct {
+	a                  Assistant
+	mu                 sync.Mutex
+	users              []string
+	searches, ghLookup atomic.Int32
+}
+
+func (d *searchDoubles) userMessages() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.users)
+}
+
+func newSearchDoubles(t *testing.T, results, status string, repos map[string]string) *searchDoubles {
+	t.Helper()
+	d := &searchDoubles{}
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			Stream   bool `json:"stream"`
 			Messages []struct {
 				Role    string          `json:"role"`
 				Content json.RawMessage `json:"content"`
 			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		mu.Lock()
+		d.mu.Lock()
 		for _, m := range req.Messages {
 			if m.Role == "user" {
 				var text string
 				if json.Unmarshal(m.Content, &text) != nil {
 					text = string(m.Content)
 				}
-				users = append(users, text)
+				d.users = append(d.users, text)
 			}
 		}
-		mu.Unlock()
+		d.mu.Unlock()
+		if !req.Stream {
+			// The clarifier's call is not streamed.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "1", "object": "chat.completion", "model": "m",
+				"choices": []any{map[string]any{"index": 0, "finish_reason": "stop",
+					"message": map[string]any{"role": "assistant", "content": `{"questions":[]}`}}}})
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{\\\"subtopics\\\":[{\\\"name\\\":\\\"A\\\"}]}\"}}]}\n\ndata: [DONE]\n\n")
 	}))
-	defer model.Close()
-	var searches atomic.Int32
+	t.Cleanup(model.Close)
 	sx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		searches.Add(1)
+		d.searches.Add(1)
 		body := results
 		if strings.Contains(r.URL.Query().Get("q"), "archived deprecated") {
 			body = status
@@ -1581,8 +1615,9 @@ func planWithSearch(t *testing.T, results, status string, repos map[string]strin
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, body)
 	}))
-	defer sx.Close()
+	t.Cleanup(sx.Close)
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d.ghLookup.Add(1)
 		body, ok := repos[strings.TrimPrefix(r.URL.Path, "/repos/")]
 		if !ok {
 			http.NotFound(w, r)
@@ -1590,19 +1625,65 @@ func planWithSearch(t *testing.T, results, status string, repos map[string]strin
 		}
 		fmt.Fprint(w, body)
 	}))
-	defer gh.Close()
+	t.Cleanup(gh.Close)
 	a, err := New(Config{OpenAIAPIKey: "k", OpenAIBaseURL: model.URL, OpenAIModel: "m",
 		SearXNGURL: sx.URL, Scraper: "none", ModelCallTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.(*impl).github.BaseURL = gh.URL
-	for _, r := range readings {
-		if _, err := a.Plan(context.Background(), "Which static site generator is best?", Breadth{Max: 4}, r); err != nil {
-			t.Fatal(err)
-		}
+	d.a = a
+	return d
+}
+
+// Asked from memory alone, the clarifier took a short product name for the
+// senses the model knew of before its cutoff and asked which of those was
+// meant, none of them what the name commonly means today; the plan's search,
+// which would have shown it, came only after. The clarifier now gets the
+// question's results, without the status search's or GitHub's, and the plan
+// that follows reuses that search and asks GitHub then.
+func TestClarifierIsShownTodaysSearchResults(t *testing.T) {
+	results := `{"results":[{"title":"Zeta, the terminal coding agent","url":"https://github.com/example/zeta","content":"Zeta runs in your terminal."}]}`
+	status := `{"results":[{"title":"Old Zeta chatbot discontinued","url":"https://news.example/zeta","content":"Shut down."}]}`
+	d := newSearchDoubles(t, results, status, map[string]string{"example/zeta": `{"archived":false,"pushed_at":"2026-11-20T08:00:00Z"}`})
+	ctx := context.Background()
+	q := "How do I extend the Zeta agent?"
+	if _, err := d.a.Clarify(ctx, q); err != nil {
+		t.Fatal(err)
 	}
-	return users, int(searches.Load())
+	users := d.userMessages()
+	if len(users) != 1 || !strings.Contains(users[0], "Zeta, the terminal coding agent") ||
+		!strings.Contains(users[0], "what its names refer to today") {
+		t.Fatalf("clarify prompt lacks the question's results: %q", users)
+	}
+	if strings.Contains(users[0], "Old Zeta chatbot") || strings.Contains(users[0], "[GitHub:") {
+		t.Errorf("clarify prompt carries the plan's status results: %s", users[0])
+	}
+	if n := d.ghLookup.Load(); n != 0 {
+		t.Errorf("the clarifier asked GitHub %d times, want none", n)
+	}
+	if _, err := d.a.Plan(ctx, q, Breadth{Max: 4}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := d.searches.Load(); n != 2 {
+		t.Errorf("searches = %d, want the clarifier's pair reused by the plan", n)
+	}
+	if plan := d.userMessages()[1]; !strings.Contains(plan, "[GitHub: last commit 2026-11-20] Zeta") ||
+		!strings.Contains(plan, "Old Zeta chatbot") {
+		t.Errorf("plan prompt lacks the status results or GitHub's answer: %s", plan)
+	}
+}
+
+// Without web search, or with it failing, the clarifier asks from memory,
+// as it did before it searched.
+func TestClarifierWorksWithoutSearchResults(t *testing.T) {
+	d := newSearchDoubles(t, "", "", nil)
+	if _, err := d.a.Clarify(context.Background(), "q"); err != nil {
+		t.Fatal(err)
+	}
+	if u := d.userMessages(); len(u) != 1 || strings.Contains(u[0], "today's web") {
+		t.Errorf("clarify prompt with failed searches: %q", u)
+	}
 }
 
 // The planner named a comparison's alternatives from the model's memory,

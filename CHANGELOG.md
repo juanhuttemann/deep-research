@@ -5,6 +5,16 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The clarifying questions were asked from the model's memory alone, before
+  any search: a name with a newer common meaning got questions offering only
+  the senses the model knew from before its cutoff. With web search on, the
+  clarifier now sees the question's search results first. A plan made in
+  the same process (the terminal) reuses that search; the serve page and
+  the Pi extension, which plan in a second `--answers` run, search again
+  there.
+
 ## [0.40.1] - 2026-11-28
 
 ### Fixed

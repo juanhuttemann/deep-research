@@ -302,8 +302,11 @@ writes its plan to FILE instead of stdout.
 
 A question can leave open what to research: "the best heat pump" for which
 market, which kind, which climate. Before planning, one low-effort call
-(`clarifier_instructions`, `reasoning_effort.clarify`) checks for that and
-asks up to three questions, each with two to four readings, the likeliest
+(`clarifier_instructions`, `reasoning_effort.clarify`) checks for that,
+with the question's web search results in front of it when search is on
+(on the `--domains` sites when there are some; a plan made in the same
+run reuses that search, while after `--clarify-only` the `--answers` run
+searches again), and asks up to three questions, each with two to four readings, the likeliest
 first. A clear question gets none, and the run goes straight to its plan.
 
 In the terminal each question lists its readings, then `your own answer`,

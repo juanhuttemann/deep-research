@@ -66,6 +66,23 @@ func (o Options) checkSources(ctx context.Context, sink *MultiSink, domains []st
 	return usable, nil
 }
 
+// scopeUnchecked confines the search to the run's sites as listed, with
+// none checked: the clarifier searches the question, and open-web results
+// could offer a reading that a run confined to other sites cannot research.
+// A list that does not parse leaves the scope open: the plan's stage, which
+// parses and checks it, fails the run with the reason.
+func (o Options) scopeUnchecked() {
+	sc, ok := o.Assistant.(agent.SourceScoper)
+	if !ok {
+		return
+	}
+	domains, err := tools.ParseDomains(o.Domains)
+	if err != nil {
+		domains = nil
+	}
+	sc.ScopeTo(domains)
+}
+
 // sourceTable is the preflight's result for the terminal: one line per domain
 // and what the run will use.
 func sourceTable(checks []agent.DomainCheck, usable int) string {

@@ -92,7 +92,11 @@ from.
 
 Before the plan, a run someone can answer (the terminal, or a
 `--clarify-only` caller such as the serve page) asks the clarifier
-(`agent.Assistant.Clarify`, one call) what the question leaves open. Its
+(`agent.Assistant.Clarify`, one call) what the question leaves open. With
+web search on, that call carries the question's own search results
+(`impl.questionLeads`, the plan's search below, made first): asked from
+memory, a clarifier offered only the senses of a name it knew before its
+cutoff. Its
 questions are put to the reader by `ui.Run` (the picker on the terminal,
 radio groups on the page from the `clarify` event) and the answers
 (`agent.Clarification`, aliased in `ui`) go on the plan beside the
@@ -125,9 +129,12 @@ the results with only an instruction to leave out what they showed
 archived, a planner at low effort still planned an archived project in six
 plans of eight; made to write the judgement first, in none of eight. The
 searches sit inside `Plan`, as `ResearchDetail`'s does, before the one
-model call and bounded to 20 seconds; they are cached per question and
-source list, so the brief's replans reuse them, and if both fail the plan
-is made from memory as before. A trace records the plan, not the results
+model call, unless the clarifier made them first, and with the GitHub
+lookups they are bounded to 20 seconds; they are cached per question and
+source list, so a plan after the clarifier's call in the same process and
+the brief's replans reuse them (a `--clarify-only` process's results end
+with it). GitHub is asked only at the plan, once per set of results. If
+both searches fail, the plan is made from memory as before. A trace records the plan, not the results
 it was made from, so a replay cannot show why a plan chose what it did.
 The planner is given a breadth (`agent.Breadth`): by default a
 ceiling, the depth tier's sub-topic count. Under it the planner first

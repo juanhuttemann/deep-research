@@ -4382,3 +4382,34 @@ func proposeIn(t *testing.T, e *Editor, find, with string) func() {
 		}
 	}
 }
+
+// clarifyScopeAssistant records the search's scope when the clarifier is
+// asked, which searches the question under it.
+type clarifyScopeAssistant struct {
+	*scopingAssistant
+	scopeAtClarify []string
+}
+
+func (s *clarifyScopeAssistant) Clarify(ctx context.Context, q string) ([]agent.Question, error) {
+	s.scopeAtClarify = s.scoped
+	return s.scopingAssistant.Clarify(ctx, q)
+}
+
+// The clarifier searches the question, and a --clarify-only run left the
+// search on the open web though the run was confined to a few sites: its
+// questions could offer a reading those sites cannot research. The search
+// now keeps to the list, which is still checked only at the plan's stage.
+func TestClarifyOnlySearchesTheRunsSites(t *testing.T) {
+	a := &clarifyScopeAssistant{scopingAssistant: &scopingAssistant{fakeAssistant: &fakeAssistant{}}}
+	_, err := Run(context.Background(), Options{Question: "q", Assistant: a, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+		JSONL: true, Clarify: true, ClarifyOnly: true, Domains: []string{"https://Go.dev/doc"}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !slices.Equal(a.scopeAtClarify, []string{"go.dev"}) {
+		t.Errorf("clarified under scope %q, want the listed site", a.scopeAtClarify)
+	}
+	if a.checked != nil {
+		t.Errorf("the clarify stage checked %q; the plan's stage does", a.checked)
+	}
+}
