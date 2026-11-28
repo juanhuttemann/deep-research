@@ -5,6 +5,8 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-11-28
+
 ### Fixed
 
 - A report edit left pending in a conversation while the same question was
