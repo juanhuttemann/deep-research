@@ -42,9 +42,9 @@ export interface RunRecord {
 	md?: string;
 	checkpoint?: string;
 	status: string;
-	// request is a run that ended before its plan was made, when drsh
-	// keeps no checkpoint: nothing was spent, so resuming it is asking it
-	// again, with the settings and answers it had.
+	// request is a run that ended before drsh's first checkpoint, which it
+	// writes once the plan is taken: nothing was searched, so resuming it is
+	// asking it again, with the settings, answers and approved plan it had.
 	request?: NewRun;
 }
 
@@ -105,7 +105,7 @@ function waiting(c: Call, details: ResearchDetails): void {
 }
 
 async function clarify(c: Call, run: NewRun, details: ResearchDetails): Promise<Result | undefined> {
-	if (run.answers) {
+	if (run.answers || run.plan) {
 		return undefined;
 	}
 	enter(details, "clarify");
@@ -142,8 +142,11 @@ async function clarify(c: Call, run: NewRun, details: ResearchDetails): Promise<
 }
 
 // planned is the command line for the run itself: as asked, or the plan the
-// user reviewed and maybe edited.
+// user reviewed and maybe edited, which is kept on run.plan.
 async function planned(c: Call, run: NewRun, review: boolean, details: ResearchDetails): Promise<string[] | Result> {
+	if (run.plan !== undefined) {
+		return withPlan(c, run, run.plan);
+	}
 	if (!review || !c.hooks.review) {
 		return newRunArgs(c.settings, run, c.reports, "run");
 	}
@@ -152,11 +155,22 @@ async function planned(c: Call, run: NewRun, review: boolean, details: ResearchD
 	const r = await stage(c, details, newRunArgs(c.settings, run, c.reports, "plan"));
 	const failed = failedStage(details, r, "planning");
 	if (failed) return failed;
+	// An instant plan is not reviewed, as drsh's own brief does not ask: it
+	// searches the question as asked, and drsh puts any plan marked instant
+	// back to that, so an edited sub-topic did nothing.
+	if ((r.plan as { instant?: unknown } | undefined)?.instant === true) {
+		return withPlan(c, run, r.plan);
+	}
 	waiting(c, details);
 	const plan = await c.hooks.review(r.plan);
 	if (plan === "stop") {
 		return stopped(details, "the plan was not confirmed");
 	}
+	run.plan = plan;
+	return withPlan(c, run, plan);
+}
+
+async function withPlan(c: Call, run: NewRun, plan: unknown): Promise<string[]> {
 	const file = join(c.reports, "plan.json");
 	await writeFile(file, JSON.stringify(plan, null, 2));
 	return planRunArgs(file, c.reports, run.trace);
@@ -277,5 +291,14 @@ export async function research(c: Call): Promise<Result> {
 	c.hooks.update(details);
 	const r = await stage(c, details, args);
 	const { o, isError } = await outcome(c, r);
-	return { text: content(o), isError, ...finish(details, o, details.question) };
+	const done = finish(details, o, details.question);
+	// Ended before drsh's first checkpoint, at the step into the run: a
+	// plan approved here was only in plan.json, and /research-resume found
+	// neither a checkpoint nor a request and said nothing was left. drsh's
+	// own status, not the outcome's: a run that searched to the end and
+	// failed only to write its report is not one to search again.
+	if (c.req.kind === "new" && done.record && !o.checkpoint && r.done?.status !== "complete") {
+		done.record.request = structuredClone(c.req.run);
+	}
+	return { text: content(o), isError, ...done };
 }

@@ -77,6 +77,59 @@ test("a reviewed plan is what runs", async () => {
 	assert.ok(!last.some((a) => a.startsWith("--prompt=")), "a plan carries its question");
 });
 
+// Stopped at the step into the run, before drsh's first checkpoint, a run
+// whose plan had been approved and edited recorded neither a checkpoint nor
+// a request: /research-resume said nothing was left, and the edits were
+// only in plan.json.
+test("a run stopped before its first checkpoint keeps the approved plan to run again", async () => {
+	const abort = new AbortController();
+	const edited = (plan: unknown) => ({ ...(plan as object), sub_topics: [{ id: "1", name: "Edited" }] });
+	const c = call(
+		{ ...fresh(), review: true },
+		{ ask: async () => [], review: async (plan) => edited(plan), update: (d) => void (d.stage === "run" && abort.abort()) },
+		{ FAKE_QUESTIONS: "none" },
+		abort.signal,
+	);
+	const r = await c.run;
+	assert.equal(r.details.outcome?.status, "cancelled");
+	assert.equal(r.record?.checkpoint, undefined);
+	const request = r.record?.request;
+	assert.deepEqual((request?.plan as { sub_topics?: unknown })?.sub_topics, [{ id: "1", name: "Edited" }], JSON.stringify(r.record));
+	// Run again, it is run as approved: no questions, no plan, no review.
+	const again = call({ kind: "new", run: request!, review: true }, {
+		ask: async () => assert.fail("asked again"),
+		review: async () => assert.fail("reviewed again"),
+	});
+	assert.equal((await again.run).details.outcome?.status, "complete");
+	const argv = again.argv();
+	assert.equal(argv.length, 1, JSON.stringify(argv));
+	const planArg = argv[0].find((a) => a.startsWith("--plan="));
+	assert.ok(planArg, JSON.stringify(argv[0]));
+	assert.match(readFileSync(planArg.slice("--plan=".length), "utf8"), /Edited/);
+});
+
+// A run drsh finished whose report was not written is a failure, but one
+// that searched to the end: run again, it would search it all again.
+test("a finished run whose report was not written is not offered to run again", async () => {
+	const r = await call(fresh(), { ask: async () => [] }, { FAKE_QUESTIONS: "none", FAKE_NO_REPORT: "1" }).run;
+	assert.equal(r.details.outcome?.status, "failed");
+	assert.equal(r.record?.request, undefined, JSON.stringify(r.record));
+});
+
+// An instant plan was offered for editing, and drsh rebuilt it from the
+// question: the edit the user approved did nothing.
+test("an instant plan is not offered for review", async () => {
+	const c = call({ ...fresh(), review: true }, { ask: async () => [], review: async () => assert.fail("an instant plan was reviewed") }, {
+		FAKE_QUESTIONS: "none",
+		FAKE_INSTANT: "1",
+	});
+	assert.equal((await c.run).details.outcome?.status, "complete");
+	const last = c.argv().at(-1) ?? [];
+	const planArg = last.find((a) => a.startsWith("--plan="));
+	assert.ok(planArg, JSON.stringify(last));
+	assert.equal(JSON.parse(readFileSync(planArg.slice("--plan=".length), "utf8")).instant, true, "not the plan drsh made");
+});
+
 test("dismissing the questions or the plan stops before anything is spent", async () => {
 	const q = await call(fresh(), { ask: async () => "stop" }).run;
 	assert.equal(q.details.outcome?.status, "cancelled");

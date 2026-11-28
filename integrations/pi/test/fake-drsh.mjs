@@ -50,7 +50,9 @@ if (args.includes("--plan-only") && process.env.FAKE_HANG_PLAN) {
 	});
 	setInterval(() => {}, 1000);
 } else if (args.includes("--plan-only")) {
-	process.stdout.write(JSON.stringify({ type: "plan", plan: { question: "q", sub_topics: [{ id: "1", name: "Benchmarks" }] } }) + "\n");
+	// FAKE_INSTANT plans as drsh does at the instant depth: the plan says so.
+	const plan = { question: "q", sub_topics: [{ id: "1", name: "Benchmarks" }], ...(process.env.FAKE_INSTANT ? { instant: true } : {}) };
+	process.stdout.write(JSON.stringify({ type: "plan", plan }) + "\n");
 	process.stdout.write(JSON.stringify({ type: "done", status: "complete" }) + "\n");
 	process.exit(0);
 } else if (["kill", "torn", "empty"].includes(process.env.FAKE_HANG)) {
@@ -76,7 +78,8 @@ if (args.includes("--plan-only") && process.env.FAKE_HANG_PLAN) {
 		process.exit(2);
 	}
 	mkdirSync(reports, { recursive: true });
-	writeFileSync(join(reports, "run.md"), "# Report\n\nRust is faster [1].\n");
+	// FAKE_NO_REPORT finishes the run with its report not written.
+	if (!process.env.FAKE_NO_REPORT) writeFileSync(join(reports, "run.md"), "# Report\n\nRust is faster [1].\n");
 	copyFileSync(join(fixtures, process.env.FAKE_JSON ?? "run.json"), join(reports, "run.json"));
 	replay(fixture);
 }

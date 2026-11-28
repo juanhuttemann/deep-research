@@ -4261,3 +4261,124 @@ func TestNestedEmphasisIsBounded(t *testing.T) {
 		t.Errorf("shallow nesting: got %q, want %q", got, want)
 	}
 }
+
+// A terminal conversation left an edit pending while the same question was
+// run again into the same directory. The rerun cleared the edits, so the
+// pending edit's head (0) still matched, and saving it put the old report's
+// text on the new run as its revision, exported with the old run's header.
+func TestPendingEditIsNotSavedOverARerun(t *testing.T) {
+	path, m := editRun(t)
+	e := newTestEditor(t, path, m)
+	e.Begin()
+	if _, err := e.Propose([]Replace{{Find: "1990", With: "1991"}}, "", false); err != nil {
+		t.Fatal(err)
+	}
+	e.End()
+	rerun := *m
+	rerun.Timestamp = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	rerun.Report = "## Price\n\nAcme now costs 15 euros."
+	if _, err := WriteMetadata(rerun, filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	e.Begin()
+	if _, err := e.Save(); !errors.Is(err, ErrReplaced) {
+		t.Fatalf("save of an edit of the replaced run = %v, want ErrReplaced", err)
+	}
+	if o := e.End(); o.Pending || !strings.Contains(o.Note, "replaced by a new run") {
+		t.Errorf("outcome = %+v, want the edit dropped and the rerun said", o)
+	}
+	ed, err := LoadEdits(path)
+	if err != nil || len(ed.Revisions) != 0 || ed.Active() != nil {
+		t.Errorf("the rerun has edits %+v (%v), want none", ed, err)
+	}
+	if got, _ := LoadMeta(path); got == nil || got.Report != rerun.Report {
+		t.Errorf("the rerun's report is %+v", got)
+	}
+	if md, _ := filepath.Glob(strings.TrimSuffix(path, ".json") + ".r*"); len(md) != 0 {
+		t.Errorf("revision exports were written for the rerun: %v", md)
+	}
+	if _, _, err := UndoRevision(path, m, 0); !errors.Is(err, ErrReplaced) {
+		t.Errorf("undo on the replaced run = %v, want ErrReplaced", err)
+	}
+}
+
+// Two sessions made the same edit. One saved and undid it; the other, still
+// at the old head, saved it too, and the digest of the save already made
+// answered "saved as revision 1, it is the report now" while the original
+// was in effect.
+func TestDuplicateSaveAfterUndoIsStale(t *testing.T) {
+	path, m := editRun(t)
+	a, b := newTestEditor(t, path, m), newTestEditor(t, path, m)
+	for _, e := range []*Editor{a, b} {
+		if _, err := e.Propose([]Replace{{Find: "1990", With: "1991"}}, "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := b.Save(); !errors.Is(err, ErrStale) {
+		t.Errorf("save after the same edit was undone = revision %d, %v; want ErrStale", r.N, err)
+	}
+	if ed, _ := LoadEdits(path); ed.Active() != nil || len(ed.Revisions) != 1 {
+		t.Errorf("edits = %+v, want the original in effect and one revision", ed)
+	}
+}
+
+// The serve page's tabs on one run share its editor. Tab B's proposal
+// replaced tab A's, and "save it" typed in A saved B's, which A's reader
+// had never seen: only the buttons were bound to the edit they showed.
+func TestConversationSavesOnlyTheEditItWasShown(t *testing.T) {
+	path, m := editRun(t)
+	e := newTestEditor(t, path, m)
+	turn := tabTurn(e)
+	tabA := turn("", proposeIn(t, e, "1990", "1991"))
+	tabB := turn("", proposeIn(t, e, "12 euros", "13 euros"))
+	if tabA.Proposal == "" || tabB.Proposal == "" || tabA.Proposal == tabB.Proposal {
+		t.Fatalf("proposals %q and %q", tabA.Proposal, tabB.Proposal)
+	}
+	if !strings.Contains(tabB.Note, "proposed an edit") || strings.Contains(tabB.Note, "revised") {
+		t.Errorf("tab B amended tab A's edit: %+v", tabB)
+	}
+	var saveErr error
+	o := turn(tabA.Proposal, func() { _, saveErr = e.Save() })
+	if saveErr == nil || !strings.Contains(saveErr.Error(), "another tab") || o.Pending {
+		t.Errorf("tab A's save = %v, outcome %+v; want nothing pending to it", saveErr, o)
+	}
+	if ed, _ := LoadEdits(path); ed.Active() != nil {
+		t.Errorf("tab A saved tab B's edit: %+v", ed.Active())
+	}
+	// A conversation never shown an edit has none pending, not a lost one.
+	if turn("", func() { _, saveErr = e.Save() }); saveErr == nil || strings.Contains(saveErr.Error(), "another tab") {
+		t.Errorf("a new conversation's save = %v", saveErr)
+	}
+	// Tab B's edit is still pending to tab B.
+	if !e.Holds(tabB.Proposal) {
+		t.Error("tab A's turn dropped tab B's edit")
+	}
+	if o := turn(tabB.Proposal, func() { _, saveErr = e.Save() }); saveErr != nil || o.Revision != 1 {
+		t.Errorf("tab B's save = %v, outcome %+v", saveErr, o)
+	}
+}
+
+// tabTurn is one turn of a page conversation that was shown the edit shown.
+func tabTurn(e *Editor) func(shown string, f func()) Outcome {
+	return func(shown string, f func()) Outcome {
+		e.Begin()
+		e.Shown(shown)
+		f()
+		return e.End()
+	}
+}
+
+func proposeIn(t *testing.T, e *Editor, find, with string) func() {
+	return func() {
+		t.Helper()
+		if _, err := e.Propose([]Replace{{Find: find, With: with}}, "", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -5,6 +5,40 @@ on Keep a Changelog, and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- A report edit left pending in a conversation while the same question was
+  run again into the same reports directory could be saved onto the new
+  run, whose report then became an edit of the old one, exported with the
+  old run's header. A save or undo now checks that the run is still the
+  one the conversation was about and refuses the edit otherwise.
+- On the serve page, two tabs on one report shared its pending edit: an
+  edit proposed in one replaced the other's, and "save it" typed in the
+  other saved an edit its reader had never seen. Each conversation now
+  saves only the edit it was shown.
+- Saving an edit again after that same edit had been saved and undone in
+  another session said "saved as revision N, it is the report now" while
+  the original was in effect. It is refused as stale.
+- Pi extension: moving to another branch with `/tree` kept the previous
+  branch's last report, last run and research model, so `research_ask`
+  and `/research-resume` used a run the branch never had.
+- Pi extension: a run stopped at the step into the search, after its plan
+  was approved but before drsh's first checkpoint, left `/research-resume`
+  with nothing to resume and the plan's edits only on disk. It now runs
+  the approved plan again.
+- Pi extension: a new sub-topic typed in the plan review lost a leading
+  number or dash, `3.5 vs 4 throughput` becoming `5 vs 4 throughput`. A
+  number or a dash is taken as a list marker only with a space after it.
+- Pi extension: an instant run offered its plan for editing, and drsh,
+  which searches the question as asked at that depth, ignored the edit.
+  The review is skipped for an instant plan, as in drsh's own brief.
+- Pi extension: after a report, the agent offered "a new deep_research"
+  and follow-ups "via research_ask", its own tool names, which a Pi user
+  cannot use. It now suggests `/research` (with `--mode deep` for more
+  depth) without promising a fact-checked result, and offers to answer
+  follow-ups from the run's saved files, saying those answers are not
+  fact-checked.
+
 ## [0.40.0] - 2026-11-28
 
 ### Added

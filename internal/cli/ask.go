@@ -52,6 +52,9 @@ type talk struct {
 	m    *ui.Meta
 	ed   *ui.Editor
 	chat *agent.Chat
+	// shown, on the page, is the proposal this conversation was shown: its
+	// editor is shared by every tab on the run (ui.Editor.Shown).
+	shown *string
 }
 
 // chatAbout starts a conversation about the run whose .json is at path.
@@ -95,7 +98,11 @@ func (t *talk) connect(turns []agent.Turn) error {
 // the editor's, so it is given even when the answer failed: a save made
 // before the call failed is still saved.
 func (t *talk) ask(ctx context.Context, q string) (string, ui.Outcome, error) {
-	if t.ed.Begin() {
+	changed := t.ed.Begin()
+	if t.shown != nil {
+		t.ed.Shown(*t.shown)
+	}
+	if changed {
 		if err := t.connect(t.chat.Turns); err != nil {
 			return "", t.ed.End(), err
 		}
@@ -258,8 +265,9 @@ func (w *webTalks) talk(run string) (*webTalk, error) {
 }
 
 // ask answers a question from the page about a run in the reports
-// directory; web passes only a bare .json name there.
-func (w *webTalks) ask(ctx context.Context, run string, turns []web.Turn, q string) (string, any, error) {
+// directory; web passes only a bare .json name there. shown is the edit
+// pending in the page's conversation, which alone "save it" may save.
+func (w *webTalks) ask(ctx context.Context, run string, turns []web.Turn, shown, q string) (string, any, error) {
 	d, err := w.load()
 	if err != nil {
 		return "", nil, err
@@ -273,7 +281,7 @@ func (w *webTalks) ask(ctx context.Context, run string, turns []web.Turn, q stri
 	for _, turn := range turns {
 		ts = append(ts, agent.Turn(turn))
 	}
-	chat := &talk{d: d, m: t.m, ed: t.ed}
+	chat := &talk{d: d, m: t.m, ed: t.ed, shown: &shown}
 	if err := chat.connect(ts); err != nil {
 		return "", nil, err
 	}

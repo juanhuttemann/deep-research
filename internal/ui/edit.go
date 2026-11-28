@@ -37,6 +37,14 @@ type Editor struct {
 	// changed is whether the turn changed the revision in effect, so the
 	// conversation is given the report it now reads.
 	changed bool
+	// parked is a proposal another conversation on this editor was shown,
+	// set aside for the turn of one that was not (Shown), and proposed is
+	// whether the turn made one of its own, which replaces it.
+	parked   *Proposal
+	proposed bool
+	// lost is that this conversation was shown an edit, which the parked
+	// one replaced.
+	lost bool
 }
 
 // Proposal is an edit of the report not yet saved: the text it would save,
@@ -82,6 +90,7 @@ func (e *Editor) Begin() (changed bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.did, e.diff, e.changed = nil, nil, false
+	e.parked, e.proposed, e.lost = nil, false, false
 	if ed, err := LoadEdits(e.path); err == nil {
 		changed = ed.Head != e.edits.Head
 		e.edits = ed
@@ -93,6 +102,20 @@ func (e *Editor) Begin() (changed bool) {
 	return changed
 }
 
+// Shown binds the turn just begun to the proposal its conversation was
+// shown, id (empty: none). The serve page's tabs share one editor per run,
+// and a "save it" in one saved the proposal another tab had made since,
+// which its reader never saw. Any other proposal is set aside for the turn:
+// to this conversation nothing is pending. It is back after the turn unless
+// the turn made a proposal of its own, or changed the report under it.
+func (e *Editor) Shown(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.proposal != nil && e.proposalIDLocked() != id {
+		e.parked, e.proposal, e.lost = e.proposal, nil, id != ""
+	}
+}
+
 // End finishes the turn and says what it did.
 func (e *Editor) End() Outcome {
 	e.mu.Lock()
@@ -100,6 +123,10 @@ func (e *Editor) End() Outcome {
 	o := Outcome{Note: strings.Join(slices.Compact(e.did), "; "), Diff: e.diff, Pending: e.proposal != nil,
 		Proposal: e.proposalIDLocked(), Revision: e.activeLocked(), Changed: e.changed}
 	e.did, e.diff, e.changed = nil, nil, false
+	if p := e.parked; p != nil && e.proposal == nil && !e.proposed && p.Head == e.edits.Head {
+		e.proposal = p
+	}
+	e.parked, e.proposed, e.lost = nil, false, false
 	return o
 }
 
@@ -204,6 +231,7 @@ func (e *Editor) Propose(edits []Replace, note string, fresh bool) ([]DiffLine, 
 		return nil, errors.New("the edits leave the report as it is")
 	}
 	e.proposal = &Proposal{Head: e.edits.Head, Base: e.activeLocked(), Report: text, Note: note}
+	e.proposed = true
 	e.diff = Diff(saved, text)
 	if amend {
 		e.did = append(e.did, "revised the proposed edit")
@@ -251,12 +279,25 @@ func (e *Editor) Discard() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.proposal == nil {
-		return errors.New("no edit is pending")
+		return e.noneErr("no edit is pending")
 	}
 	e.proposal = nil
 	e.diff = nil
 	e.did = append(e.did, "discarded the proposed edit")
 	return nil
+}
+
+// errReplacedElsewhere is a save or discard in a conversation whose edit
+// another conversation on the run replaced with its own.
+var errReplacedElsewhere = errors.New("the edit proposed here was replaced by one proposed in another tab on this report; ask for this edit again to save it")
+
+// noneErr is the error for nothing pending to this conversation: none at
+// all, or another conversation's edit in place of the one it was shown.
+func (e *Editor) noneErr(none string) error {
+	if e.lost {
+		return errReplacedElsewhere
+	}
+	return errors.New(none)
 }
 
 // Save saves the proposal pending as the report's next revision.
@@ -265,17 +306,21 @@ func (e *Editor) Save() (Revision, error) {
 	defer e.mu.Unlock()
 	p := e.proposal
 	if p == nil {
-		return Revision{}, errors.New("no edit is pending: propose one first")
+		return Revision{}, e.noneErr("no edit is pending: propose one first")
 	}
 	before := e.edits.ActiveReport(e.meta)
 	r, err := SaveRevision(e.path, e.meta, p.Head, p.Report, p.Note)
 	if ed, lerr := LoadEdits(e.path); lerr == nil {
 		e.edits = ed
 	}
-	if errors.Is(err, ErrStale) {
+	switch {
+	case errors.Is(err, ErrStale):
 		e.proposal = nil
 		e.did = append(e.did, "dropped the proposed edit: another session changed the report")
 		e.changed = true
+	case errors.Is(err, ErrReplaced):
+		e.proposal = nil
+		e.did = append(e.did, "dropped the proposed edit: the report was replaced by a new run of the same question")
 	}
 	if err != nil {
 		return Revision{}, err
@@ -298,7 +343,7 @@ func (e *Editor) Undo() (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	before := e.edits.ActiveReport(e.meta)
-	undone, now, err := UndoRevision(e.path, e.edits.Head)
+	undone, now, err := UndoRevision(e.path, e.meta, e.edits.Head)
 	if ed, lerr := LoadEdits(e.path); lerr == nil {
 		e.edits = ed
 	}

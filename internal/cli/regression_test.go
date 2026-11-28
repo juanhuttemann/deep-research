@@ -1155,3 +1155,46 @@ func TestPageAskStaysInTheReportsDirectory(t *testing.T) {
 		t.Error("a symlink out of reports was read")
 	}
 }
+
+// Two tabs on one run share its editor. Tab B's proposal replaced tab A's,
+// and the model's save_edit, asked for by "save it" in tab A, saved B's
+// edit, which A's reader had never been shown.
+func TestWebSaveItSavesOnlyThisTabsEdit(t *testing.T) {
+	url, _ := toolProvider(t,
+		[2]string{"edit_report", `{"edits":[{"find":"Acme is fast.","with":"Acme is quick."}]}`},
+		[2]string{"", "Here is edit A."},
+		[2]string{"edit_report", `{"edits":[{"find":"Acme is fast.","with":"Acme is slow."}]}`},
+		[2]string{"", "Here is edit B."},
+		[2]string{"save_edit", `{}`},
+		[2]string{"", "Saved."})
+	dir := t.TempDir()
+	path, err := ui.WriteMetadata(ui.Meta{Question: "Is Acme worth it?", Report: "Acme is fast."}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: url,
+		OpenAIModel: "test", ModelCallTimeout: 5 * time.Second}}}
+	talks := newWebTalks(func() (Deps, error) { return deps, nil }, dir)
+	run := filepath.Base(path)
+	proposal := func(got any) string { p, _ := got.(outcomePage); return p.Proposal }
+	_, a, err := talks.ask(context.Background(), run, nil, "", "Say quick")
+	if err != nil || proposal(a) == "" {
+		t.Fatalf("tab A = %+v, %v", a, err)
+	}
+	_, b, err := talks.ask(context.Background(), run, nil, "", "Say slow")
+	if err != nil || proposal(b) == "" {
+		t.Fatalf("tab B = %+v, %v", b, err)
+	}
+	if _, _, err := talks.ask(context.Background(), run, []web.Turn{{Question: "Say quick", Answer: "Here is edit A."}}, proposal(a), "save it"); err != nil {
+		t.Fatal(err)
+	}
+	if md, _, _ := talks.active(run); md != "Acme is fast." {
+		t.Errorf("tab A's \"save it\" saved %q", md)
+	}
+	if _, err := talks.edit(run, "save", proposal(b)); err != nil {
+		t.Errorf("tab B's own edit was lost: %v", err)
+	}
+	if md, _, _ := talks.active(run); md != "Acme is slow." {
+		t.Errorf("after tab B's apply the report is %q", md)
+	}
+}

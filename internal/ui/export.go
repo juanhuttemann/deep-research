@@ -655,19 +655,27 @@ func WriteMetadata(m Meta, dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return path, err
 	}
+	// Under the edits lock: a save checks under it that the run is still
+	// the one its edit was of, and a rerun landing between that check and
+	// the save's write put the old report's edit on the new run. The run is
+	// written all the same, so it waits past the age at which a lock is one
+	// a crash left, never writing beside a save under way.
+	return path, lockEdits(path, editsLockStale+editsLockWait, func() error { return replaceRun(path, data) })
+}
+
+// replaceRun writes a run's .json over the one before it, and clears what
+// was of that run.
+func replaceRun(path string, data []byte) error {
 	if err := writeAtomic(path, data); err != nil {
-		return path, err
+		return err
 	}
 	// The question asked again writes over the earlier run's files, and the
 	// questions asked about that run's report are not about this one.
 	if err := os.Remove(ChatLog(path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return path, err
+		return err
 	}
 	// Nor are the edits of its report.
-	if err := removeEdits(path); err != nil {
-		return path, err
-	}
-	return path, nil
+	return removeEdits(path)
 }
 
 // condStr extracts a field from a Summary, tolerating a nil summary.

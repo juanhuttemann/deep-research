@@ -551,7 +551,10 @@ func TestAskGuards(t *testing.T) {
 	reports := fstest.MapFS{"r.json": {Data: []byte(`{}`)}, "r.partial.json": {Data: []byte(`{}`)}, "r.trace.json": {Data: []byte(`{}`)}}
 	s := New(context.Background(), reports, nil)
 	asked := 0
-	s.Ask = func(context.Context, string, []Turn, string) (string, any, error) { asked++; return "ok", nil, nil }
+	s.Ask = func(context.Context, string, []Turn, string, string) (string, any, error) {
+		asked++
+		return "ok", nil, nil
+	}
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
@@ -578,7 +581,7 @@ func TestAskRendersTheAnswer(t *testing.T) {
 	s := New(context.Background(), fstest.MapFS{"r.json": {Data: []byte(`{}`)}}, nil)
 	var gotRun, gotQ string
 	var gotTurns []Turn
-	s.Ask = func(_ context.Context, run string, turns []Turn, q string) (string, any, error) {
+	s.Ask = func(_ context.Context, run string, turns []Turn, _, q string) (string, any, error) {
 		gotRun, gotTurns, gotQ = run, turns, q
 		return "It costs **12 euros** ([docs](https://a.example/acme)).\n\n<script>alert(1)</script>", nil, nil
 	}

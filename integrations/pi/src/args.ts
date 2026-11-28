@@ -48,6 +48,10 @@ export interface NewRun {
 	domains?: string[];
 	answers?: Clarified;
 	trace?: boolean;
+	// plan is the plan the user approved, kept when the run ended before
+	// drsh's first checkpoint: run again, it is run as approved, edits
+	// included, with no questions or review.
+	plan?: unknown;
 }
 
 export type Stage = "clarify" | "plan" | "run";

@@ -146,13 +146,26 @@ export interface Outcome {
 // maxReport bounds the report sent to the model; the whole of it is on disk.
 export const maxReport = 60_000;
 
+// closingOffer is what the agent offers after a report, in the Pi user's
+// terms: the command for a deeper run, whose fact-check is a step it may
+// not finish, and follow-ups from the saved files, which are not checked.
+export const closingOffer =
+	"For more depth, I can run a deeper research (`/research --mode deep`), which includes a fact-check step; I can also answer follow-ups from this run's saved files, though those answers aren't fact-checked.";
+
 const rules = [
 	"Answer from this report and keep its citations.",
 	"Say the confidence it gives.",
 	"Say which claims the fact-check did not confirm, and do not present an unconfirmed claim or a blocked recommendation or conclusion as fact.",
 	"State a figure only as the report or a COMPUTED line gives it; do no arithmetic of your own.",
-	"Do not add facts the run did not establish; offer research_ask for a question its pages may answer, or a new run.",
+	// Said to a Pi user, "a new deep_research" and "via research_ask" name
+	// the agent's tools, which the user cannot call: a new run is the
+	// /research command, and a follow-up is answered from the run's files,
+	// which the agent can read. Told what not to say, the model still
+	// offered "a fact-checked version", a check a run can end without;
+	// given the sentence, it uses it.
+	"Do not add facts the run did not establish.",
 	"Give the user the artifact paths.",
+	`End with this sentence, as written: "${closingOffer}"`,
 ];
 
 function digestLines(d: Digest): string[] {

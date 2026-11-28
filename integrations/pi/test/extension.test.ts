@@ -117,6 +117,35 @@ test("research_ask still reads the last run with a report after a later run is s
 	}
 });
 
+// Pi's /tree moves to another branch of the session and says so with
+// session_tree, not session_start: the report, run and model of the branch
+// left behind stayed in force, and research_ask read a report the branch
+// now in effect never had.
+test("research_ask follows the branch /tree moves to", async () => {
+	const runs = mkdtempSync(join(tmpdir(), "pi-dr-tree-"));
+	try {
+		await withEnv({ DEEP_RESEARCH_PI_RUNS: runs }, async () => {
+			const f = await load(fakeDrsh);
+			const done = await f.tools.get("deep_research")!.execute("1", { question: "Is Go faster?", answers: [] }, undefined, undefined, f.ctx);
+			assert.equal(done.details.outcome.status, "complete");
+			const all = f.ctx.sessionManager.getBranch();
+			const before = all.slice(0, 1);
+			f.ctx.sessionManager.getBranch = () => before;
+			await f.handlers.get("session_tree")?.({ type: "session_tree" }, f.ctx);
+			await assert.rejects(
+				f.tools.get("research_ask")!.execute("2", { question: "Which benchmark?" }, undefined, undefined, f.ctx),
+				/no research run in this session has written a report yet/,
+			);
+			f.ctx.sessionManager.getBranch = () => all;
+			await f.handlers.get("session_tree")?.({ type: "session_tree" }, f.ctx);
+			const r = await f.tools.get("research_ask")!.execute("3", { question: "Which benchmark?" }, undefined, undefined, f.ctx);
+			assert.ok(String(r.details.run).endsWith("run.json"), JSON.stringify(r.details));
+		});
+	} finally {
+		rmSync(runs, { recursive: true, force: true });
+	}
+});
+
 // /research took its run slot only after its prompts, so a second /research
 // typed while the first waited on its question also passed the check; the
 // first to end freed the slot while the other went on, past /research-stop.

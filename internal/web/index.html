@@ -2344,10 +2344,13 @@ $("ask-form").onsubmit = async ev => {
   $("chat").append(li);
   try {
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ run: run.name, question: q, turns }) });
+      body: JSON.stringify({ run: run.name, question: q, turns, proposal: run.proposal || "" }) });
     if (!r.ok) throw new Error((await r.text()).trim() || "status " + r.status);
     const got = await r.json();
     if (askRun !== run) return;
+    // The edit pending in this conversation, the only one its "save it"
+    // may save: the run's editor is shared with other tabs.
+    run.proposal = pendingOf(got.edit);
     a.className = "prose";
     a.replaceChildren(inert(got.html));
     if (got.error) a.append(el("p", "form-msg", got.error));
@@ -2400,7 +2403,12 @@ function editView(run, o) {
   const acts = el("div", "acts"), keep = el("button", "btn sm primary", "apply"), drop = el("button", "btn sm ghost", "discard");
   keep.type = drop.type = "button";
   const press = async action => {
+    // Not while a question is out, nor a question while this is: the two
+    // replies could come back in another order than the server took them,
+    // and the later one decides which edit this conversation holds.
+    if ($("ask-go").disabled) return;
     keep.disabled = drop.disabled = true;
+    $("ask-go").disabled = true;
     try {
       const got = await editAction(run, action, o.proposal);
       if (askRun !== run) return;
@@ -2410,6 +2418,8 @@ function editView(run, o) {
       if (askRun !== run) return;
       keep.disabled = drop.disabled = false;
       $("ask-msg").textContent = err.message;
+    } finally {
+      if (askRun === run) $("ask-go").disabled = false;
     }
   };
   keep.onclick = () => press("save");
@@ -2418,11 +2428,13 @@ function editView(run, o) {
   box.append(acts);
   return box;
 }
+function pendingOf(o) { return (o && o.pending && o.proposal) || ""; }
 async function editAction(run, action, proposal) {
   const r = await fetch("/api/edit", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ run: run.name, action, proposal: proposal || "" }) });
   if (!r.ok) throw new Error((await r.text()).trim() || "status " + r.status);
   const got = (await r.json()).edit || {};
+  if (askRun === run) run.proposal = pendingOf(got);
   // The conversation is told what the button did, as it is told what a turn
   // did, so "undo that" after Apply means the save; not when another run was
   // opened meanwhile, whose conversation this is not.
@@ -2431,8 +2443,9 @@ async function editAction(run, action, proposal) {
 }
 $("undo").onclick = async () => {
   const run = askRun;
-  if (!run) return;
-  $("undo").disabled = true;
+  // One edit request at a time, as for apply and discard.
+  if (!run || $("ask-go").disabled) return;
+  $("undo").disabled = $("ask-go").disabled = true;
   try {
     const got = await editAction(run, "undo");
     if (askRun !== run) return;
@@ -2441,7 +2454,10 @@ $("undo").onclick = async () => {
     $("chat").append(li);
   } catch (err) {
     if (askRun === run) $("ask-msg").textContent = err.message;
-  } finally { $("undo").disabled = false; }
+  } finally {
+    $("undo").disabled = false;
+    if (askRun === run) $("ask-go").disabled = false;
+  }
 };
 $("ask-q").addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("ask-form").requestSubmit(); }

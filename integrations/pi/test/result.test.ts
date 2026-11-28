@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { content, digest, maxReport } from "../src/result.ts";
+import { closingOffer, content, digest, maxReport } from "../src/result.ts";
 import { fixture } from "./helpers.ts";
 
 const load = (name: string) => JSON.parse(readFileSync(fixture(name), "utf8"));
@@ -57,6 +57,17 @@ test("the model is told the rules, the unconfirmed claims and where the files ar
 	assert.match(text, /BLOCKED conclusion, not established/);
 	assert.match(text, /do not present an unconfirmed claim/);
 	assert.match(text, /Artifacts: \/r\/run.md, \/r\/run.json/);
+});
+
+// Pi closed a report offering "a new deep_research" and follow-ups "via
+// research_ask": the agent's tool names, which mean nothing to its user.
+test("the offers after a report are in the Pi user's terms", () => {
+	const text = content({ status: "complete", artifacts: [], digest: digest(load("run.json")), report: "# Report" });
+	assert.ok(text.includes(`End with this sentence, as written: "${closingOffer}"`));
+	assert.match(closingOffer, /\/research --mode deep/);
+	assert.match(closingOffer, /includes a fact-check step/);
+	assert.doesNotMatch(closingOffer, /deep_research|research_ask/);
+	assert.doesNotMatch(text, /offer research_ask/);
 });
 
 test("a stopped run says how to resume, or that it cannot", () => {

@@ -455,8 +455,10 @@ export default function deepResearch(pi: ExtensionAPI) {
 		});
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
-		session++;
+	// restoreBranch reads the model chosen and the last run and report from
+	// the branch now in effect: entries on another branch are not this
+	// conversation's.
+	function restoreBranch(ctx: ExtensionContext): void {
 		choice = { kind: "pi" };
 		lastReport = undefined;
 		lastRun = undefined;
@@ -466,11 +468,23 @@ export default function deepResearch(pi: ExtensionAPI) {
 			if (e.customType === runEntry && e.data) lastRun = e.data as RunRecord;
 			if (e.customType === runEntry && (e.data as RunRecord | undefined)?.json) lastReport = e.data as RunRecord;
 		}
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		session++;
+		restoreBranch(ctx);
 		try {
 			await loadSettings();
 		} catch {
 			registerStandIn();
 		}
+	});
+
+	// /tree moves to another branch of the same session file: the branch
+	// left behind kept its report, run and model in force, so research_ask
+	// and /research-resume went on with a run that branch never had.
+	pi.on("session_tree", async (_event, ctx) => {
+		restoreBranch(ctx);
 	});
 
 	pi.on("session_shutdown", async () => {

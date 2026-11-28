@@ -43,6 +43,14 @@ test("an unchanged name that starts like a list marker keeps its sub-topic", () 
 	assert.deepEqual(edited.sub_topics, [{ name: "3.5 vs 4 throughput", query: "q1" }, { name: "-O2 vs -O3 builds", query: "q2" }, { name: "New one" }]);
 });
 
+// The exception above covered only names left as they were: a new or
+// renamed "3.5 vs 4 throughput" still lost its "3." and "-O2 builds" its
+// dash.
+test("a new name that starts like a list marker keeps its prefix; a real marker goes", () => {
+	const edited = withSubTopics(plan, "3.5 vs 4 throughput\n-O2 builds\n- Hinduism\n2) Jainism\n•Sikhism\n* Taoism");
+	assert.deepEqual(subTopicNames(edited), ["3.5 vs 4 throughput", "-O2 builds", "Hinduism", "Jainism", "Sikhism", "Taoism"]);
+});
+
 test("deleting every line leaves no sub-topics, which the review refuses", () => {
 	assert.equal(withSubTopics(plan, "\n  \n").sub_topics?.length, 0);
 });

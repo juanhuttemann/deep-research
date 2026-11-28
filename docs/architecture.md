@@ -386,9 +386,13 @@ lock file beside the run (the terminal and `serve` are separate processes
 on one reports directory): the revision's `.md` and `.pdf` first, under
 names no other revision has, then `<name>.edits`, whose `head` counts the
 saves and undos so a proposal made at another head is refused as stale. A
-proposal's digest makes a repeated save one save. The run's own files are
-never rewritten; `ui.WriteMetadata` removes the edits with the chat log
-when the same question writes over the run.
+proposal's digest makes a repeated save one save, while the revision it
+became is the one in effect; after an undo the repeat is stale. The run's
+own files are never rewritten; `ui.WriteMetadata` removes the edits with
+the chat log when the same question writes over the run, under the same
+lock, and a save or undo first checks that the `.json` is still the run
+its editor read (its time, question and report), so an edit of the old
+report is refused (`ui.ErrReplaced`) rather than saved onto the new run.
 
 What a turn did is the editor's to say (`ui.Outcome`: the diff, the note,
 the revision in effect), not the model's, whose answer is written before
@@ -399,7 +403,10 @@ in the model's instructions. `agent.Chat.State` puts the pending edit's
 diff ahead of each question. The terminal session, `ask` and the page drive
 one lifecycle (`cli.talk`); the page's apply and discard buttons call the
 same editor methods the tools do, and the server keeps one editor per run
-(`cli.webTalks`), read again when the run's `.json` changes.
+(`cli.webTalks`), read again when the run's `.json` changes. Its tabs share
+that editor, so each question carries the proposal its conversation was
+shown, and `ui.Editor.Shown` sets any other aside for the turn: "save it"
+in one tab cannot save the edit another tab proposed since.
 
 In the terminal a run is a session (`cli/session.go`): the questions asked
 about it after the run, or after `/resume` reopens it, are appended to

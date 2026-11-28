@@ -800,8 +800,12 @@ are the original run's. The run's own `.md`, `.pdf` and `.json` are never
 changed. Later questions and edits are about the revision in effect, and
 `/resume` and the serve page show it. An unsaved edit lasts as long as the
 conversation; one made before another session saved an edit of the same
-report is dropped rather than saved over it. Running the same question
-again replaces the run, and its revisions and conversation go with it.
+report is dropped rather than saved over it. On the serve page each tab's
+conversation saves only the edit it was shown: when another tab on the same
+report has proposed one since, "save it" saves nothing and says so. Running
+the same question again replaces the run, and its revisions and
+conversation go with it; an edit still pending in a conversation about the
+replaced run is refused when it is saved.
 
 A run watched in the terminal UI takes questions under "Ask about this
 report" once its report is printed, in an `ask ▸` box with its keys under

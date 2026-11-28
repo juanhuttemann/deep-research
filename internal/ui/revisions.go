@@ -51,6 +51,33 @@ type Revision struct {
 // edit was proposed, in another session or by this one.
 var ErrStale = errors.New("the report was changed in another session since this edit was proposed")
 
+// ErrReplaced is a save or undo refused because the same question was run
+// again and its run written over the one the edit was of. The rerun clears
+// the edits, so their head alone let an edit of the old report through onto
+// the new one.
+var ErrReplaced = errors.New("the report was replaced by a new run of the same question; this edit was of the report it replaced")
+
+// runIdentity names a run by when it was made and what it wrote: a rerun of
+// the question writes to the same path, and the path alone cannot tell the
+// two apart.
+func runIdentity(m *Meta) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%s\x00%s", m.Timestamp.UTC().Format(time.RFC3339Nano), m.Question, m.Report))
+	return hex.EncodeToString(sum[:12])
+}
+
+// sameRun reports whether the run at path is still the one m was read
+// from, ErrReplaced when a rerun wrote over it.
+func sameRun(path string, m *Meta) error {
+	cur, err := LoadMeta(path)
+	if err != nil {
+		return err
+	}
+	if runIdentity(cur) != runIdentity(m) {
+		return ErrReplaced
+	}
+	return nil
+}
+
 // EditsPath is where the edits of the run whose .json is at path are kept.
 func EditsPath(path string) string { return strings.TrimSuffix(path, ".json") + ".edits" }
 
@@ -105,14 +132,23 @@ func proposalDigest(head int, report string) string {
 
 // SaveRevision saves report as the run's next revision, made at head, and
 // writes its exports. It returns the revision saved; a proposal already
-// saved returns the revision it became.
+// saved returns the revision it became while that revision is in effect.
 func SaveRevision(path string, m *Meta, head int, report, note string) (Revision, error) {
 	var saved Revision
 	err := withEditsLock(path, func(e *Edits) (bool, error) {
+		if err := sameRun(path, m); err != nil {
+			return false, err
+		}
 		digest := proposalDigest(head, report)
 		if i := slices.IndexFunc(e.Revisions, func(r Revision) bool { return r.Digest == digest }); i >= 0 {
-			saved = e.Revisions[i]
-			return false, nil
+			// Saved already: a repeat is that save, while it stands. One
+			// undone since is not in effect, and a success said "it is the
+			// report now" over the original.
+			if a := e.Active(); a != nil && a.N == e.Revisions[i].N {
+				saved = *a
+				return false, nil
+			}
+			return false, ErrStale
 		}
 		if e.Head != head {
 			return false, ErrStale
@@ -136,8 +172,11 @@ func SaveRevision(path string, m *Meta, head int, report, note string) (Revision
 // UndoRevision takes back the last save, made at head, and returns the
 // revision now in effect, nil for the original. The undone revision is kept
 // in the history, as its exports are.
-func UndoRevision(path string, head int) (undone int, now *Revision, err error) {
+func UndoRevision(path string, m *Meta, head int) (undone int, now *Revision, err error) {
 	err = withEditsLock(path, func(e *Edits) (bool, error) {
+		if err := sameRun(path, m); err != nil {
+			return false, err
+		}
 		if e.Head != head {
 			return false, ErrStale
 		}
@@ -163,12 +202,36 @@ const (
 	editsLockStale = time.Minute
 )
 
-// withEditsLock runs fn on the run's edits under a lock file, which the
-// terminal and the serve page, separate processes on one reports directory,
-// both take; the edits are written back when fn says they changed.
+// withEditsLock runs fn on the run's edits under the edits lock; the edits
+// are written back when fn says they changed.
 func withEditsLock(path string, fn func(*Edits) (bool, error)) error {
+	return lockEdits(path, editsLockWait, func() error {
+		e, err := LoadEdits(path)
+		if err != nil {
+			return err
+		}
+		changed, err := fn(e)
+		if err != nil || !changed {
+			return err
+		}
+		data, err := json.MarshalIndent(e, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeAtomic(EditsPath(path), data)
+	})
+}
+
+// errEditsBusy is the edits lock still held when the wait is over.
+var errEditsBusy = errors.New("another session is saving an edit to this report; try again")
+
+// lockEdits runs fn holding the run's edits lock, a lock file which the
+// terminal and the serve page, separate processes on one reports directory,
+// both take, as a rerun writing over the run does. It waits up to wait, and
+// fn does not run when the lock is not taken.
+func lockEdits(path string, wait time.Duration, fn func() error) error {
 	lock := EditsPath(path) + ".lock"
-	deadline := time.Now().Add(editsLockWait)
+	deadline := time.Now().Add(wait)
 	for {
 		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
@@ -183,24 +246,12 @@ func withEditsLock(path string, fn func(*Edits) (bool, error)) error {
 			continue
 		}
 		if time.Now().After(deadline) {
-			return errors.New("another session is saving an edit to this report; try again")
+			return errEditsBusy
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	defer func() { _ = os.Remove(lock) }()
-	e, err := LoadEdits(path)
-	if err != nil {
-		return err
-	}
-	changed, err := fn(e)
-	if err != nil || !changed {
-		return err
-	}
-	data, err := json.MarshalIndent(e, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeAtomic(EditsPath(path), data)
+	return fn()
 }
 
 // writeRevisionExports writes a revision's Markdown and PDF beside the run's

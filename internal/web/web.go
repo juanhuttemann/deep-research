@@ -93,7 +93,11 @@ type Turn struct {
 // reports directory, after the conversation so far. It returns Markdown,
 // and what the question did to the report (the edit proposed or saved, any
 // JSON value), nil when it left the report alone.
-type AskFunc func(ctx context.Context, run string, turns []Turn, question string) (string, any, error)
+//
+// shown names the edit pending in the page's conversation, the last
+// outcome's "proposal", empty for none: the run's other conversations, in
+// other tabs, may have proposed since, and only this one's may be saved.
+type AskFunc func(ctx context.Context, run string, turns []Turn, shown, question string) (string, any, error)
 
 // EditFunc does what the page's Apply, Discard or Undo asks of the run's
 // report edit, action "save", "discard" or "undo", and returns its outcome
@@ -644,6 +648,7 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		Run      string `json:"run"`
 		Question string `json:"question"`
 		Turns    []Turn `json:"turns"`
+		Proposal string `json:"proposal"`
 	}
 	if err := decodeBody(w, r, maxAskBody, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -664,7 +669,7 @@ func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	answer, edit, err := s.Ask(r.Context(), req.Run, req.Turns, strings.TrimSpace(req.Question))
+	answer, edit, err := s.Ask(r.Context(), req.Run, req.Turns, req.Proposal, strings.TrimSpace(req.Question))
 	if err != nil && edit == nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

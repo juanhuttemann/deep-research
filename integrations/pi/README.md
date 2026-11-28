@@ -56,13 +56,15 @@ setup, while Exa, Tavily and Firecrawl use their keys from `drsh setup`.
   - With no flags it opens the settings screen first: ←/→ steps the
     setting under the cursor through its values, Enter lists them all.
   - You answer the clarifying questions and review the plan, then the run
-    starts and the agent reports what it found.
+    starts and the agent reports what it found. An instant run has no plan
+    review: it searches the question as asked.
   - `/research-stop` ends the run, keeping a checkpoint.
   - `/research-resume` continues the last stopped, failed or incomplete
     run from its checkpoint without repeating finished searches;
     `/research-resume <checkpoint>` continues another. A run stopped
-    before its plan was made has no checkpoint and nothing spent: it
-    starts again with the same question, settings and answers.
+    before drsh's first checkpoint has nothing searched: it starts again
+    with the same question, settings and answers, and with the plan you
+    approved, edits included, when you had approved one.
 - **`/research-model`** picks the model research runs use:
   - Pi's current model, the default.
   - Another of Pi's models, for example a cheaper one for the many calls a

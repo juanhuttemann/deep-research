@@ -722,7 +722,7 @@ func TestWebAskCarriesTheConversation(t *testing.T) {
 	deps := Deps{Config: config.Config{Config: agent.Config{OpenAIAPIKey: "k", OpenAIBaseURL: url,
 		OpenAIModel: "test", ModelCallTimeout: 5 * time.Second}}}
 	got, _, err := newWebTalks(func() (Deps, error) { return deps, nil }, dir).ask(context.Background(),
-		filepath.Base(path), []web.Turn{{Question: "How much?", Answer: "12 euros"}}, "And in dollars?")
+		filepath.Base(path), []web.Turn{{Question: "How much?", Answer: "12 euros"}}, "", "And in dollars?")
 	if err != nil || got != "In dollars, 13." {
 		t.Fatalf("webAsk = %q, %v", got, err)
 	}
@@ -1133,7 +1133,7 @@ func TestWebEditIsAppliedByTheButton(t *testing.T) {
 		OpenAIModel: "test", ModelCallTimeout: 5 * time.Second}}}
 	talks := newWebTalks(func() (Deps, error) { return deps, nil }, dir)
 	run := filepath.Base(path)
-	_, got, err := talks.ask(context.Background(), run, nil, "Say quick instead")
+	_, got, err := talks.ask(context.Background(), run, nil, "", "Say quick instead")
 	page, ok := got.(outcomePage)
 	o := page.Outcome
 	if err != nil || !ok || !o.Pending || o.Proposal == "" {
